@@ -23,7 +23,7 @@ describe("describeNotification", () => {
   });
   it("carries no message text for mentions and replies, and links to the discussion", () => {
     const m = describeNotification("project_mention", { ...base, message_id: "m1" });
-    expect(m).toEqual({ text: "You were mentioned in the discussion of UAE-P-2026-0001 Floor projection.", href: "/projects/p1/discussion" });
+    expect(m).toEqual({ text: "You were mentioned in the conversation of UAE-P-2026-0001 Floor projection.", href: "/projects/p1/discussion" });
     expect(describeNotification("project_reply", { ...base, message_id: "m1" }).href).toBe("/projects/p1/discussion");
   });
   it("distinguishes the three kinds of assignment", () => {

@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { loadProjectUnread } from "@/lib/chat/data";
 import { canDecideScope, hasProjCapability, isProjFounder } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectsContext } from "./context";
@@ -108,18 +109,19 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
   const [work, handovers, unread, scope] = await Promise.all([
     loadMyWork(ctx),
     supabase.from("proj_handovers").select("id, company_id, status, pm_user_id, crm_opportunity_id, crm_reference, title, submitted_at, updated_at").in("status", ["submitted", "pm_assigned"]).limit(100),
-    supabase.rpc("proj_unread_counts"),
+    loadProjectUnread(),
     // Proposed scope changes the person may decide NOW, from the narrow function (id, project reference, title, time only): a holder of approve_scope who is not a member of the
     // project is authorised to decide but cannot read the proposal through row-level security. Only worth asking for someone who may decide one.
     deciderCompanies.size > 0 ? supabase.rpc("proj_scope_decisions_waiting") : Promise.resolve({ data: [] as ProjScopeDecisionWaitingRow[], error: null }),
   ]);
-  ok(handovers, unread, scope);
+  ok(handovers, scope);
+  if (unread === null) throw new Error("Project chat unread counts could not be loaded");
   // The function returns only open proposals on projects still open, in companies where the person decides, oldest first.
   const scopeRows = scope.data ?? [];
   const scopeWaiting = scopeRows.length;
   const oldestScope = scopeRows[0] ?? null;
   const groups = groupTasksByDue(work.open, work.today);
-  const unreadRows = (unread.data ?? []).filter((r) => r.unread > 0);
+  const unreadRows = [...unread.values()];
   const handoverList = (handovers.data ?? [])
     .filter((h) => handoverWaitsOnMe(h, ctx.userId, (c) => hasProjCapability(ctx.grants, c, "assign_pm")))
     .map((h) => ({ id: h.id, opportunityId: h.crm_opportunity_id, reference: h.crm_reference, title: h.title, status: h.status, at: h.submitted_at ?? h.updated_at }));
@@ -131,7 +133,7 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
     scopeChangesWaiting: scopeWaiting,
     scopeChangeProjectId: oldestScope?.project_id ?? null,
     scopeChangeId: oldestScope?.scope_change_id ?? null,
-    unreadMessages: unreadRows.reduce((n, r) => n + r.unread, 0),
+    unreadMessages: unreadRows.reduce((n, r) => n + r, 0),
     unreadProjects: unreadRows.length,
     handoverList,
     scopeList: scopeRows.map((r) => ({ id: r.scope_change_id, projectId: r.project_id, projectReference: r.project_reference, projectName: r.project_name, title: r.title, at: r.proposed_at })),
@@ -152,6 +154,10 @@ export interface WorkRows {
   team: TaskRowData[];
   /** Whether "My team" means anything for this person (they lead at least one project or team). */
   canSeeTeam: boolean;
+  /** Open blocked tasks this person can help clear: they are the person named to unblock it, or nobody is named and they manage the whole project. */
+  blockers: TaskRowData[];
+  /** This person's own tasks that they sent for review: nothing for them to do, the next step is a reviewer's. Not part of `mine`. */
+  waiting: TaskRowData[];
 }
 
 const FINISHED = "(completed,archived)";
@@ -163,7 +169,7 @@ const FINISHED = "(completed,archived)";
  */
 export const loadWorkRows = cache(async (ctx: ProjectsContext): Promise<WorkRows> => {
   const today = todayIso();
-  const none: WorkRows = { today, mine: [], reviews: [], team: [], canSeeTeam: false };
+  const none: WorkRows = { today, mine: [], reviews: [], team: [], canSeeTeam: false, blockers: [], waiting: [] };
   if (ctx.grants.length === 0) return none;
   const supabase = await createClient();
   const founderCompanies = ctx.grants.map((g) => g.companyId).filter((c) => isProjFounder(ctx.grants, c));
@@ -187,18 +193,24 @@ export const loadWorkRows = cache(async (ctx: ProjectsContext): Promise<WorkRows
   const leadIds = [...new Set([...wholeProject, ...headTeams.keys()])];
   const collabIds = (collabRes.data ?? []).map((c) => c.task_id);
 
-  const [mineRes, collabTasksRes, reviewRes, teamRes] = await Promise.all([
+  const [mineRes, collabTasksRes, reviewRes, teamRes, namedRes] = await Promise.all([
     supabase.from("proj_tasks").select("*").eq("assignee_id", ctx.userId).in("status", OPEN),
     collabIds.length > 0 ? supabase.from("proj_tasks").select("*").in("id", collabIds).in("status", OPEN) : Promise.resolve({ data: [] as ProjTaskRow[], error: null }),
     supabase.from("proj_tasks").select("*").eq("status", "ready_for_review").neq("assignee_id", ctx.userId),
     leadIds.length > 0 ? supabase.from("proj_tasks").select("*").in("project_id", leadIds).in("status", OPEN).limit(1000) : Promise.resolve({ data: [] as ProjTaskRow[], error: null }),
+    // Blocked tasks that name this person as the one who can unblock them (whoever they are assigned to).
+    supabase.from("proj_tasks").select("*").eq("unblock_owner_id", ctx.userId).not("blocked_at", "is", null).in("status", OPEN),
   ]);
-  ok(mineRes, collabTasksRes, reviewRes, teamRes);
+  ok(mineRes, collabTasksRes, reviewRes, teamRes, namedRes);
 
   const mineById = new Map<string, ProjTaskRow>();
   for (const t of [...(mineRes.data ?? []), ...(collabTasksRes.data ?? [])]) mineById.set(t.id, t);
   const teamTasks = (teamRes.data ?? []).filter((t) => wholeProject.has(t.project_id) || (!!t.team_id && (headTeams.get(t.project_id) ?? []).includes(t.team_id)));
-  const projectIds = [...new Set([...mineById.values(), ...(reviewRes.data ?? []), ...teamTasks].map((t) => t.project_id))];
+  const blockerById = new Map<string, ProjTaskRow>();
+  for (const t of namedRes.data ?? []) blockerById.set(t.id, t);
+  // Nobody named: it falls to whoever manages the whole project.
+  for (const t of teamTasks) if (t.blocked_at && !t.unblock_owner_id && wholeProject.has(t.project_id)) blockerById.set(t.id, t);
+  const projectIds = [...new Set([...mineById.values(), ...(reviewRes.data ?? []), ...teamTasks, ...blockerById.values()].map((t) => t.project_id))];
   if (projectIds.length === 0) return { ...none, canSeeTeam: leadIds.length > 0 };
 
   const [projRes, teamsRes, delRes, msRes] = await Promise.all([
@@ -259,5 +271,10 @@ export const loadWorkRows = cache(async (ctx: ProjectsContext): Promise<WorkRows
     };
     return isWaitingOnMyReview(t, rctx);
   });
-  return { today, mine: toRows([...mineById.values()]), reviews: toRows(reviews), team: toRows(teamTasks), canSeeTeam: leadIds.length > 0 };
+  const sent = (t: ProjTaskRow) => t.assignee_id === ctx.userId && t.status === "ready_for_review";
+  const own = [...mineById.values()];
+  return {
+    today, mine: toRows(own.filter((t) => !sent(t))), reviews: toRows(reviews), team: toRows(teamTasks), canSeeTeam: leadIds.length > 0,
+    blockers: toRows([...blockerById.values()]), waiting: toRows(own.filter(sent)),
+  };
 });

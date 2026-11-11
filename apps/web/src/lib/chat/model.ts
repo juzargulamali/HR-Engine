@@ -3,7 +3,34 @@
  * a posted message may mention. The server decides who is a member and who may see a shared item; nothing here is a permission.
  */
 
-export interface ChatGroup { id: string; key: string; name: string; unread: number; mentions: number; lastAt: string | null; lastSender: string | null; lastPreview: string | null }
+export type ChatGroupKind = "sales" | "project";
+export interface ChatGroup {
+  id: string; key: string; name: string; unread: number; mentions: number; lastAt: string | null; lastSender: string | null; lastPreview: string | null;
+  /** "project" = one project's group (members: the people actively enrolled in that project). Absent on a database without project groups: read as "sales". */
+  kind?: ChatGroupKind; projectId?: string | null;
+  /** A finished project's conversation: it can be read, not written (the server refuses a post). */
+  readOnly?: boolean;
+}
+
+/** The address parameter that opens one group in the Chat panel from any page (old Discussion links and the project's "Open chat" shortcut use it). */
+export const CHAT_PARAM = "chat";
+/** The event a page fires to open one group in the panel without changing the address. */
+export const CHAT_OPEN_EVENT = "enginious:open-chat";
+export const openChatGroup = (groupId: string): void => { window.dispatchEvent(new CustomEvent(CHAT_OPEN_EVENT, { detail: { groupId } })); };
+
+/** The group list in sections: Sales groups, then project groups (already most recent first from the server). A section with no group is left out. */
+export function groupSections<T extends Pick<ChatGroup, "kind">>(groups: readonly T[]): { title: string; groups: T[] }[] {
+  const sales = groups.filter((g) => (g.kind ?? "sales") === "sales");
+  const projects = groups.filter((g) => g.kind === "project");
+  return [{ title: "Sales", groups: sales }, { title: "Projects", groups: projects }].filter((s) => s.groups.length > 0);
+}
+/** Who is in a group, in words (the server decides; this only describes it). */
+export const membershipLine = (g: Pick<ChatGroup, "kind" | "readOnly">): string =>
+  g.kind === "project" ? (g.readOnly ? "This project is finished: the conversation can be read, not added to" : "The people on this project") : "Everyone with Sales access to this company";
+export const filterGroups = <T extends Pick<ChatGroup, "name">>(groups: readonly T[], query: string): T[] => {
+  const q = query.trim().toLowerCase();
+  return q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : [...groups];
+};
 export interface ChatMention { userId: string; name: string }
 export type SharedItem = { restricted: true } | { restricted?: undefined; type: ShareType; id: string; title: string; subtitle: string; href: string };
 export interface ChatMessage { id: string; seq: number; senderId: string; senderName: string; body: string; createdAt: string; mentions: ChatMention[]; shared: SharedItem | null }

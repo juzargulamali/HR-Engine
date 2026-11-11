@@ -73,12 +73,12 @@ Every Sales route, tab, dialog, download and old route is listed with its detail
 
 | Path | Shows | Menu |
 |---|---|---|
-| `/projects/work` | My Work (tasks, review queue `?show=review`) | Menu |
+| `/projects/work` | My Work: My tasks, Waiting for my review (`?show=review`), Blockers I can help clear (`?show=blockers`), Sent for review (`?show=waiting`), Overdue, My team | Menu |
 | `/projects`, `/projects/calendar` | Directory; cross-project calendar | Menu |
 | `/projects/new` | New internal project | Secondary, needs `assign_pm` |
-| `/projects/handovers` | Handovers waiting for a PM | Menu (Manage) |
+| `/projects/handovers` | Handovers: open ones first (oldest first), accepted and withdrawn ones paged separately (`?page=`); `?handover=<id>` opens one brief by id (My Day links here) | Menu (Manage) |
 | `/projects/scope-decisions/[scopeChangeId]` | Scope-change decision | Ctx (from My Day) |
-| `/projects/[id]` plus `work`, `work/tasks/[taskId]`, `plan`, `timeline`, `calendar`, `discussion`, `documents`, `people`, `changes`, `history`, `complete`, `equipment`, `budget` | One project: summary and tabs. Equipment tab holds equipment requests and dispatch/return notes; Budget tab is the project budget (denied and error are separate states) | Ctx: SQL checks (`proj_can_view_details`, `proj_can_manage`, `pbx_budget_view`) |
+| `/projects/[id]` plus `work`, `work/tasks/[taskId]`, `plan`, `timeline`, `calendar`, `discussion`, `documents`, `people`, `changes`, `history`, `complete`, `equipment`, `budget` | One project: summary and tabs (Work, Timeline, Equipment, Budget; **the Discussion tab is removed once project chat groups exist**: `/discussion` then sends a member to `/work?chat=<group>`, and the conversation is the project's group in Chat, opened from the header's Chat button or `?chat=<group id>` on any page). Equipment tab holds equipment requests and dispatch/return notes; Budget tab is the project budget (denied and error are separate states) | Ctx: SQL checks (`proj_can_view_details`, `proj_can_manage`, `pbx_budget_view`) |
 
 ### Inventory (`inventory/layout.tsx`: "not installed here" notice, `LoadError` on failure; access per page)
 
@@ -150,7 +150,7 @@ Whatever the page shows, the database is the enforcement (`docs/03-permission-ma
 |---|---|---|
 | `approvals` | Decisions waiting (leave, claims, Recovery Leave, queue-routed) | `/approvals` |
 | `project-tasks` | Own tasks overdue or due today; tasks waiting for review | `/projects/work?task=...` |
-| `project-decisions` | Handovers and scope decisions | `/projects/handovers`, `/projects/scope-decisions/...` |
+| `project-decisions` | Handovers and scope decisions | `/projects/handovers?handover=<id>` (that brief), `/projects/scope-decisions/...` |
 | `sales` | Overdue/today follow-ups; enquiries awaiting first response | `/sales/follow-ups` (overdue), `/sales/follow-ups?view=today` (due today, now lands on the Today view), enquiry |
 | `sales-handover` | Won enquiry needing handover | `/sales/opportunities/[id]/handover` |
 | `sales-approvals` | Commercial approvals waiting | enquiry `?tab=commercial` |

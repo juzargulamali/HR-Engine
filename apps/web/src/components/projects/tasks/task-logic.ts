@@ -222,6 +222,44 @@ export function moveFor(row: Pick<TaskRowData, "moves">, to: string): TaskMoveSp
   return matches.find((m) => !m.needsNote) ?? matches[0] ?? null;
 }
 
+/**
+ * The move(s) to offer as the task's main button, from the moves this person is already allowed (never a new right): Start on a To do task; Send for review (or Mark done on a
+ * routine task) while in progress; for a reviewer of work that is ready, the decision itself: Accept and complete, and Request changes.
+ */
+export function primaryMoves(row: Pick<TaskRowData, "moves" | "status">): TaskMoveSpec[] {
+  const pick = (to: string, label?: string) => row.moves.find((m) => m.to === to && (!label || m.label === label)) ?? null;
+  if (row.status === "todo") return [pick("in_progress")].filter((m): m is TaskMoveSpec => m !== null);
+  if (row.status === "in_progress") return [pick("ready_for_review") ?? pick("done")].filter((m): m is TaskMoveSpec => m !== null);
+  if (row.status === "ready_for_review") return [pick("done", "Accept and complete"), pick("in_progress", "Request changes")].filter((m): m is TaskMoveSpec => m !== null);
+  return [];
+}
+
+export interface NextStepInput {
+  status: string; requiresReview: boolean; blocked: boolean; blockedReason: string | null; unblockOwnerName: string | null; unblockAction: string | null;
+  /** The viewer's part in this task (null = they can only read and comment). */
+  role: "manager" | "head" | "assignee" | null;
+  viewerIsAssignee: boolean; viewerIsUnblocker: boolean; readOnly: boolean; pmName: string; open: boolean;
+}
+
+/** One sentence at the top of a task: what happens next and whose step it is, from recorded facts. `forViewer` says whether that step is the viewer's. */
+export function nextStep(i: NextStepInput): { text: string; forViewer: boolean } {
+  if (i.readOnly) return { text: "This project is finished, so the task is read-only.", forViewer: false };
+  if (!i.open) return { text: "This task is closed. A department head or the Project Manager can reopen it.", forViewer: false };
+  if (i.blocked) {
+    const who = i.viewerIsUnblocker ? "You are named to unblock it" : i.unblockOwnerName ? `${i.unblockOwnerName} can unblock it` : `No one is named to unblock it; ${i.pmName} manages the project`;
+    return { text: `Blocked${i.blockedReason ? `: ${i.blockedReason}` : " (no reason recorded)"}. ${who}${i.unblockAction ? `: ${i.unblockAction}` : ""}.`, forViewer: i.viewerIsUnblocker || (!i.unblockOwnerName && i.role === "manager") };
+  }
+  if (i.status === "ready_for_review") {
+    if (i.viewerIsAssignee) return { text: "You sent this for review. A department head or the Project Manager decides; there is nothing for you to do until then.", forViewer: false };
+    if (i.role === "manager" || i.role === "head") return { text: "Waiting for your review: accept it or request changes.", forViewer: true };
+    return { text: "Waiting for a review by the department head or the Project Manager.", forViewer: false };
+  }
+  if (!i.role) return { text: "The assignee, the department head or the Project Manager move this task on. You can comment.", forViewer: false };
+  if (!i.viewerIsAssignee) return { text: i.status === "todo" ? "Not started yet. The assignee starts it." : "In progress with the assignee.", forViewer: false };
+  if (i.status === "todo") return { text: "Yours to start.", forViewer: true };
+  return { text: i.requiresReview ? "Yours: when the work is finished, send it for review." : "Yours: mark it done when the work is finished.", forViewer: true };
+}
+
 // ---- Grouping ------------------------------------------------------------------------------------------------------
 
 export const GROUP_BY = ["none", "team", "milestone", "status", "assignee"] as const;

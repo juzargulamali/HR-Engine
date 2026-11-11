@@ -186,3 +186,39 @@ describe("who is pre-filled as responsible for unblocking", () => {
     expect(defaultUnblocker({ viewerId: "me", pmId: "gone", teamHeadId: "gone2", memberIds: members })).toBe("");
   });
 });
+
+import { nextStep, primaryMoves, type NextStepInput } from "./task-logic";
+describe("the task's main button and next-step sentence", () => {
+  const mv = (to: string, label: string, needsNote = false) => ({ to, label, needsNote, mode: needsNote ? "dialog" as const : "direct" as const });
+  it("an assignee is offered Start, then Send for review (or Mark done on a routine task), never a move they do not have", () => {
+    expect(primaryMoves({ status: "todo", moves: [mv("in_progress", "Start"), mv("done", "Mark done")] }).map((m) => m.label)).toEqual(["Start"]);
+    expect(primaryMoves({ status: "in_progress", moves: [mv("todo", "Back to To do"), mv("ready_for_review", "Send for review")] }).map((m) => m.label)).toEqual(["Send for review"]);
+    expect(primaryMoves({ status: "in_progress", moves: [mv("todo", "Back to To do"), mv("done", "Mark done")] }).map((m) => m.label)).toEqual(["Mark done"]);
+    expect(primaryMoves({ status: "in_progress", moves: [mv("todo", "Back to To do")] })).toEqual([]);             // blocked routine task: Mark done is not allowed, so it is not offered
+    expect(primaryMoves({ status: "todo", moves: [] })).toEqual([]);                                               // a reader
+  });
+  it("a reviewer reaches the decision directly: Accept and complete, and Request changes; the assignee's Withdraw is not a main button", () => {
+    expect(primaryMoves({ status: "ready_for_review", moves: [mv("done", "Accept and complete"), mv("in_progress", "Request changes", true), mv("deferred", "Defer", true)] }).map((m) => m.label)).toEqual(["Accept and complete", "Request changes"]);
+    expect(primaryMoves({ status: "ready_for_review", moves: [mv("in_progress", "Withdraw from review")] })).toEqual([]);
+  });
+  const base: NextStepInput = { status: "in_progress", requiresReview: true, blocked: false, blockedReason: null, unblockOwnerName: null, unblockAction: null, role: "assignee", viewerIsAssignee: true, viewerIsUnblocker: false, readOnly: false, pmName: "Fictional Pia", open: true };
+  it("says whose step it is", () => {
+    expect(nextStep({ ...base, status: "todo" })).toEqual({ text: "Yours to start.", forViewer: true });
+    expect(nextStep(base).text).toMatch(/send it for review/);
+    expect(nextStep({ ...base, requiresReview: false }).text).toMatch(/mark it done/);
+    expect(nextStep({ ...base, status: "ready_for_review" })).toMatchObject({ forViewer: false, text: expect.stringMatching(/You sent this for review/) });
+    expect(nextStep({ ...base, status: "ready_for_review", role: "head", viewerIsAssignee: false })).toEqual({ text: "Waiting for your review: accept it or request changes.", forViewer: true });
+    expect(nextStep({ ...base, role: null, viewerIsAssignee: false }).forViewer).toBe(false);
+  });
+  it("a blocker leads, with its reason and who can clear it, or that nobody is named", () => {
+    expect(nextStep({ ...base, blocked: true, blockedReason: "Power not ready", unblockOwnerName: "Fictional Hana", unblockAction: "Confirm the supply" }))
+      .toEqual({ text: "Blocked: Power not ready. Fictional Hana can unblock it: Confirm the supply.", forViewer: false });
+    expect(nextStep({ ...base, blocked: true, viewerIsUnblocker: true, unblockOwnerName: "Me" }).text).toBe("Blocked (no reason recorded). You are named to unblock it.");
+    expect(nextStep({ ...base, blocked: true }).text).toBe("Blocked (no reason recorded). No one is named to unblock it; Fictional Pia manages the project.");
+    expect(nextStep({ ...base, blocked: true, role: "manager" }).forViewer).toBe(true);
+  });
+  it("a finished project and a closed task say so", () => {
+    expect(nextStep({ ...base, readOnly: true }).text).toMatch(/read-only/);
+    expect(nextStep({ ...base, open: false }).text).toMatch(/closed/);
+  });
+});

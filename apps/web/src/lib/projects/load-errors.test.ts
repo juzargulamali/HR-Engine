@@ -22,7 +22,9 @@ beforeEach(() => {
     proj_projects: row(PROJECT), proj_project_details: row({ project_id: "p1" }), proj_teams: rows([]), proj_task_collaborators: rows([]), proj_project_members: rows([]),
     proj_tasks: rows([]), proj_handovers: rows([]),
   };
-  rpcs = { proj_project_people: rows([{ user_id: "u1", full_name: "Pat", role: "pm" }]), proj_directory: rows([]), proj_unread_counts: rows([]) };
+  rpcs = { proj_project_people: rows([{ user_id: "u1", full_name: "Pat", role: "pm" }]), proj_directory: rows([]), proj_unread_counts: rows([]),
+    // this database has no project chat groups yet, so unread counts come from the old Discussion (the cutover path is tested below)
+    chat_project_group: { data: null, error: { code: "PGRST202", message: "Could not find the function chat_project_group" } } };
 });
 
 describe("loadProjectView", () => {
@@ -73,6 +75,15 @@ describe("My Day project work", () => {
   it("a failed unread-count read THROWS rather than reporting no unread messages", async () => {
     rpcs = { ...rpcs, proj_unread_counts: failing() };
     await expect(loadProjectsAttention(ctx)).rejects.toThrow(/could not be loaded/);
+  });
+
+  it("once project chat groups exist, unread comes from Chat: its numbers are used, and a failed Chat read THROWS", async () => {
+    const group = (project: string, unread: number) => ({ gid: `g-${project}`, gkey: `project:${project}`, gname: "x", unread, mentions: 0, last_at: null, last_sender: null, last_preview: null, gkind: "project", project_id: project, read_only: false });
+    rpcs = { ...rpcs, chat_project_group: { data: null, error: { code: "42501", message: "You are not a member of this group" } }, proj_unread_counts: rows([{ project_id: "stale", unread: 50 }]),
+      chat_my_groups: rows([group("p1", 2), group("p2", 0), { ...group("s", 9), gkind: "sales", project_id: null }]) };
+    expect(await loadProjectsAttention({ ...ctx, userId: "u-chat-ok" } as ProjectsContext)).toMatchObject({ unreadMessages: 2, unreadProjects: 1 });
+    rpcs = { ...rpcs, chat_my_groups: failing() };
+    await expect(loadProjectsAttention({ ...ctx, userId: "u-chat-fail" } as ProjectsContext)).rejects.toThrow(/could not be loaded/);
   });
 
   it("a person with no Projects grant gets zeros without any read (nothing to load)", async () => {

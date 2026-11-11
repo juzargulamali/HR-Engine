@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, Check, ClipboardCheck, MapPin } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Flag, Hourglass, MapPin, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dateText } from "@/lib/projects/format";
 import { stripSteps, type StripMilestone } from "@/app/(app)/projects/[id]/work/helpers";
+import type { AttentionItem, AttentionKind } from "@/lib/projects/work-attention";
 
 /**
  * Presentational pieces of a project's Work page. Every figure arrives already counted from the project's real records by the page;
@@ -77,32 +78,130 @@ export function MilestoneStrip({ milestones, today, basis, percent, manageHref, 
   );
 }
 
-export interface ActionItem { key: string; href: string; title: string; detail: string; tone: "red" | "amber" | "blue" }
+const TONE_TEXT = { red: "text-[hsl(var(--os-red))]", amber: "text-[hsl(var(--os-amber))]", blue: "text-[hsl(var(--os-info))]", quiet: "text-muted-foreground" } as const;
+const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = { blocker: AlertTriangle, review: ClipboardCheck, overdue: CalendarClock, due_today: CalendarClock, in_review: Hourglass, milestone: Flag, equipment: Package };
 
-const ACTION_ICON = { red: AlertTriangle, amber: CalendarClock, blue: ClipboardCheck } as const;
+function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.ReactNode }) {
+  const Icon = KIND_ICON[a.kind];
+  return (
+    <li className="flex items-start gap-2.5 py-2 text-sm">
+      <Icon className={cn("mt-0.5 h-4 w-4 flex-none", TONE_TEXT[a.tone])} aria-hidden />
+      <div className="min-w-0 flex-1">
+        <p className="break-words">
+          <span className={cn("font-semibold", TONE_TEXT[a.tone])}>{a.label}</span>
+          <span className="text-muted-foreground"> · </span>
+          <Link href={a.href} scroll={false} className="font-medium underline-offset-4 hover:underline">{a.title}</Link>
+        </p>
+        <p className="break-words text-[13px] text-muted-foreground">Owner: {a.owner} · {a.due ? `Due ${dateText(a.due)}` : "No due date recorded"}</p>
+        {a.detail ? <p className="break-words text-[13px] text-muted-foreground">{a.detail}</p> : null}
+        {recovery ? <div className="mt-1.5">{recovery}</div> : null}
+      </div>
+    </li>
+  );
+}
 
-/** What most needs someone's hand on this project, in order: blocked tasks, work waiting for the viewer's review, overdue milestones. Hidden when there is none. */
-export function NextActionCard({ items, total }: { items: readonly ActionItem[]; total: number }) {
+/**
+ * The first thing on a project's Work page: what needs the person looking at it, and what is waiting on someone else, each with its owner, its due date (or that none is
+ * recorded) and a link to the task or record. Every line is a recorded fact; when nothing is waiting it says so in one line. `importRecovery` is the existing "import the
+ * handover equipment" control, shown under the failed-import line only.
+ */
+export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; importRecovery?: React.ReactNode; max?: number }) {
+  if (needsYou.length === 0 && waiting.length === 0) {
+    return (
+      <section aria-label="What needs doing" className="os-card px-4 py-3" data-testid="work-attention">
+        <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span> <span className="text-muted-foreground">No blocker, review, overdue task or equipment decision is recorded for this project.</span></p>
+      </section>
+    );
+  }
+  const group = (title: string, items: readonly AttentionItem[], testid: string, empty: string) => (
+    <div className="min-w-0" data-testid={testid}>
+      <h3 className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{title} <span className="tabular-nums">({items.length})</span></h3>
+      {items.length === 0 ? <p className="py-2 text-sm text-muted-foreground">{empty}</p> : (
+        <ul className="divide-y divide-border/70">
+          {items.slice(0, max).map((a) => <AttentionRow key={a.key} a={a} recovery={a.recovery === "import" ? importRecovery : undefined} />)}
+        </ul>
+      )}
+      {items.length > max ? <p className="pt-1 text-[13px] text-muted-foreground">Showing {max} of {items.length}. The task list below has the rest.</p> : null}
+    </div>
+  );
+  return (
+    <section aria-label="What needs doing" className="os-card os-warm px-4 py-3.5 sm:px-5" data-testid="work-attention">
+      <h2 className="mb-2 font-heading text-base font-semibold">What needs doing</h2>
+      <div className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
+        {group("Needs you", needsYou, "attention-needs-you", "Nothing needs you right now.")}
+        {group("Waiting on someone else", waiting, "attention-waiting", "Nothing is waiting on anyone else.")}
+      </div>
+    </section>
+  );
+}
+
+export interface SummaryFact { label: string; value: string; detail?: string | null; href: string; linkText: string; tone?: "red" | "amber" | "quiet" }
+
+/** The Project Manager's delivery summary: the next milestone, the next site booking and the equipment decision, each from existing records with a link to where it is managed. */
+export function DeliverySummary({ facts }: { facts: readonly SummaryFact[] }) {
+  return (
+    <section aria-label="Delivery summary" className="os-card px-4 py-3 sm:px-5" data-testid="delivery-summary">
+      <h2 className="mb-2 font-heading text-base font-semibold">Delivery summary</h2>
+      <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-3">
+        {facts.map((f) => (
+          <div key={f.label} className="min-w-0">
+            <dt className="text-[13px] text-muted-foreground">{f.label}</dt>
+            <dd className="break-words text-sm">
+              <span className={cn("block font-medium", f.tone === "red" ? TONE_TEXT.red : f.tone === "amber" ? TONE_TEXT.amber : undefined)}>{f.value}</span>
+              {f.detail ? <span className="block text-[13px] text-muted-foreground">{f.detail}</span> : null}
+              <Link href={f.href} className="mt-0.5 block w-fit text-[13px] font-medium text-accent underline-offset-4 hover:underline">{f.linkText}</Link>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+export interface ActivityLine { key: string; subject: string; sentence: string; when: string; who: string; href: string }
+
+/**
+ * A short preview of what last changed on the project (dates, status, people), each with a link to where that record lives. It is the member-visible change log, not the
+ * conversation: chat messages and task comments are never copied here. `failed` = the read failed (it then says so; an empty list would be a different statement).
+ */
+export function RecentActivity({ lines, failed, historyHref }: { lines: readonly ActivityLine[]; failed: boolean; historyHref: string }) {
+  return (
+    <section aria-label="Recent activity" className="os-card p-4" data-testid="recent-activity">
+      <div className="mb-2 flex items-baseline justify-between gap-2">
+        <h2 className="font-heading text-base font-semibold">Recent activity</h2>
+        <Link href={historyHref} className="text-[13px] font-medium text-accent underline-offset-4 hover:underline">Full history</Link>
+      </div>
+      {failed ? <p className="text-sm text-destructive" role="alert">Could not load the recent activity. Reload to try again; the full record is on History.</p>
+        : lines.length === 0 ? <p className="text-sm text-muted-foreground">No change to dates, status or people is recorded yet.</p> : (
+          <ul className="space-y-2.5">
+            {lines.map((l) => (
+              <li key={l.key} className="text-sm">
+                <Link href={l.href} className="block break-words font-medium underline-offset-4 hover:underline">{l.subject}</Link>
+                <p className="break-words text-[13px] text-muted-foreground">{l.sentence}</p>
+                <p className="text-[13px] text-muted-foreground">{l.who} · {l.when}</p>
+              </li>
+            ))}
+          </ul>
+        )}
+    </section>
+  );
+}
+
+/** Direct ways into the parts of the project the work depends on, each with the fact that makes it relevant. Only the ones given are shown. */
+export function WorkShortcuts({ items }: { items: readonly { href: string; label: string; note: string }[] }) {
   if (items.length === 0) return null;
   return (
-    <section aria-label="Needs action" className="os-card os-warm p-4">
-      <h2 className="mb-2 font-heading text-base font-semibold">Needs action</h2>
-      <ul className="space-y-2.5">
-        {items.map((a) => {
-          const Icon = ACTION_ICON[a.tone];
-          return (
-            <li key={a.key} className="flex items-start gap-2.5 text-sm">
-              <Icon className={cn("mt-0.5 h-4 w-4 flex-none", a.tone === "red" ? "text-[hsl(var(--os-red))]" : a.tone === "amber" ? "text-[hsl(var(--os-amber))]" : "text-[hsl(var(--os-info))]")} aria-hidden />
-              <div className="min-w-0">
-                <Link href={a.href} scroll={false} className="block break-words font-medium underline-offset-4 hover:underline">{a.title}</Link>
-                <p className="break-words text-[13px] text-muted-foreground">{a.detail}</p>
-              </div>
-            </li>
-          );
-        })}
+    <nav aria-label="Go to" className="os-card p-4" data-testid="work-shortcuts">
+      <h2 className="mb-2 font-heading text-base font-semibold">Go to</h2>
+      <ul className="space-y-2">
+        {items.map((i) => (
+          <li key={i.href} className="text-sm">
+            <Link href={i.href} className="font-medium text-accent underline-offset-4 hover:underline">{i.label}</Link>
+            <span className="block text-[13px] text-muted-foreground">{i.note}</span>
+          </li>
+        ))}
       </ul>
-      {total > items.length ? <p className="mt-2.5 text-[13px] text-muted-foreground">Showing {items.length} of {total}.</p> : null}
-    </section>
+    </nav>
   );
 }
 

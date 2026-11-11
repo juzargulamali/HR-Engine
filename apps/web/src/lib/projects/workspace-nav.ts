@@ -1,5 +1,5 @@
 /**
- * The project workspace has four primary sections (Work, Timeline, Discussion, Equipment) and, for the people who may open it, a fifth (Budget); everything else is under "Manage project". Pure so the rule "what is offered
+ * The project workspace has three primary sections (Work, Timeline, Equipment; the conversation is the project's group in Chat) and, for the people who may open it, a fifth (Budget); everything else is under "Manage project". Pure so the rule "what is offered
  * to whom" is tested. The database and the pages still enforce every one of these.
  */
 export interface ProjectTabData {
@@ -8,11 +8,15 @@ export interface ProjectTabData {
   badge?: string | null;
 }
 
-export function projectTabs(base: string, unread: string | null, budget = false): ProjectTabData[] {
+/**
+ * `discussion` is given ONLY on a database that does not have project chat groups yet: the old Discussion tab is then still the conversation. Once the groups exist the tab is not
+ * offered; the conversation is the project's group in the app-wide Chat panel.
+ */
+export function projectTabs(base: string, discussion: { unread: string | null } | null, budget = false): ProjectTabData[] {
   return [
     { href: `${base}/work`, label: "Work" },
     { href: `${base}/plan`, label: "Timeline" },
-    { href: `${base}/discussion`, label: "Discussion", badge: unread },
+    ...(discussion ? [{ href: `${base}/discussion`, label: "Discussion", badge: discussion.unread }] : []),
     { href: `${base}/equipment`, label: "Equipment" },
     // Project Budget & Expenses: offered only to the Project Manager and to people the module's own access rules let in (never inferred from Projects access).
     ...(budget ? [{ href: `${base}/budget`, label: "Budget" }] : []),

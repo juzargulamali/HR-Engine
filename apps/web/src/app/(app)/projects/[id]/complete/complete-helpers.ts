@@ -64,3 +64,20 @@ export function evidenceProblems(e: EvidenceInput): string[] {
   if (!e.clientContact.trim()) out.push("Record who at the client confirmed.");
   return out;
 }
+
+/**
+ * What a completion read's error means. "denied": the database refused this person (no access, or the project is not theirs to see); "failed": the read itself failed and may
+ * work on a retry; "ok": no error (the result may still be an empty list, which is a real answer).
+ */
+export function completionReadState(error: { code?: string; message?: string } | null | undefined): "ok" | "denied" | "failed" {
+  if (!error) return "ok";
+  return error.code === "42501" || error.code === "P0002" || /permission denied|not found|do not have access|only the project manager/i.test(error.message ?? "") ? "denied" : "failed";
+}
+
+/** The information that must load before a project can be confirmed complete, in words, for the ones that did not. Evidence files matter only for a client project. */
+export function completionLoadProblems(a: { reviewFailed: boolean; evidenceFailed: boolean; projectKind: "client" | "internal" }): string[] {
+  return [
+    ...(a.reviewFailed ? ["The unfinished work of this project (open tasks, deliverables, milestones, client feedback and site bookings) could not load."] : []),
+    ...(a.evidenceFailed && a.projectKind === "client" ? ["The uploaded completion evidence could not load."] : []),
+  ];
+}

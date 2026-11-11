@@ -13,7 +13,7 @@ import type { ToolbarFilter } from "@/components/workspace/list-toolbar";
  * (`children`). Everything applies as it is chosen by changing the address (so it can be shared and Back works), exactly like ListToolbar.
  * A filter that is on is always visible as a chip with its own remove link, so a narrowed list is never a mystery; the button counts them.
  */
-export function OsFilterBar({ search, filters, clearHref, children }: { search: { value: string; placeholder: string }; filters: readonly ToolbarFilter[]; clearHref?: string; children?: React.ReactNode }) {
+export function OsFilterBar({ search, filters, clearHref, resetKeys, children }: { search: { value: string; placeholder: string }; filters: readonly ToolbarFilter[]; clearHref?: string; /** Address parameters cleared whenever a filter or the search changes (for example paging). */ resetKeys?: readonly string[]; children?: React.ReactNode }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -28,7 +28,15 @@ export function OsFilterBar({ search, filters, clearHref, children }: { search: 
   if (search.value !== seen) { setSeen(search.value); setText(search.value); }
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
-  const go = (patch: Record<string, string | null>) => start(() => router.replace(withParams(pathname, sp, patch), { scroll: false }));
+  // Two filters changed in quick succession: the second builds on the first even when the address has not caught up yet, so neither is lost (as in ListToolbar).
+  const spText = sp.toString();
+  const latest = useRef(spText);
+  useEffect(() => { latest.current = spText; }, [spText]);
+  const go = (patch: Record<string, string | null>) => {
+    const next = withParams(pathname, new URLSearchParams(latest.current), { ...Object.fromEntries((resetKeys ?? []).map((k) => [k, null])), ...patch });
+    latest.current = next.includes("?") ? next.slice(next.indexOf("?") + 1) : "";
+    start(() => router.replace(next, { scroll: false }));
+  };
   const onSearch = (v: string) => {
     setText(v);
     if (timer.current) clearTimeout(timer.current);

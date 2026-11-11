@@ -10,7 +10,11 @@ import { DeliverableStatusBadge, MilestoneStatusBadge } from "@/components/proje
 import { OsFilterBar } from "@/components/os/filter-bar";
 import { OsStatCard } from "@/components/os/stat-card";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
-import { MilestoneStrip, NextActionCard, NextOnSiteCard, type ActionItem } from "@/components/projects/work-parts";
+import { DeliverySummary, MilestoneStrip, NextOnSiteCard, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
+import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
+import { loadEquipmentState } from "@/lib/projects/equipment-state";
+import { equipmentSummary, workAttention } from "@/lib/projects/work-attention";
+import { describeChange } from "../history/change-log";
 import { QuickAddTask } from "@/components/projects/tasks/quick-add-task";
 import { TaskBoard } from "@/components/projects/tasks/task-board";
 import { TaskPanel } from "@/components/projects/tasks/task-panel";
@@ -36,7 +40,7 @@ import {
 } from "./helpers";
 import { AddMilestoneButton, EditMilestoneButton, MilestoneStatusButton } from "./milestone-forms";
 import { PlanAddMenu } from "./plan-add-menu";
-import { blockers, holdReviewState, resolutionSummary } from "../overview-helpers";
+import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Work" };
@@ -69,7 +73,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
 
   const supabase = await createClient();
   const manager = canManageProject(view.standing);
-  const [msRes, dlRes, taskRes, progressRes, feedbackRes, bookingRes, completionRes, outdatedRes] = await Promise.all([
+  const [msRes, dlRes, taskRes, progressRes, feedbackRes, bookingRes, completionRes, outdatedRes, equipment, logRes, depRes, planItemRes] = await Promise.all([
     supabase.from("proj_milestones").select("*").eq("project_id", id).order("sort_order").order("due_date", { nullsFirst: false }),
     supabase.from("proj_deliverables").select("*").eq("project_id", id).order("due_date", { nullsFirst: false }),
     supabase.from("proj_tasks").select("*").eq("project_id", id),
@@ -78,6 +82,12 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     supabase.from("proj_site_bookings").select("id, user_id, location, starts_at, ends_at, tz, state").eq("project_id", id).order("starts_at"),
     supabase.from("proj_completions").select("*").eq("project_id", id).order("completed_at", { ascending: false }),
     manager && view.project.kind === "client" ? supabase.rpc("proj_plan_outdated", { p_project_id: id }) : Promise.resolve({ data: null, error: null }),
+    // What the system can confirm about equipment (drafts, a failed handover import, requests the warehouse has not started). A failed read is shown as such.
+    loadEquipmentState(id).catch(() => ({ status: "error" as const })),
+    // The member-visible change log (dates, status, people): the newest few for the preview. Chat messages and task comments are not in it.
+    supabase.from("proj_change_log").select("id, entity_type, entity_id, field, from_value, to_value, note, actor_id, created_at").eq("project_id", id).neq("entity_type", "message").order("id", { ascending: false }).limit(4),
+    supabase.from("proj_external_dependencies").select("id, label, confirmation").eq("project_id", id),
+    supabase.from("proj_plan_items").select("id, title").eq("project_id", id),
   ]);
   if (msRes.error || dlRes.error || taskRes.error || completionRes.error) {
     return <LoadError what="this project's work" retryHref={withParams(basePath, current)} />;
@@ -133,21 +143,50 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   // ---- Right rail: what needs action, the next site visit, the project's details.
   const milestoneStrip = ms.map((m) => ({ id: m.id, title: m.title, status: m.status, dueDate: m.due_date, isRequired: m.is_required }));
   const lateMilestones = ms.filter((m) => m.due_date && m.due_date < today && ["planned", "in_progress", "ready_for_acceptance"].includes(m.status));
-  const blocked = blockers(allTasks);
-  const actionAll: ActionItem[] = [
-    ...blocked.map((t) => ({
-      key: `b-${t.id}`, href: taskAt(t.id), tone: "red" as const, title: `Blocked: ${t.title}`,
-      detail: [t.blocked_reason, t.unblock_owner_id ? `${view.nameOf(t.unblock_owner_id)} can unblock it` : null, t.unblock_action].filter(Boolean).join(" · "),
-    })),
-    ...queue.map((t) => ({ key: `r-${t.id}`, href: taskAt(t.id), tone: "blue" as const, title: `Review: ${t.title}`, detail: `Done by ${view.nameOf(t.assignee_id)}. You can accept it or send it back.` })),
-    ...lateMilestones.map((m) => ({ key: `m-${m.id}`, href: `${basePath}?ms=1#milestone-list`, tone: "amber" as const, title: `Overdue milestone: ${m.title}`, detail: `Was due ${formatDate(m.due_date as string)}` })),
-  ];
+  const attention = readOnly ? { needsYou: [], waiting: [] } : workAttention({
+    tasks: allTasks, reviewIds: queue.map((t) => t.id), lateMilestones, equipment, userId: ctx.userId, manager: view.canManage, pmName: view.pmName, today, nameOf: view.nameOf,
+    taskHref: taskAt, milestonesHref: `${basePath}?ms=1#milestone-list`, equipmentHref: (r) => `/projects/${id}/equipment${r ? `?request=${r}` : ""}`,
+  });
   const nowIso = new Date().toISOString();
   const upcomingBookings = (bookingRes.data ?? []).filter((b) => (b.state === "tentative" || b.state === "confirmed") && b.ends_at > nowIso);
   const nextBooking = upcomingBookings[0] ?? null;
   const bookingWhen = nextBooking
     ? `${new Intl.DateTimeFormat("en-GB", { timeZone: nextBooking.tz, day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(nextBooking.starts_at))} (${nextBooking.tz})`
     : "";
+  // ---- Delivery summary (for whoever manages the project): next milestone, next site booking, the equipment decision. Existing records only.
+  const nextMilestone = ms.filter((m) => m.due_date && ["planned", "in_progress", "ready_for_acceptance"].includes(m.status)).sort((a, b) => (a.due_date as string).localeCompare(b.due_date as string))[0] ?? null;
+  const eq = equipmentSummary(equipment);
+  const summaryFacts: SummaryFact[] = [
+    { label: "Next milestone", value: nextMilestone ? nextMilestone.title : ms.length === 0 ? "No milestone yet" : "No dated milestone open",
+      detail: nextMilestone ? `${(nextMilestone.due_date as string) < today ? "Overdue · " : ""}${dateText(nextMilestone.due_date)}` : null, tone: nextMilestone && (nextMilestone.due_date as string) < today ? "amber" : "quiet",
+      href: `/projects/${id}/plan`, linkText: "Open Timeline" },
+    { label: "Next site booking", value: nextBooking ? nextBooking.location : bookingRes.error ? "Could not load the site bookings" : "None booked", tone: bookingRes.error ? "red" : "quiet",
+      detail: nextBooking ? `${bookingWhen} · ${view.nameOf(nextBooking.user_id)} · ${nextBooking.state === "confirmed" ? "Confirmed" : "Tentative"}` : null,
+      href: `/projects/${id}/plan?plan=site`, linkText: nextBooking ? "Open the booking" : "Open site bookings" },
+    { label: "Equipment", value: eq.text, tone: eq.tone, href: `/projects/${id}/equipment`, linkText: "Open Equipment" },
+  ];
+
+  // ---- Recent activity preview: the newest change-log lines, each linked to where that record lives.
+  const titleOf = (type: string, entityId: string): string | null =>
+    type === "milestone" ? (ms.find((m) => m.id === entityId)?.title ?? null) : type === "deliverable" ? (dls.find((d) => d.id === entityId)?.title ?? null)
+      : type === "plan_item" ? ((planItemRes.data ?? []).find((x) => x.id === entityId)?.title ?? null) : type === "external_dependency" ? ((depRes.data ?? []).find((x) => x.id === entityId)?.label ?? null) : null;
+  const sourceHref = (type: string): string =>
+    type === "milestone" || type === "deliverable" ? `${basePath}?ms=1#milestone-list` : type === "plan_item" ? `/projects/${id}/plan` : type === "external_dependency" ? `/projects/${id}/plan?plan=site&mode=list`
+      : type === "booking" ? `/projects/${id}/plan?plan=site` : type === "member" ? `/projects/${id}/people` : `/projects/${id}/history`;
+  const activity: ActivityLine[] = (logRes.data ?? []).map((l) => {
+    const d = describeChange(l, { entityName: titleOf, nameOf: view.nameOf });
+    return { key: String(l.id), subject: d.subject, sentence: d.sentence, when: formatDateTime(l.created_at), who: l.actor_id ? view.nameOf(l.actor_id) : "Recorded by the system", href: sourceHref(l.entity_type) };
+  });
+
+  // ---- Direct entry points, each shown only with the fact that makes it relevant.
+  const openDeps = (depRes.data ?? []).filter((d) => d.confirmation !== "confirmed");
+  const shortcuts = [
+    ...(outdatedRes.data === true ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "The issued client timeline is out of date." }] : view.project.kind === "client" ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "Project files and the client-facing plan." }] : []),
+    { href: `/projects/${id}/plan`, label: "Timeline", note: nextMilestone ? `Next milestone: ${nextMilestone.title}, ${dateText(nextMilestone.due_date)}.` : "Dates, activities and milestones." },
+    ...(depRes.error ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: "Could not load the dependencies just now. Open the site plan to see them." }] : []),
+    ...(openDeps.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: `${openDeps.length} not confirmed yet (waiting on another party).` }] : []),
+    ...(upcomingBookings.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list#bookings`, label: "Site bookings", note: `${upcomingBookings.length} upcoming.` }] : []),
+  ];
   const feedbackOpen = (feedbackRes.data ?? []).filter((f) => f.status === "open" || f.status === "in_progress").length;
   const completions = completionRes.data ?? [];
   const completion = completions.find((c) => !c.reopened_at) ?? null;
@@ -252,6 +291,13 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,72fr)_minmax(0,28fr)]">
         <div className="min-w-0 space-y-4">
+          {/* First in the reading order, on a phone too: what needs the viewer, any blocker, and what is waiting on someone else. */}
+          {readOnly ? null : (
+            <WorkAttention needsYou={attention.needsYou} waiting={attention.waiting}
+              importRecovery={view.canManage ? <ImportHandoverButton projectId={id} label="Import the handover equipment" /> : undefined} />
+          )}
+          {equipment.status === "error" && !readOnly ? <Alert variant="warning" role="status">Could not load this project&apos;s equipment state, so an equipment decision may be missing above. Open <Link href={`/projects/${id}/equipment`} className="font-medium underline">Equipment</Link> or reload.</Alert> : null}
+          {view.canManage && !readOnly ? <DeliverySummary facts={summaryFacts} /> : null}
           <ul className="grid grid-cols-3 gap-2.5 sm:gap-3" aria-label="Where the work stands">
             <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>
             <li><OsStatCard href={withParams(basePath, current, { show: "attention" }, ["status", "tasks", "mine", "overdue", "blocked"])} label="Need attention" value={attentionCount} icon={AlertTriangle} edge="amber" active={filters.attention} /></li>
@@ -308,13 +354,14 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         </div>
 
         <aside aria-label="Project support" className="min-w-0 space-y-4">
-          <NextActionCard items={actionAll.slice(0, 4)} total={actionAll.length} />
-          <NextOnSiteCard
+          {view.canManage && !readOnly ? null : <NextOnSiteCard
             booking={nextBooking ? { id: nextBooking.id, location: nextBooking.location, startsAt: nextBooking.starts_at, endsAt: nextBooking.ends_at, state: nextBooking.state, who: view.nameOf(nextBooking.user_id) } : null}
             count={upcomingBookings.length}
             href={`/projects/${id}/plan?plan=site`}
             when={bookingWhen}
-          />
+          />}
+          <RecentActivity lines={activity} failed={!!logRes.error} historyHref={`/projects/${id}/history`} />
+          <WorkShortcuts items={shortcuts} />
           {details ? (
             <ProjectDetailsCard
               pmName={view.pmName} acting={acting} team={teamNames} peopleCount={view.people.length} start={view.project.start_date} end={view.project.end_date}

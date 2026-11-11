@@ -9,6 +9,7 @@ import { Select } from "@/components/ui/select";
 import { SearchCombobox, type ComboOption } from "@/components/sales/combobox";
 import { chatMarkRead, chatMembers, chatMessages, chatPost, chatSearchItems } from "@/lib/actions/chat";
 import {
+  membershipLine,
   clockTime, dayHeading, filterMembers, initials, MAX_BODY, mentionQuery, mentionsStillInText, mergeMessages, SHARE_TYPES, splitMentions,
   type ChatGroup, type ChatMention, type ChatMessage, type ShareType, type SharedItem,
 } from "@/lib/chat/model";
@@ -221,7 +222,8 @@ export function ChatThread({ group, meId, onBack, onChanged }: { group: ChatGrou
     <>
       <div className="flex items-center gap-2 border-b border-border px-2 py-2">
         <button type="button" onClick={onBack} aria-label="Back to groups" className="flex h-11 w-11 items-center justify-center rounded-md text-muted-foreground hover:bg-secondary/70 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><ArrowLeft className="h-5 w-5" aria-hidden /></button>
-        <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-semibold" data-testid="chat-thread-title">{group.name}</h3><p className="text-xs text-muted-foreground">Everyone with Sales access to this company</p></div>
+        <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-semibold" data-testid="chat-thread-title">{group.name}</h3><p className="text-xs text-muted-foreground">{membershipLine(group)}</p></div>
+        {group.kind === "project" && group.projectId ? <Link href={`/projects/${group.projectId}/work`} className="mr-2 shrink-0 text-xs font-medium underline underline-offset-2" data-testid="chat-open-project">Open project</Link> : null}
       </div>
 
       <div className="relative min-h-0 flex-1">
@@ -267,6 +269,9 @@ export function ChatThread({ group, meId, onBack, onChanged }: { group: ChatGrou
         ) : null}
       </div>
 
+      {group.readOnly ? (
+        <p className="border-t border-border px-4 py-3 text-sm text-muted-foreground" role="note" data-testid="chat-read-only">This project is finished, so its conversation is read-only.</p>
+      ) : (
       <div className="border-t border-border p-2">
         {shareOpen ? <SharePicker onPick={(s) => { setShare(s); setShareOpen(false); input.current?.focus(); }} onClose={() => setShareOpen(false)} /> : null}
         {emojiOpen ? <div className="mb-2 flex gap-1" role="group" aria-label="Emoji">{EMOJI.map((e) => <button key={e} type="button" onClick={() => addEmoji(e)} className="h-10 w-10 rounded-md text-lg hover:bg-secondary/70" aria-label={`Insert ${e}`}>{e}</button>)}</div> : null}
@@ -306,6 +311,7 @@ export function ChatThread({ group, meId, onBack, onChanged }: { group: ChatGrou
           {body.length > MAX_BODY - 300 ? <span className={cn("ml-auto text-xs", body.length > MAX_BODY ? "text-destructive" : "text-muted-foreground")}>{body.length}/{MAX_BODY}</span> : null}
         </div>
       </div>
+      )}
     </>
   );
 }

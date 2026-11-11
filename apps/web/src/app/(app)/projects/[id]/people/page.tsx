@@ -62,7 +62,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
     <div className="space-y-5">
       <Panel
         title="Members"
-        description="Everyone here can read the project's workspace and discussion. Access ends the moment someone is removed."
+        description="Everyone here can read the project's workspace and its chat group. Access ends the moment someone is removed."
         actions={canAssignPm && live ? <ReassignPmButton projectId={id} candidates={pmCandidates} currentId={project.pm_user_id} /> : undefined}
       >
         {people.length === 0 ? (

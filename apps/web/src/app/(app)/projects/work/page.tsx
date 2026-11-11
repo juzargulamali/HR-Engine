@@ -1,5 +1,7 @@
 import Link from "next/link";
-import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert, Users } from "lucide-react";
+import { loadProjectUnread } from "@/lib/chat/data";
+import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -35,6 +37,8 @@ const EMPTY: Record<MyWorkShow, { title: string; description: string }> = {
   mine: { title: "No open tasks", description: "Tasks assigned to you, or shared with you as a collaborator, appear here. You can add your own task inside a project you are part of." },
   team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the departments you head appear here." },
   overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed appear here." },
+  blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you as the person who can unblock them appear here, and blocked tasks with nobody named on a project you manage." },
+  waiting: { title: "Nothing of yours is in review", description: "Tasks you sent for review appear here until a reviewer accepts them or sends them back. There is nothing for you to do on them meanwhile." },
   review: { title: "Nothing is waiting for your review", description: "Tasks sent for review that you lead as Project Manager, temporary leader, founder or department head appear here. You never review your own work." },
 };
 
@@ -76,7 +80,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   const sort = parseTaskSort(firstParam(sp, "sort"));
   const columns = parseColumns(firstParam(sp, "cols"), TASK_COLUMN_IDS, DEFAULT_TASK_COLUMNS);
   const q = firstParam(sp, "q").trim().slice(0, 100);
-  const base = selectMyWorkRows({ mine: work.mine, team: work.team, reviews: work.reviews }, show, work.today);
+  const base = selectMyWorkRows({ mine: work.mine, team: work.team, reviews: work.reviews, blockers: work.blockers, waiting: work.waiting }, show, work.today);
   const projects = [...new Map(base.map((r) => [r.projectId, `${r.projectName}`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const projectId = projects.some(([id]) => id === firstParam(sp, "project")) ? firstParam(sp, "project") : "";
   const rows = sortTaskRows(narrowMyWork(base, q, projectId), sort);
@@ -95,12 +99,12 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
     const mine = directory.filter((d) => d.is_member && d.status !== "completed" && d.status !== "archived");
     if (mine.length === 0) return [];
     const ids = milestoneProjectIds(mine, ctx.grants);
-    const [{ data: ms }, { data: unreadRows }] = await Promise.all([
+    const [{ data: ms }, unreadMap] = await Promise.all([
       ids.length > 0 ? supabase.from("proj_milestones").select("project_id, title, due_date, status").in("project_id", ids).in("status", ["planned", "in_progress", "ready_for_acceptance"]).not("due_date", "is", null) : Promise.resolve({ data: [] as { project_id: string; title: string; due_date: string | null; status: string }[] }),
-      supabase.rpc("proj_unread_counts"),
+      loadProjectUnread(),
     ]);
     const next = nextMilestones(ms ?? []);
-    const unreadBy = new Map((unreadRows ?? []).map((r) => [r.project_id, r.unread]));
+    const unreadBy = unreadMap ?? new Map<string, number>();
     return mine.map((p) => ({ id: p.id, name: p.name, reference: p.reference, nextMilestone: canSeeProjectDetails(p, ctx.grants) ? (next.get(p.id) ?? null) : null, unread: unreadBy.get(p.id) ?? 0 }));
   })();
 
@@ -109,19 +113,29 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
     team: work.team.length,
     overdue: selectMyWorkRows({ mine: work.mine, team: [], reviews: [] }, "overdue", work.today).length,
     review: work.reviews.length,
+    blockers: work.blockers.length,
+    waiting: work.waiting.length,
   };
   const showOptions = MY_WORK_SHOWS.filter((s) => s !== "team" || work.canSeeTeam).map((s) => ({ value: s === "mine" ? "" : s, label: `${MY_WORK_LABELS[s]} (${counts[s]})` }));
 
   return (
     <div className="space-y-5">
-      <OsHero title="My Work" eyebrow="Projects" sub="Tasks assigned to you and work waiting for your review. Having several tasks on one day is normal and is never flagged." />
+      <OsHero title="My Work" eyebrow="Projects" sub="Tasks assigned to you, work waiting for your review and blockers you can clear. Having several tasks on one day is normal and is never flagged." />
 
-      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="Your work at a glance">
-        <li><OsStatCard href={withParams(BASE, current, { show: null })} label="My open tasks" value={counts.mine} icon={ListChecks} edge="cyan" active={show === "mine"} /></li>
-        <li><OsStatCard href={withParams(BASE, current, { show: "overdue" })} label="Overdue" value={counts.overdue} icon={AlertTriangle} edge="amber" active={show === "overdue"} /></li>
+      {/* Three different things, never mixed: work I must do, reviews I must give, blockers I can clear. Each card's number is the number of rows its list shows. */}
+      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3" aria-label="What needs you">
+        <li><OsStatCard href={withParams(BASE, current, { show: null })} label="My tasks" value={counts.mine} icon={ListChecks} edge="cyan" active={show === "mine"} /></li>
         <li><OsStatCard href={withParams(BASE, current, { show: "review" })} label="Waiting for my review" value={counts.review} icon={ShieldAlert} edge="blue" active={show === "review"} /></li>
-        {work.canSeeTeam ? <li><OsStatCard href={withParams(BASE, current, { show: "team" })} label="My team's open tasks" value={counts.team} icon={Users} edge="muted" active={show === "team"} /></li> : null}
+        <li><OsStatCard href={withParams(BASE, current, { show: "blockers" })} label="Blockers I can help clear" value={counts.blockers} icon={AlertTriangle} edge="amber" active={show === "blockers"} /></li>
       </ul>
+      <nav aria-label="More views" className="flex flex-wrap items-center gap-2 text-sm">
+        {([["overdue", "Overdue"], ["waiting", "Sent for review: waiting on someone else"], ...(work.canSeeTeam ? [["team", "My team's open tasks"] as const] : [])] as const).map(([key, label]) => (
+          <Link key={key} href={withParams(BASE, current, { show: show === key ? null : key })} scroll={false} aria-current={show === key ? "true" : undefined}
+            className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 font-medium", show === key ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+            {label}<span className="tabular-nums text-foreground">{counts[key]}</span>
+          </Link>
+        ))}
+      </nav>
 
       {!attention ? <LoadError what="your waiting handovers" retryHref={BASE} /> : null}
       {attention && attention.handoversWaiting > 0 ? (
@@ -132,6 +146,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
       ) : null}
 
       <MyProjects items={myProjects} />
+      {myProjects.length > 0 && (await loadProjectUnread()) === null ? <Alert variant="warning" role="status">Unread chat counts could not be loaded just now, so no project above shows one. The Chat button still lists your groups.</Alert> : null}
 
       <div className="space-y-3">
         <ListToolbar

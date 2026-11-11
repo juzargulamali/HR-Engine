@@ -60,3 +60,21 @@ describe("merging messages", () => {
     expect(mergeMessages([m(1), m(3)], [m(2), m(3, "again")]).map((x) => [x.seq, x.body])).toEqual([[1, ""], [2, ""], [3, "again"]]);
   });
 });
+
+import { filterGroups, groupSections, membershipLine } from "./model";
+describe("project groups in the list", () => {
+  const groups = [{ name: "Sales — UAE", kind: "sales" as const }, { name: "UAE-P-1 · Fictional Alpha", kind: "project" as const }, { name: "Older database row" }];
+  it("puts Sales groups first and project groups in their own section; a row without a kind is a Sales group", () => {
+    expect(groupSections(groups).map((s) => [s.title, s.groups.length])).toEqual([["Sales", 2], ["Projects", 1]]);
+    expect(groupSections([groups[1]!]).map((s) => s.title)).toEqual(["Projects"]);
+  });
+  it("describes who is in a group, and that a finished project is read-only", () => {
+    expect(membershipLine({ kind: "sales" })).toMatch(/Sales access/);
+    expect(membershipLine({ kind: "project" })).toBe("The people on this project");
+    expect(membershipLine({ kind: "project", readOnly: true })).toMatch(/finished/);
+  });
+  it("finds a group by part of its name or reference", () => {
+    expect(filterGroups(groups, "p-1").map((g) => g.name)).toEqual(["UAE-P-1 · Fictional Alpha"]);
+    expect(filterGroups(groups, " ")).toHaveLength(3);
+  });
+});

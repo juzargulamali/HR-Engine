@@ -69,9 +69,9 @@ export function describeNotification(type: string, payload: Record<string, unkno
       return { text: `${task ? `“${task}”` : "A task"} on ${project} is blocked and needs your action${reason ? `: ${reason}` : ""}.`, href: taskLink };
     }
     case "project_mention":
-      return { text: `You were mentioned in the discussion of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
+      return { text: `You were mentioned in the conversation of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
     case "project_reply":
-      return { text: `Someone replied to your message in the discussion of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
+      return { text: `Someone replied to your message in the conversation of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
     case "project_dates_changed":
       return { text: `The key dates of ${project} changed.`, href: projectLink };
     case "project_scope_decision":
