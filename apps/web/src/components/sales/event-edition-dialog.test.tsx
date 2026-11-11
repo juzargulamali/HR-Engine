@@ -77,7 +77,7 @@ describe("the event and edition form", () => {
 describe("Create event or edition from Quick Add", () => {
   const props = {
     companies: [{ id: "co", name: "Fictional Co", currency: "AED", hasSettings: true, canAssignOwner: false, canOpenSettings: false, people: [] }],
-    organisations: [{ id: "client", name: "Fictional Client Only", kind: "client", roles: ["client"], place: null }],
+    organisations: [{ id: "client", name: "Fictional Client Only", kind: "client" as const, roles: ["client"], place: null }],
     editions: [{ id: "g27", label: "Fictional Expo Global · 2027 · Dubai", detail: "2027-10-11", archived: false }],
     events: EVENTS, currentUserId: "u1", currentUserName: "Fictional Person", today: "2026-11-11",
   };
