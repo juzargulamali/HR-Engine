@@ -1,3 +1,4 @@
+import { loadProjectUnread } from "@/lib/chat/data";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
@@ -72,11 +73,10 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   }
   const rows = sortDirectory(filtered, sort, new Map([...nextBy].map(([k, v]) => [k, v.due])));
 
-  // ---- unread discussion counts (members only: the function returns nothing for projects you are not on)
+  // ---- unread project chat counts (members only: the server lists a project's group only for the people enrolled in it)
   const unreadBy = new Map<string, number>();
   if (!salesOnly || directory.some((d) => d.is_member)) {
-    const { data } = await supabase.rpc("proj_unread_counts");
-    for (const r of data ?? []) if (r.unread > 0) unreadBy.set(r.project_id, r.unread);
+    for (const [k, v] of (await loadProjectUnread()) ?? []) unreadBy.set(k, v);
   }
 
   // ---- who may add an internal project

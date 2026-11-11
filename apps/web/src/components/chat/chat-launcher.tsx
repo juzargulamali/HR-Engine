@@ -1,14 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { AtSign, MessageCircle, Users, X } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { AtSign, FolderKanban, MessageCircle, Search, Users, X } from "lucide-react";
 import { chatGroups } from "@/lib/actions/chat";
-import { badgeText, launcherLabel, shortAgo, totalUnread, type ChatGroup } from "@/lib/chat/model";
+import { badgeText, CHAT_OPEN_EVENT, CHAT_PARAM, filterGroups, groupSections, launcherLabel, shortAgo, totalUnread, type ChatGroup } from "@/lib/chat/model";
+import { withParams } from "@/components/workspace/url-state";
 import { useFocusTrap } from "@/lib/use-focus-trap";
 import { cn } from "@/lib/utils";
 import { ChatThread } from "./chat-thread";
 
 const POLL_MS = 30000;
+/** Above this many groups the list gets a search box. */
+const SEARCH_FROM = 8;
 
 function useIsPhone() {
   const [phone, setPhone] = useState(false);
@@ -23,8 +27,11 @@ function useIsPhone() {
 
 /**
  * The one floating Chat button, on every page of Enginious OS. It is drawn only while the server lists at least one group for this person (membership is the server's: an active Sales
- * grant for that company), shows the total unread on the button and per group in the panel, and opens a panel over the current page (a bottom sheet on a phone), so nobody leaves what
- * they are doing. When access is removed the next refresh returns no group and the button and panel disappear. The panel is built around a list of groups; only the three Sales groups exist.
+ * grant for that company for a Sales group, active enrolment in the project for a project group), shows the total unread on the button and per group in the panel, and opens a panel
+ * over the current page (a bottom sheet on a phone), so nobody leaves what they are doing. When access is removed the next refresh no longer lists the group: its thread closes, and
+ * with no group left the button and panel disappear.
+ * One group can be opened from anywhere: the address parameter `?chat=<group id>` (old Discussion links arrive this way) or the CHAT_OPEN_EVENT a project page fires. The group is
+ * opened only if the server lists it for this person; otherwise a short notice says it is not available.
  */
 export function ChatLauncher({ userId, initialGroups }: { userId: string; initialGroups: ChatGroup[] }) {
   const [groups, setGroups] = useState<ChatGroup[]>(initialGroups);
@@ -32,6 +39,11 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
   const [openGroup, setOpenGroup] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const groupsRef = useRef(initialGroups);
+  const [find, setFind] = useState("");
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  const asked = sp.get(CHAT_PARAM);
   const phone = useIsPhone();
   const panelRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
@@ -50,8 +62,34 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
     if (r.groups.length === 0) setOpen(false);
   }, []);
 
+  /** Opens one group by id. A group the server does not list for this person is never opened: the list is refreshed once, then a notice says so. */
+  const openById = useCallback(async (groupId: string) => {
+    let known = groupsRef.current.some((g) => g.id === groupId);
+    if (!known) {
+      const r = await chatGroups();
+      if (r.ok) { groupsRef.current = r.groups; setGroups(r.groups); known = r.groups.some((g) => g.id === groupId); }
+    }
+    if (groupsRef.current.length === 0) return;
+    setOpen(true);
+    if (known) { setNotice(null); setOpenGroup(groupId); }
+    else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project."); }
+  }, []);
+
+  // `?chat=<group id>` in the address: open it, then take the parameter out so Back and a reload do not reopen the panel.
   useEffect(() => {
-    const t = setInterval(() => { if (document.visibilityState === "visible") void refresh(); }, POLL_MS);
+    if (!asked) return;
+    void openById(asked);
+    router.replace(withParams(pathname, sp, { [CHAT_PARAM]: null }), { scroll: false });
+  }, [asked, openById, pathname, router, sp]);
+
+  useEffect(() => {
+    const onOpen = (e: Event) => { const id = (e as CustomEvent<{ groupId?: string }>).detail?.groupId; if (id) void openById(id); };
+    window.addEventListener(CHAT_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(CHAT_OPEN_EVENT, onOpen);
+  }, [openById]);
+
+  useEffect(() => {
+    const t = setInterval(() => { if (document.visibilityState === "visible" && groupsRef.current.length > 0) void refresh(); }, POLL_MS);
     const onFocus = () => void refresh();
     window.addEventListener("focus", onFocus);
     return () => { clearInterval(t); window.removeEventListener("focus", onFocus); };
@@ -107,23 +145,36 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
                     <button type="button" onClick={() => setNotice(null)} className="text-muted-foreground underline underline-offset-2">Dismiss</button>
                   </div>
                 ) : null}
-                <p className="px-4 pt-3 text-xs text-muted-foreground">Groups you belong to. Membership follows your Sales access for each company.</p>
-                <ul className="divide-y divide-border">
-                  {groups.map((g) => (
-                    <li key={g.id}>
-                      <button type="button" onClick={() => setOpenGroup(g.id)} data-testid={`chat-group-${g.key}`}
-                        className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-secondary/50 focus-visible:bg-secondary/50 focus-visible:outline-none">
-                        <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary"><Users className="h-5 w-5" /></span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2"><span className="truncate text-sm font-semibold">{g.name}</span><span className="ml-auto shrink-0 text-xs text-muted-foreground">{shortAgo(g.lastAt)}</span></span>
-                          <span className="block truncate text-xs text-muted-foreground">{g.lastPreview ? `${g.lastSender ?? ""}: ${g.lastPreview}` : "No messages yet"}</span>
-                        </span>
-                        {g.mentions > 0 ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive text-white" title="You were mentioned" data-testid="chat-group-mention"><AtSign className="h-3 w-3" aria-hidden /></span> : null}
-                        {g.unread > 0 ? <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold text-white" data-testid="chat-group-unread" aria-label={`${g.unread} unread`}>{badgeText(g.unread)}</span> : null}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
+                <p className="px-4 pt-3 text-xs text-muted-foreground">Groups you belong to. A Sales group follows your Sales access for that company; a project group is for the people on that project.</p>
+                {groups.length > SEARCH_FROM ? (
+                  <div className="relative mx-4 mt-2">
+                    <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
+                    <input type="search" value={find} onChange={(e) => setFind(e.target.value)} aria-label="Find a group" placeholder="Find a group or project" data-testid="chat-group-search"
+                      className="h-10 w-full rounded-lg border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  </div>
+                ) : null}
+                {groupSections(filterGroups(groups, find)).map((section) => (
+                  <section key={section.title} aria-label={`${section.title} groups`}>
+                    <h3 className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{section.title}</h3>
+                    <ul className="divide-y divide-border">
+                      {section.groups.map((g) => (
+                        <li key={g.id}>
+                          <button type="button" onClick={() => setOpenGroup(g.id)} data-testid={`chat-group-${g.key}`}
+                            className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-secondary/50 focus-visible:bg-secondary/50 focus-visible:outline-none">
+                            <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary">{g.kind === "project" ? <FolderKanban className="h-5 w-5" /> : <Users className="h-5 w-5" />}</span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2"><span className="truncate text-sm font-semibold">{g.name}</span><span className="ml-auto shrink-0 text-xs text-muted-foreground">{shortAgo(g.lastAt)}</span></span>
+                              <span className="block truncate text-xs text-muted-foreground">{g.lastPreview ? `${g.lastSender ?? ""}: ${g.lastPreview}` : "No messages yet"}</span>
+                            </span>
+                            {g.mentions > 0 ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive text-white" title="You were mentioned" data-testid="chat-group-mention"><AtSign className="h-3 w-3" aria-hidden /></span> : null}
+                            {g.unread > 0 ? <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold text-white" data-testid="chat-group-unread" aria-label={`${g.unread} unread`}>{badgeText(g.unread)}</span> : null}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </section>
+                ))}
+                {find && filterGroups(groups, find).length === 0 ? <p className="px-4 py-6 text-center text-sm text-muted-foreground">No group matches.</p> : null}
               </div>
             )}
           </div>

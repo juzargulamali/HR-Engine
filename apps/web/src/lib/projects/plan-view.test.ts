@@ -36,10 +36,11 @@ describe("legacy addresses", () => {
 
 describe("workspace tabs and the Manage project menu", () => {
   it("has exactly four primary sections", () => {
-    expect(projectTabs("/projects/p1", "3").map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment"]);
-    expect(projectTabs("/projects/p1", "3")[2]?.badge).toBe("3");
+    expect(projectTabs("/projects/p1", null).map((t) => t.label)).toEqual(["Work", "Timeline", "Equipment"]);       // the conversation is in Chat
+    expect(projectTabs("/projects/p1", { unread: "3" }).map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment"]);   // only before project chat groups exist
+    expect(projectTabs("/projects/p1", { unread: "3" })[2]?.badge).toBe("3");
     // the Budget tab appears only when the module's own access says so
-    expect(projectTabs("/projects/p1", null, true).map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment", "Budget"]);
+    expect(projectTabs("/projects/p1", null, true).map((t) => t.label)).toEqual(["Work", "Timeline", "Equipment", "Budget"]);
   });
   it("lights up the new home of every old section and none for the secondary pages", () => {
     const b = "/projects/p1";

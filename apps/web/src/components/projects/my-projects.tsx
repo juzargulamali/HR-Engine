@@ -33,7 +33,7 @@ export function MyProjects({ items }: { items: readonly MyProjectItem[] }) {
               </p>
             </div>
             <Link href={`/projects/${p.id}/discussion`} className="inline-flex h-8 items-center gap-1.5 rounded-md border border-input px-3 text-sm font-medium hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-              <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Discussion
+              <MessageSquare className="h-3.5 w-3.5" aria-hidden /> Chat
               {p.unread > 0 ? <span className="rounded-full bg-accent px-1.5 text-[12px] font-semibold text-accent-foreground">{p.unread} new</span> : null}
             </Link>
           </li>

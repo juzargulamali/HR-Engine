@@ -8,6 +8,8 @@ import { Panel } from "@/components/projects/parts";
 import { isFinishedProject } from "@enginious-hr/domain";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
+import { loadProjectChat } from "@/lib/chat/data";
+import { CHAT_PARAM } from "@/lib/chat/model";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjMessageFeedRow } from "@/types/projects";
 import { DiscussionClient } from "./discussion-client";
@@ -22,6 +24,23 @@ export default async function DiscussionPage({ params }: { params: Promise<{ id:
   const view = await loadProjectView(ctx, id);
   if (!view) return null;
   if (view.level !== "details") redirect(`/projects/${id}`);
+
+  // The project's conversation is its group in Chat. This address is kept for old links and notices: an enrolled member is sent to the project's Work page with the group open in
+  // the Chat panel. Someone who may open the project but is not enrolled in it (a founder, for example) is told where the conversation is; they are not shown it.
+  // Only a database that does not have project groups yet still shows the old Discussion below.
+  const chat = await loadProjectChat(id);
+  if (chat.state === "ready") redirect(`/projects/${id}/work?${CHAT_PARAM}=${chat.groupId}`);
+  if (chat.state === "not_member") {
+    return (
+      <Panel title="Project chat" description="This project's conversation is in Chat.">
+        <p className="text-sm text-muted-foreground" data-testid="project-chat-not-member">
+          The conversation is open to the people on this project. You can open the project, but you are not on its team, so its chat is not shown to you. The Project Manager can add you under Manage project, People &amp; access.
+        </p>
+        <Link href={`/projects/${id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Back to Work</Link>
+      </Panel>
+    );
+  }
+  if (chat.state === "error") return <LoadError what="the project chat" retryHref={`/projects/${id}/discussion`} />;
 
   const supabase = await createClient();
   const [{ data: rows, error }, { data: taskRows }] = await Promise.all([

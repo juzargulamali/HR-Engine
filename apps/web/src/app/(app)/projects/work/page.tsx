@@ -1,3 +1,4 @@
+import { loadProjectUnread } from "@/lib/chat/data";
 import Link from "next/link";
 import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert, Users } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
@@ -95,12 +96,12 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
     const mine = directory.filter((d) => d.is_member && d.status !== "completed" && d.status !== "archived");
     if (mine.length === 0) return [];
     const ids = milestoneProjectIds(mine, ctx.grants);
-    const [{ data: ms }, { data: unreadRows }] = await Promise.all([
+    const [{ data: ms }, unreadMap] = await Promise.all([
       ids.length > 0 ? supabase.from("proj_milestones").select("project_id, title, due_date, status").in("project_id", ids).in("status", ["planned", "in_progress", "ready_for_acceptance"]).not("due_date", "is", null) : Promise.resolve({ data: [] as { project_id: string; title: string; due_date: string | null; status: string }[] }),
-      supabase.rpc("proj_unread_counts"),
+      loadProjectUnread(),
     ]);
     const next = nextMilestones(ms ?? []);
-    const unreadBy = new Map((unreadRows ?? []).map((r) => [r.project_id, r.unread]));
+    const unreadBy = unreadMap ?? new Map<string, number>();
     return mine.map((p) => ({ id: p.id, name: p.name, reference: p.reference, nextMilestone: canSeeProjectDetails(p, ctx.grants) ? (next.get(p.id) ?? null) : null, unread: unreadBy.get(p.id) ?? 0 }));
   })();
 

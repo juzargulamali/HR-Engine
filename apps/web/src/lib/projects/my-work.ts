@@ -1,5 +1,6 @@
 import "server-only";
 import { cache } from "react";
+import { loadProjectUnread } from "@/lib/chat/data";
 import { canDecideScope, hasProjCapability, isProjFounder } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectsContext } from "./context";
@@ -108,18 +109,19 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
   const [work, handovers, unread, scope] = await Promise.all([
     loadMyWork(ctx),
     supabase.from("proj_handovers").select("id, company_id, status, pm_user_id, crm_opportunity_id, crm_reference, title, submitted_at, updated_at").in("status", ["submitted", "pm_assigned"]).limit(100),
-    supabase.rpc("proj_unread_counts"),
+    loadProjectUnread(),
     // Proposed scope changes the person may decide NOW, from the narrow function (id, project reference, title, time only): a holder of approve_scope who is not a member of the
     // project is authorised to decide but cannot read the proposal through row-level security. Only worth asking for someone who may decide one.
     deciderCompanies.size > 0 ? supabase.rpc("proj_scope_decisions_waiting") : Promise.resolve({ data: [] as ProjScopeDecisionWaitingRow[], error: null }),
   ]);
-  ok(handovers, unread, scope);
+  ok(handovers, scope);
+  if (unread === null) throw new Error("Project chat unread counts could not be loaded");
   // The function returns only open proposals on projects still open, in companies where the person decides, oldest first.
   const scopeRows = scope.data ?? [];
   const scopeWaiting = scopeRows.length;
   const oldestScope = scopeRows[0] ?? null;
   const groups = groupTasksByDue(work.open, work.today);
-  const unreadRows = (unread.data ?? []).filter((r) => r.unread > 0);
+  const unreadRows = [...unread.values()];
   const handoverList = (handovers.data ?? [])
     .filter((h) => handoverWaitsOnMe(h, ctx.userId, (c) => hasProjCapability(ctx.grants, c, "assign_pm")))
     .map((h) => ({ id: h.id, opportunityId: h.crm_opportunity_id, reference: h.crm_reference, title: h.title, status: h.status, at: h.submitted_at ?? h.updated_at }));
@@ -131,7 +133,7 @@ export const loadProjectsAttention = cache(async (ctx: ProjectsContext): Promise
     scopeChangesWaiting: scopeWaiting,
     scopeChangeProjectId: oldestScope?.project_id ?? null,
     scopeChangeId: oldestScope?.scope_change_id ?? null,
-    unreadMessages: unreadRows.reduce((n, r) => n + r.unread, 0),
+    unreadMessages: unreadRows.reduce((n, r) => n + r, 0),
     unreadProjects: unreadRows.length,
     handoverList,
     scopeList: scopeRows.map((r) => ({ id: r.scope_change_id, projectId: r.project_id, projectReference: r.project_reference, projectName: r.project_name, title: r.title, at: r.proposed_at })),

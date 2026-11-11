@@ -19,7 +19,7 @@ export function ProjectTabs({ tabs, base }: { tabs: ProjectTab[]; base: string }
   const pathname = usePathname();
   const active = activeTabHref(pathname, base);
   return (
-    <nav aria-label="Project sections" className={cn("grid border-b border-border sm:flex sm:gap-1", tabs.length > 4 ? "grid-cols-5" : "grid-cols-4")}>
+    <nav aria-label="Project sections" className={cn("grid border-b border-border sm:flex sm:gap-1", tabs.length > 4 ? "grid-cols-5" : tabs.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
       {tabs.map((t) => {
         const Icon = ICONS[t.label] ?? ClipboardList;
         const on = active === t.href;

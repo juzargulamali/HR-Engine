@@ -10,6 +10,8 @@ import { ProjectTabs } from "@/components/projects/project-tabs";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectBudgetAccess } from "@/lib/budget/data";
 import { loadProjectView } from "@/lib/projects/data";
+import { loadProjectChat, loadProjectUnread } from "@/lib/chat/data";
+import { ProjectChatButton } from "@/components/chat/project-chat-button";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
@@ -17,8 +19,8 @@ import { BackLink } from "@/components/workspace/list-memory";
 import { LoadError } from "@/components/workspace/states";
 
 /**
- * One project. Members and founders get a compact banner, four sections (Work, Timeline, Discussion, Equipment), a fifth (Budget) for the people who may open it, and one "Manage project"
- * menu for the rest; a person who can only see the summary (a Projects-access holder who is not a member, or a linked Sales person) gets
+ * One project. Members and founders get a compact banner, three sections (Work, Timeline, Equipment), a fourth (Budget) for the people who may open it, a Chat button that opens the
+ * project's group in the app-wide Chat panel (enrolled members only), and one "Manage project" menu for the rest; a person who can only see the summary (a Projects-access holder who is not a member, or a linked Sales person) gets
  * the summary page and neither: the details, discussion, plans and files are not theirs.
  */
 export default async function ProjectLayout({ children, params }: { children: React.ReactNode; params: Promise<{ id: string }> }) {
@@ -41,13 +43,16 @@ export default async function ProjectLayout({ children, params }: { children: Re
   if (!view) notFound();
   const { project, details } = view;
 
-  let unread: string | null = null;
-  if (view.level === "details") {
+  // The project's conversation is its group in Chat. Only an enrolled member gets it (the database decides). On a database without project groups yet the old Discussion tab stays.
+  const chat = view.level === "details" ? await loadProjectChat(id) : { state: "not_member" as const };
+  let discussion: { unread: string | null } | null = null;
+  if (chat.state === "not_installed") {
     const supabase = await createClient();
     const { data } = await supabase.rpc("proj_unread_counts");
     const row = (data ?? []).find((r) => r.project_id === id);
-    if (row && row.unread > 0) unread = row.unread > 99 ? "99+" : String(row.unread);
+    discussion = { unread: row && row.unread > 0 ? (row.unread > 99 ? "99+" : String(row.unread)) : null };
   }
+  const chatUnread = chat.state === "ready" ? ((await loadProjectUnread())?.get(id) ?? 0) : 0;
   // The Budget tab: only where the module's own access rules let this person in (the Project Manager, or Finance / view access in the owning company).
   const budgetAccess = view.level === "details" ? await loadProjectBudgetAccess(id) : { can_open: false };
   const base = `/projects/${id}`;
@@ -83,17 +88,19 @@ export default async function ProjectLayout({ children, params }: { children: Re
         }
       >
         {team.length > 0 ? <OsTeamStack names={team} /> : null}
+        {chat.state === "ready" ? <ProjectChatButton groupId={chat.groupId} unread={chatUnread} className="border-white/30 text-white hover:bg-white/10" /> : null}
         {view.level === "details" ? (
           <ManageMenu projectId={id} projectName={project.name} items={items} editable={editable} moves={moves} currentStatusLabel={projectStatusLabel(project.status)} />
         ) : null}
       </OsHero>
       {view.level === "summary" ? (
         <Alert role="status">
-          Summary only. Details, tasks, discussion and files are for the people working on this project; the Project Manager can add you if you should take part.
+          Summary only. Details, tasks, chat and files are for the people working on this project; the Project Manager can add you if you should take part.
         </Alert>
       ) : (
         <>
-          <ProjectTabs tabs={projectTabs(base, unread, budgetAccess.can_open)} base={base} />
+          <ProjectTabs tabs={projectTabs(base, discussion, budgetAccess.can_open)} base={base} />
+          {chat.state === "error" ? <Alert variant="warning" role="status">Could not check this project&apos;s chat, so its Chat button is missing here. The Chat button at the corner of the page still lists your groups. Reload to try again.</Alert> : null}
           {"loadFailed" in budgetAccess && budgetAccess.loadFailed ? <Alert variant="warning" role="status">Could not check budget access, so the Budget tab may be missing. Reload to try again.</Alert> : null}
         </>
       )}
