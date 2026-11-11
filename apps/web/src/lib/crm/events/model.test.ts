@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  buildExhibitorGrid, countEnquiries, dateRangeText, editionLabel, editionPhase, enquiriesByEdition, eventFiltersFromParams, filterEditions, observationLine, outreachLeads, sortLeads,
+  addEditionLabel, buildExhibitorGrid, calendarRange, calendarWeeks, countEnquiries, editionsForMonth, eventNameKey, eventWithName, isMonth, monthLabel, shiftMonth, dateRangeText, editionLabel, editionPhase, enquiriesByEdition, EMPTY_EVENT_FILTERS, eventFiltersFromParams, filterEditions, observationLine, outreachLeads, sortLeads,
   type EditionLite, type EventLite, type LinkedEnquiry, type ObservationLite,
 } from "./model";
 
@@ -132,5 +132,62 @@ describe("the events list filters", () => {
   it("archived entries appear only when asked for", () => {
     expect(ids({ when: "all", archived: "1" })).toContain("z1");
     expect(ids({ when: "all" })).not.toContain("z1");
+  });
+});
+
+describe("adding an event or an edition", () => {
+  it("compares event names the way the database does (letters and digits only, any case)", () => {
+    expect(eventNameKey("  Fictional EXPO-Global! ")).toBe("fictionalexpoglobal");
+    const events = [{ id: "a", name: "Fictional Expo Global", editions: 2 }];
+    expect(eventWithName(events, "fictional expo  global")?.id).toBe("a");
+    expect(eventWithName(events, "Fictional Expo")).toBeNull();
+    expect(eventWithName(events, " -- ")).toBeNull();
+  });
+  it("says first edition only for an event that has none", () => {
+    expect(addEditionLabel(0)).toBe("Add first edition");
+    expect(addEditionLabel(1)).toBe("Add next edition");
+  });
+});
+
+describe("the calendar", () => {
+  const CROSS = { event: { ...EV, id: "ev2", name: "Fictional Cross Show" }, edition: ed("x1", "2027-03-30", "2027-04-02", { event_id: "ev2" }) };
+  const OCT = { event: EV, edition: E27 };
+  const namesOn = (month: string, date: string, rows = [CROSS, OCT]) => calendarWeeks(month, rows).flat().find((d) => d.date === date)!.shows.map((s) => s.name);
+  it("validates and steps months, across a year end", () => {
+    expect(isMonth("2027-03")).toBe(true); expect(isMonth("2027-13")).toBe(false); expect(isMonth("2027-3")).toBe(false);
+    expect(shiftMonth("2027-01", -1)).toBe("2026-12"); expect(shiftMonth("2026-12", 1)).toBe("2027-01");
+    expect(monthLabel("2027-03")).toBe("March 2027");
+  });
+  it("shows whole weeks, Monday to Sunday", () => {
+    expect(calendarRange("2027-03")).toEqual({ from: "2027-03-01", to: "2027-04-04" });   // 1 March 2027 is a Monday
+    expect(calendarRange("2027-04")).toEqual({ from: "2027-03-29", to: "2027-05-02" });
+    const weeks = calendarWeeks("2027-04", []);
+    expect(weeks.every((w) => w.length === 7)).toBe(true);
+    expect(weeks[0]![0]).toMatchObject({ date: "2027-03-29", inMonth: false });
+  });
+  it("puts a show on every day from its start to its end, and on no other day, across the month boundary", () => {
+    for (const day of ["2027-03-30", "2027-03-31"]) expect(namesOn("2027-03", day)).toEqual(["Fictional Cross Show"]);
+    expect(namesOn("2027-03", "2027-03-29")).toEqual([]);
+    for (const day of ["2027-04-01", "2027-04-02"]) expect(namesOn("2027-04", day)).toEqual(["Fictional Cross Show"]);
+    expect(namesOn("2027-04", "2027-04-03")).toEqual([]);
+    // In April the March days of the same show are still on the page (previous month's last week), marked as outside the month.
+    const march30 = calendarWeeks("2027-04", [CROSS]).flat().find((d) => d.date === "2027-03-30")!;
+    expect(march30.inMonth).toBe(false);
+    expect(march30.shows[0]).toEqual({ eventId: "ev2", editionId: "x1", name: "Fictional Cross Show" });
+  });
+  it("each name carries its OWN edition, so two editions of one event open different editions", () => {
+    const again = { event: EV, edition: ed("e27b", "2027-10-20", "2027-10-21") };
+    const days = calendarWeeks("2027-10", [OCT, again]).flat();
+    expect(days.find((d) => d.date === "2027-10-11")!.shows.map((s) => s.editionId)).toEqual(["e27"]);
+    expect(days.find((d) => d.date === "2027-10-20")!.shows.map((s) => s.editionId)).toEqual(["e27b"]);
+  });
+  it("uses the list's archive, name and country rules, and the visible weeks as the dates", () => {
+    const archived = { event: EV, edition: ed("gone", "2027-04-10", "2027-04-11", { archived_at: "2026-01-01T00:00:00Z" }) };
+    const rows = [CROSS, OCT, archived];
+    const ids = (f = EMPTY_EVENT_FILTERS, month = "2027-04") => editionsForMonth(rows, f, month, "2026-11-11").map((r) => r.edition.id);
+    expect(ids()).toEqual(["x1"]);                                  // October is outside April; the archived one is hidden; past / upcoming does not matter
+    expect(ids({ ...EMPTY_EVENT_FILTERS, archived: true })).toEqual(["gone", "x1"]);
+    expect(ids({ ...EMPTY_EVENT_FILTERS, q: "nothing" })).toEqual([]);
+    expect(ids(EMPTY_EVENT_FILTERS, "2027-05")).toEqual([]);
   });
 });

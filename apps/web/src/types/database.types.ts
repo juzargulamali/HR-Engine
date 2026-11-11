@@ -1831,6 +1831,7 @@ export interface Database {
       crm_finish_reminder_email: { Args: { p_reminder_id: string; p_ok: boolean; p_error?: string | null }; Returns: undefined };
       crm_set_outreach_priority: { Args: { p_org: string; p_priority: number | null }; Returns: undefined };
       crm_save_event: { Args: { p_id: string | null; p_name: string; p_kind?: string; p_website?: string | null; p_note?: string | null }; Returns: string };
+      crm_add_event_with_edition: { Args: { p_name: string; p_kind: string; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_website?: string | null; p_event_note?: string | null; p_edition_note?: string | null }; Returns: unknown };
       crm_save_edition: { Args: { p_id: string | null; p_event: string | null; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_note?: string | null }; Returns: string };
       chat_my_groups: { Args: Record<string, never>; Returns: { gid: string; gkey: string; gname: string; unread: number; mentions: number; last_at: string | null; last_sender: string | null; last_preview: string | null }[] };
       chat_group_members: { Args: { p_group: string }; Returns: { user_id: string; name: string }[] };

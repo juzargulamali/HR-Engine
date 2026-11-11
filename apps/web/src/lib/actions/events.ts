@@ -63,6 +63,44 @@ export async function saveEdition(_prev: ActionState & { id?: string }, formData
   return { error: null, id: String(data) };
 }
 
+export type EventEditionState = ActionState & { id?: string; editionId?: string };
+const eventEditionSchema = z.object({
+  eventId: optionalUuid, name: text(200), kind: z.enum(["exhibition", "conference", "other"]).default("exhibition"),
+  start: date, end: date, city: text(100), country: text(2), venue: text(200), note: text(1000),
+}).superRefine((d, ctx) => {
+  if (!d.eventId && !d.name) ctx.addIssue({ code: "custom", message: "Enter the event name" });
+  if (d.end < d.start) ctx.addIssue({ code: "custom", message: "The end date cannot be before the start date." });
+  if (d.country && !/^[A-Za-z]{2}$/.test(d.country)) ctx.addIssue({ code: "custom", message: "Use a two-letter country code, for example AE." });
+});
+
+/**
+ * The one "event and edition" form (Add event, and Create event or edition on an enquiry). With `eventId` it adds an edition to that existing event
+ * (crm_save_edition). Without it, it adds a NEW event together with its first edition through crm_add_event_with_edition (migration 20261227000100): one database
+ * call, so a refused edition never leaves an event behind. It never falls back to two separate saves. Returns the event id (`id`) and the new `editionId`.
+ */
+export async function saveEventEdition(_prev: EventEditionState, formData: FormData): Promise<EventEditionState> {
+  const p = eventEditionSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const d = p.data;
+  const place = { p_city: d.city ?? null, p_country: d.country ? d.country.toUpperCase() : null, p_venue: d.venue ?? null };
+  const supabase = await createClient();
+  if (d.eventId) {
+    const { data, error } = await supabase.rpc("crm_save_edition", { p_id: null, p_event: d.eventId, p_start: d.start, p_end: d.end, ...place, p_note: d.note ?? null });
+    if (error) return fail(error.message);
+    refresh();
+    return { error: null, id: d.eventId, editionId: String(data) };
+  }
+  const { data, error } = await supabase.rpc("crm_add_event_with_edition", { p_name: d.name!, p_kind: d.kind, p_start: d.start, p_end: d.end, ...place, p_website: null, p_event_note: null, p_edition_note: d.note ?? null });
+  if (error) {
+    if (/could not find the function|schema cache|does not exist/i.test(error.message)) return { error: "Adding an event with its first edition is not available yet: the database update for it has not been applied. Nothing was saved." };
+    return fail(error.message);
+  }
+  const ids = data as { event_id?: unknown; edition_id?: unknown } | null;
+  if (typeof ids?.event_id !== "string" || typeof ids.edition_id !== "string") return { error: "The event was saved but its details did not come back. Reload the page to see it before trying again." };
+  refresh();
+  return { error: null, id: ids.event_id, editionId: ids.edition_id };
+}
+
 /**
  * ARCHIVES an edition: the standard (and only) removal. It is archived whatever is attached, so the result never reveals whether an enquiry the person cannot see is linked;
  * every observation and enquiry link stays; the edition stays in history but is no longer offered for new enquiry links.

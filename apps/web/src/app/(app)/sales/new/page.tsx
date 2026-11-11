@@ -4,7 +4,8 @@ import { Alert } from "@/components/ui/alert";
 import { todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
-import { loadEditionOptions, type EditionOption } from "@/lib/crm/events/data";
+import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
+import type { EventChoice } from "@/lib/crm/events/model";
 import { NewEnquiryForm, type EnquiryCompany } from "./new-enquiry-form";
 
 export const metadata = { title: "New enquiry" };
@@ -33,8 +34,9 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
 
   const { organisations } = await loadOrganisations();
   let editions: EditionOption[] = [];
+  let events: EventChoice[] = [];
   let editionsFailed = false;
-  try { editions = await loadEditionOptions(); } catch (e) { console.error("[crm] new enquiry: editions load failed", e); editionsFailed = true; }
+  try { ({ editions, events } = await loadEditionPicker()); } catch (e) { console.error("[crm] new enquiry: editions load failed", e); editionsFailed = true; }
   // Opened from an account's Outreach section: the organisation and company are pre-filled and the outreach is linked when the enquiry is saved.
   const sp = await searchParams;
   const one = (k: string) => (typeof sp[k] === "string" && UUID.test(sp[k] as string) ? (sp[k] as string) : "");
@@ -60,6 +62,7 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
         companies={companies}
         organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website }))}
         editions={editions}
+        events={events}
         editionsFailed={editionsFailed}
         contacts={organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })))}
         currentUserId={ctx.userId}

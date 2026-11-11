@@ -13,18 +13,24 @@ import { ActionForm, Field } from "./action-form";
 import { AddOrganisationDialog, type CreatedOrganisation } from "@/app/(app)/sales/clients/entity-dialogs";
 import { DuplicateWarning, EventEditionPicker, OrganisationPicker, type EnquiryCompany, type EnquiryOrganisation } from "@/app/(app)/sales/new/new-enquiry-form";
 import type { EditionOption } from "@/lib/crm/events/data";
+import type { EventChoice } from "@/lib/crm/events/model";
+import { EventEditionDialog, useCreatedEditions } from "@/components/sales/event-edition-dialog";
 import { parseTechnologyRows, type TechnologyRow } from "@/app/(app)/sales/new/technologies";
 
 let techKey = 1;
 const emptyTech = (): TechnologyRow => ({ key: techKey++, name: "", qty: "1" });
 
 /** The short form: what the enquiry is, who it is from, where it came from and what happens next. Everything else is behind "Add more details". */
-function QuickForm({ companies, organisations: serverOrganisations, editions = [], editionsFailed = false, currentUserId, currentUserName, today, close }: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string; close: () => void }) {
+function QuickForm({ companies, organisations: serverOrganisations, editions: serverEditions = [], events: serverEvents = [], editionsFailed = false, currentUserId, currentUserName, today, close }: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; events?: EventChoice[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string; close: () => void }) {
   const [companyId, setCompanyId] = useState((companies.find((c) => c.hasSettings) ?? companies[0])?.id ?? "");
   const company = companies.find((c) => c.id === companyId) ?? null;
   const [agencyId, setAgencyId] = useState("");
   const [clientId, setClientId] = useState("");
   const [editionId, setEditionId] = useState("");
+  // An event or edition added from this form is offered (and chosen) straight away; the enquiry itself is saved only by its own button.
+  const { allEditions: editions, allEvents: events, add: addEdition } = useCreatedEditions(serverEditions, serverEvents);
+  const [eventDialog, setEventDialog] = useState<{ name: string } | null>(null);
+  const [eventEnd, setEventEnd] = useState("");
   const [title, setTitle] = useState("");
   const [eventStart, setEventStart] = useState("");
   const [installStart, setInstallStart] = useState("");
@@ -87,7 +93,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions = [
             <OrganisationPicker id="qa-agency" name="agencyOrgId" label="Agency" hint="One of agency or end client is enough." value={agencyId} onChange={setAgencyId} organisations={organisations} field="agency" onAdd={() => setOrgDialog("agency")} />
             <OrganisationPicker id="qa-client" name="clientOrgId" label="End client" hint="The brand the work is for." value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")} />
           </div>
-          <EventEditionPicker id="qa-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} />
+          <EventEditionPicker id="qa-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} onCreate={(name) => setEventDialog({ name })} />
         </fieldset>
 
         <Field label="Where did it come from?" htmlFor="qa-source">
@@ -111,7 +117,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions = [
         <MoreDetails>
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Event start" htmlFor="qa-es"><Input id="qa-es" name="eventStart" type="date" value={eventStart} onChange={(e) => setEventStart(e.target.value)} /></Field>
-            <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} /></Field>
+            <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} /></Field>
             <Field label="Installation" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
           </div>
           <Field label="Location" htmlFor="qa-loc"><Input id="qa-loc" name="location" value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
@@ -145,6 +151,13 @@ function QuickForm({ companies, organisations: serverOrganisations, editions = [
           ) : <p className="text-sm text-muted-foreground">Owner: you. Only a founder or someone allowed to assign owners can give an enquiry to a colleague.</p>}
         </MoreDetails>
       </ActionForm>
+      <EventEditionDialog
+        open={eventDialog !== null}
+        onClose={() => setEventDialog(null)}
+        events={events}
+        initial={{ name: eventDialog?.name ?? "", start: eventStart, end: eventEnd }}
+        onCreated={(c) => { addEdition(c); setEditionId(c.editionId); }}
+      />
       <AddOrganisationDialog
         open={orgDialog !== null}
         onClose={() => setOrgDialog(null)}
@@ -156,7 +169,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions = [
   );
 }
 
-export function QuickAddEnquiryForm(props: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string }) {
+export function QuickAddEnquiryForm(props: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; events?: EventChoice[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string }) {
   return (
     <QuickAdd label="Add enquiry" title="Add an enquiry" description="Record it the moment it arrives. Everything else can be added later." size="wide">
       {({ close }) => <QuickForm {...props} close={close} />}

@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Archive, Pencil, Plus } from "lucide-react";
 import { archiveEdition, archiveEvent, saveEdition, saveEvent } from "@/lib/actions/events";
-import { EVENT_KIND_LABEL } from "@/lib/crm/events/model";
+import { EVENT_KIND_LABEL, type EventChoice } from "@/lib/crm/events/model";
+import { EventEditionDialog } from "@/components/sales/event-edition-dialog";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,18 +17,17 @@ import { Modal } from "@/components/sales/modal";
 export interface EventValues { id?: string; name: string; kind: string; website: string; note: string }
 export interface EditionValues { id?: string; eventId?: string; start: string; end: string; city: string; country: string; venue: string; note: string }
 
-/** Add an event (the recurring thing: "GITEX Global"). Its dates and place belong to its editions, added next. */
-export function AddEventButton({ label = "Add event" }: { label?: string }) {
+/**
+ * Add event: the event (name and type) TOGETHER with its first edition (dates and place), in one save. Opens the new event with that edition selected. Typing the
+ * name of an event that already exists offers to add the edition to that event instead.
+ */
+export function AddEventButton({ events, label = "Add event" }: { events: readonly EventChoice[]; label?: string }) {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   return (
     <>
       <Button type="button" variant="outline" onClick={() => setOpen(true)}><Plus className="h-4 w-4" aria-hidden /> {label}</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add an event" description="The recurring event, for example GITEX Global. Its dates and place are recorded per edition, which you add next.">
-        <ActionForm action={saveEvent} submitLabel="Add event" onDone={(s) => { setOpen(false); if (s.id) router.push(`/sales/events/${s.id}`); }} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
-          <EventFields values={{ name: "", kind: "exhibition", website: "", note: "" }} />
-        </ActionForm>
-      </Modal>
+      <EventEditionDialog open={open} onClose={() => setOpen(false)} events={events} onCreated={(c) => router.push(`/sales/events/${c.eventId}?edition=${c.editionId}`)} />
     </>
   );
 }
@@ -62,7 +62,7 @@ function EventFields({ values }: { values: EventValues }) {
   );
 }
 
-/** Add the next edition of an event (earlier editions and their dates are never touched), or correct one edition's dates and place. */
+/** Add an edition of an event: its first ("Add first edition") or the next one ("Add next edition"; earlier editions and their dates are never touched), or correct one edition's dates and place. */
 export function EditionButton({ events, values, eventId, label, variant = "outline" }: {
   /** The events to choose from when adding (omit when `eventId` fixes it). */
   events?: { id: string; name: string }[]; values?: EditionValues; eventId?: string; label?: string; variant?: "outline" | "default" | "ghost";
@@ -75,8 +75,8 @@ export function EditionButton({ events, values, eventId, label, variant = "outli
       <Button type="button" variant={editing ? "ghost" : variant} size={editing ? "sm" : "default"} onClick={() => setOpen(true)} aria-label={editing ? "Edit edition" : undefined}>
         {editing ? <Pencil className="h-4 w-4" aria-hidden /> : <Plus className="h-4 w-4" aria-hidden />}{editing ? null : ` ${label ?? "Add edition"}`}
       </Button>
-      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit edition" : "Add an edition"} description={editing ? "Correct this edition's dates or place. Other editions are not changed." : "One occurrence of the event, with its own dates and place. Earlier editions keep their dates."}>
-        <ActionForm action={saveEdition} submitLabel={editing ? "Save edition" : "Add edition"} onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
+      <Modal open={open} onClose={() => setOpen(false)} title={editing ? "Edit edition" : label ?? "Add an edition"} description={editing ? "Correct this edition's dates or place. Other editions are not changed." : "One occurrence of the event, with its own dates and place. Earlier editions keep their dates."}>
+        <ActionForm action={saveEdition} submitLabel={editing ? "Save edition" : label ?? "Add edition"} onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           {editing ? <input type="hidden" name="id" value={v.id} /> : null}
           {!editing && eventId ? <input type="hidden" name="eventId" value={eventId} /> : null}
           {!editing && !eventId ? (

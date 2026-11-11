@@ -170,3 +170,67 @@ export function filterEditions(rows: readonly EditionRow[], f: EventFilters, tod
   const asc = f.when === "upcoming" && !f.from && !f.to;
   return out.sort((a, b) => (asc ? a.edition.start_date.localeCompare(b.edition.start_date) : b.edition.start_date.localeCompare(a.edition.start_date)) || a.event.name.localeCompare(b.event.name));
 }
+
+// ------------------------------------------------------------------------------------------------------------------------------ add event / edition
+/** The key the database compares event names by (migration 20261224000100, crm_save_event): letters and digits only, lower case. "GITEX  Global!" = "gitex global". */
+export const eventNameKey = (name: string): string => name.replace(/[^A-Za-z0-9]+/g, "").toLowerCase();
+
+/** A live event offered when adding an edition; `editions` = how many editions it has, archived ones included (0 = the next one added is its first). */
+export interface EventChoice { id: string; name: string; editions: number }
+
+/** The live event that already has this name (the database would refuse a second one), or null. Only ever a hint: the database decides. */
+export function eventWithName<T extends Pick<EventChoice, "name">>(events: readonly T[], name: string): T | null {
+  const key = eventNameKey(name);
+  return key === "" ? null : events.find((e) => eventNameKey(e.name) === key) ?? null;
+}
+
+/** "Add first edition" for an event that has none yet, "Add next edition" once it has one. */
+export const addEditionLabel = (editions: number): string => (editions === 0 ? "Add first edition" : "Add next edition");
+
+// ------------------------------------------------------------------------------------------------------------------------------ calendar
+/** A calendar month, "2026-11". */
+export const isMonth = (s: string): boolean => /^\d{4}-(0[1-9]|1[0-2])$/.test(s);
+const iso = (d: Date) => d.toISOString().slice(0, 10);
+const addDays = (date: string, n: number) => { const d = new Date(`${date}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return iso(d); };
+export function shiftMonth(month: string, by: number): string {
+  const d = new Date(`${month}-01T00:00:00Z`);
+  d.setUTCMonth(d.getUTCMonth() + by);
+  return iso(d).slice(0, 7);
+}
+export const monthLabel = (month: string): string => new Date(`${month}-01T00:00:00Z`).toLocaleDateString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" });
+export const dayLabel = (date: string): string => new Date(`${date}T00:00:00Z`).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" });
+export const WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] as const;
+
+/** The first and last day SHOWN for a month: whole weeks, Monday to Sunday, so a show that starts in the last days of the previous month is still on the page. */
+export function calendarRange(month: string): { from: string; to: string } {
+  const first = `${month}-01`;
+  const last = addDays(`${shiftMonth(month, 1)}-01`, -1);
+  const dow = (d: string) => (new Date(`${d}T00:00:00Z`).getUTCDay() + 6) % 7;   // Monday = 0
+  return { from: addDays(first, -dow(first)), to: addDays(last, 6 - dow(last)) };
+}
+
+export interface CalendarShow { eventId: string; editionId: string; name: string }
+export interface CalendarDay { date: string; inMonth: boolean; shows: CalendarShow[] }
+/**
+ * The weeks of one month, each day with the shows on it. An edition is on every whole day from its start date to its end date inclusive (the same rule as
+ * "On now"), so one that crosses into the next month appears at the end of this month AND the start of the next. `rows` are already filtered (archive, name,
+ * country): nothing is filtered or inferred here. Shows on a day are A to Z.
+ */
+export function calendarWeeks(month: string, rows: readonly EditionRow[]): CalendarDay[][] {
+  const { from, to } = calendarRange(month);
+  const weeks: CalendarDay[][] = [];
+  for (let day = from; day <= to; day = addDays(day, 1)) {
+    const shows = rows.filter(({ edition }) => edition.start_date <= day && edition.end_date >= day)
+      .map(({ event, edition }) => ({ eventId: event.id, editionId: edition.id, name: event.name }))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.editionId.localeCompare(b.editionId));
+    if (weeks.length === 0 || weeks[weeks.length - 1]!.length === 7) weeks.push([]);
+    weeks[weeks.length - 1]!.push({ date: day, inMonth: day.slice(0, 7) === month, shows });
+  }
+  return weeks;
+}
+
+/** The editions a calendar month shows: the list's own archive, name and country rules, with the visible weeks as the date range (overlap, like From / To). */
+export function editionsForMonth(rows: readonly EditionRow[], f: EventFilters, month: string, today: string): EditionRow[] {
+  const { from, to } = calendarRange(month);
+  return filterEditions(rows, { ...f, when: "all", from, to }, today);
+}

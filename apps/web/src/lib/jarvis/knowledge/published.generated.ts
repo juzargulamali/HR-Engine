@@ -570,13 +570,17 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "create inquiry",
       "quick add",
       "enter a lead",
-      "new lead"
+      "new lead",
+      "event not listed",
+      "create event or edition",
+      "add a missing event"
     ],
     "summary": "Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date.",
     "steps": [
       "Open Enquiries in Sales.",
       "Press Add enquiry.",
       "Fill in the title, the source, the agency and/or end client, and what happens next and when.",
+      "If the enquiry is for a show, choose it in Event / Exhibition. If the show or its edition is not listed, press Create event or edition under the field: it adds the event with its first edition, or a missing edition of an existing event, and selects it. What you have typed in the enquiry stays as it is; the enquiry is saved only when you save it.",
       "Save. The enquiry opens so you can add more details."
     ],
     "links": [
@@ -865,8 +869,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "expo",
       "upcoming shows",
       "event calendar",
+      "calendar view",
+      "month view",
       "add an event",
       "add an edition",
+      "first edition",
       "which shows are coming",
       "conference"
     ],
@@ -874,8 +881,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open Events & Exhibitions in Sales.",
       "Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.",
-      "Press Add event for a show that is not listed, or Add edition for its next year.",
-      "To add many at once, use Import events with the template."
+      "Press Add event for a show that is not listed. One form takes the name, the type and the first edition's dates and place, and one save adds both. If the name already exists, the form shows that event and offers to add the edition to it instead.",
+      "Press Add edition for the next year of a show that is already listed.",
+      "Switch from List to Calendar to see the shows by month (Previous, Next and Today move between months; a show's name is on each of its days and opens that edition). To add many shows at once, use Import events with the template."
     ],
     "links": [
       {
@@ -903,6 +911,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "exhibitor history",
       "stand builder",
       "event page",
+      "add first edition",
       "add next edition",
       "archive an event",
       "outreach priority"
@@ -912,7 +921,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press Record an observation, choose the edition and the exhibitor, then the agency (or Agency unknown).",
       "Read Who exhibited, and with which agency to compare the years.",
       "Under Agencies to contact, set the outreach priority and open the account to start outreach or a follow-up.",
-      "Press Add next edition when the next dates are known. Archive keeps the history; nothing is deleted."
+      "Press Add first edition on an event that has none yet, or Add next edition when the next dates are known. Archive keeps the history; nothing is deleted."
     ],
     "links": [
       {
