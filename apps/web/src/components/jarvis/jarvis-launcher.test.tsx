@@ -567,7 +567,13 @@ describe("general chat, clarifying question, lookup and memory in the panel", ()
     expect(within(actions).getAllByRole("button").map((b) => b.textContent)).toEqual(["Compare periods", "Explain & suggest"]);
     expect(actions.querySelector("div")!.className).toMatch(/flex-wrap/);
     for (const b of within(actions).getAllByRole("button")) expect(b.className).toMatch(/whitespace-normal/);
-    expect(screen.getByTestId("summary-ai-notice").textContent).toMatch(/sends these counts and names to Anthropic/);
+    const notice = screen.getByTestId("summary-ai-notice");
+    expect(notice.textContent).toMatch(/sends these counts and names to Anthropic/);
+    // the notice comes BEFORE the button that sends: earlier in the document than "Explain & suggest", inside the same block
+    const explain = within(actions).getByRole("button", { name: "Explain & suggest" });
+    expect(actions.contains(notice)).toBe(true);
+    expect(notice.compareDocumentPosition(explain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(notice.className).toMatch(/break-words/);
     type("and again");
     await waitFor(() => expect(screen.getAllByTestId("summary-headline")).toHaveLength(2));
     expect(screen.getAllByTestId("summary-headline")[1]!.textContent).toBe("0 won · 0 lost · no share won (nothing closed)");
@@ -578,6 +584,34 @@ describe("general chat, clarifying question, lookup and memory in the panel", ()
     expect(screen.getAllByTestId("summary-headline")[2]!.textContent).toBe("5 created · 2 won · 1 lost · 67% won");
     // a card that already compares and explains offers neither button again
     expect(screen.getAllByTestId("summary-actions")).toHaveLength(1); // only the first card still has them
+  });
+  it("a breakdown that covers only some records says so NEXT TO that breakdown, visible with 'How this is counted' closed; definitions and the reopening explanation stay inside the disclosure", async () => {
+    const BREAK = "The breakdowns below cover the 2000 newest of the 2600 enquiries created in the period.";
+    const LOST = "The lost reasons below cover 400 of the 520 enquiries lost in the period.";
+    const OTHER = "A won enquiry is not a delivered project: delivery is not covered here.";
+    const REOPEN = "Closures recorded in this period that were subsequently reopened; the enquiry may have closed again.";
+    const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.summary.run", confirmation: null, card: { kind: "summary.sales", title: "Sales enquiries summary", company: { id: CO1, name: companies[0]!.name }, scope: "counts only", period: "2099 so far (2099-01-01 to 2099-10-14, Dubai dates)", comparedWith: null, asOfLabel: "14 Oct 2099, 10:00 (Dubai)",
+      metrics: [{ label: "Enquiries created", value: 2600, previous: null, definition: "Creation date in the period." }, { label: "Closures later reopened", value: 3, previous: null, definition: REOPEN }],
+      groups: [{ heading: "Events with the most enquiries", definition: "Per event, all editions.", rows: [{ label: "Fictional Forum", count: 40 }], more: 0 }, { heading: "Where they came from", definition: "By recorded source.", rows: [{ label: "Referral", count: 900 }], more: 0 }, { heading: "Recorded lost reasons", definition: "As typed.", rows: [{ label: "Event cancelled", count: 12 }], more: 0 }],
+      supporting: [], coverage: [BREAK, OTHER, LOST], unavailable: [], narrative: null, narrativeBy: null, suggestions: [], narrativeNote: null, links: [], descriptor: { kind: "period", period: "this_year", compare: true, focus: "all", narrative: true } } as never }) });
+    mount(api);
+    openPanel();
+    type("Summarise this year's enquiries");
+    const c = await screen.findByTestId("jarvis-sales-summary");
+    const counted = within(c).getByTestId("summary-counted") as HTMLDetailsElement;
+    expect(counted.open).toBe(false);
+    // each partial warning sits inside the breakdown it limits, outside the disclosure
+    const groups = within(c).getAllByTestId("summary-group");
+    const warningsOf = (i: number) => within(groups[i]!).queryAllByTestId("summary-partial-coverage").map((n) => n.textContent);
+    expect(warningsOf(0)).toEqual([BREAK]); // events
+    expect(warningsOf(1)).toEqual([BREAK]); // sources: the same limited read
+    expect(warningsOf(2)).toEqual([LOST]); // lost reasons
+    for (const n of within(c).getAllByTestId("summary-partial-coverage")) expect(n.closest("details")).toBeNull();
+    // the disclosure keeps the definitions, the reopening explanation and the other notes, and does not repeat the partial warnings
+    expect(within(counted).getByTestId("summary-definitions").textContent).toContain(REOPEN);
+    expect(within(counted).getByTestId("summary-coverage").textContent).toBe(OTHER);
+    expect(counted.textContent).not.toContain(BREAK);
+    expect(counted.textContent).not.toContain(LOST);
   });
   it("a limited-scan notice stays visible next to the lookup result, outside any disclosure", async () => {
     const api = fakeApi({ send: async () => ({ ok: true, kind: "action", actionId: "jarvis.sales.lookup.run", confirmation: null, card: { kind: "lookup.sales", title: "Your enquiries with no recorded activity for 14 days", company: { id: CO1, name: companies[0]!.name }, scope: "Owned by you", filters: [], asOf: new Date().toISOString(), asOfLabel: "14 Oct 2099, 10:00 (Dubai)", total: 0, shown: 0, sections: [], unavailable: [], note: "You own 501 open enquiries; this looked at the 500 newest only.", empty: "No matching enquiries among the enquiries checked.", choices: [], links: [{ label: "Open Enquiries", href: "/sales/opportunities" }], descriptor: { kind: "inactive", days: 14 } } }) });

@@ -420,6 +420,23 @@ function summaryHeadline(card: SalesSummaryCard): string | null {
 }
 
 /**
+ * Coverage notes that say a BREAKDOWN covers only some of the records ("The breakdowns below cover the 2000 newest of the 2600 ...", "The lost reasons below cover 400 of
+ * the 520 ..."). They are the server's own coverage lines, shown next to the breakdown they limit so they are seen with "How this is counted" closed; every other
+ * coverage line stays in that disclosure. Nothing is calculated here.
+ */
+const LOST_REASONS_PARTIAL = /^The lost reasons below cover\b/;
+const BREAKDOWNS_PARTIAL = /^The breakdowns below cover\b/;
+function partialCoverage(card: SalesSummaryCard): { forGroup: (heading: string) => string[]; rest: string[] } {
+  const lost = card.coverage.filter((c) => LOST_REASONS_PARTIAL.test(c));
+  const breakdowns = card.coverage.filter((c) => BREAKDOWNS_PARTIAL.test(c));
+  const shown = new Set<string>();
+  const forGroup = (heading: string) => { const notes = heading === "Recorded lost reasons" ? lost : breakdowns; for (const n of notes) shown.add(n); return notes; };
+  // A partial note whose breakdown is not on the card (it could not be loaded, or was not asked for) is not hidden: it stays with the other notes.
+  for (const g of card.groups) forGroup(g.heading);
+  return { forGroup, rest: card.coverage.filter((c) => !shown.has(c)) };
+}
+
+/**
  * A factual summary. The result leads (one line of the app's own figures), then the company and period; a partial read stays next to it. Definitions and the notes on how
  * things are counted are one disclosure away ("How this is counted"). "In words" for a period is written by the app; the AI model's suggestions are in their own block.
  */
@@ -427,7 +444,9 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
   const { busy, error, run } = useRerun(p);
   const d = card.descriptor;
   const headline = summaryHeadline(card);
-  const counted = card.metrics.length > 0 || card.coverage.length > 0;
+  const partial = partialCoverage(card);
+  const canExplain = d.kind === "period" && !card.narrative && !d.narrative;
+  const counted = card.metrics.length > 0 || card.groups.length > 0 || partial.rest.length > 0;
   return (
     <section aria-label={card.title} className="space-y-2 rounded-lg border border-border bg-card p-3 text-sm" data-testid="jarvis-sales-summary" data-kind={d.kind}>
       <h3 className="font-heading text-sm font-semibold">{card.title}</h3>
@@ -448,6 +467,7 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
       {card.groups.map((g) => (
         <div key={g.heading} className="space-y-0.5" data-testid="summary-group">
           <p className="text-xs font-semibold">{g.heading}</p>
+          {partial.forGroup(g.heading).map((n) => <p key={n} className="rounded-md border border-border bg-secondary/60 px-2 py-1 text-xs" data-testid="summary-partial-coverage">{n}</p>)}
           {g.rows.length === 0 ? <p className="text-xs text-muted-foreground">None.</p> : <ul className="text-xs">{g.rows.map((r) => <li key={r.label} className="flex justify-between gap-2"><span className="min-w-0 break-words">{r.label}</span><span className="font-medium">{r.count}</span></li>)}</ul>}
           {g.more > 0 ? <p className="text-xs text-muted-foreground">and {g.more} more.</p> : null}
         </div>
@@ -472,17 +492,18 @@ function SalesSummaryView({ card, ...p }: { card: SalesSummaryCard } & ReadCardP
           <div className="mt-1 max-h-48 space-y-1 overflow-y-auto text-muted-foreground">
             {card.metrics.length > 0 ? <dl className="space-y-1" data-testid="summary-definitions">{card.metrics.map((m) => <div key={m.label}><dt className="font-medium text-foreground">{m.label}</dt><dd>{m.definition}</dd></div>)}</dl> : null}
             {card.groups.map((g) => <p key={g.heading}><span className="font-medium text-foreground">{g.heading}: </span>{g.definition}</p>)}
-            {card.coverage.length > 0 ? <ul className="list-disc pl-4" data-testid="summary-coverage">{card.coverage.map((x) => <li key={x}>{x}</li>)}</ul> : null}
+            {partial.rest.length > 0 ? <ul className="list-disc pl-4" data-testid="summary-coverage">{partial.rest.map((x) => <li key={x}>{x}</li>)}</ul> : null}
           </div>
         </details>
       ) : null}
-      {d.kind === "period" && (!d.compare || (!card.narrative && !d.narrative)) ? (
-        <div className="space-y-1" data-testid="summary-actions">
+      {d.kind === "period" && (!d.compare || canExplain) ? (
+        <div className="space-y-1.5" data-testid="summary-actions">
+          {/* What the AI action sends is said BEFORE the button that sends it. */}
+          {canExplain ? <p className="text-xs leading-snug text-muted-foreground break-words" data-testid="summary-ai-notice">Explain &amp; suggest sends these counts and names to Anthropic for suggestions. The sentences are written by Enginious OS.</p> : null}
           <div className="flex flex-wrap gap-2">
             {!d.compare ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, compare: true })}>Compare periods</Button> : null}
-            {!card.narrative && !d.narrative ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Explain &amp; suggest</Button> : null}
+            {canExplain ? <Button type="button" size="sm" variant="outline" className="h-auto min-h-8 whitespace-normal py-1" disabled={busy || p.companyStale} onClick={() => void run({ ...d, narrative: true })}>Explain &amp; suggest</Button> : null}
           </div>
-          {!card.narrative && !d.narrative ? <p className="text-[11px] text-muted-foreground" data-testid="summary-ai-notice">Explain &amp; suggest sends these counts and names to Anthropic for suggestions. The sentences are written by Enginious OS.</p> : null}
         </div>
       ) : null}
       {error ? <Alert variant="destructive">{error}</Alert> : null}
