@@ -3,18 +3,17 @@ import { Building2, Download, Upload } from "lucide-react";
 import { nextSort, relationshipAvailable, relationshipCounts, sortDirectory, sortFromParams, DEFAULT_SORT, type SortKey } from "@/lib/crm/clients-agencies/directory";
 import { hasCrmCapability } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
 import { LoadError } from "@/components/workspace/states";
+import { withParams } from "@/components/workspace/url-state";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadDirectory, loadStaff } from "@/lib/crm/clients-agencies/data";
 import { filterDirectory, filtersFromParams, hasFilters, NOT_RECORDED, PRIORITY_FILTERS, PRIORITY_FILTER_LABEL, UNASSIGNED, type DirectoryRow } from "@/lib/crm/clients-agencies/directory";
 import { countryLabel, LEAD_SOURCE_LABEL, LEAD_SOURCES, ORGANISATION_ROLES, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
 import { selectCompany } from "@/lib/crm/clients-agencies/company";
 import { eligibleStaff, type StaffPerson } from "@/lib/crm/clients-agencies/staff";
-import { cn } from "@/lib/utils";
 import { AddAccountButton } from "./account-forms";
 import { DirectoryTable, ENQUIRIES_NOTE, ENQUIRIES_NOTE_ID, PhoneSort, QuickFilters } from "./directory-table";
 import { AssignBar, SelectionProvider } from "./outreach-select";
@@ -55,7 +54,8 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
   const shown = sortDirectory(matching, sort, nameOf);
   const page = shown.slice(0, PAGE_LIMIT);
   const counts = relOk ? relationshipCounts(filterDirectory(rows, { ...effective, rel: "" })) : null;
-  const countries = [...new Set(rows.map((r) => r.org.country_code).filter((c): c is string => !!c))].sort((a, b) => countryLabel(a).localeCompare(countryLabel(b)));
+  // A country chosen in the address is always offered, so the filter in use is never shown as "Any country".
+  const countries = [...new Set([...rows.map((r) => r.org.country_code), filters.country].filter((c): c is string => !!c))].sort((a, b) => countryLabel(a).localeCompare(countryLabel(b)));
   const exportQuery = (scope: "filtered" | "all") => {
     const q = new URLSearchParams({ company: company.id, scope });
     for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v);
@@ -70,7 +70,17 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
     if (s.key !== DEFAULT_SORT.key || s.dir !== DEFAULT_SORT.dir) { q.set("sort", s.key); q.set("dir", s.dir); }
     return `/sales/accounts?${q.toString()}`;
   };
-  const moreActive = [filters.country, filters.source, filters.exhibition].filter(Boolean).length;
+  // No Company selector: the directory is ONE shared list of every account, whichever company added it. The company only decides which company's owner, lead source and enquiry figures are shown (see the line under the filters).
+  const toolbarFilters: ToolbarFilter[] = [
+    { name: "role", label: "Role", value: filters.role, options: [{ value: "", label: "Any role" }, ...ORGANISATION_ROLES.map((r) => ({ value: r, label: ROLE_LABEL[r] })), { value: NOT_RECORDED, label: "Role not recorded" }] },
+    { name: "priority", label: "Outreach priority", value: filters.priority, options: [{ value: "", label: "Any priority" }, ...PRIORITY_FILTERS.map((f) => ({ value: f, label: PRIORITY_FILTER_LABEL[f] }))] },
+    { name: "owner", label: "Account owner", value: filters.owner, options: [{ value: "", label: "Anyone" }, { value: UNASSIGNED, label: "Unassigned" }, ...people.map((p) => ({ value: p.userId, label: p.name }))] },
+    { name: "country", label: "Country", secondary: true, value: filters.country, options: [{ value: "", label: "Any country" }, ...countries.map((c) => ({ value: c, label: countryLabel(c) }))] },
+    { name: "source", label: "Lead source", secondary: true, value: filters.source, options: [{ value: "", label: "Any source" }, ...LEAD_SOURCES.map((x) => ({ value: x, label: LEAD_SOURCE_LABEL[x] })), { value: NOT_RECORDED, label: "Not recorded" }] },
+    { name: "exhibition", label: "Exhibition", secondary: true, kind: "text", value: filters.exhibition, placeholder: "Part of the show name" },
+  ];
+  // Clear removes the search, every filter and the relationship chip; the company and the sort stay.
+  const clearHref = withParams("/sales/accounts", sp, { company: company.id, q: null, role: null, priority: null, owner: null, country: null, source: null, exhibition: null, rel: null });
   // Changing the company, a filter, the search or the sort starts an empty selection (see outreach-select.tsx).
   const viewKey = JSON.stringify([company.id, effective, sort]);
 
@@ -86,72 +96,8 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
         </div>
       </div>
 
-      <form method="get" role="search" aria-label="Filter accounts" className="space-y-3">
-        {sort.key !== DEFAULT_SORT.key || sort.dir !== DEFAULT_SORT.dir ? <><input type="hidden" name="sort" value={sort.key} /><input type="hidden" name="dir" value={sort.dir} /></> : null}
-        {filters.rel ? <input type="hidden" name="rel" value={filters.rel} /> : null}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {/* No Company selector: the directory is ONE shared list of every account, whichever company added it. The company only decides which company's owner, lead source and enquiry figures are shown (see the line under the filters). */}
-          <input type="hidden" name="company" value={company.id} />
-          <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="ca-q" className="text-sm font-medium leading-none">Search</label>
-            <Input id="ca-q" name="q" type="search" defaultValue={filters.q} placeholder="Name, website, place, notes, contact or email" />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ca-role" className="text-sm font-medium leading-none">Role</label>
-            <Select id="ca-role" name="role" defaultValue={filters.role}>
-              <option value="">Any role</option>
-              {ORGANISATION_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
-              <option value={NOT_RECORDED}>Role not recorded</option>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ca-priority" className="text-sm font-medium leading-none">Outreach priority</label>
-            <Select id="ca-priority" name="priority" defaultValue={filters.priority}>
-              <option value="">Any priority</option>
-              {PRIORITY_FILTERS.map((f) => <option key={f} value={f}>{PRIORITY_FILTER_LABEL[f]}</option>)}
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ca-owner" className="text-sm font-medium leading-none">Account owner</label>
-            <Select id="ca-owner" name="owner" defaultValue={filters.owner}>
-              <option value="">Anyone</option>
-              <option value={UNASSIGNED}>Unassigned</option>
-              {people.map((p) => <option key={p.userId} value={p.userId}>{p.name}</option>)}
-            </Select>
-          </div>
-          <div className="flex items-end gap-2">
-            <Button type="submit" variant="secondary" className="min-h-10">Apply</Button>
-            {hasFilters(filters) ? <Link href={here()} className={cn(buttonVariants({ variant: "ghost" }), "min-h-10")}>Clear</Link> : null}
-          </div>
-        </div>
-        <details className="rounded-md border border-border px-3 py-1" open={moreActive > 0}>
-          <summary className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-medium">
-            More filters
-            {moreActive > 0 ? <span className="rounded-full bg-primary px-2 text-xs font-semibold text-primary-foreground" aria-label={`${moreActive} more ${moreActive === 1 ? "filter" : "filters"} active`}>{moreActive} active</span> : null}
-          </summary>
-          <div className="grid gap-3 pb-3 pt-2 sm:grid-cols-2 lg:grid-cols-4">
-            <div className="space-y-1.5">
-              <label htmlFor="ca-country" className="text-sm font-medium leading-none">Country</label>
-              <Select id="ca-country" name="country" defaultValue={filters.country}>
-                <option value="">Any country</option>
-                {countries.map((c) => <option key={c} value={c}>{countryLabel(c)}</option>)}
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="ca-source" className="text-sm font-medium leading-none">Lead source</label>
-              <Select id="ca-source" name="source" defaultValue={filters.source}>
-                <option value="">Any source</option>
-                {LEAD_SOURCES.map((s) => <option key={s} value={s}>{LEAD_SOURCE_LABEL[s]}</option>)}
-                <option value={NOT_RECORDED}>Not recorded</option>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <label htmlFor="ca-exhibition" className="text-sm font-medium leading-none">Exhibition</label>
-              <Input id="ca-exhibition" name="exhibition" defaultValue={filters.exhibition} placeholder="Part of the show name" />
-            </div>
-          </div>
-        </details>
-      </form>
+      {/* Same toolbar as Sales > Enquiries: each filter applies as it is chosen (no Apply button), keeping the company, the search, the sort and the relationship chip. */}
+      <ListToolbar search={{ value: filters.q, placeholder: "Name, website, place, notes, contact or email", label: "Search accounts" }} filters={toolbarFilters} clearHref={clearHref} />
 
       <QuickFilters active={effective.rel} counts={counts} available={relOk} hrefFor={(rel) => linkWith({ rel })} />
       {!relOk ? (
@@ -167,7 +113,7 @@ export default async function ClientsAgenciesPage({ searchParams }: { searchPara
       {rows.length === 0 ? (
         <EmptyState icon={Building2} title="No accounts yet" description="Add an account, or record an enquiry: its agency and client appear here." />
       ) : shown.length === 0 ? (
-        <EmptyState icon={Building2} title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here()} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
+        <EmptyState icon={Building2} title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={clearHref} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
       ) : (
         <SelectionProvider key={viewKey}>
           {/* Only people with the assign owners right get the selection boxes and the bar; the action and the database check the right again. */}

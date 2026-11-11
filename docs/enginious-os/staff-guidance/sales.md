@@ -175,7 +175,7 @@ Won and Lost are closed on their own form, which asks for the evidence or the re
 
 Clients & Agencies holds every organisation. Search first so you do not add the same one twice. An organisation can be an agency, a direct client, an end client or a technology company, and an enquiry's agency and end-client boxes offer only organisations with the matching role.
 
-1. Open Clients & Agencies and search by name.
+1. Open Clients & Agencies and search by name. The search and the filters apply as you type or choose; More filters holds country, lead source and exhibition.
 2. If it is not there, add it with its roles (and country and website if you know them).
 3. To add many at once, use Import from Excel.
 
@@ -206,7 +206,7 @@ Estimates are built on the enquiry's Estimates tab in three steps: details, item
 Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see. It helps you see which shows are coming up, how much business each one has brought, and which to prepare for.
 
 1. Open Events & Exhibitions in Sales.
-2. Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.
+2. Search or choose a filter to find a show: the list changes as soon as you choose, and Clear removes the filters. Open a show to see its editions, who exhibited and the agencies to contact.
 3. Press Add event for a show that is not listed. One form takes the name, the type and the first edition's dates and place, and one save adds both. If the name already exists, the form shows that event and offers to add the edition to it instead.
 4. Press Add edition for the next year of a show that is already listed.
 5. Switch from List to Calendar to see the shows by month (Previous, Next and Today move between months; a show's name is on each of its days and opens that edition). To add many shows at once, use Import events with the template.
@@ -253,7 +253,7 @@ Outreach is your list of accounts to approach before any enquiry exists. Each ca
 
 1. Open Outreach in Sales to see what is assigned to you.
 2. Open an account from its card to log what you did and set the next action.
-3. Filter by status or Overdue only to choose what to do first.
+3. Choose a status or tick Overdue only to decide what to do first: the list changes as soon as you choose, and Clear removes the filters.
 4. Accounts are assigned from Clients & Agencies by the people who manage Sales assignments.
 
 ## Sales reports

@@ -821,7 +821,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "summary": "Clients & Agencies holds every organisation. Search first so you do not add the same one twice. An organisation can be an agency, a direct client, an end client or a technology company, and an enquiry's agency and end-client boxes offer only organisations with the matching role.",
     "steps": [
-      "Open Clients & Agencies and search by name.",
+      "Open Clients & Agencies and search by name. The search and the filters apply as you type or choose; More filters holds country, lead source and exhibition.",
       "If it is not there, add it with its roles (and country and website if you know them).",
       "To add many at once, use Import from Excel."
     ],
@@ -902,7 +902,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "Events & Exhibitions is the shared calendar of shows, one row per edition, with how many enquiries are linked to each. It opens on upcoming editions; you can filter by name, country and dates, or switch to past editions. Everyone in Sales sees the same calendar; the enquiry figures count only the enquiries you can see. It helps you see which shows are coming up, how much business each one has brought, and which to prepare for.",
     "steps": [
       "Open Events & Exhibitions in Sales.",
-      "Use the filters to find a show, then open it to see its editions, who exhibited and the agencies to contact.",
+      "Search or choose a filter to find a show: the list changes as soon as you choose, and Clear removes the filters. Open a show to see its editions, who exhibited and the agencies to contact.",
       "Press Add event for a show that is not listed. One form takes the name, the type and the first edition's dates and place, and one save adds both. If the name already exists, the form shows that event and offers to add the edition to it instead.",
       "Press Add edition for the next year of a show that is already listed.",
       "Switch from List to Calendar to see the shows by month (Previous, Next and Today move between months; a show's name is on each of its days and opens that edition). To add many shows at once, use Import events with the template."
@@ -1013,7 +1013,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open Outreach in Sales to see what is assigned to you.",
       "Open an account from its card to log what you did and set the next action.",
-      "Filter by status or Overdue only to choose what to do first.",
+      "Choose a status or tick Overdue only to decide what to do first: the list changes as soon as you choose, and Clear removes the filters.",
       "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
     ],
     "links": [

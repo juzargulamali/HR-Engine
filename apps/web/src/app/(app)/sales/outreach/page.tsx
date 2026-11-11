@@ -2,10 +2,10 @@ import Link from "next/link";
 import { ClipboardList } from "lucide-react";
 import { hasCrmCapability } from "@enginious-hr/domain";
 import { OsBadge } from "@/components/os/pills";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Select } from "@/components/ui/select";
+import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
 import { LoadError } from "@/components/workspace/states";
 import { todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
@@ -54,7 +54,14 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
   const assignees = [...new Set(scoped.map((r) => r.assigned_to))];
   const base = `/sales/outreach?company=${company.id}`;
   const overdueCount = scoped.filter((r) => isOverdue(r, today)).length;
-  const hasFilter = !!(filters.assignee || filters.status || filters.overdue);
+  const toolbarFilters: ToolbarFilter[] = [
+    ...(all ? [{ name: "assignee", label: "Assigned to", value: filters.assignee, options: [{ value: "", label: "Anyone" }, ...assignees.map((u) => ({ value: u, label: nameOf(u) }))] }] : []),
+    { name: "status", label: "Status", value: filters.status, options: [{ value: "", label: "Not closed" }, ...OUTREACH_STATUSES.map((x) => ({ value: x, label: OUTREACH_STATUS_LABEL[x] }))] },
+    { name: "overdue", label: "Overdue only", kind: "toggle" as const, value: filters.overdue ? "1" : "" },
+    // Which company's outreach is shown: a chooser, not a filter, so Clear leaves it alone.
+    ...(ctx.companies.length > 1 ? [{ name: "company", label: "Company", secondary: true, scopeOnly: true, value: company.id, options: ctx.companies.map((c) => ({ value: c.id, label: c.name })) }] : []),
+  ];
+  const clearHref = `${base}${all ? "&view=all" : ""}`;
 
   return (
     <div className="space-y-6">
@@ -66,37 +73,8 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
         </nav>
       ) : null}
 
-      <form method="get" role="search" aria-label="Filter outreach" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <input type="hidden" name="company" value={company.id} />
-        {all ? <input type="hidden" name="view" value="all" /> : null}
-        {ctx.companies.length > 1 ? (
-          <div className="space-y-1.5">
-            <label htmlFor="or-company" className="text-sm font-medium leading-none">Company</label>
-            <Select id="or-company" name="company" defaultValue={company.id}>{ctx.companies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
-          </div>
-        ) : null}
-        {all ? (
-          <div className="space-y-1.5">
-            <label htmlFor="or-assignee" className="text-sm font-medium leading-none">Assigned to</label>
-            <Select id="or-assignee" name="assignee" defaultValue={filters.assignee}>
-              <option value="">Anyone</option>
-              {assignees.map((u) => <option key={u} value={u}>{nameOf(u)}</option>)}
-            </Select>
-          </div>
-        ) : null}
-        <div className="space-y-1.5">
-          <label htmlFor="or-status" className="text-sm font-medium leading-none">Status</label>
-          <Select id="or-status" name="status" defaultValue={filters.status}>
-            <option value="">Not closed</option>
-            {OUTREACH_STATUSES.map((s) => <option key={s} value={s}>{OUTREACH_STATUS_LABEL[s]}</option>)}
-          </Select>
-        </div>
-        <label className="flex items-end gap-2 pb-2 text-sm font-medium"><input type="checkbox" name="overdue" value="1" defaultChecked={filters.overdue} className="h-4 w-4" /> Overdue only</label>
-        <div className="flex items-end gap-2">
-          <Button type="submit" variant="secondary">Apply</Button>
-          {hasFilter ? <Link href={`${base}${all ? "&view=all" : ""}`} className={buttonVariants({ variant: "ghost" })}>Clear</Link> : null}
-        </div>
-      </form>
+      {/* Same toolbar as Sales > Enquiries: each filter applies as it is chosen (no Apply button); My outreach or All outreach and the company stay. */}
+      <ListToolbar filters={toolbarFilters} clearHref={clearHref} />
 
       <p className="text-sm text-muted-foreground" role="status">
         {all ? `All outreach for ${company.name}` : "Your outreach"}: {scoped.filter((r) => r.status !== "closed").length} open{overdueCount ? `, ${overdueCount} overdue` : ""}. Sorted by next due date; with no next action, by target date.
@@ -105,7 +83,7 @@ export default async function OutreachPage({ searchParams }: { searchParams: Pro
       {scoped.length === 0 ? (
         <EmptyState icon={ClipboardList} title={all ? "No outreach yet" : "Nothing assigned to you"} description={all ? "Select accounts in Clients & Agencies and choose Assign outreach." : "A Sales lead can assign you accounts to approach from Clients & Agencies."} />
       ) : shown.length === 0 ? (
-        <EmptyState icon={ClipboardList} title="Nothing matches" description="Clear a filter to see more." action={<Link href={`${base}${all ? "&view=all" : ""}`} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
+        <EmptyState icon={ClipboardList} title="Nothing matches" description="Clear a filter to see more." action={<Link href={clearHref} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
       ) : (
         <ul className="space-y-3" aria-label="Outreach">
           {shown.map((o) => (

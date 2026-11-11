@@ -3,12 +3,12 @@ import { CalendarDays, List as ListIcon, Upload } from "lucide-react";
 import { AlertTriangle } from "lucide-react";
 import { OsBadge } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
 import { LoadError } from "@/components/workspace/states";
+import { withParams } from "@/components/workspace/url-state";
 import { todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadEvents } from "@/lib/crm/events/data";
@@ -68,6 +68,19 @@ export default async function EventsPage({ searchParams }: { searchParams: Promi
   const address = (params: Record<string, string>) => { const q = new URLSearchParams(); for (const [k, v] of Object.entries(params)) if (v) q.set(k, v); const s = q.toString(); return `/sales/events${s ? `?${s}` : ""}`; };
   const listHref = address({ ...shared, ...(filters.when !== "upcoming" ? { when: filters.when } : {}), from: filters.from, to: filters.to });
   const calendarHref = (m?: string) => address({ ...shared, view: "calendar", ...(m ? { month: m } : {}) });
+  // The calendar's dates are its month, so When, From date, To date and the enquiry figures do not apply to it and are not offered there.
+  const toolbarFilters: ToolbarFilter[] = [
+    { name: "country", label: "Country", value: filters.country, options: [{ value: "", label: "Any country" }, ...countries.map((c) => ({ value: c, label: countryLabel(c) }))] },
+    ...(calendar ? [] : [
+      { name: "when", label: "When", value: filters.when === "upcoming" ? "" : filters.when, options: [{ value: "", label: "Upcoming (default)" }, { value: "past", label: "Past editions" }, { value: "all", label: "All editions" }] },
+      { name: "from", label: "From date", secondary: true, kind: "date" as const, value: filters.from },
+      { name: "to", label: "To date", secondary: true, kind: "date" as const, value: filters.to },
+      ...(scope.canChooseAll ? [{ name: "scope", label: "Enquiry figures for", secondary: true, scopeOnly: true, value: scope.all ? "all" : "", options: [{ value: "", label: ctx.companies.find((c) => c.id === scope.companyId)?.name ?? "Current company" }, { value: "all", label: "All my companies" }] }] : []),
+    ]),
+    { name: "archived", label: "Include archived", secondary: true, kind: "toggle" as const, value: filters.archived ? "1" : "" },
+  ];
+  // Clear removes the search and the filters; the view, the month and whose enquiry figures are counted stay.
+  const clearHref = withParams("/sales/events", sp, { q: null, country: null, archived: null, ...(calendar ? {} : { when: null, from: null, to: null }) });
   const here = (over: Record<string, string>) => { const q = new URLSearchParams(); for (const [k, v] of Object.entries({ ...(scope.all ? { scope: "all" } : {}), ...over })) if (v) q.set(k, v); const s = q.toString(); return `/sales/events${s ? `?${s}` : ""}`; };
 
   return (
@@ -86,54 +99,8 @@ export default async function EventsPage({ searchParams }: { searchParams: Promi
         <Link href={calendarHref(sp.view === "calendar" && typeof sp.month === "string" && isMonth(sp.month) ? month : undefined)} aria-current={calendar ? "page" : undefined} className={cn("inline-flex min-h-10 items-center gap-1.5 rounded px-3 text-sm font-medium", calendar ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground")}><CalendarDays className="h-4 w-4" aria-hidden /> Calendar</Link>
       </nav>
 
-      <form method="get" role="search" aria-label="Filter events" className="space-y-3">
-        {calendar ? <><input type="hidden" name="view" value="calendar" /><input type="hidden" name="month" value={month} /></> : null}
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="space-y-1.5 sm:col-span-2">
-            <label htmlFor="ev-q" className="text-sm font-medium leading-none">Event name</label>
-            <Input id="ev-q" name="q" type="search" defaultValue={filters.q} placeholder="e.g. GITEX, a city or a venue" />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ev-country" className="text-sm font-medium leading-none">Country</label>
-            <Select id="ev-country" name="country" defaultValue={filters.country}>
-              <option value="">Any country</option>
-              {countries.map((c) => <option key={c} value={c}>{countryLabel(c)}</option>)}
-            </Select>
-          </div>
-          {calendar ? null : (<>
-          <div className="space-y-1.5">
-            <label htmlFor="ev-when" className="text-sm font-medium leading-none">When</label>
-            <Select id="ev-when" name="when" defaultValue={filters.when}>
-              <option value="upcoming">Upcoming (default)</option>
-              <option value="past">Past editions</option>
-              <option value="all">All editions</option>
-            </Select>
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ev-from" className="text-sm font-medium leading-none">From date</label>
-            <Input id="ev-from" name="from" type="date" defaultValue={filters.from} />
-          </div>
-          <div className="space-y-1.5">
-            <label htmlFor="ev-to" className="text-sm font-medium leading-none">To date</label>
-            <Input id="ev-to" name="to" type="date" defaultValue={filters.to} />
-          </div>
-          {scope.canChooseAll ? (
-            <div className="space-y-1.5">
-              <label htmlFor="ev-scope" className="text-sm font-medium leading-none">Enquiry figures for</label>
-              <Select id="ev-scope" name="scope" defaultValue={scope.all ? "all" : ""}>
-                <option value="">{ctx.companies.find((c) => c.id === scope.companyId)?.name ?? "Current company"}</option>
-                <option value="all">All my companies</option>
-              </Select>
-            </div>
-          ) : null}
-          </>)}
-          <label className="flex min-h-10 items-end gap-2 pb-2 text-sm font-medium"><input type="checkbox" name="archived" value="1" defaultChecked={filters.archived} className="h-4 w-4" /> Include archived</label>
-          <div className="flex items-end gap-2">
-            <Button type="submit" variant="secondary" className="min-h-10">Apply</Button>
-            {(calendar ? filters.q || filters.country || filters.archived : hasEventFilters(filters)) ? <Link href={calendar ? address({ ...(scope.all ? { scope: "all" } : {}), view: "calendar", month }) : here({})} className={cn(buttonVariants({ variant: "ghost" }), "min-h-10")}>Clear</Link> : null}
-          </div>
-        </div>
-      </form>
+      {/* Same toolbar as Sales > Enquiries: each filter applies as it is chosen (no Apply button). The view (List or Calendar) and the calendar's month are in the address, so they stay. */}
+      <ListToolbar search={{ value: filters.q, placeholder: "Event name, city or venue", label: "Search events by name, city or venue" }} filters={toolbarFilters} clearHref={clearHref} />
 
       {calendar ? (
         <p className="text-sm text-muted-foreground" role="status">Editions on the days shown for {monthLabel(month)}: {rows.length}. A show is on every day from its start date to its end date. Choose a name to open that edition.</p>
