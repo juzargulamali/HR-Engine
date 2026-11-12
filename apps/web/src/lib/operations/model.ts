@@ -198,6 +198,167 @@ export function pressure(o: Overview): PressureItem[] {
   return out;
 }
 
+// ---- Project health (rule-based), the summary figures, the delivery timeline and the week chart ---------------------------------------------------------------------
+//
+// Health is a label read from recorded facts, never a score and never a judgement of the Project Manager. The rules, in order:
+//   at_risk          a recorded problem on a project whose installation (or show, when no installation date is recorded) starts within 14 days or is under way
+//                    (`riskReasons`), or unused reservations that were not released at completion, or equipment past its recorded return date.
+//   needs_attention  a blocked task, a missing owner (no Project Manager, or a blocker nobody is named to unblock), a recorded shortage, an open booking
+//                    review, an overdue task or milestone, or a finished project whose equipment is still out.
+//   not_enough_info  none of the above, and neither an installation nor a show date is recorded: there is nothing to measure "on track" against.
+//   on_track         dates are recorded and nothing above is recorded against the project.
+// A read that failed has no label at all: the screen says it could not load.
+export type Health = "on_track" | "needs_attention" | "at_risk" | "not_enough_info";
+export const HEALTH_WORDS: Record<Health, string> = { on_track: "On track", needs_attention: "Needs attention", at_risk: "At risk", not_enough_info: "Not enough information" };
+export const HEALTH_ORDER: Health[] = ["at_risk", "needs_attention", "not_enough_info", "on_track"];
+export interface Evidence { text: string; href: string }
+export interface ProjectHealth { health: Health; evidence: Evidence[] }
+
+export function projectHealth(p: OverviewProject, today: string): ProjectHealth {
+  const work = `/projects/${p.id}/work`; const equip = `/projects/${p.id}/equipment`; const people = `/projects/${p.id}/people`;
+  const risk: Evidence[] = []; const attention: Evidence[] = [];
+  const start = day(p.install_start) ?? day(p.event_start);
+  const windowed = riskReasons(p, today);
+  if (windowed.length > 0 && start) {
+    const lead = `${p.install_start ? "Installation" : "The show"} ${start < today ? "started" : "starts"} ${start}`;
+    for (const r of windowed) risk.push({ text: `${lead}: ${r}`, href: /equipment|warehouse/.test(r) ? equip : /delivery plan/.test(r) ? `/projects/${p.id}/delivery` : work });
+  }
+  if (p.release_failed) risk.push({ text: "Unused reservations were not released at completion", href: equip });
+  for (const q of p.equipment) if (q.return_overdue) risk.push({ text: `Equipment from ${q.code} was due back ${day(q.expected_return_at) ?? "on a date that is not recorded"} and is not returned`, href: equip });
+
+  if (!p.pm_id && !isFinished(p.status)) attention.push({ text: "No Project Manager is recorded", href: people });
+  if (windowed.length === 0) {
+    for (const b of p.blockers) attention.push({ text: `Blocked since ${day(b.since)}: ${b.title}${b.unblock_owner ? ` (waiting on ${b.unblock_owner})` : " (nobody is named to unblock it)"}`, href: `${work}?task=${b.task_id}` });
+    if (blockedCount(p) > p.blockers.length) attention.push({ text: `${plural(blockedCount(p) - p.blockers.length, "more blocked task")}`, href: work });
+    for (const q of p.equipment) if (q.short_lines > 0) attention.push({ text: `Equipment short on ${q.code}: ${plural(q.short_lines, "line")}`, href: equip });
+    if (p.tasks_overdue > 0) attention.push({ text: plural(p.tasks_overdue, "overdue task"), href: work });
+    if (p.milestones_overdue > 0) attention.push({ text: plural(p.milestones_overdue, "overdue milestone"), href: work });
+  } else {
+    for (const b of p.blockers) if (!b.unblock_owner) attention.push({ text: `Nobody is named to unblock "${b.title}"`, href: `${work}?task=${b.task_id}` });
+  }
+  if (p.equipment_reviews > 0) attention.push({ text: `${plural(p.equipment_reviews, "equipment booking")} to review after a date change (with ${p.pm_id ? p.pm : "the Project Manager"})`, href: equip });
+  if (completeButOut(p)) attention.push({ text: `Delivery complete, ${plural(unitsOut(p), "unit")} still out`, href: equip });
+
+  if (risk.length > 0) return { health: "at_risk", evidence: [...risk, ...attention] };
+  if (attention.length > 0) return { health: "needs_attention", evidence: attention };
+  if (!start) return { health: "not_enough_info", evidence: [{ text: "Neither an installation date nor a show date is recorded", href: work }] };
+  return { health: "on_track", evidence: [{ text: "Dates are recorded; no blocker, shortage, overdue task, overdue milestone or booking review is recorded", href: work }] };
+}
+export function healthCounts(o: Overview, today: string): Record<Health, number> {
+  const c: Record<Health, number> = { on_track: 0, needs_attention: 0, at_risk: 0, not_enough_info: 0 };
+  for (const p of o.projects) if (!isFinished(p.status) || unitsOut(p) > 0 || p.release_failed) c[projectHealth(p, today).health] += 1;
+  return c;
+}
+
+/** Equipment lines ready out of the lines asked for, on requests that are with the warehouse and not yet out. Null when there is no such line: no bar is drawn without a real denominator. */
+export function readiness(p: Pick<OverviewProject, "equipment">): { ready: number; total: number } | null {
+  const live = p.equipment.filter((q) => ["reserved", "partially_ready", "short"].includes(q.state));
+  const total = live.reduce((a, q) => a + n(q.lines), 0);
+  return total > 0 ? { ready: live.reduce((a, q) => a + n(q.reserved_lines), 0), total } : null;
+}
+
+const addDays = (iso: string, days: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+/** Unfinished projects whose installation (or show, when no installation date is recorded) starts today or within `days` days, soonest first. */
+export function installationsWithin(o: Overview, today: string, days = AT_RISK_WINDOW_DAYS): (OverviewProject & { start: string; in_days: number; by: "installation" | "show" })[] {
+  return o.projects.flatMap((p) => {
+    const start = day(p.install_start) ?? day(p.event_start);
+    if (!start || isFinished(p.status)) return [];
+    const d = daysBetween(today, start);
+    return d >= 0 && d <= days ? [{ ...p, start, in_days: d, by: p.install_start ? "installation" as const : "show" as const }] : [];
+  }).sort((a, b) => a.start.localeCompare(b.start) || a.reference.localeCompare(b.reference));
+}
+
+export type EquipmentIssueKind = "shortage" | "booking_review" | "overdue_return" | "release_failed" | "not_sent" | "still_out";
+export const EQUIPMENT_ISSUE_WORDS: Record<EquipmentIssueKind, string> = {
+  shortage: "Shortage", booking_review: "Booking to review", overdue_return: "Return overdue", release_failed: "Reservations not released", not_sent: "Request not sent", still_out: "Complete, still out",
+};
+export interface EquipmentIssue { kind: EquipmentIssueKind; key: string; project: string; text: string; owner: string; href: string }
+/** Recorded equipment problems, most pressing kind first. "Request not sent" is listed only inside the 14-day window: a draft far ahead of its dates is not a problem. */
+export function equipmentIssues(o: Overview, today: string): EquipmentIssue[] {
+  const out: EquipmentIssue[] = [];
+  const soon = new Set(installationsWithin(o, today).map((p) => p.id));
+  for (const p of o.projects) {
+    const href = `/projects/${p.id}/equipment`; const project = `${p.reference} ${p.name}`;
+    for (const q of p.equipment) {
+      if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, project, text: equipmentLine(q), owner: "Warehouse", href });
+      if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, project, text: `${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at) ?? "on a date that is not recorded"}`, owner: "Warehouse", href });
+      if (q.state === "draft" && soon.has(p.id)) out.push({ kind: "not_sent", key: `draft:${q.id}`, project, text: `${q.code} has not been sent to the warehouse`, owner: p.pm, href });
+    }
+    if (p.equipment_reviews > 0) out.push({ kind: "booking_review", key: `review:${p.id}`, project, text: `${plural(p.equipment_reviews, "booking")} to review after a committed date changed`, owner: p.pm, href });
+    if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, project, text: "Unused reservations were not released at completion", owner: "Warehouse", href });
+    if (completeButOut(p) && !p.equipment.some((q) => q.return_overdue)) out.push({ kind: "still_out", key: `out:${p.id}`, project, text: `Delivery complete, ${plural(unitsOut(p), "unit")} still out`, owner: "Warehouse", href });
+  }
+  const order: EquipmentIssueKind[] = ["shortage", "release_failed", "overdue_return", "booking_review", "not_sent", "still_out"];
+  return out.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.project.localeCompare(b.project));
+}
+
+export type TimelineKind = "installation" | "show" | "dismantling";
+export const TIMELINE_WORDS: Record<TimelineKind, string> = { installation: "Installation", show: "Show", dismantling: "Dismantling" };
+export interface TimelineEntry { key: string; kind: TimelineKind; date: string; until: string | null; title: string; who: string; href: string; tentative: boolean }
+export const TIMELINE_DAYS = 30;
+/**
+ * The next 30 days in date order: installation and show dates of live projects, and the installation, show and dismantling dates Sales recorded on flagged
+ * enquiries that have no project yet (marked tentative until won). A project carries no dismantling date, so dismantling appears only for enquiries.
+ */
+export function timeline(o: Overview, upcoming: readonly UpcomingRow[] | null, today: string, days = TIMELINE_DAYS): TimelineEntry[] {
+  const out: TimelineEntry[] = [];
+  const inWindow = (d: string | null, until?: string | null) => !!d && daysBetween(today, d) <= days && daysBetween(today, until ?? d) >= 0;
+  for (const p of o.projects) {
+    if (isFinished(p.status)) continue;
+    const title = `${p.reference} ${p.name}`; const href = `/projects/${p.id}/work`;
+    if (inWindow(day(p.install_start))) out.push({ key: `i:${p.id}`, kind: "installation", date: day(p.install_start)!, until: null, title, who: p.pm, href, tentative: false });
+    if (inWindow(day(p.event_start), day(p.event_end))) out.push({ key: `s:${p.id}`, kind: "show", date: day(p.event_start)!, until: day(p.event_end), title, who: p.pm, href, tentative: false });
+  }
+  for (const r of upcoming ?? []) {
+    if (r.handover?.project_id) continue;
+    const title = `${r.reference} ${r.title}`; const href = `/operations/upcoming?company=${r.company_id}&q=${encodeURIComponent(r.reference)}`; const tentative = !r.won;
+    const who = r.handover?.pm ?? (r.planning?.provisional_pm ? `${r.planning.provisional_pm} (provisional)` : r.owner);
+    if (inWindow(day(r.install_start))) out.push({ key: `i:${r.id}`, kind: "installation", date: day(r.install_start)!, until: null, title, who, href, tentative });
+    if (inWindow(day(r.event_start), day(r.event_end))) out.push({ key: `s:${r.id}`, kind: "show", date: day(r.event_start)!, until: day(r.event_end), title, who, href, tentative });
+    if (inWindow(day(r.dismantle_date))) out.push({ key: `d:${r.id}`, kind: "dismantling", date: day(r.dismantle_date)!, until: null, title, who, href, tentative });
+  }
+  const order: TimelineKind[] = ["installation", "show", "dismantling"];
+  return out.sort((a, b) => a.date.localeCompare(b.date) || order.indexOf(a.kind) - order.indexOf(b.kind) || a.title.localeCompare(b.title));
+}
+
+export interface WeekBucket { key: string; label: string; from: string | null; to: string | null; projects: OverviewProject[] }
+export const CHART_WEEKS = 6;
+/** Monday of the week a date falls in. */
+export const weekStart = (iso: string) => addDays(iso, -((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7));
+/**
+ * Upcoming delivery by week: unfinished projects by the week their installation (or show) starts, this week and the five after it, then "Later", "Already started"
+ * and "No date recorded". Every bucket carries its projects, so the chart and the list under it are the same records and the counts cannot differ.
+ */
+export function deliveryByWeek(o: Overview, today: string, weeks = CHART_WEEKS): WeekBucket[] {
+  const first = weekStart(today);
+  const buckets: WeekBucket[] = Array.from({ length: weeks }, (_, i) => {
+    const from = addDays(first, i * 7);
+    return { key: from, label: i === 0 ? "This week" : i === 1 ? "Next week" : `Week of ${from}`, from, to: addDays(from, 6), projects: [] };
+  });
+  const later: WeekBucket = { key: "later", label: "Later", from: addDays(first, weeks * 7), to: null, projects: [] };
+  const started: WeekBucket = { key: "started", label: "Already started", from: null, to: addDays(first, -1), projects: [] };
+  const none: WeekBucket = { key: "none", label: "No date recorded", from: null, to: null, projects: [] };
+  for (const p of o.projects) {
+    if (isFinished(p.status)) continue;
+    const start = day(p.install_start) ?? day(p.event_start);
+    if (!start) { none.projects.push(p); continue; }
+    const i = Math.floor(daysBetween(first, start) / 7);
+    (i < 0 ? started : i >= weeks ? later : buckets[i]!).projects.push(p);
+  }
+  for (const b of [...buckets, later, started, none]) b.projects.sort((a, c) => (day(a.install_start) ?? day(a.event_start) ?? "9999").localeCompare(day(c.install_start) ?? day(c.event_start) ?? "9999") || a.reference.localeCompare(c.reference));
+  return [started, ...buckets, later, none].filter((b) => b.projects.length > 0 || (b.from !== null && b.to !== null && b.key !== "started"));
+}
+
+/** The next unresolved item of a flagged enquiry, in a few words, for the scannable Upcoming Work row. */
+export function nextUnresolved(r: UpcomingRow): string {
+  const next = nextResponsible(r);
+  return `${next.who}${next.person ? ` (${next.person})` : ""}: ${next.what}`;
+}
+/** What a flagged enquiry is for, as "event · venue": the edition when one is linked, otherwise the enquiry's own title and place. */
+export function eventLine(r: Pick<UpcomingRow, "edition" | "title" | "location">): { event: string; venue: string | null } {
+  return { event: r.edition?.label ?? r.edition?.event_name ?? r.title, venue: [r.edition?.venue, r.edition?.city ?? r.location].filter(Boolean).join(", ") || null };
+}
+
 /** Upcoming Work filters. `q` matches reference, title, owner, location and the edition label. */
 export function filterUpcoming(rows: readonly UpcomingRow[], f: { q?: string; stage?: string; next?: string }): UpcomingRow[] {
   const q = (f.q ?? "").trim().toLowerCase();

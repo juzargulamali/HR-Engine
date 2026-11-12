@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { deliveryByWeek, equipmentIssues, eventLine, healthCounts, installationsWithin, projectHealth, readiness, timeline, weekStart } from "./model";
 import { completeButOut, datesWord, decisions, equipmentLine, filterUpcoming, nextResponsible, pressure, riskReasons, topIssue, upcomingDelivery, type Overview, type OverviewProject, type RequestState, type UpcomingRow } from "./model";
 
 const TODAY = "2027-02-20";
@@ -119,5 +120,101 @@ describe("Operations: Overview", () => {
     expect(p[3]!.text).toBe("UAE-P-2027-0001: UAE-R-00001 is partly dispatched (1 of 2 lines).");
     expect(p[4]!.text).toBe("UAE-P-2027-0001: 4 units from UAE-R-00001 due back 2027-03-08 and not returned.");
     expect(pressure(overview({ projects: [project()] }))).toEqual([]);
+  });
+});
+
+describe("Operations: project health (rule-based, never a score)", () => {
+  const blocker = { task_id: "t1", title: "Rig the truss", since: "2027-02-10T08:00:00Z", reason: null, assignee: "Riya", unblock_owner: null, cross_team: false };
+  it("on track needs recorded dates and nothing recorded against the project; the evidence says what was checked", () => {
+    const h = projectHealth(project({ install_start: "2027-06-01", event_start: "2027-06-03" }), TODAY);
+    expect(h.health).toBe("on_track");
+    expect(h.evidence).toEqual([{ text: "Dates are recorded; no blocker, shortage, overdue task, overdue milestone or booking review is recorded", href: "/projects/p1/work" }]);
+  });
+  it("no recorded date is 'not enough information', never on track", () => {
+    const h = projectHealth(project({ install_start: null, event_start: null, event_end: null }), TODAY);
+    expect(h).toEqual({ health: "not_enough_info", evidence: [{ text: "Neither an installation date nor a show date is recorded", href: "/projects/p1/work" }] });
+  });
+  it("needs attention: a blocker, a missing owner, a shortage, a booking review, an overdue task or milestone, equipment still out after completion", () => {
+    const far = { install_start: "2027-06-01", event_start: "2027-06-03", event_end: "2027-06-05" };
+    const texts = (p: OverviewProject) => { const h = projectHealth(p, TODAY); expect(h.health).toBe("needs_attention"); return h.evidence.map((e) => e.text); };
+    expect(texts(project({ ...far, blockers: [blocker], blockers_total: 1 }))).toEqual(["Blocked since 2027-02-10: Rig the truss (nobody is named to unblock it)"]);
+    expect(texts(project({ ...far, blockers: [{ ...blocker, unblock_owner: "Wael" }], blockers_total: 7 }))).toEqual(["Blocked since 2027-02-10: Rig the truss (waiting on Wael)", "6 more blocked tasks"]);
+    expect(texts(project({ ...far, pm_id: null }))).toEqual(["No Project Manager is recorded"]);
+    expect(texts(project({ ...far, equipment: [req({ state: "short", short_lines: 1, short_buy: 1 })] }))).toEqual(["Equipment short on UAE-R-00001: 1 line"]);
+    expect(texts(project({ ...far, equipment_reviews: 2 }))).toEqual(["2 equipment bookings to review after a date change (with Pat Manager)"]);
+    expect(texts(project({ ...far, tasks_overdue: 1, milestones_overdue: 2 }))).toEqual(["1 overdue task", "2 overdue milestones"]);
+    expect(texts(project({ status: "completed", equipment: [req({ state: "still_out", units_out: 3 })] }))).toEqual(["Delivery complete, 3 units still out"]);
+  });
+  it("at risk: a recorded problem inside the 14 days, an unreleased reservation, or an overdue return; every reason links to its screen", () => {
+    const h = projectHealth(project({ equipment: [req({ state: "short", short_lines: 1, short_rent: 1 })], plan_unreleased: 2, tasks_overdue: 1 }), TODAY);
+    expect(h.health).toBe("at_risk");
+    expect(h.evidence).toEqual([
+      { text: "Installation starts 2027-02-26: equipment short on UAE-R-00001", href: "/projects/p1/equipment" },
+      { text: "Installation starts 2027-02-26: 1 overdue task", href: "/projects/p1/work" },
+      { text: "Installation starts 2027-02-26: 2 delivery plan lines not released to the teams", href: "/projects/p1/delivery" },
+    ]);
+    expect(projectHealth(project({ status: "completed", release_failed: true }), TODAY).health).toBe("at_risk");
+    expect(projectHealth(project({ install_start: "2027-06-01", event_start: null, event_end: null, equipment: [req({ state: "still_out", units_out: 2, return_overdue: true })] }), TODAY)).toMatchObject({
+      health: "at_risk", evidence: [{ text: "Equipment from UAE-R-00001 was due back 2027-03-08 and is not returned", href: "/projects/p1/equipment" }] });
+    // the same shortage five months out is a thing to look at, not a risk to the date
+    expect(projectHealth(project({ install_start: "2027-07-01", event_start: "2027-07-03", event_end: "2027-07-05", equipment: [req({ state: "short", short_lines: 1 })] }), TODAY).health).toBe("needs_attention");
+  });
+  it("counts the labels of live projects and of finished ones that still have something open, and nothing else", () => {
+    const o = overview({ projects: [project(), project({ id: "p2", install_start: null, event_start: null }), project({ id: "p3", status: "completed" }), project({ id: "p4", status: "archived", release_failed: true })] });
+    expect(healthCounts(o, TODAY)).toEqual({ on_track: 1, needs_attention: 0, at_risk: 1, not_enough_info: 1 });
+  });
+});
+
+describe("Operations: the figures behind the summary cards", () => {
+  it("readiness has a real denominator or is not drawn", () => {
+    expect(readiness(project({ equipment: [req({ lines: 4, reserved_lines: 3, state: "partially_ready" }), req({ id: "q2", lines: 2, reserved_lines: 2 })] }))).toEqual({ ready: 5, total: 6 });
+    expect(readiness(project())).toBeNull();                                                      // no request at all
+    expect(readiness(project({ equipment: [req({ state: "draft" })] }))).toBeNull();              // nothing is with the warehouse yet
+    expect(readiness(project({ equipment: [req({ state: "dispatched" })] }))).toBeNull();         // already out: "ready" no longer means anything
+  });
+  it("installations in the next 14 days: today counts, day 15 does not, finished and undated projects never do", () => {
+    const o = overview({ projects: [project({ id: "a", install_start: "2027-02-20" }), project({ id: "b", install_start: "2027-03-06" }), project({ id: "c", install_start: "2027-03-07" }),
+      project({ id: "d", install_start: "2027-02-19" }), project({ id: "e", install_start: null, event_start: "2027-02-22" }), project({ id: "f", status: "completed" }), project({ id: "g", install_start: null, event_start: null })] });
+    expect(installationsWithin(o, TODAY).map((p) => [p.id, p.in_days, p.by])).toEqual([["a", 0, "installation"], ["e", 2, "show"], ["b", 14, "installation"]]);
+  });
+  it("equipment issues come from records, name their owner, and list an unsent request only inside the window", () => {
+    const o = overview({ projects: [
+      project({ equipment: [req({ state: "short", short_lines: 1, short_buy: 1 }), req({ id: "q2", code: "UAE-R-00002", state: "draft" })], equipment_reviews: 1 }),
+      project({ id: "p2", reference: "UAE-P-2027-0002", install_start: "2027-08-01", event_start: null, event_end: null, equipment: [req({ id: "q3", state: "draft" })] }),
+      project({ id: "p3", reference: "UAE-P-2027-0003", status: "completed", release_failed: true, equipment: [req({ id: "q4", state: "still_out", units_out: 2 })] }),
+    ] });
+    expect(equipmentIssues(o, TODAY).map((x) => [x.kind, x.project.split(" ")[0], x.owner])).toEqual([
+      ["shortage", "UAE-P-2027-0001", "Warehouse"], ["release_failed", "UAE-P-2027-0003", "Warehouse"], ["booking_review", "UAE-P-2027-0001", "Pat Manager"],
+      ["not_sent", "UAE-P-2027-0001", "Pat Manager"], ["still_out", "UAE-P-2027-0003", "Warehouse"]]);
+    expect(equipmentIssues(overview({ projects: [project()] }), TODAY)).toEqual([]);
+  });
+  it("the week chart and its list are the same records: every live project is in exactly one bucket", () => {
+    expect(weekStart("2027-02-20")).toBe("2027-02-15");                                           // a Saturday belongs to the week that began on Monday
+    const o = overview({ projects: [project({ id: "a" }), project({ id: "b", install_start: "2027-02-16" }), project({ id: "c", install_start: "2027-02-10" }), project({ id: "d", install_start: "2027-06-01" }),
+      project({ id: "e", install_start: null, event_start: null }), project({ id: "f", status: "completed" })] });
+    const weeks = deliveryByWeek(o, TODAY);
+    expect(weeks.map((w) => [w.key, w.label, w.projects.map((p) => p.id)])).toEqual([
+      ["started", "Already started", ["c"]], ["2027-02-15", "This week", ["b"]], ["2027-02-22", "Next week", ["a"]], ["2027-03-01", "Week of 2027-03-01", []], ["2027-03-08", "Week of 2027-03-08", []],
+      ["2027-03-15", "Week of 2027-03-15", []], ["2027-03-22", "Week of 2027-03-22", []], ["later", "Later", ["d"]], ["none", "No date recorded", ["e"]]]);
+    expect(weeks.reduce((a, w) => a + w.projects.length, 0)).toBe(5);
+    expect(deliveryByWeek(overview(), TODAY).every((w) => w.projects.length === 0)).toBe(true);
+  });
+  it("the timeline keeps installation, show and dismantling apart, marks an enquiry tentative until won, and drops what has a project", () => {
+    const o = overview({ projects: [project()] });
+    const enquiry = row({ install_start: "2027-03-10", event_start: "2027-03-12", event_end: "2027-03-14", dismantle_date: "2027-03-15" });
+    expect(timeline(o, [enquiry], TODAY).map((e) => [e.date, e.kind, e.tentative, e.title.split(" ")[0]])).toEqual([
+      ["2027-02-26", "installation", false, "UAE-P-2027-0001"], ["2027-03-01", "show", false, "UAE-P-2027-0001"],
+      ["2027-03-10", "installation", true, "UAE-O-2027-0007"], ["2027-03-12", "show", true, "UAE-O-2027-0007"], ["2027-03-15", "dismantling", true, "UAE-O-2027-0007"]]);
+    expect(timeline(o, [{ ...enquiry, won: true }], TODAY).filter((e) => e.tentative)).toEqual([]);
+    expect(timeline(o, [{ ...enquiry, handover: { id: "h", status: "accepted", submitted_at: null, pm: "Pat Manager", project_id: "p1" } }], TODAY)).toHaveLength(2);
+    expect(timeline(o, null, TODAY)).toHaveLength(2);                                             // enquiries not loaded: the project dates still show
+    expect(timeline(overview({ projects: [project({ install_start: "2027-04-30", event_start: "2027-05-02", event_end: "2027-05-04" })] }), [], TODAY)).toEqual([]);
+    // a show that is under way is still on the timeline
+    expect(timeline(overview({ projects: [project({ install_start: "2027-02-10", event_start: "2027-02-18", event_end: "2027-02-22" })] }), [], TODAY).map((e) => e.kind)).toEqual(["show"]);
+  });
+  it("names the event and venue of a flagged enquiry, falling back to its own title and place", () => {
+    expect(eventLine(row())).toEqual({ event: "Expo stand for Fictional Motors", venue: "Dubai" });
+    expect(eventLine(row({ edition: { event_name: "Fictional Auto Expo", label: "Fictional Auto Expo · 2027", venue: "Expo Hall 4", city: "Dubai", start_date: null, end_date: null } }))).toEqual({ event: "Fictional Auto Expo · 2027", venue: "Expo Hall 4, Dubai" });
+    expect(eventLine(row({ location: null })).venue).toBeNull();
   });
 });
