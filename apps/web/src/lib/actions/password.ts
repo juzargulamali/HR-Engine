@@ -4,6 +4,7 @@ import { z } from "zod";
 import { getPasswordIssues } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { createEmailLinkClient } from "@/lib/supabase/email-link";
 
 export interface ForgotPasswordState {
   submitted: boolean;
@@ -33,7 +34,8 @@ export async function requestPasswordReset(
   if (email) {
     const supabase = await createClient();
     const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    // Sent with the email-link client so the link carries what /reset-password reads: see lib/supabase/email-link.ts.
+    const { error } = await createEmailLinkClient().auth.resetPasswordForEmail(email, {
       ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/reset-password` } : {}),
     });
 

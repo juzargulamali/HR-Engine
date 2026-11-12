@@ -8,6 +8,16 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-12 | Invite and password links: Resend invite, Send password reset and Forgot password links can be completed by the person they are sent to | branch `claude/invite-recovery-links` from `main` `c6fdc84` (not merged); **app only: no migration, no SQL, no change to Supabase Auth settings**
+
+* **Reported by the owner:** an invite sent from Preview opened the sign-in page; a Resend invite from Production showed as expired. Claude has no access to the hosted Auth users or logs.
+* **Found in the code:** the three password emails (Resend invite, Send password reset, Forgot password) were asked for with the signed-in session client, which always asks for a link that comes back as `?code=...` and can only be completed in the browser that asked. The receiving pages read only the session after `#`, and for an administrator's resend the asking browser is the administrator's. Every such link read "invalid or has expired". Shown by test on the request each client sends.
+* **Fixed:** those emails are asked for with a plain-flow client that keeps no session (`apps/web/src/lib/supabase/email-link.ts`). The sign-in page passes on an invite or reset link that landed there (Supabase's fallback to the Site URL) to `/set-password` or `/reset-password`. The pages say whether a link was already used, was made the older way, or is simply empty.
+* **Unchanged:** who may invite or reset; the invite itself; the employee record, roles and module access; the audit entries. Nothing in a link is logged.
+* **Tests (local):** 30 files / 318 tests in the auth, login and account action folders pass; typecheck and lint pass.
+* **Docs:** new `modules/people-access-invites-and-password-links.md`; README.
+* **Not verified:** not reproduced against Supabase Auth (the local stack is a stand-in) and nothing signed in; whether an email scanner also spent the owner's link can only be read from the hosted Auth log.
+
 ### 2026-11-12 | Release: PR #88 (Add department, migration 31) and PR #89 (Chat refusals) merged; release status reconciled | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `62aa4fe`; **no application code, no migration, no SQL run**
 
 * **PR #88, merged (checked on GitHub):** merge commit `c2935f1fb6036e12375c20c731480302791c2d0e`, pinned to head `fae6daea9f7431f6b8c389dd12684a59c0b23f01`, at the owner's request. Required CI (read on GitHub by Claude): `lint-typecheck-test` and `rls-policies` passed on `fae6dae`.

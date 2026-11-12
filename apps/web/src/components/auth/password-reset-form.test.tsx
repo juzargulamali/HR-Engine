@@ -124,3 +124,38 @@ describe("PasswordResetForm: marking the account Active", () => {
     expect(navigatedTo).toBeNull();
   });
 });
+
+describe("PasswordResetForm: what the link brought", () => {
+  const at = (hash: string, search = "") => Object.defineProperty(window, "location", { configurable: true, value: { hash, search, pathname: "/set-password" } });
+
+  it("a working link (the session after #) opens the password form, and the session is taken out of the address", async () => {
+    render(<PasswordResetForm mode="invite" />);
+    expect(await screen.findByLabelText("New password")).toBeTruthy();
+    expect(supabase.client.auth.setSession).toHaveBeenCalledWith({ access_token: "a", refresh_token: "r" });
+    expect(window.history.replaceState).toHaveBeenCalledWith(null, "", "/set-password");
+  });
+
+  it("a used or expired link says so and says what to do, without trying to start a session", async () => {
+    at("#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired");
+    render(<PasswordResetForm mode="invite" />);
+    const alert = await screen.findByTestId("email-link-invalid");
+    expect(alert.getAttribute("data-reason")).toBe("used");
+    expect(alert.textContent).toMatch(/already been used or has expired\. A link works once.*Ask HR to send you a new invite/);
+    expect(supabase.client.auth.setSession).not.toHaveBeenCalled();
+  });
+
+  it("a link made the older way (?code=) is not called expired: it says it cannot be finished in this browser", async () => {
+    at("", "?code=CCC");
+    render(<PasswordResetForm mode="reset" />);
+    const alert = await screen.findByTestId("email-link-invalid");
+    expect(alert.getAttribute("data-reason")).toBe("other-browser");
+    expect(alert.textContent).toMatch(/cannot be finished here.*Request a new one from the forgot-password page/);
+  });
+
+  it("an address with nothing in it keeps the general message", async () => {
+    at("");
+    render(<PasswordResetForm mode="reset" />);
+    expect((await screen.findByTestId("email-link-invalid")).getAttribute("data-reason")).toBe("unknown");
+  });
+});
+

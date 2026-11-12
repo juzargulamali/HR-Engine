@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
+vi.mock("@/lib/supabase/email-link", () => ({ createEmailLinkClient: vi.fn() }));
 
 vi.mock("@/lib/auth/session", () => ({
   getCurrentSession: vi.fn(),
