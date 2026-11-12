@@ -2,7 +2,7 @@
 
 Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (section 9) and [action catalogue](./projects-action-catalogue.md) (section 11). The Sales side is also in the [Sales coverage index](./sales-coverage-index.md) (rows 82 and 83) and the [Sales action catalogue](./sales-action-catalogue.md) (section 3.10).
 
-Status: written on branch `claude/projects-phase-2b-operations` (2026-11-12) against the files cited below. **Code read only by the author of this reference; nothing was run signed in, in Preview or in Production.** The database rules have their own test file on a real PostgreSQL (`packages/rls-tests/test/ops-phase2b.rls.test.ts`, 11 tests, counted in the file) and the screens have unit tests (section 13); this reference states what those files contain and does not claim a run. Draft pull request: not yet opened. Migration `supabase/migrations/20270102000100_ops_phase2b.sql` (install-order row 30): **not applied anywhere by Claude; hosted status `Unverified`.**
+Status: written on branch `claude/projects-phase-2b-operations` (2026-11-12) against the files cited below. Re-read against commit `3e7e348` ("fixes from the independent review"). **Code read only by the author of this reference; nothing was run signed in, in Preview or in Production.** The database rules have their own test file on a real PostgreSQL (`packages/rls-tests/test/ops-phase2b.rls.test.ts`, 11 tests, counted in the file) and the screens have unit tests (section 13); this reference states what those files contain and does not claim a run. The full database suite was last run locally at 76 files / 1,977 tests **before** the review fixes of `3e7e348` and has not been rerun since (reported by the author of the code). Draft pull request: not yet opened. Migration `supabase/migrations/20270102000100_ops_phase2b.sql` (install-order row 30): **not applied anywhere by Claude; hosted status `Unverified`.**
 
 **Release status (four facts kept apart, 2026-11-12):** merged: no (branch only, no pull request yet). Required CI on the exact head: not recorded (no pull request). Hosted database: migration not applied by Claude, owner result none, `Unverified`. Production: not deployed, `Unverified`.
 
@@ -28,7 +28,7 @@ Operations is a **view across one company's projects and the enquiries Sales has
 * **No score, no capacity figure, no second progress tracker** (MO header; M section 7 comment). What is not recorded is shown as "Not recorded".
 * **It is not a module with its own access.** It is one capability of the Projects grant (section 2).
 * **It is not Sales.** An Operations Manager sees a flagged enquiry only through one allowlisted read; prices, quotes, the brief and Sales notes are never selected (section 5.2).
-* **Nothing in the migration reserves, releases, dispatches or receives stock, creates a project, completes one, or changes a task** (M header; verify pack row 8 checks the eight Operations functions for those statements).
+* **Nothing in the migration reserves, releases, dispatches or receives stock, creates a project, completes one, or changes a task** (M header; verify pack row 8 checks the Operations functions for those statements).
 
 The one thing Operations writes itself: `ops_enquiry_planning` (provisional Project Manager, risk, capacity conflict, a question for Sales), through `ops_set_enquiry_planning` (section 6.4). The real assignment of a Project Manager is the existing handover action in Projects (`projects.handover.assign_pm`), which an Operations Manager may use (section 2.2).
 
@@ -50,8 +50,8 @@ The one thing Operations writes itself: `ops_enquiry_planning` (provisional Proj
 | Right | How | Source |
 |---|---|---|
 | The Operations menu and both screens for that company | Menu: any Projects grant with `operations` or `founder`. Screens: `getOperationsContext` lists the companies from `opsCompanyIds`; each read is checked again in the database (`ops_require`, `ops_company_ids`) | N; DA; M section 1 |
-| **PM assignment (`assign_pm`) is implied** | `proj_has_capability(company, 'assign_pm')` is true for a holder of `operations` (database and domain). Everything that tests `assign_pm` through that function follows: assign or change the Project Manager on a handover (`proj_assign_handover_pm`), read the company's handovers (`proj_handovers_select`), the **Handovers** menu entry, My Work's "waiting on you" for a submitted handover | M section 1 (`proj_has_capability`); D (`hasProjCapability`); M200; `20261120000100_proj_core_tables.sql` (policy `proj_handovers_select`); T test 4 |
-| **Also implied, because the same test is used (not named in the description shown on People & Access):** create an internal project (`proj_create_internal_project`, menu entry "New internal project"), change the Project Manager of a live project (`proj_assign_pm`), change which Sales people are linked to a project (`proj_set_sales_link`) | Each function checks `proj_has_capability(company, 'assign_pm')` | M200 (the three functions); N (`anyCap("assign_pm")`) |
+| **PM assignment (`assign_pm`) is implied, for handovers and for reassigning a live project's Project Manager only** | `proj_has_capability(company, 'assign_pm')` is true for a holder of `operations` (database and domain): assign or change the Project Manager on a handover (`proj_assign_handover_pm`), change the Project Manager of a live project (`proj_assign_pm`), read the company's handovers (`proj_handovers_select`), the **Handovers** menu entry, My Work's "waiting on you" for a submitted handover. They are told when a handover is submitted without a Project Manager (`project_handover_submitted`, trigger `trg_proj_handover_submitted_ops`) and read staff names where an assigner does (`proj_staff_directory`) | M section 1 (`proj_has_capability`); D (`hasProjCapability`); M200; `20261120000100_proj_core_tables.sql` (policy `proj_handovers_select`); T test 4 |
+| **Not implied: creating an internal project and changing a project's Sales links.** Both need `assign_pm` itself or founder | `proj_holds_assign_pm` (the literal capability); trigger `trg_proj_internal_project_guard` on `proj_projects` for `kind = 'internal'`; `proj_set_sales_link` wraps the earlier function (kept as `proj_set_sales_link_base`) and refuses an Operations Manager who does not hold `assign_pm`. Domain `holdsAssignPm`; the menu shows "New internal project", `/projects/new` lists companies, and the People page offers the Sales link controls on that test | M section 1; D; N; `projects/new/page.tsx`, `projects/[id]/people/page.tsx`; verify pack row 15 |
 | Read that company's projects **in full without joining them** | `proj_can_view_details` and `proj_can_view_summary` return true for a holder. Every select policy and read function that uses them follows: directory row, Work, tasks, milestones, Timeline, people, site dates, the Delivery plan, unrestricted files, Equipment, History | M section 1; D (`canViewProjectDetails`, `canViewProjectSummary`); T test 6 (reads the task and the unrestricted file) |
 | Read and post in that company's project Chat groups | `chat_is_ops`, added to `chat_is_member` and `chat_project_group` (section 10) | M section 5; T test 6 |
 | Read readiness and open equipment reviews of that company's projects | `proj_equipment_readiness`, policy `proj_equipment_reviews_select` | M section 6 |
@@ -69,14 +69,14 @@ The one thing Operations writes itself: `ops_enquiry_planning` (provisional Proj
 | Scope approval, access management, reopening, overriding a site conflict, the audit trail | T test 1 (`manage_access`, `approve_scope` false); nothing in M implies them |
 | Another company's Operations | T tests 1, 5 (company B refused) |
 
-**Writes that a non-member Operations Manager can make, because those functions test `proj_can_view_details` and nothing narrower.** This differs from the migration's own comment ("Reading only: every write still asks for membership, management or its own capability", M section 1) and from the description on People & Access ("does not edit tasks or deliveries"). Verified in the SQL; none of them is exercised for an Operations Manager in T:
+**What every reader of a project can do, and so an Operations Manager can too, under their own name** (M header and section 1 say so; these functions ask only that the caller can read the project's details):
 
 * comment on a task and edit their own comment (`proj_comment_task`, `proj_edit_task_comment`, M300);
-* add a link or upload an unrestricted file to a project that is not finished (`proj_add_link`, `proj_create_upload_intent`, `proj_register_uploaded_file`, M500). Whether the storage bucket accepts the upload for a non-member: `Unverified`;
-* raise a Delivery Plan correction (`proj_dp_raise_correction` through `proj_require_member_or_founder`, M28);
-* the old Discussion functions (`proj_post_message`, own edit and delete, `proj_mark_read`, `20261120000400_proj_plans_site_calendar_discussion.sql`); the Discussion tab itself is gone once project chat groups exist.
+* raise a Delivery Plan correction (`proj_dp_raise_correction`, M28);
+* add an unrestricted link or file to a project that is not finished (`proj_add_link`, `proj_create_upload_intent`, `proj_register_uploaded_file`, M500). Whether the storage bucket accepts the upload for someone who is not enrolled: `Unverified`;
+* post in the project's old Discussion (`proj_post_message`, own edit and delete, `20261120000400_proj_plans_site_calendar_discussion.sql`); the Discussion tab itself is gone once project chat groups exist.
 
-The screens offer these controls at the "details" level, which an Operations Manager now has (`projectViewLevel`, D). Creating a task is still refused in practice: the assignee must be an active member and a non-manager may only assign to themself (`proj_create_task`, M300).
+These are participation, not management. **An Operations Manager cannot:** create, assign, move or review a task; edit the Delivery Plan; decide a correction or a proposed change; manage, edit or complete the project; see restricted files or the commercial record of a scope change; create an internal project; change a project's Sales links. The description shown on People & Access ("does not edit tasks or deliveries") does not mention the four kinds of participation above; they are not exercised for this role in T (`Unverified` by a test).
 
 ### 2.4 Revocation and deactivation
 
@@ -88,7 +88,7 @@ Removing `operations` from the grant, revoking the Projects grant, or deactivati
 
 | Entry | Where | Condition | Source |
 |---|---|---|---|
-| Module **Operations**, section "Operations", links **Overview** (`/operations`) and **Upcoming Work** (`/operations/upcoming`); icon Workflow | Sidebar, directly before **Projects & Tasks** | The person holds a Projects grant whose capabilities include `operations` or `founder`, in any company. Holding `assign_pm` alone does not show it | N (`buildNavModules`; `NAV_ICONS.operations`); test `nav-groups.test.ts` |
+| Module **Operations**, section "Operations", links **Overview** (`/operations`) and **Upcoming Work** (`/operations/upcoming`); icon Workflow | Sidebar, directly before **Projects & Tasks** | The person holds a Projects grant whose capabilities include `operations` or `founder`, in any company. Holding `assign_pm` alone does not show it. The Projects menu's "New internal project" is shown only to holders of `assign_pm` itself or founders, so not to an Operations Manager | N (`buildNavModules`; `NAV_ICONS.operations`); test `nav-groups.test.ts` |
 | Phone | Not on the bottom bar (My Day, Sales, Clock, Me, More). **More** opens the menu drawer, which lists the same modules, so Operations is reached there | N (`shell-chrome.tsx`: the bottom bar's five entries; `ModuleNavigation` inside the drawer) |
 | Command palette | The two links are ordinary links, so they are searchable | N (`navGroupsFromModules`); `Unverified`: not seen |
 
@@ -128,12 +128,12 @@ Derivation (`decisions` in MO; thresholds `STALLED_DAYS = 3`, `BLOCKER_DAYS = 2`
 |---|---|---|---|---|
 | **Project Manager not assigned** (`pm_unassigned`) | A handover of the company has status `submitted` | "Handover submitted <date>. No Project Manager is assigned." | Operations | **Assign a Project Manager** -> `/projects/handovers?handover=<id>` |
 | **Handover stalled** (`handover_stalled`) | A handover is `pm_assigned` or `clarification_requested` and has waited **3 days or more** since it was assigned (or since the question was sent), or that date is not recorded | "Waiting N days for <PM> to accept." or "A question went back to Sales N days ago and the handover has not been resubmitted." | The named Project Manager, or Sales | **Open the handover (you can reassign)** or **Open the handover** -> the same address |
-| **Blocker not resolved** (`blocker`) | A task of a listed project is blocked (open statuses only) and **either** the person named to unblock it is not the assignee (`cross_team`) **or** it has been blocked **2 days or more**. The read returns at most the 5 oldest blockers per project | ""<task>" is blocked since <date>: <reason>. Waiting on <name>." or "Nobody is named to unblock it." | The unblock owner, else the Project Manager | **Open the task** -> `/projects/<id>/work?task=<task>` |
-| **Installation at risk** (`at_risk_installation`) | A live project whose installation start (or, with none, event start) is **today or within the next 14 days**, and at least one recorded reason exists (below) | "Installation starts <date>: <reasons>." ("The event starts" when no installation date) | The Project Manager | **Open the project** -> `/projects/<id>/work` |
+| **Blocker not resolved** (`blocker`) | A task of a listed project is blocked (open statuses only) and **either** the person named to unblock it is not the assignee (`cross_team`) **or** it has been blocked **2 days or more**. The read returns at most the 5 oldest blockers per project (and `blockers_total`, the count of all of them, used for the task line and the risk reasons) | ""<task>" is blocked since <date>: <reason>. Waiting on <name>." or "Nobody is named to unblock it." | The unblock owner, else the Project Manager | **Open the task** -> `/projects/<id>/work?task=<task>` |
+| **Installation at risk** (`at_risk_installation`) | A live project that is inside the window **from 14 days before its installation start (or, with none, event start) until its event end**, and at least one recorded reason exists (below). A project with no recorded event end leaves the window the day after its start | "Installation starts <date>: <reasons>." ("started" once the date has passed; "The event starts" when no installation date) | The Project Manager | **Open the project** -> `/projects/<id>/work` |
 | **Review equipment booking** (`equipment_review`) | The project has at least one open equipment review (section 9.2) | "A committed date changed while equipment is booked. N bookings to review. The booking itself has not been changed." | The Project Manager | **Review equipment booking** -> `/projects/<id>/equipment` |
 | **Unused reservations not released** (`release_failed`) | A finished project whose release of unused reservations failed at completion and something is still left to release (section 9.4) | "Releasing unused reservations failed when the project finished. The warehouse releases them on the request." | Warehouse | **Open the Equipment tab** -> `/projects/<id>/equipment` |
 
-Reasons that make an installation "at risk" (`riskReasons`, each from a record, joined with semicolons): equipment short on a named request (any short line); an equipment request not yet sent to the warehouse (a draft); N blocked tasks; N overdue tasks; N overdue milestones; N Delivery plan lines not released to the teams. A project with none of these is not listed, however close its date. A project with no recorded installation or event date is never "at risk". A date in the past is not listed.
+Reasons that make an installation "at risk" (`riskReasons`, each from a record, joined with semicolons): equipment short on a named request (any short line); an equipment request not yet sent to the warehouse (a draft); N blocked tasks; N overdue tasks; N overdue milestones; N Delivery plan lines not released to the teams. A project with none of these is not listed, however close its date. A project with no recorded installation or event date is never "at risk". The count of blocked tasks is the total, not the five listed.
 
 Order: by kind in the order of the table, then by date (undated last), then by title.
 
@@ -154,19 +154,19 @@ Each project card:
 | Reference and name | | `/projects/<id>/work` |
 | Status badge | The project status in words | |
 | Badge **Delivery complete · equipment still out** | A completed or archived project with at least one unit out (`completeButOut`) | |
-| **Open project chat** | Only when the project's Chat group exists (`chat_group_id` in the read) | The same page with `?chat=<group id>`; the Chat panel opens it only if the server lists that group for the person (section 10) |
+| **Open project chat** | Only when the project's Chat group exists **and the viewer can open it** (the read returns `chat_group_id` only to a holder of the `operations` capability itself or a member of the project; a founder with neither is not offered the link) | The same page with `?chat=<group id>`; the Chat panel opens it only if the server lists that group for the person (section 10) |
 | Project Manager | Name | |
 | Venue | The project's location, then " · <event edition label>" when the project has one; "Not recorded" | |
 | Installation, Show | Dates or "Not recorded" | |
 | **Dismantling** | Always "Not recorded on the project": a project has no dismantling date (section 12) | |
 | Next milestone | The earliest open milestone with its date, or "None open" | |
-| Tasks | "N open", then ", N overdue" and ", N blocked" when above zero | |
+| Tasks | "N open", then ", N overdue" and ", N blocked" (all blocked tasks, `blockedCount`) when above zero | |
 | **Most relevant issue** | One sentence (below), or "Nothing recorded" | |
 | Equipment | One line per request that is not cancelled (`equipmentLine`), each linking to `/projects/<id>/equipment`; or "Equipment: no request recorded." | |
 
 **Most relevant issue** (`topIssue` in MO): the first of these that applies, in this order: (1) "Unused reservations were not released at completion"; (2) "Delivery complete · equipment still out (N units)"; (3) "Blocked: <first blocked task>"; (4) "Review equipment booking: a committed date changed"; (5) "Equipment short on <request>"; (6) "Equipment return overdue on <request>"; (7) "N overdue tasks"; (8) "N overdue milestones"; (9) "N delivery plan decisions waiting" (open corrections plus proposed changes); (10) "N tasks waiting for review"; otherwise nothing.
 
-**Equipment line** (`equipmentLine`): "<code>: <state>. R of L lines reserved." then, when lines are short, " N lines short (a to buy, b to rent, c with no plan yet)." and, when units are out, " N units out, due back <date>" or ", no return date recorded", with " (overdue)" when the expected return has passed. State words: Not sent to the warehouse yet, Cancelled, Reserved, Partly ready, Short, Partly dispatched, Dispatched, Still out, Returned (`STATE_WORDS`). A line to buy or rent is short, never reserved (section 9.1).
+**Equipment line** (`equipmentLine`): "<code>: <state>." then " R of L lines reserved." only while the state is Reserved, Partly ready or Short (a draft with lines reads " N lines on the draft, nothing reserved yet."; once stock is out the count is not said), then, when lines are short, " N lines short (a to buy, b to rent, c with no plan yet)." and, when units are out, " N units out, due back <date>" or ", no return date recorded", with " (overdue)" when the expected return has passed. State words: Not sent to the warehouse yet, Cancelled, No lines, Reserved, Partly ready, Short, Partly dispatched, Dispatched, Still out, Returned (`STATE_WORDS`). A line to buy or rent is short, never reserved (section 9.1).
 
 ### 4.4 Team and warehouse pressure
 
@@ -186,7 +186,7 @@ There is no threshold in this panel: every recorded case is listed.
 
 Footer of the page: "Read <date>. Operations reads these records; it does not change tasks, bookings or stock. Each link opens the screen where the responsible person acts."
 
-**Mobile.** The panels stack; fact grids are one column on a phone, two from `sm`, four from `lg`; item rows wrap (OV class names). Not seen on a phone: `Unverified`.
+**Mobile.** The panels stack; fact grids are one column on a phone, two from `sm`, four from `lg`; item rows wrap (OV class names). `docs/projects-phase2b-screenshots/` holds four pictures of a harness page with fictional data (Overview and Upcoming Work, desktop and phone), added by the author of the code; nothing was seen signed in or on a real phone: `Unverified`.
 
 ## 5. The two reads
 
@@ -199,7 +199,7 @@ Refuses with "Operations is open to the Operations Managers of this company" unl
 | Key | Rows | Selected fields (and only these) |
 |---|---|---|
 | `handovers` | Handovers of the company in `submitted`, `pm_assigned`, `clarification_requested`, oldest submitted first | id, Sales reference, title, status, submitted at, Project Manager id and name, assigned at, installation start, event start, event end, venue (location), event edition label, clarification requested at |
-| `projects` | Every project of the company that is not completed or archived, plus finished ones with units out, an open equipment review, or a pending failed release | id, reference, name, kind, status, Project Manager id and name, Chat group id, venue, installation start, event start, event end, edition label; counts: open tasks, overdue tasks, reviews waiting, reviews overdue, overdue milestones, open corrections, proposed plan changes, unreleased plan lines, open equipment reviews; up to 5 blockers (task id, title, since, reason cut to 200 characters, assignee, unblock owner, cross-team flag); the next open milestone; one state object per equipment request that is not cancelled (`inv_request_state`, section 9.1); `release_failed` |
+| `projects` | Every project of the company that is not completed or archived, plus finished ones with units out, an open equipment review, or a pending failed release | id, reference, name, kind, status, Project Manager id and name, Chat group id (only when the caller can open it), venue, installation start, event start, event end, edition label; counts: open tasks, overdue tasks, reviews waiting, reviews overdue, overdue milestones, open corrections, proposed plan changes, unreleased plan lines, open equipment reviews; `blockers_total`; up to 5 blockers (task id, title, since, reason cut to 200 characters, assignee, unblock owner, cross-team flag); the next open milestone; one state object per equipment request that is not cancelled (`inv_request_state`, section 9.1); `release_failed` |
 | `overlaps` | Section 4.4, at most 60 | person id and name, the two projects' ids and references, from, to |
 | `company_id`, `taken_at` | | |
 
@@ -278,14 +278,14 @@ Title "Plan <reference>"; description "What Operations records about this enquir
 | **Why** | Text, up to 500 | |
 | **Capacity conflict: this job clashes with other work** | Tick box | |
 | **What it clashes with** | Text, up to 500 | |
-| **Ask Sales to confirm** | Text, up to 1000 | Hint "Sales is told and answers on the enquiry." or, once answered, "Sales has answered. Changing the question clears that answer and asks again." The question is sent **only when its text changed**, so saving the form again does not clear an answer |
+| **Ask Sales to confirm** | Text, up to 1000 | Hint "Sales sees the question on the enquiry, in its Operations planning panel and its history, and answers there. No separate notice is sent." or, once answered, "Sales has answered. Changing the question clears that answer and asks again." The question is sent **only when its text changed**, and the database also keeps who asked, when and the answer when the text is the same, so saving the form again does not clear an answer |
 | **Save planning** | | `saveEnquiryPlanning` -> `ops_set_enquiry_planning` |
 
-**Who can act:** an Operations Manager (or founder) of the enquiry's company, checked in the function. **What it changes:** the one `ops_enquiry_planning` row of that enquiry, and a line in the enquiry's history when a provisional Project Manager is named or removed, a capacity conflict is flagged, or a question is asked ("Operations: provisional Project Manager named: <name>; capacity conflict flagged; asked Sales to confirm details"). **It writes nothing else:** no project, no member, no booking, no reservation (T test 3 compares the counts before and after). **What happens next:** the dialog shows "Saved. The provisional Project Manager is a note for planning: no project, crew or stock was booked." (or "Saved." when nobody is named) and the page refreshes; Sales sees the result on the enquiry (section 7.3).
+**Who can act:** an Operations Manager (or founder) of the enquiry's company, checked in the function. **What it changes:** the one `ops_enquiry_planning` row of that enquiry, and a line in the enquiry's history **only for what actually changed**: a provisional Project Manager named or removed, a capacity conflict flagged or cleared, a new question ("Operations: provisional Project Manager named: <name>; capacity conflict flagged; asked Sales to confirm details"). A repeated identical save writes no new history line. **It writes nothing else:** no project, no member, no booking, no reservation (T test 3 compares the counts before and after). **What happens next:** the dialog shows "Saved. The provisional Project Manager is a note for planning: no project, crew or stock was booked." (or "Saved." when nobody is named) and the page refreshes; Sales sees the result on the enquiry (section 7.3).
 
-**Sales is not sent a notice.** The hint says "Sales is told", but the function sends none: Sales has no notice list, so the answer to "how does Sales find out" is the "From Operations" block on the enquiry and the history line (M comment in `ops_set_enquiry_planning`; section 12).
+**Sales is not sent a notice.** Sales has no notice list, so Sales finds out on the enquiry: the "From Operations" block and the history line. The dialog's hint says so (M comment in `ops_set_enquiry_planning`; section 12).
 
-**Refusals** (A `FRIENDLY`): "This enquiry is not available to you in Operations. It may have been removed from Operations planning, or your Operations access for this company has ended."; "Sales has removed this enquiry from Operations planning. Reload the page."; "This enquiry was lost, so it can no longer be planned."; "Choose someone who has Projects access for this company."; a field over its length says so; anything else: "The planning details could not be saved. Try again." There is no version check: two Operations Managers saving at once, the later save wins.
+**Refusals** (A `FRIENDLY`): "This enquiry is not available to you in Operations. It may have been removed from Operations planning, or your Operations access for this company has ended."; "Sales has removed this enquiry from Operations planning. Reload the page."; "This enquiry was lost, so it can no longer be planned."; "Choose someone who has Projects access for this company."; a field over its length says so; a value the database does not accept (an unknown risk, a malformed id, an over-long text) is refused there with "Check the planning details: a choice is not valid or a text is too long" and shown as the general message; anything else: "The planning details could not be saved. Try again." There is no version check: two Operations Managers saving at once, the later save wins.
 
 ## 7. The Sales side: "Operations planning" on an enquiry
 
@@ -327,11 +327,11 @@ Block **From Operations** (read `crm_ops_planning`, any Sales access to the comp
 | Nothing recorded | "Operations has not recorded anything for this enquiry yet." |
 | Recorded | **Provisional Project Manager** (name or "Nobody named yet") with "Provisional. No project, crew or stock is booked by this."; **Risk** (badge Not assessed, Low, Medium, High, and the note); **Capacity conflict** (badge, or "None flagged", and the note); **Question from Operations** with who asked and when, the answer with its time or "Not answered yet.", or "Operations has not asked anything." |
 
-**Answer** (owner or founder, enquiry not Lost, a question exists): field **Your answer** (or **Change your answer**), hint "Operations can read this. Do not put prices or commercial terms here.", button **Send answer to Operations** (or **Replace the answer**). `answerOpsQuestion` -> `crm_set_ops_planning(id, true, {answer}, version)`. It stores the answer with who and when, and sends **Sales answered your question on <reference>** to the Operations Managers.
+**Answer** (owner or founder, enquiry not Lost, a question exists): field **Your answer** (or **Change your answer**), hint "Operations can read this. Do not put prices or commercial terms here.", button **Send answer to Operations** (or **Replace the answer**). `answerOpsQuestion` -> `crm_set_ops_planning(id, null, {answer}, version)`: a flag of null leaves the flag as it is, so an answer never flags an enquiry that was removed. It stores the answer with who and when where a question exists, and only then sends **Sales answered your question on <reference>** to the Operations Managers.
 
 **Remove from Operations planning** (confirmation dialog: "Operations will no longer see this enquiry in Upcoming Work." / "The planning details you entered stay on the enquiry, and what Operations recorded is kept. Flag the enquiry again to show it to Operations again. Nothing was booked, so nothing is released."). `removeOpsPlanning` -> `crm_set_ops_planning(id, false, {}, version)`. It clears the flag date and who flagged, writes the history line "Removed from Operations planning", and the enquiry leaves Upcoming Work on the next read (T test 11). No notice is sent.
 
-**Refusals and failures (SA).** A stale page: "This enquiry was changed by someone else. Reload the page to see the latest version, then make your change again." (checked in the app first, then by the function). Not the owner or a founder, a Lost enquiry, an unknown field: the function refuses and the message is the standard Sales wording (`friendlyCrmError`). Database without this migration: "Operations planning is not available yet, so nothing was saved. Trying again will not help until a required database update is installed. Ask the system owner to complete the Operations database update."
+**Refusals and failures (SA).** A stale page: "This enquiry was changed by someone else. Reload the page to see the latest version, then make your change again." (checked in the app first, then by the function). Not the owner or a founder, a Lost enquiry, an unknown field: the function refuses and the message is the standard Sales wording (`friendlyCrmError`). A date that is not a real date is refused in the form ("Use a valid date"); a value in the wrong form reaching the function is refused with "Check the planning details: ..." and nothing is saved. Database without this migration: "Operations planning is not available yet, so nothing was saved. Trying again will not help until a required database update is installed. Ask the system owner to complete the Operations database update."
 
 ## 8. Workflow end to end: flag, plan, won, handover, assign, accept, project with its edition
 
@@ -342,11 +342,11 @@ Block **From Operations** (read `crm_ops_planning`, any Sales access to the comp
 | 3 | Sales | Answers the question; unticks **Dates are tentative** when the client confirms | The answer; the tick | Operations Managers: `project_ops_sales_answered` (for the answer only) | M; T test 3 |
 | 4 | Sales | Closes the enquiry as Won (existing flow) | As before | As before | `sales-close-and-handover.md` |
 | 4a | (automatic) | Upcoming Work now reads "Confirmed: this enquiry is won"; next step "Prepare the handover" | Nothing | | M `ops_upcoming_work`; MO |
-| 5 | Sales | Saves and submits the handover (existing flow) | The handover; **the handover takes the enquiry's event edition and a snapshot of it** (trigger `trg_proj_handover_edition`) | Existing handover notices (see the gap in section 12 for Operations Managers) | M section 4; T test 4 |
+| 5 | Sales | Saves and submits the handover (existing flow) | The handover; **the handover takes the enquiry's event edition and a snapshot of it** (trigger `trg_proj_handover_edition`) | Existing handover notices; an Operations Manager who holds neither `founder` nor `assign_pm` is sent the same `project_handover_submitted` by the new trigger `trg_proj_handover_submitted_ops` when no Project Manager was named | M section 4; T test 4 |
 | 6 | Operations Manager (or a founder or `assign_pm` holder) | **Assign a Project Manager** on the handover, from the Overview, Upcoming Work or Handovers | The handover (existing `proj_assign_handover_pm`) | The person named (existing `project_handover_assigned`) | M200; T test 4 |
 | 7 | The named Project Manager | **Accept handover** (existing) | The project, its details, the member row, the Sales links; **the project's details take the handover's edition copy** (trigger `trg_proj_details_edition`) | Existing | M section 4; T test 4 (a second Accept returns the same project) |
 | 8 | (automatic) | The enquiry leaves Upcoming Work; the project is on the Overview under Upcoming delivery, with the edition label beside the venue | Nothing | | M `ops_upcoming_work`, `ops_overview`; T test 4 |
-| 9 | Project Manager | Changes a committed date while a request is with the warehouse | A review row per request and date (section 9.2) | The Project Manager, unless they made the change themselves | M section 6; T test 7 |
+| 9 | Project Manager | Changes a committed date while a request is with the warehouse | A review row per request and date (section 9.2) | The Project Manager, unless they made the change themselves. A date changed back to the original closes the review by itself | M section 6; T test 7 |
 | 10 | Project Manager | Completes the project while equipment is out | As before; the project stays on the Overview with "Delivery complete · equipment still out" until the warehouse records the return | | M section 7; T test 9 |
 
 ### 8.1 The event edition, exactly
@@ -376,17 +376,20 @@ Where the edition is shown:
 
 One request's state, from its lines that are not cancelled and their reservations (`inv_line_progress`):
 
-| State (word on screen) | When |
+| State (word on screen) | When (first rule that applies) |
 |---|---|
-| Not sent to the warehouse yet | The request is a draft |
-| Reserved | No line is short and nothing is dispatched |
-| Partly ready | Some, not all, lines are short |
-| Short | Every line is short |
-| Partly dispatched | Units are out and not every line has been dispatched |
-| Dispatched | Units are out, every line dispatched, nothing returned yet |
-| Still out | Units are out and some have come back |
-| Returned | Something was dispatched and nothing is out |
+| Not sent to the warehouse yet | The request is a draft. A draft is never counted as reserved |
 | Cancelled | The request is cancelled (not listed in readiness) |
+| No lines | The request has no line that is not cancelled ("The request has no lines, so nothing is reserved") |
+| Partly dispatched | Something was dispatched and either a line is short or not every line has been dispatched. **A request with a short line is never "Dispatched" or "Returned"** |
+| Returned | Something was dispatched and nothing is out |
+| Still out | Units are out and some have come back |
+| Dispatched | Units are out, nothing returned yet |
+| Partly ready | Some, not all, lines are short; or no line is short but not every line is fully reserved |
+| Short | Every line is short |
+| Reserved | Every line is fully reserved for the request's dates |
+
+A line is **short** by what is asked and neither reserved for the window nor already sent, counted only while the request is with the warehouse (submitted, in progress, fulfilled) and the line is open.
 
 **A line whose shortage is to be bought or rented is short. It is never counted as reserved** until stock is reserved for it (M comment; `short_buy`, `short_rent`, `short_no_plan`; T test 8). `return_overdue` is true when units are out and the expected return has passed.
 
@@ -396,16 +399,17 @@ Where it is shown:
 * **Work page**, delivery summary, **Equipment**: a failed import or a draft still comes first; then the readiness (one request: its word and detail; several: counts per state, "N requests with the warehouse"), with " · Review equipment booking" when a review is open; a failed read says "Equipment readiness could not be loaded" and is never shown as nothing waiting (WA `equipmentSummary`, `readinessSummary`).
 * **Operations Overview**: the equipment lines and the pressure panel (section 4).
 
-**Inventory Today** (IT): the readiness sentence of a request no longer counts a line to buy or rent as fully reserved. The fact now reads "F of L lines fully reserved · R still to reserve · B to buy or rent", the three counts always add up to the open lines, the title says "ready to send in part" (never plain "ready to send") while any line is still to reserve or to buy or rent, and a separate fact "N lines to buy or rent" is added (test `today.test.ts`).
+**Inventory Today** (IT): the readiness sentence of a request no longer counts a line to buy or rent as fully reserved. The fact now reads "F of L lines fully reserved · R still to reserve · B to buy or rent", the three counts always add up to the open lines, the fact about lines that can go reads "N line has reserved stock to send" / "N lines have reserved stock to send" (not "ready to send", because a partly reserved line is counted there and among the short ones), the title says "ready to send in part" (never plain "ready to send") while any line is still to reserve or to buy or rent, and a separate fact "N lines to buy or rent" is added (test `today.test.ts`).
 
 ### 9.2 Review equipment booking
 
-**When a review is recorded** (trigger `trg_proj_details_dates_changed`): the project's installation start, event start or event end changes while the project has a request in `submitted`, `in_progress` or `fulfilled`. One row per request and date in `proj_equipment_reviews`: the old date, the new date, who changed it and when. A second change of the same date before the review is resolved keeps the first "old" date and updates the new one. **It changes no reservation and no request date** (T test 7 compares the reservations before and after). The Project Manager is sent **Review equipment booking: <request code>** (once per request while unread; not when the Project Manager made the change, because `proj_notify` never tells the caller).
+**When a review is recorded** (trigger `trg_proj_details_dates_changed`): the project's installation start, event start or event end changes while the project has a request in `submitted`, `in_progress` or `fulfilled`. One row per request and date in `proj_equipment_reviews`: the old date, the new date, who changed it and when. A second change of the same date before the review is resolved keeps the first "old" date and updates the new one. **A date changed back to the date the booking was made for closes the review by itself** (the open row is deleted; no notice). **It changes no reservation and no request date** (T test 7 compares the reservations before and after). The Project Manager is sent **Review equipment booking: <request code>** (once per request while unread; not when the Project Manager made the change, because `proj_notify` never tells the caller).
 
 **Where it shows:**
 
 * **Equipment tab**, panel **Review equipment booking** ("A project date changed after the equipment was requested."): the sentence "The booking has not been changed. The warehouse changes it on the request, where conflicts are checked."; per review the request code, which date (Installation start, Event start, Event end), "was <old> · now <new>" ("not set" for an empty date), "Changed by <name> on <time>", the link **Open request <code> to change its dates** (`/inventory/requests/<id>`), and the form below. Shown on a finished project too.
 * **Work page**, What needs doing: one line per request, label **Review equipment booking**, "Request <code>", the dates and "The booking has not been changed.", linking to the Equipment tab; under "needs you" for whoever manages the project, otherwise under waiting on the Project Manager (WA).
+* **Inventory request page** (`/inventory/requests/<id>`), for a project request: the same panel, filtered to that request, so the warehouse sees it where the booking is changed. **Mark as reviewed** is offered to someone who operates a warehouse location or manages the request. If the read fails: "Whether a project date changed for this request could not be loaded. Reload to check before changing the booking." (`apps/web/src/app/(app)/inventory/requests/[id]/page.tsx`).
 * **Operations Overview**: Needs my decision and Most relevant issue (section 4).
 
 **Mark as reviewed** (EQ `EquipmentReviewForm`; `resolveEquipmentReview` -> `proj_resolve_equipment_review`): optional **Note (optional)** up to 500 characters (placeholder "What was decided, for example: the warehouse moved the booking").
@@ -440,19 +444,21 @@ Reference for Chat as a whole: [`app-chat.md`](./app-chat.md) (section 10 covers
 * **Groups appear before anyone has posted:** `chat_my_groups` creates the missing group of each live project (not completed or archived) of an Operations Manager's companies.
 * **Tag and note:** a group the person reads through Operations and not as a team member shows a small tag **Operations** in the list and, at the top of the thread, "You are reading this as Operations Manager. You are not on this project's team." (`via_operations`; CH).
 * **Archived (N):** the groups of **archived** projects are listed under a collapsed heading "Archived (N)" after Sales and Projects. Pressing it opens and closes the section; a search opens it; while closed, the heading carries the section's unread count and a mention marker, so nothing is dropped from the totals. A completed project that is not archived stays under Projects; a restored project's group is back under Projects on the next refresh (CH `groupSections`, `archivedHeading`; `project_status` from the read; T test 10).
-* **Mentions:** the picker lists `chat_group_members`, which for a project group is the project's enrolled members only (M27, unchanged). **An Operations Manager who is not on the project is not offered in the picker, so they cannot be @mentioned** from the screen. (The post function itself accepts any current member of the group, which now includes them; no screen sends such a mention.)
-* **"Open project chat"** on the Overview opens `?chat=<group>`; the launcher opens it only when the server lists that group for the person. A founder who holds no `operations` capability and is not on the project sees "That conversation is not available to you. A project's chat is open to the people on that project." (CH; the sentence does not mention Operations Managers).
+* **Mentions:** `chat_group_members` for a project group now lists the people on the project and, marked "(Operations)" after their name, the company's Operations Managers who are not on the project. They can be chosen in the @ picker and mentioned. The membership line under a project group's name reads "The people on this project, and the company's Operations Managers" (`lib/chat/model.ts`).
+* **"Open project chat"** on the Overview is offered only when the viewer can open the group (section 4.3) and opens `?chat=<group>`. A link to a group the person cannot open says "That conversation is not available to you. A project's chat is open to the people on that project and to the company's Operations Managers." (CH).
+* **Cost:** `chat_my_groups` works through every project group of the caller's Operations companies, so the list gets slower as projects accumulate: about 1.5 s at 3,000 groups in the independent reviewer's measurement (reported, not measured by the author of this reference).
 * **Unchanged:** the three Sales groups, the read-only rule for finished projects, the membership rule for team members, messages and their storage.
 
 ## 11. Notices
 
-Three new types, all shown in the existing Project notices list (My Work, My Day; `proj_my_notifications`), worded in NT:
+Three new types and one wider audience, all shown in the existing Project notices list (My Work, My Day; `proj_my_notifications`), worded in NT:
 
 | Type | Text | Opens | Sent to | When |
 |---|---|---|---|---|
 | `project_equipment_review` | "Review equipment booking: <request code>" | The project's Equipment tab | The Project Manager (never the person who made the change) | A committed date changed while a request is with the warehouse |
+| `project_handover_submitted` (existing type) | The existing handover wording | The handover | Now also holders of `operations` who hold neither `founder` nor `assign_pm` (trigger `trg_proj_handover_submitted_ops`) | A handover is submitted without a Project Manager |
 | `project_ops_enquiry_flagged` | "Sales flagged <reference> for Operations planning" | `/operations/upcoming` | Holders of the `operations` capability itself for that company (not a founder without it; never the caller) | An enquiry is flagged for the first time (or again after being removed) |
-| `project_ops_sales_answered` | "Sales answered your question on <reference>" | `/operations/upcoming` | Same | Sales sends an answer |
+| `project_ops_sales_answered` | "Sales answered your question on <reference>" | `/operations/upcoming` | Same | Sales sends an answer to a question that exists |
 
 The Operations notices carry the enquiry's reference and id, never what was written. A second identical notice is not added while the first is unread (`dedupe_key`). Nothing is sent by email or outside the app.
 
@@ -460,17 +466,14 @@ The Operations notices carry the enquiry's reference and id, never what was writ
 
 1. **No automatic recovery when releasing unused reservations fails at completion.** The warehouse releases by hand; the notice clears when nothing is left (section 9.4).
 2. **A project has no dismantling date.** Sales records one on the enquiry for planning (shown in Upcoming Work); it is not carried into the handover or the project, so the Overview always says "Not recorded on the project". (An equipment request has its own "Dismantling finished" planning date in Inventory; Operations does not read it.)
-3. **Sales has no notice list.** Sales sees what Operations recorded on the enquiry (From Operations) and in its history. The Plan dialog's hint "Sales is told and answers on the enquiry." overstates this: no notice is sent.
-4. **An Operations Manager cannot be @mentioned in a project chat** unless they are also on the project (section 10).
+3. **Sales has no notice list.** Sales sees what Operations recorded on the enquiry (From Operations) and in its history; no notice is sent, and the Plan dialog says so.
+4. **The Chat list costs more for an Operations Manager with very many projects:** about 1.5 s at 3,000 groups in the reviewer's measurement (section 10).
 5. **Overlaps need both projects' dates** (a start and an event end) and the people recorded on both; an unrecorded clash does not show.
-6. **A new handover's "submitted" notice may not reach an Operations Manager.** `proj_submit_handover` (M200) notifies people whose grant literally contains `founder` or `assign_pm`; a person who holds only `operations` is not in that list. They still see the handover on the Overview (Needs my decision), in Upcoming Work, on Handovers and under My Work. `Unverified` by a run.
-7. **Sales owners' names on the Handovers page.** `proj_staff_directory` (M000) answers only for a literal `founder`, `manage_access` or `assign_pm`; an Operations Manager with only `operations` gets no rows, so a Sales owner without Projects access reads "a Sales colleague". `Unverified` by a run.
-8. **Writes open to a non-member Operations Manager** (task comments, unrestricted files and links, Delivery Plan corrections) and **the wider reach of the implied PM assignment** (New internal project, Change Project Manager on a live project, Sales links): section 2.2 and 2.3. They contradict the description shown on People & Access and are untested for this role.
-9. **The warehouse is not told about a booking to review.** The notice goes to the Project Manager only; the warehouse sees the review on the project's Equipment tab. Inventory's own screens do not show it.
-10. **The answer notice does not check that a question exists.** `crm_set_ops_planning` sends `project_ops_sales_answered` for any non-empty answer; the screen offers the answer box only when there is a question.
-11. **A question sent back by the Project Manager re-takes the edition on the next update of the handover** (section 8.1), including a reassignment made while it is in that state.
-12. **JARVIS:** guidance only. No JARVIS action, read or capability was added (`jarvis-rulebook.md` section 7).
-13. **Nothing was checked signed in; no hosted migration was run; no browser flow exists for this phase** (`apps/web/os-shell-checks/README.md` lists none).
+6. **Participation open to an Operations Manager** (task comments, corrections, unrestricted files and links, the old Discussion) is intended (section 2.3) and is not named in the description shown on People & Access; it is not exercised for this role in the database tests.
+7. **The warehouse gets no notice of a booking to review.** The notice goes to the Project Manager only; the warehouse sees the panel on the request page in Inventory and on the project's Equipment tab, not in a list of its own (Inventory Today does not show it).
+8. **A question sent back by the Project Manager re-takes the edition on the next update of the handover** (section 8.1), including a reassignment made while it is in that state.
+9. **JARVIS:** guidance only. No JARVIS action, read or capability was added (`jarvis-rulebook.md` section 7).
+10. **Nothing was checked signed in; no hosted migration was run; no browser flow exists for this phase** (`apps/web/os-shell-checks/README.md` lists none).
 
 ## 13. Rollout and tests
 
@@ -480,7 +483,7 @@ Tests in the repository (counts are the number of `it(...)` blocks in each file;
 
 | File | Count | What it covers |
 |---|---|---|
-| `packages/rls-tests/test/ops-phase2b.rls.test.ts` | 11 | The capability and what it implies; flagging and the allowlist; planning writes nothing else; won, assign, accept, the edition copy; Overview access and revocation; Chat path; date-change review; readiness states; equipment out after completion and the failed release; Chat status and the closeout edition; removing the flag, the owner packs, rollback and re-apply |
+| `packages/rls-tests/test/ops-phase2b.rls.test.ts` | 11 (counted at `3e7e348`) | The capability and what it implies; flagging and the allowlist; planning writes nothing else; won, assign, accept, the edition copy; Overview access and revocation; Chat path; date-change review; readiness states; equipment out after completion and the failed release; Chat status and the closeout edition; removing the flag, the owner packs, rollback and re-apply |
 | `apps/web/src/lib/operations/model.test.ts` | 8 | Dates word, next step, filters, equipment line, Needs my decision, at-risk window, complete-but-out, pressure |
 | `apps/web/src/app/(app)/operations/operations-pages.test.tsx` | 6 | Overview order and links, refused / failed / empty, company chooser, Upcoming Work fields, won and submitted, the three empty and failure messages |
 | `apps/web/src/app/(app)/sales/opportunities/[id]/ops-planning-panel.test.tsx` | 18 | The Sales panel in each state |

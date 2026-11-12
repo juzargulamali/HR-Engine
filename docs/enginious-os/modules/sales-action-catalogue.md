@@ -1138,7 +1138,7 @@ All three are one database function, `crm_set_ops_planning(id, flag, fields, exp
 | (1) Reached | `setOpsPlanning` (`apps/web/src/lib/actions/crmOps.ts`) from **Flag for Operations planning** and **Edit planning details** on the enquiry's Overview tab, panel Operations planning; function `crm_set_ops_planning` with flag true |
 | (2) Record | The enquiry (`crm_opportunities`), identified by its id; version checked |
 | (3) Inputs | Expected decision date (optional), dismantling date (optional), **Dates are tentative** (tick, on by default), expected teams (any of Engineering, Content, Programming, Installation, Warehouse), Still to confirm (up to 1000), Note for Operations (up to 1000). Every field of the dialog is sent, so an emptied field is cleared |
-| (4) Permissions | Owner/founder (`crm_require_owner_or_founder`). Refused: anyone else with a Sales grant (they see the panel without buttons); an unknown field name |
+| (4) Permissions | Owner/founder (`crm_require_owner_or_founder`). Refused: anyone else with a Sales grant (they see the panel without buttons); an unknown field name; a value in the wrong form ("Check the planning details: ..."; a date that is not a real date is refused in the form with "Use a valid date") |
 | (5) Starting states | Any stage except Lost ("A lost enquiry cannot be flagged for Operations planning"). Allowed on a Won enquiry |
 | (6) Changes | `crm_opportunities`: `ops_flagged_at` and `ops_flagged_by` (kept if already set), `ops_decision_date`, `ops_dates_tentative`, `ops_dismantle_date`, `ops_teams`, `ops_to_confirm`, `ops_note`; `version` plus one |
 | (7) Side effects | On first flagging (or flagging again after a removal): event `details_changed` with the note "Flagged for Operations planning", and the in-app notice `project_ops_enquiry_flagged` ("Sales flagged <reference> for Operations planning") to each holder of the Operations Manager right for that company. The enquiry appears in Operations > Upcoming Work with the allowlisted fields. Editing details later sends no notice |
@@ -1165,13 +1165,13 @@ All three are one database function, `crm_set_ops_planning(id, flag, fields, exp
 #### `sales.ops.answer_question`
 | Field | Entry |
 |---|---|
-| (1) Reached | `answerOpsQuestion` from **Send answer to Operations** / **Replace the answer** under Question from Operations; function `crm_set_ops_planning` with flag true and the one field `answer` |
+| (1) Reached | `answerOpsQuestion` from **Send answer to Operations** / **Replace the answer** under Question from Operations; function `crm_set_ops_planning` with flag null (the flag is left as it is: an answer never flags an enquiry) and the one field `answer` |
 | (2) Record | The enquiry (version checked) and its `ops_enquiry_planning` row |
 | (3) Inputs | The answer (required, up to 1000) |
 | (4) Permissions | Owner/founder |
 | (5) Starting states | Flagged, not Lost, and Operations has asked a question (the screen offers the box only then; the function stores the answer only where a question exists) |
 | (6) Changes | `ops_enquiry_planning`: `answer`, `answered_by`, `answered_at`; the enquiry's `version` plus one |
-| (7) Side effects | In-app notice `project_ops_sales_answered` ("Sales answered your question on <reference>") to the Operations Managers of the company. Operations reads the answer in Upcoming Work. No timeline event |
+| (7) Side effects | In-app notice `project_ops_sales_answered` ("Sales answered your question on <reference>") to the Operations Managers of the company, only when a question existed and the answer was stored. Operations reads the answer in Upcoming Work. No timeline event |
 | (8) Verify | The panel shows "Answer from Sales, <time>" with the text |
 | (9) STOP | No. The answer is read by Operations: no prices or commercial terms |
 | (10) Retry | Safe: a repeat replaces the answer with the same text; a second notice is not added while the first is unread. The version check refuses a stale repeat |
