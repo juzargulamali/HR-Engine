@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
@@ -18,6 +20,7 @@ const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@dp-test.ae')
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const j = (o: unknown) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;
 const DENIED = /Only |not found|permission denied/i;
+const pack = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
 
 describe("Delivery Plan", () => {
   const db = new RlsTestDatabase();
@@ -239,6 +242,14 @@ describe("Delivery Plan", () => {
     expect((await plan(U.pm)).changes[0]).toMatchObject({ source: "excel", status: "proposed" });
   });
 
+  it("the owner packs: preflight has no STOP, verify says OK on every row", async () => {
+    expect((await admin(pack("proj_delivery_plan_00_preflight_readonly.sql"))).filter((r) => String(r.result).startsWith("STOP"))).toEqual([]);
+    // Row 2 (no write privilege) is checked on hosted: this harness grants every table to signed-in users so that row-level security is what is tested.
+    const rows = (await admin(pack("proj_delivery_plan_20_verify_readonly.sql"))).filter((r) => !String(r.item).startsWith("signed-in users can only READ"));
+    expect(rows.filter((r) => r.result !== "OK" && r.result !== "INFO")).toEqual([]);
+    expect(rows.length).toBeGreaterThan(6);
+  });
+
   it("a finished project's plan is read-only, and another project's plan is its own", async () => {
     expect((await plan(U.outsider, P2)).items).toEqual([]);
     await expect(plan(U.pm, P2)).rejects.toThrow(/not found/);
@@ -246,5 +257,17 @@ describe("Delivery Plan", () => {
     await expect(saveItem(U.pm, { zone: "x", title: "After the end" })).rejects.toThrow();
     await expect(release(U.pm)).rejects.toThrow();
     expect((await plan(U.tech)).items.length).toBe(3);
+  });
+
+  it("rollback: the plan is gone, the tasks and equipment lines it created stay, and applying the migration again works", async () => {
+    const tasks = await count(`select 1 from proj_tasks where project_id = '${P1}'`);
+    const eq = await count(`select 1 from inv_request_lines`);
+    await db.seed(pack("proj_delivery_plan_90_rollback.sql"));
+    await db.seed(pack("proj_delivery_plan_90_rollback.sql"));                        // safe to run twice
+    expect(await count(`select 1 from pg_class where relname like 'proj_dp_%' and relkind = 'r'`)).toBe(0);
+    expect(await count(`select 1 from proj_tasks where project_id = '${P1}'`)).toBe(tasks);
+    expect(await count(`select 1 from inv_request_lines`)).toBe(eq);
+    await db.applyMigration("20261231000100_proj_delivery_plan.sql");
+    expect((await plan(U.outsider, P2)).items).toEqual([]);
   });
 });

@@ -16,6 +16,7 @@ export function projectTabs(base: string, discussion: { unread: string | null } 
   return [
     { href: `${base}/work`, label: "Work" },
     { href: `${base}/plan`, label: "Timeline" },
+    { href: `${base}/delivery`, label: "Delivery plan" },
     ...(discussion ? [{ href: `${base}/discussion`, label: "Discussion", badge: discussion.unread }] : []),
     { href: `${base}/equipment`, label: "Equipment" },
     // Project Budget & Expenses: offered only to the Project Manager and to people the module's own access rules let in (never inferred from Projects access).
@@ -26,7 +27,7 @@ export function projectTabs(base: string, discussion: { unread: string | null } 
 /** Which tab a path belongs to. The old overview address belongs to Work (its content lives there now); the legacy section addresses light up their new home. */
 export function activeTabHref(pathname: string, base: string): string | null {
   if (pathname === base) return `${base}/work`;
-  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`], ["/equipment", `${base}/equipment`], ["/budget", `${base}/budget`]];
+  const map: [string, string][] = [["/work", `${base}/work`], ["/plan", `${base}/plan`], ["/delivery", `${base}/delivery`], ["/timeline", `${base}/plan`], ["/calendar", `${base}/plan`], ["/discussion", `${base}/discussion`], ["/equipment", `${base}/equipment`], ["/budget", `${base}/budget`]];
   for (const [seg, href] of map) if (pathname === `${base}${seg}` || pathname.startsWith(`${base}${seg}/`)) return href;
   return null;
 }
