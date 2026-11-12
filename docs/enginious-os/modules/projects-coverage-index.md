@@ -9,12 +9,14 @@ Reference files (all under `docs/enginious-os/modules/`):
 * **T** [`projects-timeline-site-and-files.md`](./projects-timeline-site-and-files.md): Timeline, site bookings, dependencies, Files & client plan.
 * **P** [`projects-people-changes-history-completion.md`](./projects-people-changes-history-completion.md): People & access, Feedback & changes, History, Completion and reopening.
 * **H** [`projects-handovers-equipment-and-workflow.md`](./projects-handovers-equipment-and-workflow.md): Handovers, the Equipment tab, the Budget tab, the end-to-end workflow trace.
+* **L** [`projects-delivery-plan.md`](./projects-delivery-plan.md): the Delivery Plan (Phase 2, part 1; draft PR, not merged; migration `20261231000100` not applied by Claude): deliverables by zone, breakdown, release, corrections, proposals, Excel import and export.
+* **R** [`projects-closeout-report.md`](./projects-closeout-report.md): the Project Closeout Report (Phase 2, part 2; draft PR #84, not merged; migration `20270101000100` not applied by Claude): evidence snapshot, Review data to be sent, the AI or facts-only draft, checks, approval, PDF.
 * **C** [`app-chat.md`](./app-chat.md) section 9: the project's Chat group (membership, the end of the Discussion tab, old Discussion links).
 * [`projects-action-catalogue.md`](./projects-action-catalogue.md): every action that changes data. [`projects-phase1-changes.md`](./projects-phase1-changes.md): what Phase 1 changed, per workflow (who can act, what it does, where the user goes next), the Phase 2 boundary and the verification gaps.
 
 Who can see: **Member** = actively enrolled in the project and still eligible (`proj_is_active_member`); **Manager** = Project Manager, temporary leader or founder of the project's company (`proj_can_manage`); **Head** = head of a department team; **Assigner** = holds `assign_pm`. Capabilities are in `packages/domain/src` (Projects permissions) and `docs/enginious-os/03-roles-access-and-approvals.md`. The database enforces each rule; the screens only hide what would be refused.
 
-**Planned, not built (Phase 2):** structured event-edition links on the handover and project, calendar integration, equipment booking review after a delivery-date change, the Inventory readiness calculation. None has a row below.
+**Planned, not built (Phase 2):** the Operations Manager dashboard, structured event-edition links on the handover and project, calendar integration, equipment booking review after a delivery-date change, the Inventory readiness calculation. None has a row below. (The Delivery Plan, Phase 2 part 1, is section 7; the Project Closeout Report, part 2, is section 8.)
 
 
 ## 1. Module shell, directory, My Work, cross-project calendar, the project frame and lifecycle (D)
@@ -262,7 +264,38 @@ Who can see: **Member** = actively enrolled in the project and still eligible (`
 | 214 | Discussion tab and page (old) | tab | Only on a database WITHOUT project chat groups | Members and founders (the old rule) | The earlier conversation surface; also the rollback state | C app-chat.md 9; `discussion/discussion-client.tsx` | Unverified: the old page's controls were not re-documented (it is replaced once the migration is applied) |
 | 215 | Group search in the Chat panel | filter | Chat panel, when the person has more than eight groups | Anyone with groups | Finds a group by name or reference | C app-chat.md 9 | Documented |
 
+## 7. Delivery Plan and its Excel import and export (L)
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 216 | Delivery plan tab | tab | Project, tab **Delivery plan**; `/projects/[id]/delivery` | Readers of the project's details | The plan by zone, what waits for a decision, who defines each section | L 3 | Documented |
+| 217 | Add deliverable / Edit deliverable | dialog | **Add deliverable**; **Edit** on a deliverable | Manager | Create or change a deliverable row; a released row becomes a proposal | L 3, 4 | Documented |
+| 218 | Add breakdown line / Edit line | dialog | **Add line**; **Edit** on a line | Manager; the section's delegate | Create or change a line; released becomes a proposal; booked equipment is refused | L 3, 4 | Documented |
+| 219 | Remove deliverable / Remove line | dialog | **Remove** | Manager; the section's delegate (lines) | Take unreleased rows out of the plan | L 3 | Documented |
+| 220 | Release the plan / Release this deliverable | dialog | **Release plan**; **Release** | Manager | Says what will be created, then creates tasks and draft equipment lines once | L 3 | Documented |
+| 221 | Who defines each section | form | Bottom of the tab | Manager | Delegate a section to a member | L 3 | Documented |
+| 222 | Raise a correction | dialog | **Correction** on a deliverable or line; the scope button; "Raise a correction" in task detail | Readers of the project's details | Send a correction to the relevant lead; tells the Project Manager | L 3 | Documented |
+| 223 | Corrections waiting for a decision | panel | Top of the tab while one is open | Readers; decided by the lead or the manager | Accept or decline, with a note | L 3 | Documented |
+| 224 | Proposed changes to released work | panel | Top of the tab while one is proposed | Readers; decided by the manager | Approve, reject or withdraw a proposal | L 3, 4 | Documented |
+| 225 | Decisions | panel | Bottom of the tab | Readers | The latest decided corrections and changes, with who and why | L 3 | Documented |
+| 226 | Download template | download | **Download template**; `/api/projects/[id]/delivery-plan/template` | Readers | The empty workbook with examples and instructions | L 5 | Documented |
+| 227 | Export Excel | download | **Export Excel**; `/api/projects/[id]/delivery-plan/export` | Readers | The plan as a workbook with read-only progress | L 5 | Documented |
+| 228 | Import Excel | screen | **Import Excel**; `/projects/[id]/delivery/import` | Manager; section delegates | Upload, preview (Add, Update, Unchanged, Needs attention), resolve, confirm | L 5 | Documented |
+
+## 8. Project Closeout Report (R)
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 229 | Closeout report | screen | **Manage project > Closeout report**; `/projects/[id]/closeout` | Manager (others are told who the Project Manager is) | The internal report: review, draft, approve, download | R 5 | Documented |
+| 230 | Generate closeout report | link | The **Closeout report** panel on Files & client plan; the link under Complete project | Manager | Opens the Closeout report screen | R 5 | Documented |
+| 231 | Review data to be sent | panel | First thing on the screen; **Review data and write again** | Manager | Source categories, team names, optional text with tick boxes, what is withheld, missing or cut, and that generating sends the reviewed content to Anthropic | R 5.1 | Documented |
+| 232 | Send to Anthropic and write the draft / Write a facts-only draft | form | Bottom of the review | Manager | Write or rewrite the one draft, with or without the AI provider | R 5.1, 5.2 | Documented |
+| 233 | The draft (Recorded facts, sections, Sources, marks) | panel | After a draft is written | Manager | Read and edit the narrative against its sources | R 5.3, 5.4 | Documented |
+| 234 | Save edits / Approve version / Discard draft | form | Bottom of the draft | Manager | Save, fix a version, or drop the draft | R 5.4 | Documented |
+| 235 | Approved versions | panel | Bottom of the screen | Manager | Each fixed version, readable in place | R 5.5 | Documented |
+| 236 | Download PDF | download | On an approved version; `/projects/[id]/closeout/[reportId]/pdf` | Manager | The approved report as a PDF marked internal | R 5.5 | Documented |
+
 ## Totals
 
-215 entries: 186 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6.
+236 entries: 207 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8.
 

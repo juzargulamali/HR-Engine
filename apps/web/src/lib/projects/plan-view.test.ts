@@ -36,11 +36,11 @@ describe("legacy addresses", () => {
 
 describe("workspace tabs and the Manage project menu", () => {
   it("has exactly four primary sections", () => {
-    expect(projectTabs("/projects/p1", null).map((t) => t.label)).toEqual(["Work", "Timeline", "Equipment"]);       // the conversation is in Chat
-    expect(projectTabs("/projects/p1", { unread: "3" }).map((t) => t.label)).toEqual(["Work", "Timeline", "Discussion", "Equipment"]);   // only before project chat groups exist
-    expect(projectTabs("/projects/p1", { unread: "3" })[2]?.badge).toBe("3");
+    expect(projectTabs("/projects/p1", null).map((t) => t.label)).toEqual(["Work", "Timeline", "Delivery plan", "Equipment"]);       // the conversation is in Chat
+    expect(projectTabs("/projects/p1", { unread: "3" }).map((t) => t.label)).toEqual(["Work", "Timeline", "Delivery plan", "Discussion", "Equipment"]);   // only before project chat groups exist
+    expect(projectTabs("/projects/p1", { unread: "3" })[3]?.badge).toBe("3");
     // the Budget tab appears only when the module's own access says so
-    expect(projectTabs("/projects/p1", null, true).map((t) => t.label)).toEqual(["Work", "Timeline", "Equipment", "Budget"]);
+    expect(projectTabs("/projects/p1", null, true).map((t) => t.label)).toEqual(["Work", "Timeline", "Delivery plan", "Equipment", "Budget"]);
   });
   it("lights up the new home of every old section and none for the secondary pages", () => {
     const b = "/projects/p1";
@@ -58,12 +58,14 @@ describe("workspace tabs and the Manage project menu", () => {
     const member = manageItems({ base: "/p", manager: false, live: true, canReopen: false, hasStatusMoves: false });
     expect(member.map((i) => i.key)).toEqual(["people", "changes", "documents", "history"]);
     const pm = manageItems({ base: "/p", manager: true, live: true, canReopen: false, hasStatusMoves: true });
-    expect(pm.map((i) => i.key)).toEqual(["edit", "status", "people", "changes", "documents", "history", "complete"]);
+    expect(pm.map((i) => i.key)).toEqual(["edit", "status", "people", "changes", "documents", "history", "closeout", "complete"]);
     expect(pm.find((i) => i.key === "complete")?.href).toBe("/p/complete");
+    expect(pm.find((i) => i.key === "closeout")?.href).toBe("/p/closeout");
+    expect(member.some((i) => i.key === "closeout")).toBe(false);                 // the closeout report is for whoever manages the project
   });
   it("offers Reopen only to those holding the capability on a finished project, and no completion or edit on it", () => {
     const done = manageItems({ base: "/p", manager: true, live: false, canReopen: true, hasStatusMoves: true });
-    expect(done.map((i) => i.key)).toEqual(["status", "people", "changes", "documents", "history", "reopen"]);
+    expect(done.map((i) => i.key)).toEqual(["status", "people", "changes", "documents", "history", "closeout", "reopen"]);   // a finished project can still have its report written
     expect(manageItems({ base: "/p", manager: true, live: false, canReopen: false, hasStatusMoves: false }).map((i) => i.key)).not.toContain("reopen");
   });
 });

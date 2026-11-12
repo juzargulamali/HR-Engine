@@ -10,6 +10,7 @@ import { describeTaskEvent } from "@/app/(app)/projects/[id]/work/helpers";
 import { TaskActionsMenu } from "./task-actions-menu";
 import { TaskAssigneeControl, TaskDueControl, TaskPrimaryAction, TaskStatusControl } from "./task-controls";
 import { CommentForm } from "./task-forms";
+import { CorrectionDialog } from "@/components/projects/delivery/delivery-forms";
 import type { TaskDetailData } from "./task-detail-data";
 import { toControlRow } from "./task-table";
 import { defaultUnblocker, nextStep, primaryMoves } from "./task-logic";
@@ -92,6 +93,11 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           </ul>
         )}
         {data.readOnly ? <Muted>This project is read-only.</Muted> : <CommentForm projectId={view.project.id} taskId={task.id} />}
+        {data.readOnly ? null : (
+          <p className="mt-3 text-sm text-muted-foreground">
+            Something in the plan is wrong (a quantity, a spec, a date)? <CorrectionDialog projectId={view.project.id} targetType="task" targetId={task.id} about={`Task: ${task.title}`} variant="outline" /> It goes to the relevant lead and the Project Manager is told.
+          </p>
+        )}
       </Panel>
 
 

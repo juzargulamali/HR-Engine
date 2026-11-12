@@ -75,6 +75,9 @@ export default async function CompletePage({ params }: { params: Promise<{ id: s
         />
       </Panel>
       <Muted>The database checks all of this again when you complete the project, and tells you in words if anything is missing.</Muted>
+      <Muted>
+        Preparing the internal closeout report is separate from completing the project and can be done before or after: <Link href={`/projects/${id}/closeout`} className="text-accent underline-offset-4 hover:underline" data-testid="closeout-entry">Generate closeout report</Link>.
+      </Muted>
     </div>
   );
 }

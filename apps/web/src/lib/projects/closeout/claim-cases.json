@@ -1,0 +1,265 @@
+{
+  "about": "Sentences checked by BOTH the app (claims.ts) and the database (proj_closeout_text_blocks) against the same situation: a client project for Fictional Motors with NO completion record and equipment still out. 'blocks' is the exact set of blocking marks expected.",
+  "cases": [
+    {
+      "text": "The client signed off the installation.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Not only did the client sign off, they praised the team.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client signed off without any snags.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The installation was approved by Fictional Motors.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Fictional Motors signed the completion certificate.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Handover was signed on site.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client was happy to accept the installation.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The stand was handed over to the client and accepted.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client gave final approval.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Acceptance was given by the client's representative.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Sign-off received.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "We got the green light on the last day.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The stand opened with the client's blessing.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "Fictional Motors were delighted with the final result.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client was satisfied with the installation and raised nothing more.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client agreed that the work was complete.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client had no further objections.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The client confirmed the handover on the last day.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The stand was formally accepted on site.",
+      "blocks": [
+        "signoff_unrecorded"
+      ]
+    },
+    {
+      "text": "The job was closed out with the client on the last day.",
+      "blocks": [
+        "signoff_unrecorded",
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "The project was completed on time.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "The team successfully wrapped up the project. Everyone moved on.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "The project has been successfully closed out.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "After the event we completed the project.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "This marked the successful completion of the work.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "The event brought the project to a close.",
+      "blocks": [
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "The project was completed and the client signed off.",
+      "blocks": [
+        "signoff_unrecorded",
+        "completion_unrecorded"
+      ]
+    },
+    {
+      "text": "Everything is back in the warehouse.",
+      "blocks": [
+        "equipment_out"
+      ]
+    },
+    {
+      "text": "No equipment remains on site.",
+      "blocks": [
+        "equipment_out"
+      ]
+    },
+    {
+      "text": "All equipment is back, with not a single unit missing.",
+      "blocks": [
+        "equipment_out"
+      ]
+    },
+    {
+      "text": "The LED panels were all returned.",
+      "blocks": [
+        "equipment_out"
+      ]
+    },
+    {
+      "text": "Equipment return is complete.",
+      "blocks": [
+        "equipment_out"
+      ]
+    },
+    {
+      "text": "The client said \"this is the best stand we have ever had\".",
+      "blocks": [
+        "unverified_quote"
+      ]
+    },
+    {
+      "text": "The client called it 'the best stand ever'.",
+      "blocks": [
+        "unverified_quote"
+      ]
+    },
+    {
+      "text": "The client said « the best stand ever ».",
+      "blocks": [
+        "unverified_quote"
+      ]
+    },
+    {
+      "text": "The client asked: \"Please make the welcome loop brighter\".",
+      "blocks": []
+    },
+    {
+      "text": "The client hasn't signed off.",
+      "blocks": []
+    },
+    {
+      "text": "Client sign-off is not recorded.",
+      "blocks": []
+    },
+    {
+      "text": "No client sign-off has been recorded for this project.",
+      "blocks": []
+    },
+    {
+      "text": "Sign-off is still pending.",
+      "blocks": []
+    },
+    {
+      "text": "Completion is not recorded; the project was not completed in the records.",
+      "blocks": []
+    },
+    {
+      "text": "The content task was completed on 2027-02-27.",
+      "blocks": []
+    },
+    {
+      "text": "A second kiosk was added through an approved scope change.",
+      "blocks": []
+    },
+    {
+      "text": "The equipment wasn't all returned.",
+      "blocks": []
+    },
+    {
+      "text": "3 of the 4 LED panels are still out and due back 2027-03-08.",
+      "blocks": []
+    },
+    {
+      "text": "The client's team raised one point and the Content lead's fix closed it.",
+      "blocks": []
+    },
+    {
+      "text": "The client raised one correction, which was resolved on site.",
+      "blocks": []
+    }
+  ]
+}

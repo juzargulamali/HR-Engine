@@ -72,6 +72,17 @@ export function describeNotification(type: string, payload: Record<string, unkno
       return { text: `You were mentioned in the conversation of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
     case "project_reply":
       return { text: `Someone replied to your message in the conversation of ${project}.`, href: pid ? `/projects/${pid}/discussion` : null };
+    // Delivery plan notices carry what they are about, never the text someone wrote.
+    case "project_plan_delegated":
+      return { text: `You were asked to define the ${str(payload.section) ?? "a"} section of the delivery plan of ${project}.`, href: pid ? `/projects/${pid}/delivery` : null };
+    case "project_plan_correction":
+      return { text: payload.fyi === true ? `A correction was raised on ${project}${str(payload.about) ? ` about ${str(payload.about)}` : ""}. It was sent to the relevant lead.` : `A correction on ${project}${str(payload.about) ? ` about ${str(payload.about)}` : ""} is waiting for your decision.`, href: pid ? `/projects/${pid}/delivery` : null };
+    case "project_plan_correction_decided":
+      return { text: `${payload.fyi === true ? "A" : "Your"} correction on ${project}${str(payload.about) ? ` about ${str(payload.about)}` : ""} was ${payload.decision === "accepted" ? "accepted" : "declined"}.`, href: pid ? `/projects/${pid}/delivery` : null };
+    case "project_plan_change":
+      return { text: `The delivery plan of ${project} changed for a line your task came from${str(payload.line) ? ` (${str(payload.line)})` : ""}. Check the task; nothing on it was moved.`, href: taskLink ?? (pid ? `/projects/${pid}/delivery` : null) };
+    case "project_plan_change_decided":
+      return { text: `Your proposed change to the delivery plan of ${project} was ${payload.decision === "approved" ? "approved" : "rejected"}.`, href: pid ? `/projects/${pid}/delivery` : null };
     case "project_dates_changed":
       return { text: `The key dates of ${project} changed.`, href: projectLink };
     case "project_scope_decision":
