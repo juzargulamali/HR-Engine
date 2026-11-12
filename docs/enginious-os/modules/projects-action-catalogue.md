@@ -1,6 +1,6 @@
 # Projects & Tasks action catalogue
 
-Status: built from the code on the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379` (draft PR #82, **not merged**). **Code read only; nothing was run to produce it.** One row per action that changes data: the permission and where it is enforced, the starting state, the server action and database function, the records changed, the resulting state, who is notified and whether a repeat is safe. Assembled from the `## Actions` table at the end of each reference file ([coverage index](./projects-coverage-index.md)); a point a reference could not confirm reads `Unverified` in its row.
+Status: built from the code on the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379` (merged as PR #82 (merge `30c7895adc75f834a60b00ed3bca7015b1654282`, 2026-11-11)). **Code read only; nothing was run to produce it.** One row per action that changes data: the permission and where it is enforced, the starting state, the server action and database function, the records changed, the resulting state, who is notified and whether a repeat is safe. Assembled from the `## Actions` table at the end of each reference file ([coverage index](./projects-coverage-index.md)); a point a reference could not confirm reads `Unverified` in its row.
 
 ## 0. What this catalogue is NOT (read first)
 
