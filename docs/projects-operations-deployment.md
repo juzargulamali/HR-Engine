@@ -1,6 +1,6 @@
 # Operations (Projects & Tasks Phase 2B): rollout
 
-Migration `supabase/migrations/20270102000100_ops_phase2b.sql` (install-order row 30). **Status (2026-11-12): on branch `claude/projects-phase-2b-operations`; draft pull request not yet opened; not merged; required CI not recorded. The migration is not applied anywhere by Claude and no owner result is recorded: hosted `Unverified`. Production: not deployed. Nothing was checked signed in.** Reference: `docs/enginious-os/modules/operations.md`.
+Migration `supabase/migrations/20270102000100_ops_phase2b.sql` (install-order row 30). **Status (2026-11-12): on branch `claude/projects-phase-2b-operations`; draft pull request #86; not merged; required CI not recorded. The migration is not applied anywhere by Claude and no owner result is recorded: hosted `Unverified`. Production: not deployed. Nothing was checked signed in.** Reference: `docs/enginious-os/modules/operations.md`.
 
 Claude runs no hosted SQL, gives nobody access and creates no Production test data (`CLAUDE.md`). Every step below that touches the hosted database or a signed-in session is the owner's.
 
