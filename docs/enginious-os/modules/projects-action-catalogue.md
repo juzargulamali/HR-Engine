@@ -177,7 +177,7 @@ None of these completes a project, approves work, sends a message or changes sto
 
 **Stop and ask before `projects.closeout.generate` in mode ai:** it is the only action in Projects that sends project information outside Enginious OS. The person must have seen Review data to be sent. The stopping statements (an unrecorded sign-off or completion, equipment said to be back, a quotation not in the records) are enforced by the database function `proj_closeout_approve`, however it is called; the tick for "to check" marks is enforced by the server action (`approveCloseout`).
 
-## 11. Operations and the equipment booking review ([`operations.md`](./operations.md); Phase 2B, branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude)
+## 11. Operations and the equipment booking review ([`operations.md`](./operations.md); Phase 2B, merged as PR #86, merge `5b75ade`; migration `20270102000100` not applied by Claude)
 
 Neither action reserves, releases, dispatches or receives stock, creates a project or a task, or books anyone. A documented function is not an approved JARVIS tool: JARVIS cannot call either. The three Sales-side actions of the same phase (flag and save planning, remove, answer) are in [`sales-action-catalogue.md`](./sales-action-catalogue.md) section 3.10.
 

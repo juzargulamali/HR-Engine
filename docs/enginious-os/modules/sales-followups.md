@@ -2,7 +2,7 @@
 
 Status: written from the code at `main` `d4a9dc325dc669990e146ebb15eeb0cc3d2c11d4` (`../README.md` stamp row "Sales & CRM app map completed"). **Code read only; nothing was run.** Conventions as in `../README.md`. Follow-ups on an enquiry are created and completed here and in [`sales-enquiries.md`](./sales-enquiries.md); follow-ups on an account with no enquiry, reassignment and the "owner, assignee and outreach are independent" rule are documented in [`sales-clients-and-agencies.md`](./sales-clients-and-agencies.md) (sections 2.2, 5, 9.3 and 10); catalogue entries in [`sales-action-catalogue.md`](./sales-action-catalogue.md).
 
-**Addendum 2026-11-12 (branch `claude/projects-phase-2b-operations`, draft PR #86, not merged; commit `d9e8338`, re-read at `16d6f42`):** a per-person **Dismiss** on the "Handover accepted" row of the Handover card. Section 2.1, the Handover card row of section 2 and the test list were written against the code; app only, no SQL, no new migration. One database test was added and unit tests cover the rest; nothing was seen signed in. The other rows keep the stamp above.
+**Addendum 2026-11-12 (merged as PR #86, merge `5b75ade`; commit `d9e8338`, re-read at `16d6f42`):** a per-person **Dismiss** on the "Handover accepted" row of the Handover card. Section 2.1, the Handover card row of section 2 and the test list were written against the code; app only, no SQL, no new migration. One database test was added and unit tests cover the rest; nothing was seen signed in. The other rows keep the stamp above.
 
 ## 1. Route and who sees what
 
