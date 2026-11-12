@@ -132,7 +132,17 @@ Requests are bounded: message length (`JARVIS_MAX_INPUT_CHARS`), at most four co
 
 Each needs its own rule in this document before any code:
 
-1. Live lookups or summaries for Projects & Tasks, Inventory, Finance, People & HR or Approvals. A won enquiry is not a delivered project, and there is no approved Projects source.
+1. Live lookups or summaries for Projects & Tasks, Inventory, Finance, People & HR or Approvals. A won enquiry is not a delivered project, and there is no approved Projects source for JARVIS (the Closeout Report's source in section 8 is not available to JARVIS).
 2. Any financial summary, value-based metric or priced estimate through JARVIS. Pricing stays in the Estimate screen.
 3. Sending email or messages, scheduling, autonomous follow-ups or outreach.
 4. More creation actions (projects), and the Sales actions listed as "not conversational" in section 2.
+
+## 8. A use of the AI provider outside JARVIS: the Project Closeout Report
+
+This is **not a JARVIS capability**. It cannot be asked for in the panel, no JARVIS action exists for it, and it gives JARVIS no read, post, completion or publishing ability in Projects (section 7, item 1 still holds). It is recorded here because it goes through the same outbound gate, and the gate refuses anything without a rule. The rule is in `APP_AI_RULES` (`apps/web/src/lib/jarvis/rulebook.ts`), separate from the JARVIS rules.
+
+| Use (`id`) | Who | Company and records | May display | May go to Anthropic | Confirmation | Paused by |
+|---|---|---|---|---|---|---|
+| Draft an internal Project Closeout Report `projects.closeout.draft` | Whoever manages the project (Project Manager, temporary leader, founder), from the project's Closeout report screen. No pilot list | One project the requester manages; the evidence snapshot the database builds for it (`proj_closeout_evidence`) | The review of what will be sent; the draft with its source references; statements to check | **Source `project_closeout_evidence` only:** the evidence lines the Project Manager saw on "Review data to be sent": project, venue and dates, scope, team names and project roles with recorded ownership, decisions, feedback facts, delivery, handover and equipment facts, plus the optional texts they left ticked. **Never:** prices, costs, margins, budgets, payroll, chat, task comments, files, contact or employee details | The review screen and its button "Send to Anthropic and write the draft"; the result is a draft that a person edits and approves | `JARVIS_DISABLED` (the provider switch) |
+
+How it differs from section 3: the evidence is kind B1 material for Projects, admitted for this one use only, and one point is **stricter**: a line that mentions an amount of money is withheld before the review (`lib/projects/closeout/evidence.ts`), although ordinary record text may carry figures elsewhere. Layers 1 to 5 of section 3 apply unchanged (declared source, sharing restriction, screening of what goes out, screening of what comes back, blind logs). Reference: [`projects-closeout-report.md`](./projects-closeout-report.md).

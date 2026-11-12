@@ -83,7 +83,7 @@ Repeating the same import adds nothing (rows are matched by ID, else by zone + n
 
 ## 6. What is not built (Phase 2 items still in their plan)
 
-The Operations Manager dashboard; structured event-edition links; calendar integration; equipment booking review after a delivery-date change (a date change on released work is a proposal here, and booked equipment is not touched); the Inventory readiness calculation. The Project Closeout Report is the next part of Phase 2 and reads the plan's records; it is not in this PR.
+The Project Closeout Report is built separately ([`projects-closeout-report.md`](./projects-closeout-report.md)). The Operations Manager dashboard; structured event-edition links; calendar integration; equipment booking review after a delivery-date change (a date change on released work is a proposal here, and booked equipment is not touched); the Inventory readiness calculation. The Project Closeout Report is the next part of Phase 2 and reads the plan's records; it is not in this PR.
 
 ## 7. Verification gaps
 

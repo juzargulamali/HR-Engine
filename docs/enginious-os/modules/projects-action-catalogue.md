@@ -164,7 +164,20 @@ Sales marks the enquiry won and submits the handover (`sales-action-catalogue.md
 
 Adding or removing a project member (`projects.member.add`, `projects.member.remove`), revoking the person's Projects access or deactivating them changes who is in the project's Chat group on the next call, because membership is computed (`chat_is_project_member` in `supabase/migrations/20261230000100_chat_project_groups.sql`). There is no "add to chat" or "remove from chat" action. Old Discussion links (`/projects/<id>/discussion`) send a member to `/projects/<id>/work?chat=<group>`; anyone else is shown no conversation.
 
+## 10. Project Closeout Report ([`projects-closeout-report.md`](./projects-closeout-report.md))
+
+None of these completes a project, approves work, sends a message or changes stock. A documented function is not an approved JARVIS tool: JARVIS cannot call any of them.
+
+| # | Id | Label in the app | Permission (and where enforced) | Starting state | Server action -> database function | Records changed | Resulting state | Notifications | Retry behaviour |
+|---|---|---|---|---|---|---|---|---|---|
+| 104 | `projects.closeout.generate` | Send to Anthropic and write the draft / Write a facts-only draft (nothing is sent) | Manager (`proj_can_manage` in `proj_closeout_evidence` and `proj_closeout_require_manager`) | Any project status; the content reviewed is still what would be sent | `generateCloseout` -> `proj_closeout_evidence`, (mode ai: ONE provider call under rule `projects.closeout.draft`), `proj_closeout_save_draft` | `proj_closeout_reports` (the one draft: created or replaced) | A draft with its snapshot, selection, fingerprint, sections and source references | None. **Externally:** mode ai sends the reviewed evidence lines to Anthropic; mode facts sends nothing | Safe: identical reviewed content with a saved result is not sent again; a failure or timeout saves nothing; changed records are refused and must be reviewed again; never a second draft |
+| 105 | `projects.closeout.save_edits` | Save edits | Manager | A draft; the version the person loaded | `saveCloseoutEdits` -> `proj_closeout_save_edits` | `proj_closeout_reports.sections` | Edited draft, marks recomputed | None | Safe: a stale version is refused |
+| 106 | `projects.closeout.approve` | Approve version N | Manager | A draft that is not empty, has no stopping mark, and whose "to check" marks are ticked as checked | `approveCloseout` -> `proj_closeout_approve` | `proj_closeout_reports` (status, approved by, approved at) | A fixed version that can be downloaded | None | Safe: a second press does nothing |
+| 107 | `projects.closeout.discard_draft` | Discard draft | Manager | A draft | `discardCloseoutDraft` -> `proj_closeout_discard_draft` | The draft row is deleted | No draft; approved versions kept | None | Safe: already gone is not an error |
+
+**Stop and ask before `projects.closeout.generate` in mode ai:** it is the only action in Projects that sends project information outside Enginious OS. The person must have seen Review data to be sent. The stopping marks and the tick for "to check" marks are enforced by the server action (`approveCloseout`), not by the database function: the function itself checks the manager, the version and that the report is not empty.
+
 ## Totals
 
-103 actions: D 9, H 22, P 18, W 23, T 19, C 2, L 10 (Delivery Plan, section 8). `projects.project.reopen` is listed once (under P; the Manage project menu in D reaches the same action) and `projects.equipment.import_handover` once (under H; the Work page's "Import the handover equipment" button reaches the same action).
+107 actions: D 9, H 22, P 18, W 23, T 19, C 2, L 10 (Delivery Plan, section 8), R 4 (Closeout Report, section 10). `projects.project.reopen` is listed once (under P; the Manage project menu in D reaches the same action) and `projects.equipment.import_handover` once (under H; the Work page's "Import the handover equipment" button reaches the same action).
 
