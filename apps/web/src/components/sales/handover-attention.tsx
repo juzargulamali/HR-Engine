@@ -3,10 +3,12 @@ import { FileCheck2, TriangleAlert } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { HANDOVER_KIND_LABEL, type HandoverRow } from "@/lib/crm/handover-attention";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
+import { DismissHandoverNotice } from "./dismiss-handover-notice";
 
 /**
  * Sales Follow-ups: the handover rows for the person (and, for a Sales founder, for other owners' won enquiries). One row per enquiry, each opening that
- * enquiry's handover page. A failed read says so; it never reads as "nothing to do".
+ * enquiry's handover page. A failed read says so; it never reads as "nothing to do". "Handover accepted" is news: the person can dismiss their own copy
+ * (it otherwise goes after seven days); rows that ask for something have no Dismiss.
  */
 export function HandoverAttention({ check }: { check: HandoverCheck }) {
   if (check.status === "none") return null;
@@ -32,7 +34,10 @@ export function HandoverAttention({ check }: { check: HandoverCheck }) {
                 <span className="text-muted-foreground"> · {r.reference}</span>
                 <p className="text-[13px] text-muted-foreground">{r.detail}</p>
               </div>
-              <span className={r.kind === "handover_accepted" ? "whitespace-nowrap font-medium text-[hsl(var(--os-green))]" : "whitespace-nowrap font-medium text-[hsl(var(--os-amber))]"}>{HANDOVER_KIND_LABEL[r.kind]}{r.scope === "company" ? " · other owner" : ""}</span>
+              <span className="flex flex-wrap items-center gap-x-2">
+                <span className={r.kind === "handover_accepted" ? "whitespace-nowrap font-medium text-[hsl(var(--os-green))]" : "whitespace-nowrap font-medium text-[hsl(var(--os-amber))]"}>{HANDOVER_KIND_LABEL[r.kind]}{r.scope === "company" ? " · other owner" : ""}</span>
+                {r.kind === "handover_accepted" && r.noticeId ? <DismissHandoverNotice noticeId={r.noticeId} title={r.title} /> : null}
+              </span>
             </li>
           ))}
         </ul>

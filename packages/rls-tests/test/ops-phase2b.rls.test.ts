@@ -202,6 +202,29 @@ describe("Operations (Phase 2B)", () => {
     expect((await admin<Row>(`select event_edition_id from proj_project_details where project_id = '${CO.b}'`))[0]!.event_edition_id).toBeNull();
   });
 
+  it("the Sales owner dismisses their own 'handover accepted' notice: per person, only their own row, nothing else changes", async () => {
+    // The acceptance sent the Sales owner one notice. They hold no Projects grant: they read their own row and mark it read with the existing function.
+    const mine = () => q<Row>(U.sales, `select id, read_at from notifications where type = 'project_handover_accepted' and payload->>'handover_id' = '${HANDOVER}'`);
+    const before = await mine();
+    expect(before).toHaveLength(1);
+    expect(before[0]!.read_at).toBeNull();
+    const notice = before[0]!.id as string;
+    // nobody else can see it or dismiss it for them, in this company or another
+    for (const other of [U.pm, U.ops, U.founder, U.salesB, U.nobody]) {
+      expect(await q(other, `select 1 from notifications where id = '${notice}'`)).toEqual([]);
+      expect(await call<number>(other, `proj_mark_notifications_read(array['${notice}']::uuid[])`)).toBe(0);
+    }
+    expect((await mine())[0]!.read_at).toBeNull();
+    const others = async () => (await admin<Row>(`select count(*)::int as n from notifications where user_id <> '${U.sales}' and read_at is null`))[0]!.n as number;
+    const othersBefore = await others();
+    const handoverBefore = (await admin<Row>(`select status, version, project_id from proj_handovers where id = '${HANDOVER}'`))[0];
+    expect(await call<number>(U.sales, `proj_mark_notifications_read(array['${notice}']::uuid[])`)).toBe(1);
+    expect((await mine())[0]!.read_at).not.toBeNull();                                           // stored on the row, so it holds on every device
+    expect(await call<number>(U.sales, `proj_mark_notifications_read(array['${notice}']::uuid[])`)).toBe(0); // dismissing twice is harmless
+    expect(await others()).toBe(othersBefore);                                                   // other people's notices are untouched
+    expect((await admin<Row>(`select status, version, project_id from proj_handovers where id = '${HANDOVER}'`))[0]).toEqual(handoverBefore);
+  });
+
   it("the Overview is for the Operations Managers of that company only, and a revoked manager loses it on the next read", async () => {
     for (const who of [U.pm, U.member, U.sales, U.wh, U.opsB]) await expect(overview(who), who).rejects.toThrow(/Operations Managers of this company/);
     await expect(overview(U.ops, CO.b)).rejects.toThrow(/Operations Managers of this company/);

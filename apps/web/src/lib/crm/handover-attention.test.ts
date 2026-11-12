@@ -67,3 +67,28 @@ describe("handoverRows: a Sales founder", () => {
     expect(founderCandidates({ userId: "me", wonOpportunities: list, founderCompanies: new Set(["c1"]), now: NOW }).map((o) => o.id)).toEqual(["x"]);
   });
 });
+
+describe("handoverRows: dismissing the accepted notice", () => {
+  const accepted = (over: Partial<OwnHandover> = {}) => own("a", "accepted", { acceptedAt: daysAgo(1), acceptedBy: "pm", ...over });
+  it("an unread notice shows the row with the id Dismiss marks; a read one hides it for that person only", () => {
+    expect(handoverRows({ ...base, wonOpportunities: [], own: [accepted({ notice: { state: "unread", id: "n1" } })] })).toMatchObject([{ kind: "handover_accepted", noticeId: "n1" }]);
+    expect(handoverRows({ ...base, wonOpportunities: [], own: [accepted({ notice: { state: "read" } })] })).toEqual([]);
+    // the other person (the preparer) has their own notice, still unread
+    expect(handoverRows({ ...base, userId: "preparer", wonOpportunities: [], own: [accepted({ notice: { state: "unread", id: "n2" } })] })).toMatchObject([{ kind: "handover_accepted", noticeId: "n2" }]);
+  });
+  it("an undismissed notice still goes after seven days", () => {
+    expect(handoverRows({ ...base, wonOpportunities: [], own: [accepted({ acceptedAt: daysAgo(ACCEPTED_NOTICE_DAYS - 1), notice: { state: "unread", id: "n1" } })] })).toHaveLength(1);
+    expect(handoverRows({ ...base, wonOpportunities: [], own: [accepted({ acceptedAt: daysAgo(ACCEPTED_NOTICE_DAYS), notice: { state: "unread", id: "n1" } })] })).toEqual([]);
+  });
+  it("without a notice the row shows with nothing to dismiss; someone who accepted it themselves is not told their own news", () => {
+    const rows = handoverRows({ ...base, wonOpportunities: [], own: [accepted()] });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.noticeId).toBeUndefined();
+    expect(handoverRows({ ...base, wonOpportunities: [], own: [accepted({ acceptedBy: "me" })] })).toEqual([]);
+  });
+  it("dismissal never touches the rows that ask for something", () => {
+    const rows = handoverRows({ ...base, wonOpportunities: [won("b")], own: [own("c", "clarification_requested", { notice: { state: "read" } }), accepted({ notice: { state: "read" } })] });
+    expect(rows.map((r) => r.kind)).toEqual(["handover_question", "won_no_handover"]);
+    expect(rows.every((r) => r.noticeId === undefined)).toBe(true);
+  });
+});
