@@ -9,7 +9,7 @@ import { isFinishedProject } from "@enginious-hr/domain";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
 import { loadProjectChat } from "@/lib/chat/data";
-import { CHAT_PARAM } from "@/lib/chat/model";
+import { CHAT_PARAM, holdsOperationsRight } from "@/lib/chat/model";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjMessageFeedRow } from "@/types/projects";
 import { DiscussionClient } from "./discussion-client";
@@ -28,7 +28,7 @@ export default async function DiscussionPage({ params }: { params: Promise<{ id:
   // The project's conversation is its group in Chat. This address is kept for old links and notices: an enrolled member is sent to the project's Work page with the group open in
   // the Chat panel. Someone who may open the project but is not enrolled in it (a founder, for example) is told where the conversation is; they are not shown it.
   // Only a database that does not have project groups yet still shows the old Discussion below.
-  const chat = await loadProjectChat(id);
+  const chat = await loadProjectChat(id, view.standing.isMember || holdsOperationsRight(ctx.grants, view.project.company_id));
   if (chat.state === "ready") redirect(`/projects/${id}/work?${CHAT_PARAM}=${chat.groupId}`);
   if (chat.state === "not_member") {
     return (

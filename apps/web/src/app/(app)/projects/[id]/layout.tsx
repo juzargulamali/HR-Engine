@@ -11,6 +11,7 @@ import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectBudgetAccess } from "@/lib/budget/data";
 import { loadProjectView } from "@/lib/projects/data";
 import { loadProjectChat, loadProjectUnread } from "@/lib/chat/data";
+import { holdsOperationsRight } from "@/lib/chat/model";
 import { ProjectChatButton } from "@/components/chat/project-chat-button";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
@@ -44,7 +45,8 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const { project, details } = view;
 
   // The project's conversation is its group in Chat. Only an enrolled member gets it (the database decides). On a database without project groups yet the old Discussion tab stays.
-  const chat = view.level === "details" ? await loadProjectChat(id) : { state: "not_member" as const };
+  // The database is asked only for someone it could let in (on the project's team, or Operations Manager of its company): for anyone else it would only refuse.
+  const chat = view.level === "details" ? await loadProjectChat(id, view.standing.isMember || holdsOperationsRight(ctx.grants, project.company_id)) : { state: "not_member" as const };
   let discussion: { unread: string | null } | null = null;
   if (chat.state === "not_installed") {
     const supabase = await createClient();
@@ -100,6 +102,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
       ) : (
         <>
           <ProjectTabs tabs={projectTabs(base, discussion, budgetAccess.can_open)} base={base} />
+          {chat.state === "not_member" && view.level === "details" ? <p className="text-[13px] text-muted-foreground" data-testid="project-chat-no-access">Project chat is open to the people on this project and to the company&apos;s Operations Managers. You can open this project but are not on its team, so its chat is not shown to you.</p> : null}
           {chat.state === "error" ? <Alert variant="warning" role="status">Could not check this project&apos;s chat, so its Chat button is missing here. The Chat button at the corner of the page still lists your groups. Reload to try again.</Alert> : null}
           {"loadFailed" in budgetAccess && budgetAccess.loadFailed ? <Alert variant="warning" role="status">Could not check budget access, so the Budget tab may be missing. Reload to try again.</Alert> : null}
         </>
