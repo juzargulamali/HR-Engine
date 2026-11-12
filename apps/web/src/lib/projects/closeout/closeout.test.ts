@@ -520,3 +520,32 @@ describe("closeout generation: one bounded call through the outbound gate, with 
     expect(sent).toEqual([]);
   });
 });
+
+describe("the event edition in the evidence", () => {
+  // Fictional edition.
+  const withEdition = (edition: NonNullable<EvidenceSnapshot["project"]["edition"]>) => { const s = fixtureSnapshot(); return { ...s, project: { ...s.project, edition } }; };
+  const editionLines = (s: EvidenceSnapshot) => evidenceItems(s).filter((i) => i.text.startsWith("Event edition:"));
+
+  it("a project with an edition says its label, venue and the published show dates, as an ordinary line", () => {
+    const s = withEdition({ label: "Fictional Expo · 2027 · Dubai", event_name: "Fictional Expo", venue: "Expo Hall 4", city: "Dubai", start_date: "2027-03-01", end_date: "2027-03-05" });
+    const lines = editionLines(s);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatchObject({ category: "project", text: "Event edition: Fictional Expo · 2027 · Dubai. Venue: Expo Hall 4. Published show dates: 2027-03-01 to 2027-03-05.", source: { type: "project", id: ID.project } });
+    expect(lines[0]!.pinned).toBeUndefined();
+    expect(lines[0]!.optional).toBeUndefined();
+    expect(buildOutbound(evidenceItems(s), null).text).toContain("Published show dates: 2027-03-01 to 2027-03-05.");
+    // a venue the organiser never published is said, not left out
+    expect(editionLines(withEdition({ label: "Fictional Expo · 2027", event_name: "Fictional Expo", venue: null, city: null, start_date: "2027-03-01", end_date: "2027-03-01" }))[0]!.text)
+      .toBe("Event edition: Fictional Expo · 2027. Venue: not recorded. Published show dates: 2027-03-01.");
+  });
+  it("a project without an edition says so explicitly, with or without the field", () => {
+    expect(editionLines(fixtureSnapshot()).map((i) => i.text)).toEqual(["Event edition: not recorded."]);
+    const s = fixtureSnapshot();
+    expect(editionLines({ ...s, project: { ...s.project, edition: null } }).map((i) => i.text)).toEqual(["Event edition: not recorded."]);
+    expect(editionLines({ ...s, handover: null }).map((i) => i.text)).toEqual(["Event edition: not recorded."]);
+  });
+  it("no longer sends the old wording about the handover notes", () => {
+    expect(evidenceItems(fixtureSnapshot()).some((i) => /not recorded as a field/.test(i.text))).toBe(false);
+  });
+});
+

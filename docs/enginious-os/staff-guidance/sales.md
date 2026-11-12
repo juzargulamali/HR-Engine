@@ -94,15 +94,16 @@ Enquiries live in Sales. The quick form needs a title, where it came from, an ag
 - id: sales-follow-ups
 - area: sales
 - status: published
-- keywords: follow-up; follow up; followup; next action; to-do; todo; reminder; overdue; due today; schedule next action; add follow-up; add a follow-up; log a follow-up
+- keywords: follow-up; follow up; followup; next action; to-do; todo; reminder; overdue; due today; schedule next action; add follow-up; add a follow-up; log a follow-up; dismiss handover accepted; handover accepted notice; remove handover accepted
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up.
+The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up. The Handover card on the page also tells you when a Project Manager has accepted your handover.
 
 1. Open Follow-ups in Sales to see what is due.
 2. To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).
 3. Choose what to do, the date and who it is for.
+4. A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days.
 
 ## Log a call, email or meeting on an enquiry
 - id: sales-log-update
@@ -280,3 +281,19 @@ Sales reports are read-only pages of figures with their definitions. If a card c
 Each company's Sales settings (reference code, currency, response target, working calendar, duplicate window, owner e-mail, approval policy and the estimate VAT choices) are kept on one page, for people who manage Sales settings or are founders.
 
 1. Open Settings in Sales (under Manage in the menu).
+
+## Flag an enquiry for Operations planning
+- id: sales-operations-planning
+- area: sales
+- status: published
+- keywords: flag for operations planning; operations planning; tentative dates; dates are tentative; tell operations about a job; provisional project manager; question from operations; answer operations; remove from operations planning; dismantling date
+- links: Enquiries -> /sales/opportunities
+- screens: /sales/opportunities/[id]
+
+The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. You are not sent a notice: look at From Operations on the enquiry.
+
+1. Open the enquiry. On Overview find Operations planning and press Flag for Operations planning.
+2. Fill Expected decision date, Dismantling date, Expected teams, Still to confirm and Note for Operations. Leave Dates are tentative ticked until the client confirms.
+3. Press Flag for Operations planning. Use Edit planning details to change it later.
+4. Read From Operations. If there is a question, write Your answer and press Send answer to Operations.
+5. Remove from Operations planning hides the enquiry from Operations again.

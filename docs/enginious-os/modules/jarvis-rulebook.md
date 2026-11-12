@@ -137,6 +137,8 @@ Each needs its own rule in this document before any code:
 3. Sending email or messages, scheduling, autonomous follow-ups or outreach.
 4. More creation actions (projects), and the Sales actions listed as "not conversational" in section 2.
 
+Projects & Tasks Phase 2B (Operations; branch `claude/projects-phase-2b-operations`, 2026-11-12) adds staff guidance topics only: JARVIS gained no capability, no Operations, Projects, Inventory or Sales planning read and no action; item 1 still holds for the Operations screens.
+
 ## 8. A use of the AI provider outside JARVIS: the Project Closeout Report
 
 This is **not a JARVIS capability**. It cannot be asked for in the panel, no JARVIS action exists for it, and it gives JARVIS no read, post, completion or publishing ability in Projects (section 7, item 1 still holds). It is recorded here because it goes through the same outbound gate, and the gate refuses anything without a rule. The rule is in `APP_AI_RULES` (`apps/web/src/lib/jarvis/rulebook.ts`), separate from the JARVIS rules.

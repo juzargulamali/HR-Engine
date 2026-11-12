@@ -148,7 +148,7 @@ export function ReassignPmButton({ projectId, candidates, currentId }: { project
   return (
     <>
       <Button type="button" variant="outline" onClick={() => setOpen(true)}>Change Project Manager</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Change Project Manager" description="The new Project Manager is added to the project; the previous one stays as an ordinary member.">
+      <Modal open={open} onClose={() => setOpen(false)} title="Change Project Manager" description="The new Project Manager is added to the project; the previous one stays as an ordinary member. Both are told, the reason is kept in the project's history, and tasks and equipment bookings stay as they are.">
         <ActionForm action={assignProjectPm} submitLabel="Change Project Manager" onDone={() => setOpen(false)} secondary={cancel(() => setOpen(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           <Field label="New Project Manager" htmlFor="pm-new">
@@ -156,6 +156,9 @@ export function ReassignPmButton({ projectId, candidates, currentId }: { project
               <option value="" disabled>Choose a person</option>
               {candidates.filter((c) => c.id !== currentId).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </Select>
+          </Field>
+          <Field label="Reason" htmlFor="pm-reason" hint="Shown to the previous Project Manager and kept in the project's history.">
+            <Textarea id="pm-reason" name="reason" rows={2} required minLength={3} maxLength={500} />
           </Field>
         </ActionForm>
       </Modal>

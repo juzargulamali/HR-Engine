@@ -69,3 +69,21 @@ describe("describeNotification", () => {
     expect(describeNotification("project_settlement_closed", base).text).toContain("closed the settlement");
   });
 });
+
+describe("equipment review and Operations planning notices", () => {
+  // Fictional references.
+  it("a changed date on a request with the warehouse: names the request and opens the project's Equipment tab", () => {
+    expect(describeNotification("project_equipment_review", { project_id: "p1", request_id: "q1", request_code: "REQ-0101" })).toEqual({ text: "Review equipment booking: REQ-0101", href: "/projects/p1/equipment" });
+    expect(describeNotification("project_equipment_review", {})).toEqual({ text: "Review equipment booking: an equipment request", href: null });
+  });
+  it("Sales flagged an enquiry, or answered a question: both open Upcoming Work", () => {
+    expect(describeNotification("project_ops_enquiry_flagged", { opportunity_id: "o1", reference: "UAE-2027-0042" })).toEqual({ text: "Sales flagged UAE-2027-0042 for Operations planning", href: "/operations/upcoming" });
+    expect(describeNotification("project_ops_sales_answered", { opportunity_id: "o1", reference: "UAE-2027-0042" })).toEqual({ text: "Sales answered your question on UAE-2027-0042", href: "/operations/upcoming" });
+  });
+  it("tells the outgoing Project Manager who took over and why", () => {
+    const n = describeNotification("project_pm_changed", { project_id: "p1", name: "Fictional Expo stand", reference: "UAE-P-2027-0001", new_pm: "Rana Lead", reason: "Pat is on leave" });
+    expect(n?.text).toContain("Rana Lead is now the Project Manager of");
+    expect(n?.text).toContain("Reason: Pat is on leave");
+    expect(n?.text).toContain("You stay on the project as a member.");
+  });
+});

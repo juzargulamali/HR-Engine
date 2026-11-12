@@ -22,6 +22,11 @@ export function describeNotification(type: string, payload: Record<string, unkno
   switch (type) {
     case "project_invitation":
       return { text: `You were added to ${project}.`, href: projectLink };
+    case "project_pm_changed": {
+      // To the outgoing Project Manager, with who took over and the recorded reason.
+      const next = str(payload.new_pm); const why = str(payload.reason);
+      return { text: `${next ?? "Someone else"} is now the Project Manager of ${project}${why ? `. Reason: ${why}` : "."} You stay on the project as a member.`, href: projectLink };
+    }
     case "project_assigned": {
       const team = str(payload.team);
       const until = str(payload.acting_until);
@@ -110,6 +115,14 @@ export function describeNotification(type: string, payload: Record<string, unkno
     }
     case "project_settlement_closed":
       return { text: `${project}: Finance closed the settlement.`, href: pid ? `/projects/${pid}/budget` : null };
+    // A committed date changed while an equipment request was with the warehouse. The booking is not changed by the notice: the Equipment tab lists what to review.
+    case "project_equipment_review":
+      return { text: `Review equipment booking: ${str(payload.request_code) ?? "an equipment request"}`, href: pid ? `/projects/${pid}/equipment` : null };
+    // Operations planning notices (to the company's Operations Managers only: Sales reads Operations' updates on the enquiry). They carry the enquiry's reference, never what was written.
+    case "project_ops_enquiry_flagged":
+      return { text: `Sales flagged ${str(payload.reference) ?? "an enquiry"} for Operations planning`, href: "/operations/upcoming" };
+    case "project_ops_sales_answered":
+      return { text: `Sales answered your question on ${str(payload.reference) ?? "an enquiry"}`, href: "/operations/upcoming" };
     case "project_reopened":
       return { text: `${project} was reopened.`, href: projectLink };
     default:

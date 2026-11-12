@@ -9,6 +9,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { LoadError } from "@/components/workspace/states";
 import { StageBadge } from "@/components/sales/badges";
+import { ProjectStatusBadge } from "@/components/projects/badges";
+import { isNotInstalled } from "@/lib/projects/errors";
+import { createClient } from "@/lib/supabase/server";
 import { formatDate, todayInDubai } from "@/components/sales/format";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadEvent, loadOrgChoices, type EventOrg, type OrgChoiceRow } from "@/lib/crm/events/data";
@@ -24,6 +27,23 @@ import { eventsScope } from "../scope";
 import { EditObservationDialog } from "./edit-observation-dialog";
 
 export const metadata = { title: "Event" };
+
+type DeliveryProject = { project_id: string; reference: string; name: string; status: string };
+/**
+ * The delivery projects on one edition that the signed-in person may see (proj_projects_for_edition: someone without Projects access gets no row). Three answers kept apart:
+ * the rows (possibly none, and then nothing is drawn), a database without the function (also nothing: there is nothing to show yet), and a failed read, which is said.
+ */
+async function loadDeliveryProjects(editionId: string): Promise<DeliveryProject[] | "error"> {
+  try {
+    const { data, error } = await (await createClient()).rpc("proj_projects_for_edition", { p_edition_id: editionId });
+    if (!error) return data ?? [];
+    if (isNotInstalled(error)) return [];
+    console.error("[events] delivery projects failed", error.message);
+  } catch (e) {
+    console.error("[events] delivery projects failed", e);
+  }
+  return "error";
+}
 const GRID_EDITIONS = 4;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -57,6 +77,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
   const byEdition = enquiriesByEdition(enquiries, scope.companyId);
   const leads = selected ? sortLeads(outreachLeads(editions, observations, selected.id), (a) => orgs.get(a)?.outreach_priority ?? null, nameOf) : [];
   const linked = selected ? (byEdition.get(selected.id) ?? []) : [];
+  const deliveryProjects = selected ? await loadDeliveryProjects(selected.id) : [];
   const q = (over: Record<string, string>) => { const p = new URLSearchParams(); for (const [k, v] of Object.entries({ ...(scope.all ? { scope: "all" } : {}), ...(showAll ? { all: "1" } : {}), ...(selected ? { edition: selected.id } : {}), ...over })) if (v) p.set(k, v); const s = p.toString(); return `/sales/events/${id}${s ? `?${s}` : ""}`; };
 
   const editionChoices = live.map((e) => ({ id: e.id, label: editionLabel(event, e) }));
@@ -271,6 +292,25 @@ export default async function EventPage({ params, searchParams }: { params: Prom
                 ))}
               </ul>
             )}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {/* ---- The delivery projects of the edition in focus: only those this person may see in Projects (the database decides); nothing is drawn when there are none ---- */}
+      {selected && deliveryProjects === "error" ? <Alert variant="destructive" role="alert" data-testid="delivery-projects-error">The delivery projects of {editionLabel(event, selected)} could not be loaded. Reload to try again.</Alert> : null}
+      {selected && deliveryProjects !== "error" && deliveryProjects.length > 0 ? (
+        <Card data-testid="delivery-projects">
+          <CardHeader className="pb-2"><CardTitle>Delivery projects for {editionLabel(event, selected)} ({deliveryProjects.length})</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            <p className="text-sm text-muted-foreground">Projects delivered for this edition that you can see in Projects. A project keeps the edition it was handed over with.</p>
+            <ul className="divide-y divide-border">
+              {deliveryProjects.map((p) => (
+                <li key={p.project_id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <span className="min-w-0 break-words"><Link href={`/projects/${p.project_id}`} className="font-medium underline-offset-2 hover:underline">{p.reference}</Link> · {p.name}</span>
+                  <ProjectStatusBadge status={p.status} />
+                </li>
+              ))}
+            </ul>
           </CardContent>
         </Card>
       ) : null}

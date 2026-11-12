@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import type { ContactPickerData } from "./contact-helpers";
 import { ContactsPanel } from "./contacts-panel";
 import { FollowUpsPanel } from "./follow-ups-panel";
+import { OpsPlanningSection } from "./ops-planning-panel";
 import { Fact, Muted, Panel, SubHeading } from "./parts";
 import { LoadError } from "@/components/workspace/states";
 import { anyFailed, type OppView } from "./view";
@@ -42,6 +43,10 @@ export function OverviewPanel({ view, picker = null }: { view: OppView; picker?:
           <div className="mt-5"><SubHeading>Contacts</SubHeading><div className="mt-2">{anyFailed(view, "contacts") ? <LoadError what="the contacts" retryHref={`/sales/opportunities/${opp.id}`} note="Contacts cannot be added or changed until they load." /> : <ContactsPanel contacts={detail.contacts} manage={{ view, picker }} />}</div></div>
         </Panel>
         <FollowUpsPanel view={view} />
+        {/* What Sales tells Operations about this enquiry, and what Operations recorded back. Its own read, so it never holds up the rest of the tab. */}
+        <Suspense fallback={<Panel title="Operations planning"><Muted>Loading the Operations planning details…</Muted></Panel>}>
+          <OpsPlanningSection view={view} />
+        </Suspense>
       </div>
       <div className="space-y-6">
         <Panel title="Where it stands">

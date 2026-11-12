@@ -32,6 +32,23 @@ describe("presets are only bundles of capabilities that exist", () => {
     });
   }
 
+  it("Operations Manager is a selectable Projects capability: not founder-only, and its text says what it gives and what it does not", () => {
+    expect(capabilitiesOf("projects")).toContain("operations");
+    const info = capabilityInfo("projects", "operations");
+    expect(info.label).toBe("Operations Manager");
+    expect(info.description).toMatch(/Operations workspace for this company/);
+    expect(info.description).toMatch(/assign or change Project Managers/);
+    expect(info.description).toMatch(/comment on tasks, raise corrections and take part in its project chats/);
+    expect(info.description).toMatch(/no Sales, Finance, HR or Warehouse rights/);
+    expect(info.description).toMatch(/does not manage tasks or deliveries or add files/);
+    expect(founderOnlyCapabilities("projects")).not.toContain("operations");
+    expect(grantableCapabilities("projects", ["manage_access"])).toContain("operations");
+    expect(ACCESS_PRESETS.projects.find((p) => p.id === "projects-operations")?.capabilities).toEqual(["operations"]);
+    // Holding it does not let its holder manage access, and it is not a new access module.
+    expect(canManageModuleAccess("projects", ["operations"])).toBe(false);
+    expect(ACCESS_MODULES).toEqual(["sales", "projects", "inventory", "budget"]);
+  });
+
   it("the budget vocabulary is the one the database function uses", () => {
     expect([...capabilitiesOf("budget")].sort()).toEqual(["executive_approver", "finance", "manage_access", "view"]);
   });

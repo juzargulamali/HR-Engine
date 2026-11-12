@@ -59,7 +59,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     expect(r.operates).toBe(true);
     expect(r.whenLabel).toBe("Dispatch today, 14:00");
     // the unfinished reserving is said on the same row, not as a second row
-    expect(r.facts.map((f) => f.text)).toEqual(["1 line ready to send", "1 line still to reserve"]);
+    expect(r.facts.map((f) => f.text)).toEqual(["1 line has reserved stock to send", "1 line still to reserve"]);
   });
 
   it("an overdue dispatch is Late and says how many days", () => {
@@ -84,7 +84,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     const r = requestRow(request({ plan: { dispatch: "2026-10-20T08:00" }, lines: [line({ reserved: 22 }), line({ reserved: 4 })] }), ctx)!;
     expect(r.kind).toBe("send");
     expect(r.title).toBe("Gulf Bank Summit is ready to send");
-    expect(r.facts[0]!.text).toBe("2 lines ready to send");
+    expect(r.facts[0]!.text).toBe("2 lines have reserved stock to send");
   });
 
   it("no row when nothing is left to reserve or send, and cancelled or closed lines are ignored", () => {
@@ -121,7 +121,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     const prep = requestRow(request({ lines: [line({ reserved: 40 }), line({ reserved: 12 }), line({ reserved: 24 }), line({ toReserve: 6, reserved: 10 }), line({ toReserve: 2 })] }), ctx)!;
     expect(prep.facts[0]!.text).toBe("3 of 5 lines fully reserved · 2 still to reserve");
     const send = requestRow(request({ plan: { dispatch: "2026-10-19T08:00" }, lines: [line({ reserved: 6 }), line({ reserved: 10 }), line({ reserved: 4, dispatched: 4 })] }), ctx)!;
-    expect(send.facts[0]!.text).toBe("2 lines ready to send, 1 sent");
+    expect(send.facts[0]!.text).toBe("2 lines have reserved stock to send, 1 sent");
     expect(send.title).toBe("Gulf Bank Summit still has equipment to send");
     expect(JSON.stringify([prep, send])).not.toMatch(/\b(40|52|76)\b/); // no summed quantity
   });
@@ -340,9 +340,48 @@ describe("Waiting / Shortages: unresolved shortages stay visible, with who acts 
     const req = request({ lines: [buy, line({ toReserve: 3 })] });
     const prep = requestRow(req, ctx)!;
     expect(prep.kind).toBe("prepare");
-    expect(prep.facts[0]!.text).toBe("1 of 2 lines fully reserved · 1 still to reserve");
+    // the line to buy is short, not reserved: nothing on this request is fully reserved yet
+    expect(prep.facts[0]!.text).toBe("0 of 2 lines fully reserved · 1 still to reserve · 1 to buy or rent");
     expect(waitingRow(req, ctx)!.facts).toHaveLength(1);
     expect(requestRows([req], ctx).map((r) => r.kind)).toEqual(["prepare", "waiting"]);
+  });
+
+  describe("a line to buy or rent is short, never fully reserved", () => {
+    it("only buy/rent shortages: the reserved lines can go in part, and the count says what is waiting", () => {
+      const req = request({ plan: { dispatch: "2026-10-22T08:00" }, lines: [line({ reserved: 5 }), line({ reserved: 2 }), buy, rent] });
+      const send = requestRow(req, ctx)!;
+      expect(send.kind).toBe("send");
+      expect(send.title).toBe("Gulf Bank Summit is ready to send in part");
+      expect(send.facts.map((f) => [f.text, f.tone])).toEqual([["2 lines have reserved stock to send", undefined], ["2 lines to buy or rent", "warn"]]);
+      expect(requestRows([req], ctx).map((r) => r.kind)).toEqual(["send", "waiting"]);
+      const person = requestRow(request({ kind: "employee", forLabel: "Sara Khan", lines: [line({ reserved: 1 }), rent] }), ctx)!;
+      expect(person.title).toBe("Equipment for Sara Khan is ready to send in part");
+    });
+    it("only buy/rent shortages and nothing reserved: no Send or Prepare row at all, only the Waiting row", () => {
+      expect(requestRows([request({ lines: [buy, rent] })], ctx).map((r) => r.kind)).toEqual(["waiting"]);
+    });
+    it("mixed: fully reserved, still to reserve from stock, and waiting to buy or rent are three separate counts that add up", () => {
+      const req = request({ lines: [line({ reserved: 5 }), line({ reserved: 2 }), line({ toReserve: 3 }), buy, rent] });
+      const prep = requestRow(req, ctx)!;
+      expect(prep.kind).toBe("prepare");
+      expect(prep.facts[0]!.text).toBe("2 of 5 lines fully reserved · 1 still to reserve · 2 to buy or rent");
+      expect(waitingRow(req, ctx)!.title).toBe("2 lines of Gulf Bank Summit are waiting for stock to be bought or rented");
+    });
+    it("mixed and due today: sent in part, with both kinds of shortage said", () => {
+      const send = requestRow(request({ plan: { dispatch: "2026-10-19T14:00" }, lines: [line({ reserved: 5 }), line({ toReserve: 3 }), buy] }), ctx)!;
+      expect(send.title).toBe("Gulf Bank Summit is ready to send in part");
+      expect(send.facts.map((f) => f.text)).toEqual(["1 line has reserved stock to send", "1 line still to reserve", "1 line to buy or rent"]);
+    });
+    it("none: the sentence and the title are as before", () => {
+      const prep = requestRow(request({ lines: [line({ reserved: 5 }), line({ toReserve: 3 })] }), ctx)!;
+      expect(prep.facts[0]!.text).toBe("1 of 2 lines fully reserved · 1 still to reserve");
+      const send = requestRow(request({ lines: [line({ reserved: 5 }), line({ reserved: 3 })] }), ctx)!;
+      expect(send.title).toBe("Gulf Bank Summit is ready to send");
+      expect(send.facts.map((f) => f.text)).toEqual(["2 lines have reserved stock to send"]);
+      // a mark on a line that is already fully reserved is not a shortage
+      const marked = requestRow(request({ lines: [line({ reserved: 5 }), { ...buy, reserved: 2, toReserve: 0 }] }), ctx)!;
+      expect(marked.title).toBe("Gulf Bank Summit is ready to send");
+    });
   });
 
   it("a marked line that is already fully reserved, cancelled or unmarked adds no Waiting row", () => {

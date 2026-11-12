@@ -13,6 +13,9 @@ import { Fact, Muted, Panel } from "@/components/projects/parts";
 import { DeliverySummary, MilestoneStrip, NextOnSiteCard, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
 import { loadEquipmentState } from "@/lib/projects/equipment-state";
+import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
+import { READINESS_LOAD_ERROR, stillOutAfterDelivery } from "@/lib/projects/equipment-readiness-model";
+import { StillOutNotice } from "@/components/projects/equipment-readiness";
 import { equipmentSummary, workAttention } from "@/lib/projects/work-attention";
 import { describeChange } from "../history/change-log";
 import { QuickAddTask } from "@/components/projects/tasks/quick-add-task";
@@ -73,7 +76,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
 
   const supabase = await createClient();
   const manager = canManageProject(view.standing);
-  const [msRes, dlRes, taskRes, progressRes, feedbackRes, bookingRes, completionRes, outdatedRes, equipment, logRes, depRes, planItemRes] = await Promise.all([
+  const [msRes, dlRes, taskRes, progressRes, feedbackRes, bookingRes, completionRes, outdatedRes, equipment, logRes, depRes, planItemRes, readinessRes] = await Promise.all([
     supabase.from("proj_milestones").select("*").eq("project_id", id).order("sort_order").order("due_date", { nullsFirst: false }),
     supabase.from("proj_deliverables").select("*").eq("project_id", id).order("due_date", { nullsFirst: false }),
     supabase.from("proj_tasks").select("*").eq("project_id", id),
@@ -88,7 +91,11 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     supabase.from("proj_change_log").select("id, entity_type, entity_id, field, from_value, to_value, note, actor_id, created_at").eq("project_id", id).neq("entity_type", "message").order("id", { ascending: false }).limit(4),
     supabase.from("proj_external_dependencies").select("id, label, confirmation").eq("project_id", id),
     supabase.from("proj_plan_items").select("id, title").eq("project_id", id),
+    // Readiness as the database states it (reserved, short, dispatched, still out) and the bookings to review after a date change. A failed read is shown as such.
+    loadEquipmentReadiness(id).catch(() => ({ state: "error" as const })),
   ]);
+  const readiness = readinessRes.state === "ok" ? readinessRes.readiness : null;
+  const equipmentStillOut = readiness ? stillOutAfterDelivery(readiness) : null;
   if (msRes.error || dlRes.error || taskRes.error || completionRes.error) {
     return <LoadError what="this project's work" retryHref={withParams(basePath, current)} />;
   }
@@ -144,7 +151,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const milestoneStrip = ms.map((m) => ({ id: m.id, title: m.title, status: m.status, dueDate: m.due_date, isRequired: m.is_required }));
   const lateMilestones = ms.filter((m) => m.due_date && m.due_date < today && ["planned", "in_progress", "ready_for_acceptance"].includes(m.status));
   const attention = readOnly ? { needsYou: [], waiting: [] } : workAttention({
-    tasks: allTasks, reviewIds: queue.map((t) => t.id), lateMilestones, equipment, userId: ctx.userId, manager: view.canManage, pmName: view.pmName, today, nameOf: view.nameOf,
+    tasks: allTasks, reviewIds: queue.map((t) => t.id), lateMilestones, equipment, equipmentReviews: readiness?.reviews, userId: ctx.userId, manager: view.canManage, pmName: view.pmName, today, nameOf: view.nameOf,
     taskHref: taskAt, milestonesHref: `${basePath}?ms=1#milestone-list`, equipmentHref: (r) => `/projects/${id}/equipment${r ? `?request=${r}` : ""}`,
   });
   const nowIso = new Date().toISOString();
@@ -155,7 +162,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     : "";
   // ---- Delivery summary (for whoever manages the project): next milestone, next site booking, the equipment decision. Existing records only.
   const nextMilestone = ms.filter((m) => m.due_date && ["planned", "in_progress", "ready_for_acceptance"].includes(m.status)).sort((a, b) => (a.due_date as string).localeCompare(b.due_date as string))[0] ?? null;
-  const eq = equipmentSummary(equipment);
+  const eq = equipmentSummary(equipment, readinessRes);
   const summaryFacts: SummaryFact[] = [
     { label: "Next milestone", value: nextMilestone ? nextMilestone.title : ms.length === 0 ? "No milestone yet" : "No dated milestone open",
       detail: nextMilestone ? `${(nextMilestone.due_date as string) < today ? "Overdue · " : ""}${dateText(nextMilestone.due_date)}` : null, tone: nextMilestone && (nextMilestone.due_date as string) < today ? "amber" : "quiet",
@@ -163,7 +170,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     { label: "Next site booking", value: nextBooking ? nextBooking.location : bookingRes.error ? "Could not load the site bookings" : "None booked", tone: bookingRes.error ? "red" : "quiet",
       detail: nextBooking ? `${bookingWhen} · ${view.nameOf(nextBooking.user_id)} · ${nextBooking.state === "confirmed" ? "Confirmed" : "Tentative"}` : null,
       href: `/projects/${id}/plan?plan=site`, linkText: nextBooking ? "Open the booking" : "Open site bookings" },
-    { label: "Equipment", value: eq.text, tone: eq.tone, href: `/projects/${id}/equipment`, linkText: "Open Equipment" },
+    { label: "Equipment", value: eq.text, detail: eq.detail ?? null, tone: eq.tone, href: `/projects/${id}/equipment`, linkText: "Open Equipment" },
   ];
 
   // ---- Recent activity preview: the newest change-log lines, each linked to where that record lives.
@@ -193,6 +200,13 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const completion = completions.find((c) => !c.reopened_at) ?? null;
   const reopenedEarlier = completions.some((c) => c.reopened_at);
   const details = view.details;
+  // "Open event in Sales" is offered only when the viewer's own session can read the edition there (row-level security answers: a row = access, no row = none).
+  // A failed read is not "no access": the card then says the check could not be made, and offers no link.
+  let editionLink: string | "none" | "error" = "none";
+  if (details?.edition_snapshot && details.event_edition_id) {
+    const { data: ed, error: edError } = await supabase.from("crm_event_editions").select("id, event_id").eq("id", details.event_edition_id).maybeSingle();
+    editionLink = edError ? "error" : ed ? `/sales/events/${ed.event_id}?edition=${ed.id}` : "none";
+  }
   const holdState = holdReviewState(details?.hold_review_date ?? null, today);
   const acting = view.people.filter((p) => p.role === "acting_pm" && p.acting_until && p.acting_until >= today).map((p) => view.nameOf(p.user_id));
   const teamNames = view.teams.map((t) => `${t.name}${t.head_user_id ? ` (head: ${view.nameOf(t.head_user_id)})` : ""}`);
@@ -298,6 +312,9 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
               importRecovery={view.canManage ? <ImportHandoverButton projectId={id} label="Import the handover equipment" /> : undefined} />
           )}
           {equipment.status === "error" && !readOnly ? <Alert variant="warning" role="status">Could not load this project&apos;s equipment state, so an equipment decision may be missing above. Open <Link href={`/projects/${id}/equipment`} className="font-medium underline">Equipment</Link> or reload.</Alert> : null}
+          {readinessRes.state === "error" ? <Alert variant="warning" role="status" data-testid="readiness-load-error">{READINESS_LOAD_ERROR}, so what is reserved, short or still out is not shown here. Open <Link href={`/projects/${id}/equipment`} className="font-medium underline">Equipment</Link> or reload.</Alert> : null}
+          {/* A finished project whose equipment has not come back: completing a project does not return it. */}
+          {equipmentStillOut ? <div className="space-y-1"><StillOutNotice out={equipmentStillOut} linkRequests={false} /><Link href={`/projects/${id}/equipment`} className="inline-block text-[13px] font-medium text-accent underline-offset-4 hover:underline">Open Equipment</Link></div> : null}
           {view.canManage && !readOnly ? <DeliverySummary facts={summaryFacts} /> : null}
           <ul className="grid grid-cols-3 gap-2.5 sm:gap-3" aria-label="Where the work stands">
             <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>
@@ -367,6 +384,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
             <ProjectDetailsCard
               pmName={view.pmName} acting={acting} team={teamNames} peopleCount={view.people.length} start={view.project.start_date} end={view.project.end_date}
               details={details} internal={view.project.kind === "internal"} feedbackOpen={feedbackOpen} feedbackHref={`/projects/${id}/changes`}
+              edition={details.edition_snapshot ?? null} editionLink={editionLink}
             />
           ) : null}
         </aside>

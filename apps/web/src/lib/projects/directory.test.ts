@@ -108,3 +108,23 @@ describe("board lanes and moves", () => {
     expect(moveForLane(row({ status: "planning" }), "completed")).toBeNull();
   });
 });
+
+import { editionChoices, filterByEdition, type ProjectEdition } from "./directory";
+describe("event editions in the directory", () => {
+  // Fictional editions.
+  const expo26: ProjectEdition = { editionId: "e26", label: "Fictional Expo · 2026 · Dubai", start: "2026-10-12", end: "2026-10-16" };
+  const expo27: ProjectEdition = { editionId: "e27", label: "Fictional Expo · 2027 · Dubai", start: "2027-10-11", end: "2027-10-15" };
+  const by = new Map([["a", expo26], ["b", expo27], ["c", expo26]]);
+  const rows = [row({ id: "a" }), row({ id: "b" }), row({ id: "c" }), row({ id: "d" })];
+  it("offers each edition once, the latest show first", () => {
+    expect(editionChoices(by, rows)).toEqual([{ value: "e27", label: "Fictional Expo · 2027 · Dubai" }, { value: "e26", label: "Fictional Expo · 2026 · Dubai" }]);
+    expect(editionChoices(new Map(), rows)).toEqual([]);
+    expect(editionChoices(by, [row({ id: "d" })])).toEqual([]);   // an edition of a project that is not listed is not offered
+  });
+  it("filters to one edition; 'All editions' keeps every project, with or without an edition", () => {
+    expect(filterByEdition(rows, by, "e26").map((r) => r.id)).toEqual(["a", "c"]);
+    expect(filterByEdition(rows, by, "").map((r) => r.id)).toEqual(["a", "b", "c", "d"]);
+    expect(filterByEdition(rows, by, "unknown")).toEqual([]);
+  });
+});
+

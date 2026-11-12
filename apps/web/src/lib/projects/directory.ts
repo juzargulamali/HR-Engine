@@ -1,4 +1,4 @@
-import { allowedStatusMoves, isFinishedProject, isProjFounder, liveStatusesFor, PROJECT_STATUSES, type ProjGrant, type ProjectKind, type StatusMove } from "@enginious-hr/domain";
+import { allowedStatusMoves, isFinishedProject, isOpsManager, isProjFounder, liveStatusesFor, PROJECT_STATUSES, type ProjGrant, type ProjectKind, type StatusMove } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
 
 /**
@@ -46,8 +46,22 @@ export function sortDirectory<T extends DirectoryRowLite>(rows: readonly T[], so
   return [...rows].sort((a, b) => cmp(a, b) || tie(a, b));
 }
 
-/** Members and founders of the project's company may see its milestones; everyone else sees the summary only. */
-export const canSeeProjectDetails = (row: Pick<DirectoryRowLite, "is_member" | "company_id">, grants: readonly ProjGrant[]) => row.is_member || isProjFounder(grants, row.company_id);
+// ---------------------------------------------------------------------------------------------------------------- editions
+/** The event edition a project was sold for: the copy taken when the handover was submitted (later edits to the event in Sales do not change it). */
+export interface ProjectEdition { editionId: string; label: string; start: string | null; end: string | null }
+
+/** The editions to offer in the directory's "Event edition" filter: each once, the latest show first, then by name. */
+export function editionChoices(byProject: ReadonlyMap<string, ProjectEdition>, rows: readonly Pick<DirectoryRowLite, "id">[]): { value: string; label: string }[] {
+  const seen = new Map<string, ProjectEdition>();
+  for (const r of rows) { const e = byProject.get(r.id); if (e && !seen.has(e.editionId)) seen.set(e.editionId, e); }
+  return [...seen.values()].sort((a, b) => (b.start ?? "").localeCompare(a.start ?? "") || a.label.localeCompare(b.label)).map((e) => ({ value: e.editionId, label: e.label }));
+}
+/** The projects of one edition. No edition asked for = every row. */
+export const filterByEdition = <T extends Pick<DirectoryRowLite, "id">>(rows: readonly T[], byProject: ReadonlyMap<string, ProjectEdition>, editionId: string): T[] =>
+  editionId ? rows.filter((r) => byProject.get(r.id)?.editionId === editionId) : [...rows];
+
+/** Members, founders and Operations Managers of the project's company may see its milestones and open it in full; everyone else sees the summary only. */
+export const canSeeProjectDetails = (row: Pick<DirectoryRowLite, "is_member" | "company_id">, grants: readonly ProjGrant[]) => row.is_member || isProjFounder(grants, row.company_id) || isOpsManager(grants, row.company_id);
 
 /** The ids whose milestones may be fetched at all. Nothing is requested for the rest, so nothing reaches the page. */
 export const milestoneProjectIds = (rows: readonly Pick<DirectoryRowLite, "id" | "is_member" | "company_id">[], grants: readonly ProjGrant[]): string[] =>

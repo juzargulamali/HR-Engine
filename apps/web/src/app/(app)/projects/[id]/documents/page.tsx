@@ -92,7 +92,9 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
             </TableBody>
           </Table>
         )}
-        {!finished ? (
+        {!finished && !(view.standing.isMember || view.isFounder) ? (
+          <Muted className="mt-3">You are reading this project as Operations Manager. Files and links are added by the people on the project.</Muted>
+        ) : !finished ? (
           <div className="mt-5 border-t border-border pt-4">
             <h3 className="mb-3 text-sm font-semibold">Add a file or a link</h3>
             <AddFileForms projectId={id} isManager={view.canManage} />

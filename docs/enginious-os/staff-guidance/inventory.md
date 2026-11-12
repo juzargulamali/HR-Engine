@@ -10,7 +10,7 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - links: Inventory -> /inventory; Equipment requests -> /inventory/requests; My equipment -> /inventory/mine
 - screens: /inventory; /inventory/requests; /inventory/mine; /inventory/stock
 
-Inventory is where equipment is requested, sent out and received back. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.
+Inventory is where equipment is requested, sent out and received back. On Today a request reads ready to send in part while any line is still to reserve, buy or rent; those lines are counted apart and never as reserved. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.
 
 1. Open Today in Inventory for the warehouse's jobs.
 2. Open Requests to prepare, send out and receive back equipment.

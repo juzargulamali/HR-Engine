@@ -3,6 +3,27 @@ import { Info } from "lucide-react";
 import { OsCollapsible } from "@/components/os/collapsible";
 import { Fact } from "@/components/projects/parts";
 import { dateRangeText, dateText } from "@/lib/projects/format";
+import type { ProjEditionSnapshot } from "@/types/projects";
+
+export const EDITION_NOTE = "These are the dates the organiser published when the handover was submitted. Later changes to the event in Sales do not change this project.";
+
+/**
+ * The event edition, kept apart from the project's own delivery dates above: the label, the venue and the show dates the organiser had published when the handover was
+ * submitted. It is a copy, so it never moves when the event is edited in Sales. The link to Sales is offered only to someone who can read the edition there.
+ */
+function EditionFact({ edition, link }: { edition: ProjEditionSnapshot; link: string | "none" | "error" }) {
+  const place = [edition.venue, edition.city].filter(Boolean).join(", ");
+  return (
+    <Fact label="Event edition" className="rounded-md border border-border p-2.5">
+      <span className="block font-medium" data-testid="edition-label">{edition.label ?? edition.event_name ?? "Edition without a name"}</span>
+      <span className="block">Venue: {place || "Not recorded"}</span>
+      <span className="block">Published show dates: {edition.start_date || edition.end_date ? dateRangeText(edition.start_date, edition.end_date) : "Not recorded"}</span>
+      <span className="mt-1 block text-[13px] text-muted-foreground">{EDITION_NOTE}</span>
+      {link === "error" ? <span className="mt-1 block text-[13px] text-muted-foreground">Could not check whether you can open this event in Sales. Reload to try again.</span>
+        : link !== "none" ? <Link href={link} className="mt-1 inline-block font-medium text-accent underline-offset-4 hover:underline" data-testid="edition-sales-link">Open event in Sales</Link> : null}
+    </Fact>
+  );
+}
 
 interface Details {
   install_start: string | null; event_start: string | null; event_end: string | null; client_name: string | null; location: string | null; site_timezone: string;
@@ -13,8 +34,12 @@ interface Details {
  * Who, when and what the project is, read-only, in the right rail. Everything here used to be the project's Overview page; it moved
  * next to the work so nothing was dropped. Folded on a phone and a narrow window; open when there is room.
  */
-export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, end, details, internal, feedbackOpen, feedbackHref }: {
+export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, end, details, internal, feedbackOpen, feedbackHref, edition, editionLink }: {
   pmName: string; acting: string[]; team: string[]; peopleCount: number; start: string | null; end: string | null; details: Details; internal: boolean; feedbackOpen: number; feedbackHref: string;
+  /** The event edition the project was sold for, as copied at the handover. Absent = the project has none. */
+  edition?: ProjEditionSnapshot | null;
+  /** Where the event opens in Sales: an address when the viewer can read the edition there, "none" when they cannot (no link, nothing said), "error" when that could not be checked. */
+  editionLink?: string | "none" | "error";
 }) {
   return (
     <>
@@ -26,6 +51,7 @@ export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, e
           <Fact label="Project dates">{dateRangeText(start, end)}</Fact>
           <Fact label="Installation starts">{dateText(details.install_start)}</Fact>
           <Fact label="Event">{dateRangeText(details.event_start, details.event_end)}</Fact>
+          {edition ? <EditionFact edition={edition} link={editionLink ?? "none"} /> : null}
           {!internal ? <Fact label="Client">{details.client_name ?? "Not recorded"}</Fact> : null}
           <Fact label="Location">{details.location ?? "Not recorded"}<span className="block text-muted-foreground">Site time zone {details.site_timezone}</span></Fact>
           {feedbackOpen > 0 ? (

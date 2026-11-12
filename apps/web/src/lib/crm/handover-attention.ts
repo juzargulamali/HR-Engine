@@ -5,7 +5,10 @@
  *   won_no_handover     a won enquiry the person owns whose handover has not been submitted (none yet, or still a draft) - from the moment of the win;
  *                       Sales founders also see it for other owners' enquiries once the win is older than FOUNDER_REMINDER_DAYS.
  *   handover_question   the Project Manager asked a question (status clarification_requested): for the owner and the preparer, until it is resubmitted.
- *   handover_accepted   the Project Manager accepted it: for the owner and the preparer, for ACCEPTED_NOTICE_DAYS days.
+ *   handover_accepted   the Project Manager accepted it: for the owner and the preparer, for ACCEPTED_NOTICE_DAYS days or until that person dismisses it.
+ *                       It is news, not an action. Dismissing is per person: it marks that person's own "handover accepted" notice as read (the notice the
+ *                       acceptance already sends them), so it holds on every device and changes nothing for the other person or on the handover.
+ *                       Someone who accepted the handover themselves is not told their own news.
  */
 export type HandoverRowKind = "won_no_handover" | "handover_question" | "handover_accepted";
 
@@ -20,6 +23,8 @@ export interface HandoverRow {
   scope: "mine" | "company";
   /** When it began (win, question or acceptance), for ordering. */
   at: string | null;
+  /** Only on "handover_accepted": the person's own unread notice, which Dismiss marks as read. Absent when there is none to mark (the row then only expires). */
+  noticeId?: string;
 }
 
 /** A Sales founder is shown a won enquiry that is still without a submitted handover after this many days (a fixed default: no settings screen). */
@@ -40,6 +45,13 @@ export const HANDOVER_KIND_LABEL: Record<HandoverRowKind, string> = {
 export interface WonOpportunity { id: string; reference: string; title: string; ownerId: string; companyId: string; wonAt: string }
 export interface OwnHandover {
   crmOpportunityId: string; reference: string; title: string; status: string; clarificationNote: string | null; acceptedAt: string | null; updatedAt: string;
+  /** Who accepted it (absent on older callers). */
+  acceptedBy?: string | null;
+  /**
+   * The person's own "handover accepted" notice for this handover: "unread" with its id (Dismiss marks it read), "read" when they dismissed it or read it in
+   * Project notices, or absent when there is no such notice.
+   */
+  notice?: { state: "unread"; id: string } | { state: "read" };
 }
 
 const DAY_MS = 86_400_000;
@@ -65,7 +77,8 @@ export function handoverRows(input: {
     if (h.status === "clarification_requested") {
       out.push({ kind: "handover_question", opportunityId: h.crmOpportunityId, reference: h.reference, title: h.title, detail: h.clarificationNote ? `The Project Manager asked: ${h.clarificationNote}` : "The Project Manager asked a question. Update the brief if needed, then resubmit.", scope: "mine", at: h.updatedAt });
     } else if (h.status === "accepted" && h.acceptedAt && ageDays(h.acceptedAt, now) < ACCEPTED_NOTICE_DAYS) {
-      out.push({ kind: "handover_accepted", opportunityId: h.crmOpportunityId, reference: h.reference, title: h.title, detail: "The Project Manager accepted it. The project exists.", scope: "mine", at: h.acceptedAt });
+      if (h.notice?.state === "read" || (h.acceptedBy && h.acceptedBy === input.userId)) continue;
+      out.push({ kind: "handover_accepted", opportunityId: h.crmOpportunityId, reference: h.reference, title: h.title, detail: "The Project Manager accepted it. The project exists.", scope: "mine", at: h.acceptedAt, ...(h.notice?.state === "unread" ? { noticeId: h.notice.id } : {}) });
     }
   }
 

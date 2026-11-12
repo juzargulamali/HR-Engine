@@ -10,6 +10,10 @@ export interface ChatGroup {
   kind?: ChatGroupKind; projectId?: string | null;
   /** A finished project's conversation: it can be read, not written (the server refuses a post). */
   readOnly?: boolean;
+  /** The project's real status (null for a Sales group; absent on a database without it). "completed" and "archived" list the group under Archived. */
+  projectStatus?: string | null;
+  /** The viewer reads this project group as Operations Manager of its company and is not on the project's team. */
+  viaOperations?: boolean;
 }
 
 /** The address parameter that opens one group in the Chat panel from any page (old Discussion links and the project's "Open chat" shortcut use it). */
@@ -18,15 +22,33 @@ export const CHAT_PARAM = "chat";
 export const CHAT_OPEN_EVENT = "enginious:open-chat";
 export const openChatGroup = (groupId: string): void => { window.dispatchEvent(new CustomEvent(CHAT_OPEN_EVENT, { detail: { groupId } })); };
 
-/** The group list in sections: Sales groups, then project groups (already most recent first from the server). A section with no group is left out. */
-export function groupSections<T extends Pick<ChatGroup, "kind">>(groups: readonly T[]): { title: string; groups: T[] }[] {
+/**
+ * A finished project's group: the project is completed or archived, so its conversation is read-only. Both sit under the collapsed "Archived (N)". The project's
+ * own status is not changed by where its chat is listed: a completed project keeps its lifecycle and its equipment-return tracking. On a database that does not
+ * send the project's status, the server's read-only flag (set for exactly these two statuses) decides.
+ */
+export const isArchivedGroup = (g: Pick<ChatGroup, "kind" | "projectStatus" | "readOnly">): boolean =>
+  g.kind === "project" && (g.projectStatus === "archived" || g.projectStatus === "completed" || (g.projectStatus == null && g.readOnly === true));
+export interface ChatSection<T> { title: string; groups: T[]; /** The Archived section: drawn as a disclosure, closed until asked for. */ archived?: boolean }
+/**
+ * The group list in sections: Sales groups, then the groups of live projects (already most recent first from the server), then the groups of completed and archived projects.
+ * A section with no group is left out. Nothing is dropped: a finished group keeps its unread and mention counts, and a reopened or restored project's group is simply back
+ * under Projects on the next refresh.
+ */
+export function groupSections<T extends Pick<ChatGroup, "kind" | "projectStatus" | "readOnly">>(groups: readonly T[]): ChatSection<T>[] {
   const sales = groups.filter((g) => (g.kind ?? "sales") === "sales");
-  const projects = groups.filter((g) => g.kind === "project");
-  return [{ title: "Sales", groups: sales }, { title: "Projects", groups: projects }].filter((s) => s.groups.length > 0);
+  const projects = groups.filter((g) => g.kind === "project" && !isArchivedGroup(g));
+  const archived = groups.filter(isArchivedGroup);
+  const sections: ChatSection<T>[] = [{ title: "Sales", groups: sales }, { title: "Projects", groups: projects }, { title: "Archived", groups: archived, archived: true }];
+  return sections.filter((s) => s.groups.length > 0);
 }
+/** The heading of the collapsed Archived section, e.g. "Archived (3)". */
+export const archivedHeading = (count: number): string => `Archived (${count})`;
+/** The one-line note in a thread the viewer reads through the Operations Manager capability. */
+export const OPERATIONS_READER_NOTE = "You are reading this as Operations Manager. You are not on this project's team.";
 /** Who is in a group, in words (the server decides; this only describes it). */
 export const membershipLine = (g: Pick<ChatGroup, "kind" | "readOnly">): string =>
-  g.kind === "project" ? (g.readOnly ? "This project is finished: the conversation can be read, not added to" : "The people on this project") : "Everyone with Sales access to this company";
+  g.kind === "project" ? (g.readOnly ? "This project is finished: the conversation can be read, not added to" : "The people on this project, and the company's Operations Managers") : "Everyone with Sales access to this company";
 export const filterGroups = <T extends Pick<ChatGroup, "name">>(groups: readonly T[], query: string): T[] => {
   const q = query.trim().toLowerCase();
   return q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : [...groups];

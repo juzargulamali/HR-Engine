@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation";
-import { canManageProject, hasProjCapability, isProjFounder } from "@enginious-hr/domain";
+import { canManageProject, hasProjCapability, holdsAssignPm, isProjFounder } from "@enginious-hr/domain";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -167,13 +167,13 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
                     <span className="font-medium">{nameFor(l.user_id)}</span>
                     <span className="text-muted-foreground"> · {l.source === "handover_owner" ? "Sales owner at handover" : l.source === "handover_preparer" ? "Prepared the handover" : "Added later"}</span>
                   </span>
-                  {canAssignPm || isProjFounder(ctx.grants, project.company_id) ? <RemoveSalesLinkButton projectId={id} userId={l.user_id} name={nameFor(l.user_id)} /> : null}
+                  {holdsAssignPm(ctx.grants, project.company_id) ? <RemoveSalesLinkButton projectId={id} userId={l.user_id} name={nameFor(l.user_id)} /> : null}
                 </li>
               ))}
             </ul>
           )}
           <Muted className="mt-3">These links are recorded once, at handover. A later change of owner in Sales &amp; CRM does not alter them. To let a Sales person take part, add them as a member above.</Muted>
-          {(canAssignPm || isProjFounder(ctx.grants, project.company_id)) && live ? (
+          {(holdsAssignPm(ctx.grants, project.company_id)) && live ? (
             <div className="mt-4 border-t border-border pt-4">
               <h3 className="mb-3 text-sm font-semibold">Link another Sales person</h3>
               {staffFailed ? <LoadError what="the staff names" retryHref={`/projects/${id}/people`} note="Sales people cannot be chosen until they load; names shown as “Name could not load” are not unknown people." /> : <SalesLinkForm projectId={id} candidates={salesCandidates} />}

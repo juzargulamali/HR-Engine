@@ -24,6 +24,7 @@ import {
   UserCog,
   Users,
   Wallet,
+  Workflow,
   type LucideIcon,
 } from "lucide-react";
 import type { NavIconKey } from "./nav-groups";
@@ -57,6 +58,7 @@ export const NAV_ICONS: Record<NavIconKey, LucideIcon> = {
   users: UserCog,
   sales: Briefcase,
   projects: FolderKanban,
+  operations: Workflow,
   inventory: Boxes,
   vendors: Truck,
   kpis: Target,

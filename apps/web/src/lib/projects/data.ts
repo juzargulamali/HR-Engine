@@ -3,6 +3,8 @@ import { cache } from "react";
 import { canManageProject, isProjFounder, projectViewLevel, type ProjectStanding, type ProjectViewLevel } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjectsContext } from "./context";
+import type { ProjectEdition } from "./directory";
+import { isNotInstalled } from "./errors";
 import type { ProjDirectoryRow, ProjProjectDetailsRow, ProjProjectPersonRow, ProjProjectRow, ProjTeamRow } from "@/types/projects";
 
 /** Everything every project page needs to know about the project and the signed-in person's standing in it. */
@@ -35,6 +37,21 @@ export const loadDirectoryResult = cache(async (): Promise<{ rows: ProjDirectory
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_directory");
   return { rows: data ?? [], error: error ? error.message : null };
+});
+
+export type ProjectEditionsResult = { state: "ok"; byProject: Map<string, ProjectEdition> } | { state: "not_installed" } | { state: "error" };
+/**
+ * The event edition of each project the person can see in the directory (the copy taken at the handover), for the edition line and filter. Three answers: the editions
+ * (possibly none), the migration is not applied here (no edition line, no filter, nothing said), or the read failed (the directory says editions could not be loaded and stays usable).
+ */
+export const loadProjectEditions = cache(async (): Promise<ProjectEditionsResult> => {
+  const { data, error } = await (await createClient()).rpc("proj_project_editions");
+  if (error) {
+    if (isNotInstalled(error)) return { state: "not_installed" };
+    console.error("[projects] project editions load failed", error.message);
+    return { state: "error" };
+  }
+  return { state: "ok", byProject: new Map((data ?? []).map((r) => [r.project_id, { editionId: r.edition_id, label: r.label ?? "Edition without a name", start: r.start_date, end: r.end_date }])) };
 });
 
 export const loadDirectory = cache(async (): Promise<ProjDirectoryRow[]> => (await loadDirectoryResult()).rows);

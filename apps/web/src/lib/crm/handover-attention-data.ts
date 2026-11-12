@@ -5,7 +5,7 @@ import { isNotInstalled } from "@/lib/projects/errors";
 import type { CrmContext } from "./context";
 import type { OpportunityListItem } from "./data";
 import type { HandoverRead } from "./enquiry-guide";
-import { founderCandidates, handoverRows, type HandoverRow, type OwnHandover, type WonOpportunity } from "./handover-attention";
+import { ACCEPTED_NOTICE_DAYS, founderCandidates, handoverRows, type HandoverRow, type OwnHandover, type WonOpportunity } from "./handover-attention";
 
 /** "none": Projects & Tasks is not installed here (no handover exists to check). "error": a read failed, so the page says "Could not check the handover", never nothing. */
 export type HandoverCheck = { status: "none" } | { status: "error" } | { status: "ok"; rows: HandoverRow[] };
@@ -28,14 +28,32 @@ export async function loadHandoverRows(ctx: CrmContext, opportunities: readonly 
     const mine = `sales_owner_id.eq.${ctx.userId},prepared_by.eq.${ctx.userId}`;
     const ownRes = await supabase
       .from("proj_handovers")
-      .select("crm_opportunity_id, crm_reference, title, status, clarification_note, accepted_at, updated_at")
+      .select("id, crm_opportunity_id, crm_reference, title, status, clarification_note, accepted_at, accepted_by, updated_at")
       .or(mine)
       .neq("status", "withdrawn")
       .limit(500);
     if (isNotInstalled(ownRes.error)) return { status: "none" };
     if (ownRes.error) return { status: "error" };
+    // The person's own "handover accepted" notices (the acceptance sends one to the owner and the preparer). Read only when a recent acceptance exists; the
+    // table shows a person their own rows only. Unread = still shown, with Dismiss; read = dismissed (here, or read in Project notices). A failed read is an
+    // error for the card: a dismissed notice must not reappear, and an undismissed one must not vanish, on a guess.
+    const since = new Date(now.getTime() - (ACCEPTED_NOTICE_DAYS + 1) * 86_400_000).toISOString();
+    const recent = (ownRes.data ?? []).filter((h) => h.status === "accepted" && h.accepted_at && h.accepted_at >= since);
+    const notice = new Map<string, NonNullable<OwnHandover["notice"]>>();
+    if (recent.length > 0) {
+      const n = await supabase.from("notifications").select("id, payload, read_at, created_at").eq("user_id", ctx.userId).eq("type", "project_handover_accepted").gte("created_at", since).order("created_at", { ascending: true }).limit(500);
+      if (n.error) return { status: "error" };
+      for (const row of n.data ?? []) {
+        const handoverId = typeof row.payload?.handover_id === "string" ? row.payload.handover_id : null;
+        if (!handoverId) continue;
+        // An unread notice wins over a read one for the same handover: it is still to be dismissed.
+        if (row.read_at === null) notice.set(handoverId, { state: "unread", id: row.id });
+        else if (!notice.has(handoverId)) notice.set(handoverId, { state: "read" });
+      }
+    }
     const own: OwnHandover[] = (ownRes.data ?? []).map((h) => ({
       crmOpportunityId: h.crm_opportunity_id, reference: h.crm_reference, title: h.title, status: h.status, clarificationNote: h.clarification_note, acceptedAt: h.accepted_at, updatedAt: h.updated_at,
+      acceptedBy: h.accepted_by, ...(notice.has(h.id) ? { notice: notice.get(h.id)! } : {}),
     }));
 
     const founderStatus = new Map<string, string | null>();

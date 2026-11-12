@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Panel, Muted } from "@/components/projects/parts";
+import { EquipmentReviewPanel, ReadinessLine, ReleaseFailedNotice, StillOutNotice } from "@/components/projects/equipment-readiness";
 import { NotesLoadError, NotesSection } from "@/components/inventory/notes/notes-section";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
 import { RequestsQuickAdd } from "@/components/inventory/planning/requests-quick-add";
@@ -24,6 +25,8 @@ import { formatQty } from "@/lib/inventory/words";
 import { isNotInstalled } from "@/lib/projects/errors";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
+import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
+import { READINESS_LOAD_ERROR, stillOutAfterDelivery } from "@/lib/projects/equipment-readiness-model";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Project equipment" };
@@ -137,6 +140,17 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const notesBlock = projectNotes === "error" ? <NotesLoadError projectId={id} />
     : projectNotes.state === "ok" ? <NotesSection notes={projectNotes.notes} canAnswer={view.canManage} canResolveFor={canResolveNoteFor} now={new Date()} openNoteId={parseRecordId(firstParam(sp, "note"))} /> : null;
 
+  // Readiness as the database states it (reserved, short, dispatched, still out) and the bookings to review after a date change. A failed read says so: it is never "nothing".
+  const readinessRes = await loadEquipmentReadiness(id).catch(() => ({ state: "error" as const }));
+  const readiness = readinessRes.state === "ok" ? readinessRes.readiness : null;
+  const readinessOf = new Map((readiness?.requests ?? []).map((q) => [q.id, q] as const));
+  const afterDelivery = readiness ? stillOutAfterDelivery(readiness) : null;
+  // Whoever manages the project, or the warehouse of its company (the database function decides; this only chooses whether to offer the button). Also on a finished project.
+  const canReview = view.canManage || canResolveNoteFor(project.company_id);
+  // There is NO automatic recovery when releasing unused reservations fails at completion: the completion trigger writes one line to the import log and carries on, nothing
+  // retries it, and no function re-runs the release for a project. The warehouse releases the lines by hand on each request, so the notice says exactly that and links there.
+  const releaseRequests = (readiness?.requests ?? []).filter((q) => q.state !== "returned" && q.state !== "cancelled");
+
   const quickScope = canEditList ? {
     companies: inv.companies.map((c) => ({ id: c.id, name: c.name, canEmployee: false })),
     projects: [{ id, name: project.name, reference: project.reference, companyId: project.company_id }],
@@ -155,7 +169,12 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       </div>
 
       {off ? <Alert variant="warning" role="status">Inventory is switched off for {company?.name ?? "this company"}. What is already recorded is shown, but nothing new can be requested until a founder switches it on.</Alert> : null}
-      {finished ? <Alert role="status">This project is {project.status}. Its equipment list is read-only; unused reservations were released when it finished.</Alert> : null}
+      {/* "Released" is only said when the database confirms no release failed; when readiness could not be read, nothing is claimed either way. */}
+      {finished ? <Alert role="status">This project is {project.status}. Its equipment list is read-only{readiness && !readiness.releaseFailed ? "; unused reservations were released when it finished" : ""}.</Alert> : null}
+      {finished && readiness?.releaseFailed ? <ReleaseFailedNotice failed={readiness.releaseFailed} requests={releaseRequests} /> : null}
+      {readinessRes.state === "error" ? <Alert variant="destructive" role="alert" data-testid="readiness-load-error">{READINESS_LOAD_ERROR}. Reload to try again; the requests below are still shown.</Alert> : null}
+      {afterDelivery ? <StillOutNotice out={afterDelivery} /> : null}
+      {readiness ? <EquipmentReviewPanel reviews={readiness.reviews} projectId={id} canReview={canReview} /> : null}
 
       {notesBlock}
 
@@ -243,6 +262,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                   <span className="min-w-0 break-words font-medium">{r.title ?? ""}</span>
                   <span className="text-muted-foreground">{windowLabel(r)}</span>
                   <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{stillOutSummary(returnsByRequest.get(r.id) ?? [])}</span>
+                  {readinessOf.has(r.id) ? <span className="basis-full"><ReadinessLine request={readinessOf.get(r.id)!} /></span> : readinessRes.state === "error" && r.status !== "cancelled" ? <span className="basis-full text-destructive">{READINESS_LOAD_ERROR}</span> : null}
                 </summary>
                 <div className="border-t border-border p-4">
                   <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading returns={returnsByRequest.get(r.id)} />

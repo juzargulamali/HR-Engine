@@ -16,6 +16,34 @@ const opp = (id: string, over: Record<string, unknown> = {}) => ({ opp: { id, re
 
 beforeEach(() => { tables = {}; rpcs = {}; });
 
+describe("loadHandoverRows: the accepted notice and its dismissal", () => {
+  const at = new Date(Date.now() - 86_400_000).toISOString();
+  const accepted = { id: "h1", crm_opportunity_id: "a", crm_reference: "R-a", title: "Job a", status: "accepted", clarification_note: null, accepted_at: at, accepted_by: "pm", updated_at: at };
+  const note = (over: Record<string, unknown> = {}) => ({ id: "n1", payload: { handover_id: "h1" }, read_at: null, created_at: at, ...over });
+  it("shows the notice with the person's own unread notice id, and hides it once that notice is read", async () => {
+    tables = { proj_handovers: rows([accepted]), notifications: rows([note()]) };
+    expect(await loadHandoverRows(ctx(), [opp("a")])).toMatchObject({ status: "ok", rows: [{ kind: "handover_accepted", opportunityId: "a", noticeId: "n1" }] });
+    tables = { proj_handovers: rows([accepted]), notifications: rows([note({ read_at: at })]) };
+    expect(await loadHandoverRows(ctx(), [opp("a")])).toEqual({ status: "ok", rows: [] });
+  });
+  it("a notice for another handover changes nothing here", async () => {
+    tables = { proj_handovers: rows([accepted]), notifications: rows([note({ payload: { handover_id: "other" }, read_at: at })]) };
+    const r = await loadHandoverRows(ctx(), [opp("a")]);
+    expect(r).toMatchObject({ status: "ok", rows: [{ kind: "handover_accepted" }] });
+    expect((r as { rows: { noticeId?: string }[] }).rows[0]!.noticeId).toBeUndefined();
+  });
+  it("when the notices cannot be read the card says it could not check, rather than guess what was dismissed", async () => {
+    tables = { proj_handovers: rows([accepted]), notifications: failing() };
+    expect(await loadHandoverRows(ctx(), [opp("a")])).toEqual({ status: "error" });
+  });
+  it("the notices are not read at all when no handover was accepted recently", async () => {
+    let asked = 0;
+    tables = { proj_handovers: rows([{ ...accepted, status: "submitted", accepted_at: null }]), notifications: () => { asked += 1; return failing(); } };
+    expect(await loadHandoverRows(ctx(), [opp("a")])).toEqual({ status: "ok", rows: [] });
+    expect(asked).toBe(0);
+  });
+});
+
 describe("loadHandoverRows", () => {
   it("a won enquiry whose handover has not been started shows the row", async () => {
     tables = { proj_handovers: rows([]) };

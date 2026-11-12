@@ -79,3 +79,40 @@ Source: `supabase/migrations/20261230000100_chat_project_groups.sql`; `apps/web/
 **Unchanged:** the three Sales groups, their membership, unread behaviour and the restricted shared items (the same functions; `chat-sales-groups.rls.test.ts` still passes). Task comments stay on tasks; formal history stays in History.
 
 Tests: `packages/rls-tests/test/chat-project-groups.rls.test.ts` (12: one group per project, verify pack, transfer once in order with authors and times, rerun and re-apply copy nothing, names follow renames, no group / preview / unread / history / post / read marker / member list for a grant holder, founder, Sales person or another project's member, mentions limited to current members, add and remove and revoke and deactivate, finished projects read-only, mirror, project deletion, Sales groups unchanged, rollback then release 1 then forward again), `components/chat/chat-launcher.test.tsx`, `lib/chat/model.test.ts`, `projects/[id]/discussion/page.test.tsx`, `lib/projects/load-errors.test.ts`.
+
+## 10. Operations Managers in project groups, and the Archived section (Projects & Tasks Phase 2B)
+
+Status: branch `claude/projects-phase-2b-operations` (2026-11-12), draft PR #86, not merged; migration `supabase/migrations/20270102000100_ops_phase2b.sql` (install-order row 30) **not applied by Claude; treated as applied on the shared hosted database on the owner's report of 2026-11-12 that the signed-in Preview checks of PR #86 passed, which is owner-reported by implication and `Unverified` by Claude**; code read only, nothing seen signed in by Claude. **The Archived paragraph below was re-read against commit `16d6f42`** (the change is `93ec0f2`, app only, no SQL); the rest of this section keeps its earlier stamp. Sources: that migration, section 5; `apps/web/src/lib/chat/model.ts`, `lib/chat/data.ts`, `components/chat/chat-launcher.tsx`, `chat-thread.tsx`; tests `packages/rls-tests/test/ops-phase2b.rls.test.ts`, `lib/chat/model.test.ts`, `components/chat/chat-launcher.test.tsx`. Full reference: [`operations.md`](./operations.md) section 10.
+
+**A second, explicit path into a project group.** Section 9 says membership of a project group is active enrolment and that "a Projects grant, a founder grant ... grants nothing". From this migration one Projects capability does: a person who holds **`operations` itself** (Operations Manager) for the project's company is a member of every project group of that company, without being enrolled in the project (`chat_is_ops`). The founder shortcut is not this permission: a founder who does not hold `operations` and is not enrolled still has no path. Sales access, warehouse access and another company's Operations Manager gain nothing.
+
+| Function | Change |
+|---|---|
+| `chat_is_ops(user, project)` (internal, new) | True when the user's active Projects grant for the project's company contains `operations` and their profile is active |
+| `chat_is_member` (internal) | For a project group: enrolled member **or** `chat_is_ops`. Every function that checks it follows (`chat_messages`, `chat_post`, `chat_mark_read`, `chat_group_members`) |
+| `chat_project_group(project)` | Also answers for an Operations Manager of the project's company |
+| `chat_my_groups()` | Creates the missing group of each **live** project (not completed or archived) of the caller's Operations companies, so the conversation is listed before anyone has posted. **Two more columns:** `project_status` (the project's real status; null for a Sales group) and `via_operations` (true when the caller reads a project group through Operations and is not enrolled). The return type changed, so the function is dropped and created again in the migration's transaction |
+| `chat_group_members` | For a project group: the enrolled members and, with "(Operations)" after the name, the company's Operations Managers who are not enrolled. Sales groups unchanged |
+
+**What the person sees.**
+
+* **Tag "Operations"** beside the group's name in the list, and a note at the top of the thread, "You are reading this as Operations Manager. You are not on this project's team.", on every group read through Operations (`viaOperations`; `OPERATIONS_READER_NOTE`).
+* **"Archived (N)"**: groups of **completed and archived** projects are listed in a third section after Sales and Projects, collapsed until pressed (`aria-expanded`; a 44 px row). A search opens it, so a finished group is still found by name. While it is closed, the heading shows the section's unread count and a mention marker: nothing is dropped from the totals (`isArchivedGroup`, `groupSections`, `archivedHeading` in `lib/chat/model.ts`).
+  * **Changed on 2026-11-12 (commit `93ec0f2`).** Before it, only an archived project's group was here and a completed project's group stayed under Projects. Now both sit under Archived.
+  * **Read-only, as before.** The server rule is unchanged: `chat_post` refuses a post to a completed or archived project (section 9). Only the place in the list changed.
+  * **Direct links still open them:** a `?chat=<group id>` link, the project's Chat button and an old Discussion link open the group whichever section it is listed in.
+  * **A reopened or restored project's group is back under Projects on the next refresh** of the list.
+  * **The project itself is not changed by where its chat is listed.** A completed project keeps its lifecycle (it can still be reopened or archived) and its equipment-return tracking (`operations.md` section 9.3).
+  * **A database that does not send the project's status:** the group is placed by the server's read-only flag, which is set for exactly these two statuses (`projectStatus == null && readOnly === true`).
+  * Tests: `lib/chat/model.test.ts` (19), `components/chat/chat-launcher.test.tsx` (17). Not seen signed in.
+* **Project chat** on a Project health card of the Operations Overview (labelled "Open project chat" before the redesign of 2026-11-12) is a link with `?chat=<group id>`: the launcher opens the group only if the server lists it for the person.
+
+**Mentions.** The @ picker is filled from `chat_group_members`, so an Operations Manager who is not enrolled is offered, marked "(Operations)", and can be mentioned. The membership line under a project group's name reads "The people on this project, and the company's Operations Managers" (`lib/chat/model.ts`).
+
+**Revocation.** Removing the capability, the Projects grant, or deactivating the person removes the groups, their history and the right to post on the next call (test "Chat: the Operations Manager reads and posts ...").
+
+**What did not change.** The three Sales groups and their membership; membership for enrolled members; read-only conversations for completed and archived projects; unread and mention counting; shared items and "Restricted item"; no editing or deleting of messages; no external notification; polling. An app version from before this phase reads the two new columns as absent and behaves as before (it names the columns it uses, `lib/chat/data.ts`): finished groups then stay under Projects and no tag is shown. The sentence shown when a `?chat=` link cannot be opened now reads "That conversation is not available to you. A project's chat is open to the people on that project and to the company's Operations Managers."
+
+**Cost (known limit).** For an Operations Manager the group list covers every project group of their companies; the independent reviewer measured about 1.5 s at 3,000 groups (reported, not measured by the author of this section).
+
+**Rollback** (`supabase/manual-sql/ops_phase2b_90_rollback.sql`): restores `chat_is_member`, `chat_project_group`, `chat_group_members` and `chat_my_groups` as installed by `20261230000100` and drops `chat_is_ops`. No group and no message is deleted.

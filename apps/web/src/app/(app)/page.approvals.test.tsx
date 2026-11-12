@@ -8,6 +8,7 @@ import { failing, fakeSupabase, rows, type FakeResult } from "@/test/fake-supaba
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/log", () => ({ logServerError: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/", redirect: vi.fn() }));
+vi.mock("@/lib/my-day/operations-day", () => ({ loadOperationsDay: async () => null, loadMyEquipmentReviews: async () => null }));
 vi.mock("@/lib/weather", () => ({ getCurrentWeather: async () => null }));
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
 let rpcs: Record<string, FakeResult | (() => FakeResult)> = {};

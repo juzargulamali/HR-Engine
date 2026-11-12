@@ -504,12 +504,13 @@ describe("Projects & Tasks", () => {
     });
     it("lets only founders / assign_pm reassign the PM, and moves the PM role and access with it", async () => {
       await fails(U.pm, `select proj_assign_pm('${P1}', '${U.member2}')`, /Only a founder/);
-      await commit(U.assigner, `select proj_assign_pm('${P1}', '${U.member2}')`);
+      await fails(U.assigner, `select proj_assign_pm('${P1}', '${U.member2}')`, /Give the reason for changing the Project Manager/);   // since Phase 2B a reassignment carries its reason
+      await commit(U.assigner, `select proj_assign_pm('${P1}', '${U.member2}', 'Handing over while the Project Manager is away')`);
       await commit(U.pm2, `select proj_add_member('${P2}', '${U.pm}')`);
       expect((await admin<Row>(`select role from proj_project_members where project_id = '${P1}' and user_id = '${U.member2}' and removed_at is null`))[0].role).toBe("pm");
       expect((await admin<Row>(`select role from proj_project_members where project_id = '${P1}' and user_id = '${U.pm}' and removed_at is null`))[0].role).toBe("member");
       await fails(U.pm, `select proj_save_milestone('${P1}', null, ${j({ title: "X" })})`, /Only the Project Manager/);
-      await commit(U.assigner, `select proj_assign_pm('${P1}', '${U.pm}')`);
+      await commit(U.assigner, `select proj_assign_pm('${P1}', '${U.pm}', 'The Project Manager is back')`);
       await commit(U.pm, `select proj_remove_member('${P1}', '${U.member2}', 'rotation')`);
       expect(await q(U.member2, `select 1 from proj_project_details where project_id = '${P1}'`)).toHaveLength(0);
       await commit(U.pm, `select proj_add_member('${P1}', '${U.member2}')`);

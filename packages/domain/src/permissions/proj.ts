@@ -16,6 +16,7 @@ export const PROJ_CAPABILITIES = [
   "view_audit",
   "reopen_project",
   "override_site_conflict",
+  "operations",
 ] as const;
 export type ProjCapability = (typeof PROJ_CAPABILITIES)[number];
 
@@ -28,6 +29,7 @@ export const PROJ_CAPABILITY_LABELS: Record<ProjCapability, { label: string; des
   view_audit: { label: "Read the Projects audit trail", description: "See who changed what in this company's projects, including member-only fields." },
   reopen_project: { label: "Reopen completed projects", description: "Reopen a completed project, with a reason. The completion record stays in the history." },
   override_site_conflict: { label: "Confirm overlapping site bookings", description: "Confirm a booking that overlaps another, with a recorded reason." },
+  operations: { label: "Operations Manager", description: "Open the Operations workspace for this company, assign or change Project Managers, read this company's projects, comment on tasks, raise corrections and take part in its project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not manage tasks or deliveries or add files." },
 };
 
 export interface ProjGrant {
@@ -38,10 +40,22 @@ export interface ProjGrant {
 /** proj_has_access */
 export const hasProjAccess = (grants: readonly ProjGrant[], companyId: string) => grants.some((g) => g.companyId === companyId);
 
-/** proj_has_capability: 'founder' implies every capability. */
+/**
+ * proj_has_capability: 'founder' implies every capability, and 'operations' implies 'assign_pm' (20270102000100_ops_phase2b.sql section 1: the handover
+ * functions, their visibility and their notices already test assign_pm, so an Operations Manager passes them without holding assign_pm itself).
+ */
 export function hasProjCapability(grants: readonly ProjGrant[], companyId: string, capability: ProjCapability): boolean {
-  return grants.some((g) => g.companyId === companyId && (g.capabilities.includes("founder") || g.capabilities.includes(capability)));
+  return grants.some(
+    (g) => g.companyId === companyId && (g.capabilities.includes("founder") || g.capabilities.includes(capability) || (capability === "assign_pm" && g.capabilities.includes("operations"))),
+  );
 }
+
+/**
+ * proj_holds_assign_pm: 'assign_pm' ITSELF (or founder), without the Operations implication. Creating an internal project and changing a project's Sales links ask
+ * for this; an Operations Manager assigns Project Managers but does neither.
+ */
+export const holdsAssignPm = (grants: readonly ProjGrant[], companyId: string) =>
+  grants.some((g) => g.companyId === companyId && (g.capabilities.includes("founder") || g.capabilities.includes("assign_pm")));
 
 /** proj_is_founder */
 export const isProjFounder = (grants: readonly ProjGrant[], companyId: string) =>
@@ -62,6 +76,13 @@ export const canSeeCommercialEffects = (grants: readonly ProjGrant[], companyId:
 export const canReopenProject = (grants: readonly ProjGrant[], companyId: string) => hasProjCapability(grants, companyId, "reopen_project");
 export const canOverrideSiteConflict = (grants: readonly ProjGrant[], companyId: string) => hasProjCapability(grants, companyId, "override_site_conflict");
 export const canReadProjAudit = (grants: readonly ProjGrant[], companyId: string) => hasProjCapability(grants, companyId, "view_audit");
+
+/** ops_require: the Operations workspace of one company is open to its Operations Managers and its founders. */
+export const isOpsManager = (grants: readonly ProjGrant[], companyId: string) => hasProjCapability(grants, companyId, "operations");
+/** ops_company_ids: the companies the person is Operations Manager of (a founder counts). */
+export const opsCompanyIds = (grants: readonly ProjGrant[]) => [
+  ...new Set(grants.filter((g) => g.capabilities.includes("founder") || g.capabilities.includes("operations")).map((g) => g.companyId)),
+];
 
 export type ProjectMemberRole = "pm" | "acting_pm" | "member";
 
@@ -87,15 +108,18 @@ export interface ProjectStanding {
 export const LIVE_PROJECT_STATUSES = ["planning", "in_progress", "ready_for_installation", "on_site", "on_hold"] as const;
 export const isLiveProjectStatus = (status: string) => (LIVE_PROJECT_STATUSES as readonly string[]).includes(status);
 
-/** proj_can_view_details: founders of the company and active members. Nobody else, whatever their other roles. */
-export const canViewProjectDetails = (s: ProjectStanding) => isProjFounder(s.grants, s.companyId) || s.isMember;
+/**
+ * proj_can_view_details: founders of the company, active members, and the company's Operations Managers (who read a project in full without joining it; reading
+ * only: managing it stays with the Project Manager). Nobody else, whatever their other roles.
+ */
+export const canViewProjectDetails = (s: ProjectStanding) => isProjFounder(s.grants, s.companyId) || s.isMember || isOpsManager(s.grants, s.companyId);
 
 /** proj_can_manage: founder, the PM, or temporary project leadership. */
 export const canManageProject = (s: ProjectStanding) => isProjFounder(s.grants, s.companyId) || s.isPm || s.isActingPm;
 
 /** proj_can_view_summary */
 export const canViewProjectSummary = (s: ProjectStanding) =>
-  isProjFounder(s.grants, s.companyId) || s.isMember || (hasProjAccess(s.grants, s.companyId) && isLiveProjectStatus(s.status)) || s.isSalesLinked;
+  isProjFounder(s.grants, s.companyId) || s.isMember || isOpsManager(s.grants, s.companyId) || (hasProjAccess(s.grants, s.companyId) && isLiveProjectStatus(s.status)) || s.isSalesLinked;
 
 export type ProjectViewLevel = "details" | "summary" | "none";
 export const projectViewLevel = (s: ProjectStanding): ProjectViewLevel => (canViewProjectDetails(s) ? "details" : canViewProjectSummary(s) ? "summary" : "none");

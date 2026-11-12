@@ -212,10 +212,11 @@ export async function setProjectStatus(_prev: S, fd: FormData): Promise<S> {
 }
 
 export async function assignProjectPm(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, pmUserId: uuid }).safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: "Choose the Project Manager." };
+  // A reassignment carries its reason: it goes into the project's history and to the outgoing Project Manager. The database refuses one without it.
+  const p = z.object({ projectId: uuid, pmUserId: uuid, reason: z.string().trim().min(3, "Give the reason for changing the Project Manager.").max(500, "Keep the reason under 500 characters.") }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: p.error.issues.some((i) => i.path[0] === "reason") ? firstIssue(p.error) : "Choose the Project Manager." };
   const supabase = await createClient();
-  const { error } = await supabase.rpc("proj_assign_pm", { p_project_id: p.data.projectId, p_pm_user_id: p.data.pmUserId });
+  const { error } = await supabase.rpc("proj_assign_pm", { p_project_id: p.data.projectId, p_pm_user_id: p.data.pmUserId, p_reason: p.data.reason });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return ok();

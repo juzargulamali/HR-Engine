@@ -77,3 +77,39 @@ describe("the equipment line of the delivery summary", () => {
     expect(equipmentSummary({ ...noEquipment, requests: 2 } as EquipmentState).text).toBe("No decision waiting");
   });
 });
+
+import type { EquipmentReadiness, EquipmentReview, RequestReadiness } from "./equipment-readiness-model";
+describe("equipment readiness on the Work page", () => {
+  const review = (over: Partial<EquipmentReview> = {}): EquipmentReview => ({ id: "v1", requestId: "q1", requestCode: "REQ-0101", field: "event_start", oldDate: "2026-11-21", newDate: "2026-11-23", changedAt: "2026-11-10T08:00:00Z", changedBy: "Fictional Pia", ...over });
+  const request = (over: Partial<RequestReadiness> = {}): RequestReadiness => ({ id: "q1", code: "REQ-0101", status: "in_progress", state: "reserved", lines: 3, reservedLines: 3, partialLines: 0, shortLines: 0, shortBuy: 0, shortRent: 0,
+    shortNoPlan: 0, dispatchedLines: 0, returnedLines: 0, unitsAsked: 6, unitsShort: 0, unitsDispatched: 0, unitsReturned: 0, unitsOut: 0, neededFrom: null, neededUntil: null, expectedReturnAt: null, returnOverdue: false, ...over });
+  const ready = (over: Partial<EquipmentReadiness> = {}): EquipmentReadiness => ({ projectStatus: "active", requests: [request()], reviews: [], releaseFailed: null, ...over });
+
+  it("a changed date is 'Review equipment booking': one line per request, the manager's to act on, linking to the Equipment tab", () => {
+    const reviews = [review(), review({ id: "v2", field: "event_end", oldDate: "2026-11-24", newDate: "2026-11-26" }), review({ id: "v3", requestId: "q2", requestCode: "REQ-0102" })];
+    const pm = workAttention(input({ equipmentReviews: reviews, manager: true, userId: "pm" }));
+    expect(pm.needsYou.map((x) => [x.label, x.title, x.href, x.owner])).toEqual([["Review equipment booking", "Request REQ-0101", "/eq#equipment-review", "You"], ["Review equipment booking", "Request REQ-0102", "/eq#equipment-review", "You"]]);
+    expect(pm.needsYou[0]!.detail).toBe("Event start: was 21 Nov 2026 · now 23 Nov 2026 · Event end: was 24 Nov 2026 · now 26 Nov 2026. The booking has not been changed.");
+    const member = workAttention(input({ equipmentReviews: reviews }));
+    expect(member.needsYou).toEqual([]);
+    expect(member.waiting.map((x) => x.owner)).toEqual(["Fictional Pia", "Fictional Pia"]);
+    // shown even when the older equipment read failed; none when there is no review
+    expect(workAttention(input({ equipment: { status: "error" }, equipmentReviews: [review()], manager: true })).needsYou).toHaveLength(1);
+    expect(workAttention(input({ equipmentReviews: [] })).waiting).toEqual([]);
+  });
+  it("the summary line uses the readiness state when it is available", () => {
+    const sent = { ...noEquipment, requests: 1 } as EquipmentState;
+    expect(equipmentSummary(sent, { state: "ok", readiness: ready({ requests: [request({ state: "short", reservedLines: 0, shortLines: 3, shortRent: 3 })] }) })).toEqual({ text: "Short", detail: "3 of 3 lines short: 3 to rent", tone: "red" });
+    expect(equipmentSummary({ ...sent, waiting: [{ id: "q1", code: "REQ-0101" }] } as EquipmentState, { state: "ok", readiness: ready() }).text).toBe("Reserved");
+    // a decision the manager owes still leads
+    expect(equipmentSummary({ ...sent, drafts: [{ id: "d", code: "REQ-0100" }] } as EquipmentState, { state: "ok", readiness: ready() }).text).toBe("Equipment draft needs submission");
+  });
+  it("a failed readiness read says so, and is never 'No decision waiting'", () => {
+    expect(equipmentSummary({ ...noEquipment, requests: 1 } as EquipmentState, { state: "error" })).toEqual({ text: "Equipment readiness could not be loaded", tone: "red" });
+  });
+  it("without the migration, or without access to readiness, the line is as before", () => {
+    expect(equipmentSummary({ ...noEquipment, requests: 2 } as EquipmentState, { state: "not_installed" }).text).toBe("No decision waiting");
+    expect(equipmentSummary({ ...noEquipment, waiting: [{ id: "1", code: "a" }], requests: 1 } as EquipmentState, { state: "denied" }).text).toBe("Waiting for Warehouse");
+    expect(equipmentSummary({ status: "unavailable" }, { state: "denied" }).text).toBe("Not available to you here");
+  });
+});

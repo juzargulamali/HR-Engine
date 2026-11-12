@@ -21,7 +21,7 @@ import { waitingAgeText } from "./waiting";
  */
 
 export type AttentionSource =
-  | "approvals" | "project-tasks" | "project-decisions" | "sales" | "sales-handover" | "sales-approvals" | "budgets" | "budget-projects" | "notes" | "hr";
+  | "approvals" | "project-tasks" | "project-decisions" | "sales" | "sales-handover" | "sales-approvals" | "budgets" | "budget-projects" | "notes" | "hr" | "operations" | "project-equipment";
 
 /** Named in the headline and in the error entries when that source could not be loaded. */
 export const SOURCE_LABEL: Record<AttentionSource, string> = {
@@ -35,6 +35,8 @@ export const SOURCE_LABEL: Record<AttentionSource, string> = {
   "budget-projects": "The budgets of your projects",
   notes: "Dispatch and return notes",
   hr: "People & HR alerts",
+  operations: "Operations",
+  "project-equipment": "Equipment bookings to review",
 };
 
 /** 0: overdue or past due. 1: due today. 2: everything else (ordered by how long it has waited). */

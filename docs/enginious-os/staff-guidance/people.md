@@ -51,3 +51,19 @@ Your own expense claims are on the My Reimbursements page, and each claim opens 
 Access to a module (Sales, Projects, Inventory and so on) is given by the people who manage People & Access: a System Administrator, an HR Admin, or a module access manager. If a screen says you do not have access, ask one of them. JARVIS cannot change anyone's access.
 
 1. Open People & Access if you manage access, or ask the person who does.
+
+## Make someone an Operations Manager, or stop it
+- id: people-operations-manager-access
+- area: people
+- status: published
+- keywords: operations manager access; make someone operations manager; who can open operations; remove operations manager; take away operations access; operations manager profile
+- links: People & Access -> /people-access
+- screens: /people-access
+
+Operations Manager is given per company, inside a person's Projects access, by a Projects founder or someone who manages Projects access. It opens Operations for that company, lets the person assign Project Managers, read every project of the company and use its project chats. It gives nothing in Sales, Finance, HR or the warehouse, and they cannot manage a project or its tasks.
+
+1. Open People & Access, find the person and open their Projects access; check Access for company.
+2. Under Working profile choose Operations Manager.
+3. Read Review before saving, then press Save changes. They see Operations on their next page.
+4. To stop it, choose another profile such as Project directory viewer, review and press Save changes.
+5. It ends on their next page: Operations and the company's project chats close for them.

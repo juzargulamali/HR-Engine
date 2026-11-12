@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AtSign, FolderKanban, MessageCircle, Search, Users, X } from "lucide-react";
+import { AtSign, ChevronDown, ChevronRight, FolderKanban, MessageCircle, Search, Users, X } from "lucide-react";
 import { chatGroups } from "@/lib/actions/chat";
-import { badgeText, CHAT_OPEN_EVENT, CHAT_PARAM, filterGroups, groupSections, launcherLabel, shortAgo, totalUnread, type ChatGroup } from "@/lib/chat/model";
+import { archivedHeading, badgeText, CHAT_OPEN_EVENT, CHAT_PARAM, filterGroups, groupSections, launcherLabel, shortAgo, totalUnread, type ChatGroup } from "@/lib/chat/model";
 import { withParams } from "@/components/workspace/url-state";
 import { useFocusTrap } from "@/lib/use-focus-trap";
 import { cn } from "@/lib/utils";
@@ -40,6 +40,8 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
   const [notice, setNotice] = useState<string | null>(null);
   const groupsRef = useRef(initialGroups);
   const [find, setFind] = useState("");
+  // The groups of completed and archived projects sit under "Archived (N)", closed until asked for. A search opens it (below), so a finished group is still found by name.
+  const [archivedOpen, setArchivedOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -73,7 +75,7 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
     if (groupsRef.current.length === 0) return;
     setOpen(true);
     if (known) { setNotice(null); setOpenGroup(groupId); }
-    else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project."); }
+    else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project and to the company's Operations Managers."); }
   }, []);
 
   useEffect(() => {
@@ -154,9 +156,25 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
                       className="h-10 w-full rounded-lg border border-input bg-transparent pl-9 pr-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                   </div>
                 ) : null}
-                {groupSections(filterGroups(groups, find)).map((section) => (
+                {groupSections(filterGroups(groups, find)).map((section) => {
+                  // An archived group is never dropped from the totals: while the section is closed its unread and mentions are shown on the heading.
+                  const shown = !section.archived || archivedOpen || find.trim() !== "";
+                  const unread = totalUnread(section.groups);
+                  const mentioned = section.groups.some((x) => x.mentions > 0);
+                  return (
                   <section key={section.title} aria-label={`${section.title} groups`}>
-                    <h3 className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{section.title}</h3>
+                    {section.archived ? (
+                      <button type="button" onClick={() => setArchivedOpen((o) => !o)} aria-expanded={shown} data-testid="chat-archived-toggle"
+                        className="flex min-h-11 w-full items-center gap-2 px-4 pb-1 pt-3 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        {shown ? <ChevronDown className="h-3.5 w-3.5" aria-hidden /> : <ChevronRight className="h-3.5 w-3.5" aria-hidden />}
+                        <span className="flex-1">{archivedHeading(section.groups.length)}</span>
+                        {!shown && mentioned ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive text-white" title="You were mentioned" data-testid="chat-archived-mention"><AtSign className="h-3 w-3" aria-hidden /></span> : null}
+                        {!shown && unread > 0 ? <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-accent px-1 text-[11px] font-semibold normal-case text-white" data-testid="chat-archived-unread" aria-label={`${unread} unread`}>{badgeText(unread)}</span> : null}
+                      </button>
+                    ) : (
+                      <h3 className="px-4 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{section.title}</h3>
+                    )}
+                    {shown ? (
                     <ul className="divide-y divide-border">
                       {section.groups.map((g) => (
                         <li key={g.id}>
@@ -164,7 +182,9 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
                             className="flex min-h-16 w-full items-center gap-3 px-4 py-3 text-left hover:bg-secondary/50 focus-visible:bg-secondary/50 focus-visible:outline-none">
                             <span aria-hidden className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-secondary">{g.kind === "project" ? <FolderKanban className="h-5 w-5" /> : <Users className="h-5 w-5" />}</span>
                             <span className="min-w-0 flex-1">
-                              <span className="flex items-center gap-2"><span className="truncate text-sm font-semibold">{g.name}</span><span className="ml-auto shrink-0 text-xs text-muted-foreground">{shortAgo(g.lastAt)}</span></span>
+                              <span className="flex items-center gap-2"><span className="truncate text-sm font-semibold">{g.name}</span>
+                                {g.viaOperations ? <span className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" data-testid="chat-group-operations">Operations</span> : null}
+                                <span className="ml-auto shrink-0 text-xs text-muted-foreground">{shortAgo(g.lastAt)}</span></span>
                               <span className="block truncate text-xs text-muted-foreground">{g.lastPreview ? `${g.lastSender ?? ""}: ${g.lastPreview}` : "No messages yet"}</span>
                             </span>
                             {g.mentions > 0 ? <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-destructive text-white" title="You were mentioned" data-testid="chat-group-mention"><AtSign className="h-3 w-3" aria-hidden /></span> : null}
@@ -173,8 +193,10 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
                         </li>
                       ))}
                     </ul>
+                    ) : null}
                   </section>
-                ))}
+                  );
+                })}
                 {find && filterGroups(groups, find).length === 0 ? <p className="px-4 py-6 text-center text-sm text-muted-foreground">No group matches.</p> : null}
               </div>
             )}

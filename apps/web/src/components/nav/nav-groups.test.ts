@@ -488,6 +488,71 @@ describe("Projects & Tasks navigation", () => {
   });
 });
 
+describe("Operations navigation", () => {
+  const proj = (capabilities: string[] = [], extra: Record<string, boolean> = {}) =>
+    ({ projects: { grants: [{ companyId: "c1", capabilities: capabilities as never[] }], ...extra } });
+  const ops = (mods: NavModuleData[]) => mods.find((m) => m.id === "operations");
+
+  it("is shown to an Operations Manager, with Overview and Upcoming Work", () => {
+    const m = ops(buildNavModules([grant("employee")], proj(["operations"])));
+    expect(m).toMatchObject({ label: "Operations", href: "/operations" });
+    expect(m!.sections.flatMap((s) => s.links.map((l) => [l.label, l.href]))).toEqual([["Overview", "/operations"], ["Upcoming Work", "/operations/upcoming"]]);
+  });
+
+  it("is shown to a Projects founder, in any one of their companies", () => {
+    expect(ops(buildNavModules([], proj(["founder"])))).toBeDefined();
+    const two = { projects: { grants: [{ companyId: "c1", capabilities: [] as never[] }, { companyId: "c2", capabilities: ["operations"] as never[] }] } };
+    expect(ops(buildNavModules([], two))).toBeDefined();
+  });
+
+  it("is hidden from a plain member, from someone who only assigns Project Managers, and from every HR role and Sales grant", () => {
+    expect(ops(buildNavModules([grant("employee")], proj()))).toBeUndefined();
+    expect(ops(buildNavModules([grant("employee")], proj(["assign_pm"])))).toBeUndefined();
+    expect(ops(buildNavModules([], proj(["manage_access", "approve_scope", "view_commercial", "view_audit", "reopen_project", "override_site_conflict"])))).toBeUndefined();
+    expect(ops(buildNavModules([], proj([], { managesProjects: true, pendingHandovers: true })))).toBeUndefined();
+    expect(ops(buildNavModules([], { projects: { grants: [], salesLinked: true } }))).toBeUndefined();
+    for (const hr of [grant("hr_admin"), grant("ceo"), grant("cto"), grant("finance"), grant("sys_admin", null), grant("line_manager")]) {
+      expect(ops(buildNavModules([hr], { crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] }))).toBeUndefined();
+    }
+  });
+
+  it("sits directly before Projects & Tasks", () => {
+    const ids = buildNavModules([grant("employee")], proj(["operations"])).map((m) => m.id);
+    expect(ids.indexOf("operations")).toBe(ids.indexOf("projects") - 1);
+    expect(ids).toEqual(["my-day", "me", "operations", "projects", "company"]);
+  });
+
+  it("gives an Operations Manager the Handovers entry, and not New internal project (that needs PM assignment itself)", () => {
+    const hrefs = hrefsOf(buildNavModules([], proj(["operations"])));
+    expect(hrefs).toContain("/projects/handovers");
+    expect(hrefs).not.toContain("/projects/new");
+    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).toContain("/projects/new");
+    expect(buildNavModules([], proj(["operations"])).find((m) => m.id === "projects")?.href).toBe("/projects");
+    // It is not access management.
+    expect(hrefs).not.toContain("/people-access");
+  });
+
+  it("never shows the same address twice, and its icons resolve", () => {
+    for (const caps of [["operations"], ["founder"], ["operations", "assign_pm", "manage_access"]]) {
+      const mods = buildNavModules([grant("hr_admin"), grant("sys_admin", null)], { ...proj(caps, { managesProjects: true, pendingHandovers: true }), crmGrants: [{ companyId: "c1", capabilities: ["founder"] }] });
+      const links = mods.flatMap((m) => m.sections.flatMap((x) => x.links.map((l) => l.href)));
+      expect(links.filter((h, i) => links.indexOf(h) !== i)).toEqual([]);
+      expect(new Set(mods.map((m) => m.id)).size).toBe(mods.length);
+      for (const key of iconKeysOf(mods)) expect(NAV_ICONS[key as keyof typeof NAV_ICONS]).toBeDefined();
+      expect(() => assertNoFunctions(mods)).not.toThrow();
+    }
+  });
+
+  it("marks Operations as the active module for its pages, and never for a Projects page", () => {
+    const modules = buildNavModules([grant("employee")], proj(["operations"]));
+    expect(activeModuleId("/operations", modules)).toBe("operations");
+    expect(activeModuleId("/operations/upcoming", modules)).toBe("operations");
+    expect(breadcrumbFor("/operations/upcoming", modules)).toEqual({ module: "Operations", page: "Upcoming Work" });
+    expect(breadcrumbFor("/operations", modules)).toEqual({ module: "Operations", page: null });
+    expect(activeModuleId("/projects/work", modules)).toBe("projects");
+  });
+});
+
 describe("Inventory navigation", () => {
   const inv = (...caps: string[]) => ({ grants: [{ companyId: "c1", capabilities: caps as never[] }] });
   const sectionLinks = (mods: ReturnType<typeof buildNavModules>) => mods.find((m) => m.id === "inventory")!.sections.flatMap((s) => s.links.map((l) => `${s.label}:${l.label}${l.secondary ? "*" : ""}`));

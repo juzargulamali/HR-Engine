@@ -60,7 +60,7 @@ The project banner (`P/[id]/layout.tsx`) shows one menu button labelled **Manage
 
 The hint "Needs the client's confirmation" is shown for internal projects too (`manageItems` does not look at the project kind).
 
-The menu is shown only at the "details" level (`view.level === "details"` in `P/[id]/layout.tsx`): a founder of the project's company or a member (`canViewProjectDetails`, `proj.ts`; `proj_can_view_details`, `M100`). A person at the "summary" level (a Projects grant holder who is not a member, or a linked Sales person) sees the banner, the note "Summary only. Details, tasks, chat and files are for the people working on this project; the Project Manager can add you if you should take part." and no menu.
+The menu is shown only at the "details" level (`view.level === "details"` in `P/[id]/layout.tsx`): a founder of the project's company or a member (`canViewProjectDetails`, `proj.ts`; `proj_can_view_details`, `M100`). **Phase 2B (branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude):** an Operations Manager of the company is also at the details level; every entry that needs a Manager stays closed to them ([`operations.md`](./operations.md) section 2). A person at the "summary" level (a Projects grant holder who is not a member, or a linked Sales person) sees the banner, the note "Summary only. Details, tasks, chat and files are for the people working on this project; the Project Manager can add you if you should take part." and no menu.
 
 ### 0.3 Guards every page here repeats
 

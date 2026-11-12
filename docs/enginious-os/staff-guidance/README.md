@@ -6,9 +6,9 @@ These files are part of the Enginious Map. They are the **only** Enginious OS kn
 |---|---|
 | [`sales.md`](./sales.md) | Sales & CRM (the first module with detailed guidance and live JARVIS actions), including Events & Exhibitions and Outreach |
 | [`people.md`](./people.md) | People & HR ("where to find it" only) |
-| [`projects.md`](./projects.md) | Projects & Tasks: 28 topics by role and screen (My Work, the Work page, the Delivery plan and its Excel import, tasks, blockers, review, timeline, site bookings, files, people, feedback and scope, equipment, handovers, completion, project chat). Guidance only: JARVIS reads no Projects record and has no Projects action |
+| [`projects.md`](./projects.md) | Projects & Tasks and Operations: 34 topics by role and screen (Operations Overview, project health labels and Upcoming Work for Operations Managers, the equipment booking review, finished projects' chats under Archived, My Work, the Work page, the Delivery plan and its Excel import, tasks, blockers, review, timeline, site bookings, files, people, feedback and scope, equipment, handovers, completion, project chat). Guidance only: JARVIS reads no Projects record and has no Projects action |
 | [`inventory.md`](./inventory.md) | Inventory ("where to find it" only) |
-| [`general.md`](./general.md) | My Day, approvals, JARVIS itself |
+| [`general.md`](./general.md) | My Day (with the Operations card for Operations Managers), approvals, JARVIS itself |
 
 ## Format of a topic
 

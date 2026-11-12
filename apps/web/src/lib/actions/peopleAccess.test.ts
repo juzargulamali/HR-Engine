@@ -57,6 +57,16 @@ describe("applyModuleAccess", () => {
     expect(rpc).toHaveBeenCalledWith("proj_grant_access", { p_user_id: U, p_company_id: C, p_capabilities: ["assign_pm", "view_commercial"], p_note: null });
   });
 
+  it("saves the Operations Manager right through the Projects grant function: a Projects capability, not a module of its own", async () => {
+    const r = await applyModuleAccess(idle, fd({ module: "projects", userId: U, companyId: C, capabilities: ["operations", "assign_pm"] }));
+    expect(r.error).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("proj_grant_access", { p_user_id: U, p_company_id: C, p_capabilities: ["assign_pm", "operations"], p_note: null });
+    rpc.mockClear();
+    expect((await applyModuleAccess(idle, fd({ module: "operations", userId: U, companyId: C, capabilities: ["operations"] }))).error).not.toBeNull();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
   it("uses the right function for each module", async () => {
     for (const [module, fn] of [["sales", "crm_grant_access"], ["projects", "proj_grant_access"], ["inventory", "inv_grant_access"], ["budget", "pbx_grant_access"]] as const) {
       rpc.mockClear();

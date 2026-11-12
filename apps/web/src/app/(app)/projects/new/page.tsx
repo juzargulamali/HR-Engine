@@ -1,4 +1,4 @@
-import { hasProjCapability, isProjFounder } from "@enginious-hr/domain";
+import { holdsAssignPm, isProjFounder } from "@enginious-hr/domain";
 import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
@@ -11,7 +11,7 @@ export default async function NewInternalProjectPage() {
   const ctx = await getProjectsContext();
   if (!ctx) return null;
   const companies = ctx.companies
-    .filter((c) => hasProjCapability(ctx.grants, c.id, "assign_pm"))
+    .filter((c) => holdsAssignPm(ctx.grants, c.id))
     .map((c) => ({
       id: c.id, name: c.name, referenceCode: c.referenceCode, isFounder: isProjFounder(ctx.grants, c.id),
       people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),

@@ -429,6 +429,23 @@ Shared meanings:
 | (10) Retry | Idempotent |
 | (11) Surface | UI over DB function |
 
+#### `sales.handover_notice.dismiss`
+Added 2026-11-12 (branch `claude/projects-phase-2b-operations`, draft PR #86, not merged; commit `d9e8338`, read at `16d6f42`). App only: no SQL and no new migration; it reuses a Projects function that already existed. Reference: [follow-ups](./sales-followups.md) section 2.1.
+
+| Field | Entry |
+|---|---|
+| (1) Reached | **Dismiss** on a "Handover accepted" row of the Handover card on `/sales/follow-ups` (`components/sales/dismiss-handover-notice.tsx`); `dismissHandoverNotice` (`apps/web/src/lib/actions/crmHandoverNotice.ts`); `proj_mark_notifications_read` (`supabase/migrations/20261120000400_proj_plans_site_calendar_discussion.sql`) |
+| (2) Record | One row of `notifications`: the person's own `project_handover_accepted` notice for that handover (sent at acceptance by `proj_notify`, `20261120000200_proj_projects_handover_functions.sql`), identified by its id |
+| (3) Inputs | Exactly one notice id (a UUID). The action refuses anything else before calling the database: the function called with no ids would mark **every** Project notice of the person read |
+| (4) Permissions | The signed-in person, on their own row only: the function filters on `user_id = auth.uid()`, unread, and Project notice types. It asks for no Sales or Projects access beyond being signed in. Someone else's notice id changes nothing (0 rows) |
+| (5) Starting states | The notice is unread. The button is offered only on a "Handover accepted" row that carries an unread notice; a row with no notice has no Dismiss |
+| (6) Changes | `read_at` on that one notice |
+| (7) Side effects | The row leaves Sales Follow-ups and the "Handover accepted" line of My Day's Also open for that person, on every device. Nothing on the handover, the project or the other person's notice. No notice or message is sent. Because it is the same notice, the row also goes when the person presses Mark all read on My Work (`projects.notice.mark_all_read`, action 9 of the Projects catalogue) |
+| (8) Verify | The row is gone from `/sales/follow-ups` after the refresh; the other person (owner or preparer) still sees theirs. Database test: `packages/rls-tests/test/ops-phase2b.rls.test.ts`, "the Sales owner dismisses their own 'handover accepted' notice..." |
+| (9) STOP | No. It hides a piece of news for the person themselves. A worker should still not dismiss a person's notices unasked: it removes something they may not have read |
+| (10) Retry | Idempotent: a second call changes 0 rows and is reported as done. A failed save is reported ("Could not dismiss it. Try again.") and can be retried |
+| (11) Surface | UI over DB function |
+
 ### 3.4 Proposals, availability, approval and Zoho references (reference: [proposals and Zoho](./sales-proposals-and-zoho.md))
 
 #### `sales.proposal.add_version`
@@ -1128,6 +1145,55 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (10) Retry | **Idempotent per confirmation id (jti)**; both writes commit together or not at all |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
+### 3.10 Operations planning (references: [enquiries 4.6](./sales-enquiries.md), [Operations](./operations.md) section 7; Projects & Tasks Phase 2B, branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude)
+
+All three are one database function, `crm_set_ops_planning(id, flag, fields, expected_version)` (`supabase/migrations/20270102000100_ops_phase2b.sql` section 2). None books, reserves or creates anything. Operations never sees value, currency, budget, payment terms, the brief, scope, exclusions, risks, estimates, proposals, files or activity notes, flagged or not.
+
+#### `sales.ops.set_planning`
+| Field | Entry |
+|---|---|
+| (1) Reached | `setOpsPlanning` (`apps/web/src/lib/actions/crmOps.ts`) from **Flag for Operations planning** and **Edit planning details** on the enquiry's Overview tab, panel Operations planning; function `crm_set_ops_planning` with flag true |
+| (2) Record | The enquiry (`crm_opportunities`), identified by its id; version checked |
+| (3) Inputs | Expected decision date (optional), dismantling date (optional), **Dates are tentative** (tick, on by default), expected teams (any of Engineering, Content, Programming, Installation, Warehouse), Still to confirm (up to 1000), Note for Operations (up to 1000). Every field of the dialog is sent, so an emptied field is cleared |
+| (4) Permissions | Owner/founder (`crm_require_owner_or_founder`). Refused: anyone else with a Sales grant (they see the panel without buttons); an unknown field name; a value in the wrong form ("Check the planning details: ..."; a date that is not a real date is refused in the form with "Use a valid date") |
+| (5) Starting states | Any stage except Lost ("A lost enquiry cannot be flagged for Operations planning"). Allowed on a Won enquiry |
+| (6) Changes | `crm_opportunities`: `ops_flagged_at` and `ops_flagged_by` (kept if already set), `ops_decision_date`, `ops_dates_tentative`, `ops_dismantle_date`, `ops_teams`, `ops_to_confirm`, `ops_note`; `version` plus one |
+| (7) Side effects | On first flagging (or flagging again after a removal): event `details_changed` with the note "Flagged for Operations planning", and the in-app notice `project_ops_enquiry_flagged` ("Sales flagged <reference> for Operations planning") to each holder of the Operations Manager right for that company. The enquiry appears in Operations > Upcoming Work with the allowlisted fields. Editing details later sends no notice |
+| (8) Verify | The panel shows "Flagged on <date>" and the saved fields; the timeline shows "Flagged for Operations planning"; an Operations Manager sees the enquiry in `/operations/upcoming` |
+| (9) STOP | Conditional: ask before flagging for the first time unless the person asked for it. It shows the enquiry's dates, place, technologies and linked edition to Operations Managers and notifies them. Never put prices or commercial terms in the two text fields |
+| (10) Retry | Safe: the version check refuses a stale repeat; an identical repeat rewrites the same values, keeps the flag date and sends no second notice (it is sent only when the enquiry was not flagged before) |
+| (11) Surface | UI over DB function |
+
+#### `sales.ops.remove`
+| Field | Entry |
+|---|---|
+| (1) Reached | `removeOpsPlanning` from **Remove from Operations planning** (confirmation dialog); function `crm_set_ops_planning` with flag false and no fields |
+| (2) Record | The enquiry; version checked |
+| (3) Inputs | None |
+| (4) Permissions | Owner/founder |
+| (5) Starting states | Flagged; any stage, Lost included |
+| (6) Changes | `ops_flagged_at` and `ops_flagged_by` cleared; `version` plus one. The planning fields Sales entered and the row Operations recorded are kept |
+| (7) Side effects | Event `details_changed` with the note "Removed from Operations planning". The enquiry leaves Upcoming Work on the next read. No notice. Nothing was booked, so nothing is released |
+| (8) Verify | The panel returns to "Operations cannot see this enquiry until it is flagged."; the timeline shows the removal |
+| (9) STOP | No |
+| (10) Retry | Safe: the version check refuses a stale repeat; removing an unflagged enquiry changes only the version |
+| (11) Surface | UI over DB function |
+
+#### `sales.ops.answer_question`
+| Field | Entry |
+|---|---|
+| (1) Reached | `answerOpsQuestion` from **Send answer to Operations** / **Replace the answer** under Question from Operations; function `crm_set_ops_planning` with flag null (the flag is left as it is: an answer never flags an enquiry) and the one field `answer` |
+| (2) Record | The enquiry (version checked) and its `ops_enquiry_planning` row |
+| (3) Inputs | The answer (required, up to 1000) |
+| (4) Permissions | Owner/founder |
+| (5) Starting states | Flagged, not Lost, and Operations has asked a question (the screen offers the box only then; the function stores the answer only where a question exists) |
+| (6) Changes | `ops_enquiry_planning`: `answer`, `answered_by`, `answered_at`; the enquiry's `version` plus one |
+| (7) Side effects | In-app notice `project_ops_sales_answered` ("Sales answered your question on <reference>") to the Operations Managers of the company, only when a question existed and the answer was stored. Operations reads the answer in Upcoming Work. No timeline event |
+| (8) Verify | The panel shows "Answer from Sales, <time>" with the text |
+| (9) STOP | No. The answer is read by Operations: no prices or commercial terms |
+| (10) Retry | Safe: a repeat replaces the answer with the same text; a second notice is not added while the first is unread. The version check refuses a stale repeat |
+| (11) Surface | UI over DB function |
+
 ## 4. Actions that communicate outside the system
 
 | Action or job | Reaches outside? | What leaves, to whom |
@@ -1139,7 +1205,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | `sales.zoho.save_references` | **No**. Zoho Books is a recorded reference only: no Zoho API host or setting exists in the repository. The Zoho side is `Unverified` (hosted, outside the app) | Nothing |
 | `sales.enquiry.add_link` | No | The app stores the address and never fetches it |
 | Reminder e-mail (internal job, section 6) | **Yes, to Enginious staff only, never to clients**, when `CRM_REMINDER_EMAILS=on`, `CRM_REMINDER_FROM_EMAIL` is set and the company switch is on | A "Follow-up due / overdue / Hold review due / No next action" message to the enquiry owner or assignee through Microsoft Graph. Hosted state `Unverified` |
-| In-app notices from handover steps | Inside the system | Rows in `notifications` for founders, `assign_pm` holders, the Project Manager, the sales owner and the preparer |
+| In-app notices from handover steps | Inside the system | Rows in `notifications` for founders, `assign_pm` holders, the Project Manager, the sales owner and the preparer. `sales.handover_notice.dismiss` marks one of them read for its own receiver and sends nothing |
 
 ## 5. Read-only actions (no catalogue risk beyond data exposure)
 
@@ -1186,7 +1252,7 @@ After a handover is submitted, the next steps are Projects screens and functions
 
 ## 8. Totals and gaps
 
-* **64 actions** catalogued in section 3 (plus one enabled JARVIS action and six disabled ones in section 3.9, counted separately: they sit on top of the actions below) (enquiries, contacts and files 13; stage changes 6; follow-ups and reminders 7; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 12, with `sales.estimate.record_sent` added 2026-11-11). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
-* **Flagged stop-and-ask: 33** (25 unconditional, `sales.estimate.record_sent` added 2026-11-11; 8 conditional: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
-* **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 40 are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
+* **68 actions** catalogued in section 3 (plus one enabled JARVIS action and six disabled ones in section 3.9, counted separately: they sit on top of the actions below) (enquiries, contacts and files 13; stage changes 6; follow-ups, reminders and the handover notice 8, with `sales.handover_notice.dismiss` added 2026-11-12; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 12, with `sales.estimate.record_sent` added 2026-11-11; Operations planning 3, section 3.10, added 2026-11-12 on branch `claude/projects-phase-2b-operations`). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
+* **Flagged stop-and-ask: 34** (25 unconditional, `sales.estimate.record_sent` added 2026-11-11; 9 conditional, `sales.ops.set_planning` added 2026-11-12: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`, `sales.ops.set_planning`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
+* **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 45 (68 less the 23 above; the three Operations planning actions and `sales.handover_notice.dismiss` are among them; this line read 40 while the total was 64, one short since `sales.estimate.record_sent` was added, and 44 while the total was 67) are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
 * **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).

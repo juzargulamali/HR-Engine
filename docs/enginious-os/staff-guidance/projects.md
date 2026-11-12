@@ -56,12 +56,12 @@ Work is where a project starts. What needs doing is first: under Needs you are b
 - links: Projects -> /projects
 - screens: /projects/[id]/work; /projects/[id]/discussion
 
-Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it and can read and reply from any page with the Chat button; people who are not on the team do not see it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.
+Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it, and so are the company's Operations Managers, shown with Operations beside their name; nobody else sees it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.
 
 1. Press the Chat button at the corner of any page and choose the project under Projects.
 2. Or open the project and press Chat in its header.
 3. Write your message; type @ and choose a name to mention someone.
-4. An old Discussion link opens the same group.
+4. An old Discussion link opens the same group. A completed or archived project's group is under Archived.
 
 ## Accept a Sales handover
 - id: projects-handover
@@ -91,7 +91,7 @@ The Projects page lists every project you can see, with its Project Manager, sta
 
 1. Open Projects & Tasks, then Projects.
 2. Type in the search box to find a project by name, reference or Project Manager.
-3. Use Show to switch between Ongoing and Completed and archived, and Kind, Status or Company to narrow the list. Press Clear to remove the filters.
+3. Use Show to switch between Ongoing and Completed and archived, and Kind, Status, Company or Event edition to narrow the list. Press Clear to remove the filters.
 4. Click a column heading such as Key dates or Status to sort, or choose Board to see the ongoing projects by status.
 5. Click a project to open it. All projects on the project brings you back to the same list.
 
@@ -359,12 +359,12 @@ History shows three things: the Sales handover as it was accepted, every complet
 - links: Handovers -> /projects/handovers; Projects -> /projects
 - screens: /projects/handovers
 
-When Sales submits a handover, a founder, or someone a founder gave PM assignment to, names the Project Manager. Those handovers are listed under Waiting for a Project Manager to be named, the longest wait first. Only people with Projects access in that company can be chosen. The person you name is told, and then accepts the handover or asks Sales a question. You can change the Project Manager until the handover is accepted.
+When Sales submits a handover, a founder, an Operations Manager, or someone a founder gave PM assignment to, names the Project Manager. Those handovers are listed under Waiting for a Project Manager to be named, the longest wait first. Only people with Projects access in that company can be chosen. The person you name is told, and then accepts the handover or asks Sales a question. You can change the Project Manager until the handover is accepted.
 
 1. Open Handovers under Projects, or open the handover from My Day.
 2. Read the brief: agreed scope, site and dates, equipment, dependencies and risks.
 3. Choose a person under Project Manager and press Assign Project Manager.
-4. To name someone else later, choose them and press Change Project Manager.
+4. To name someone else later, press Change Project Manager. On a live project it is under People & access and asks for a reason; both Project Managers are told.
 5. If the person is not in the list, a founder gives them Projects access first.
 
 ## The Equipment tab of a project
@@ -375,7 +375,7 @@ When Sales submits a handover, a founder, or someone a founder gave PM assignmen
 - links: Projects -> /projects; My Work -> /projects/work
 - screens: /projects/[id]/equipment
 
-The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Other team members can read the tab but not change it.
+The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Each request has a Readiness line: Reserved, Partly ready, Short, Dispatched and so on. Others can read the tab but not change it.
 
 1. Open the project, then Equipment. Open the draft, or press New equipment request and Create draft.
 2. Under Planning dates set at least a start and an end, then press Save the dates.
@@ -407,10 +407,10 @@ Where your company uses dispatch notes, each time the warehouse sends equipment 
 - links: Handovers -> /projects/handovers; Projects -> /projects; My Work -> /projects/work; Requests -> /inventory/requests
 - screens: /projects/handovers; /projects/[id]/work; /projects/[id]/equipment
 
-A won job passes from Sales to a founder, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.
+A won job passes from Sales to a founder or Operations Manager, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder or Operations Manager names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.
 
 1. Sales: confirm the enquiry as won, then prepare and submit the handover.
-2. Founder: open Handovers and press Assign Project Manager.
+2. Founder or Operations Manager: open Handovers and press Assign Project Manager.
 3. Project Manager: press Accept handover, add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
 4. Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.
 5. Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list.
@@ -462,3 +462,81 @@ The closeout report is an internal report about one project, prepared by its Pro
 3. Press Send to Anthropic and write the draft, or Write a facts-only draft.
 4. Check each paragraph against its sources, edit it, then press Save edits.
 5. Press Approve version, then Download PDF on the approved version.
+
+## Operations: Upcoming Work
+- id: operations-upcoming-work
+- area: projects
+- status: published
+- keywords: upcoming work; flagged enquiries; operations planning; provisional project manager; capacity conflict; ask sales to confirm; next step with; tentative job; plan a job before it is won; next unresolved item; expected decision; tentative dates
+- links: Upcoming Work -> /operations/upcoming; Overview -> /operations
+- screens: /operations/upcoming
+
+Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company. Each card is headed by the event and venue and shows four things: the dates (installation, show and dismantling, marked tentative until confirmed), the expected decision, the provisional Project Manager and the next unresolved item. Press More for teams, equipment, risk and questions. It never shows prices, quotes or Sales notes. Nothing is booked until the enquiry is won and its handover is accepted.
+
+1. Open Operations, then Upcoming Work. Choose the company if you have more than one.
+2. Use the search, Stage and Next step with to narrow the list.
+3. Press Plan on an enquiry. Choose a Provisional Project Manager, set Operational risk, tick Capacity conflict if it clashes, or write under Ask Sales to confirm.
+4. Press Save planning. Sales reads it on the enquiry; no separate notice is sent.
+5. Once the handover is submitted, press Assign a Project Manager.
+
+## Operations Overview: what needs you first
+- id: operations-overview-decisions
+- area: projects
+- status: published
+- keywords: operations overview; needs my decision; handover stalled; installation at risk; blocker not resolved; summary cards; delivery timeline; next installations; equipment issues; partly dispatched; event edition; delivery by week; equipment lines ready; team pressure
+- links: Overview -> /operations; Handovers -> /projects/handovers
+- screens: /operations
+
+The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues and project health. Operations changes no task, booking or stock.
+
+1. Open Operations, then Overview. Choose the company if you have more than one.
+2. Press a card at the top to jump to its list.
+3. Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.
+4. For other items press the button on the item and speak to the person named under With.
+5. Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab.
+
+## Project health labels in Operations
+- id: operations-project-health
+- area: projects
+- status: published
+- keywords: project health; health label; on track; needs attention; at risk; not enough information; how the label is decided; is a project at risk; why is a project at risk
+- links: Overview -> /operations
+- screens: /operations
+
+Each live project on the Operations Overview has one label, taken from the records. At risk: it starts within 14 days or is under way and has a shortage, an unsent equipment list, a blocked or overdue task, an overdue milestone or unreleased Delivery plan lines; or equipment is overdue back. Needs attention: a blocked or overdue task or a shortage further ahead, no Project Manager, or a booking to review. Not enough information: no date recorded. On track: dates recorded and nothing against it. It is not a score.
+
+1. Open Operations, then Overview, and scroll to Project health.
+2. Read the reasons under the label. Each one opens the screen where it is dealt with.
+3. Press How the label is decided to read the rules.
+4. The label follows the records. To change it, speak to the Project Manager or the warehouse named on the item.
+
+## After a date change: mark as reviewed
+- id: projects-equipment-booking-review
+- area: projects
+- status: published
+- keywords: project date changed; installation date brought forward; mark as reviewed; date change review; reviewed after a date change
+- links: Projects -> /projects
+- screens: /projects/[id]/equipment
+
+When a project's installation or event dates change after its list was sent to the warehouse, Review equipment booking appears on the project's Equipment tab, on its Work page and, for the warehouse, on the same list in Inventory. It shows what the date was and is, and who changed it. Nothing is moved for you: the warehouse changes the dates itself, where clashes are checked. If the date is changed back, the review closes by itself.
+
+1. Project Manager: open the project, then Equipment, and read Review equipment booking.
+2. Agree with the warehouse whether the dates must move.
+3. Warehouse: press the Open request link in the review and change the planning dates there if needed.
+4. Project Manager or warehouse: add a note if useful and press Mark as reviewed.
+5. Mark as reviewed only records that someone looked. It moves nothing.
+
+## Archived conversations in Chat
+- id: projects-chat-archived
+- area: projects
+- status: published
+- keywords: archived chats; archived project chat; old project conversation; where did the project chat go; chat missing after archive; archived section in chat; completed project chat; finished project chat; chat gone after completing a project
+- links: Projects -> /projects
+- screens: /projects
+
+When a project is completed or archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A link to the conversation still opens it. If the project is reopened or restored, its group returns to Projects. The project itself is not changed by this.
+
+1. Press the Chat button at the corner of any page.
+2. Scroll to Archived at the bottom of the list and press it to open the section.
+3. Choose the project to read its conversation.
+4. Or type the project's name or reference in the search box, if you have one: it finds finished groups too.
