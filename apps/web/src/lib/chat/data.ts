@@ -47,21 +47,30 @@ export async function loadProjectChat(projectId: string, mayBeMember = true): Pr
   }
   const { data, error } = await (await createClient()).rpc("chat_project_group", { p_project: projectId });
   if (error) {
-    if (chatNotInstalled(error)) return { state: "not_installed" };
+    if (missingChatFunction(error, "chat_project_group")) return { state: "not_installed" };
     return error.code === "42501" || /not a member/i.test(error.message ?? "") ? { state: "not_member" } : { state: "error" };
   }
   return typeof data === "string" ? { state: "ready", groupId: data } : { state: "error" };
 }
 
-/** The group list does not have the column that project groups added: this database is from before them. Only this, or a missing function, means "not installed". */
-const missingKindColumn = (error: { code?: string; message?: string }) => error.code === "42703" || /column .*gkind.* does not exist/i.test(error.message ?? "");
+/**
+ * The two errors, and only these, that mean "this database is from before project groups" and so allow the old Discussion to be used instead. Each must NAME what is missing:
+ * the Chat function that was asked for, or the `gkind` column that project groups added to the group list. A missing-function or missing-column error about anything else
+ * (another function the database calls inside, another column) is a fault, not an old database, and is reported as "could not load".
+ */
+type DbError = { code?: string; message?: string };
+const names = (error: DbError, what: string) => new RegExp(`\\b${what}\\b`, "i").test(error.message ?? "");
+const missingChatFunction = (error: DbError, fn: "chat_my_groups" | "chat_project_group") =>
+  (error.code === "PGRST202" || error.code === "42883" || /could not find the function|function .* does not exist/i.test(error.message ?? "")) && names(error, fn);
+const missingKindColumn = (error: DbError) => (error.code === "42703" || /column .* does not exist/i.test(error.message ?? "")) && names(error, "gkind");
 
 /**
  * Whether this database has project groups (migration 20261230000100): "yes", "no", or "error" when it could not be found out. Asked once per request, and answered without a
  * refused call: it looks at what the person's own group list returns (a row from that migration carries the group's kind), and only when the list is empty asks for that one
  * column, which a database without the migration does not have.
  *
- * "no" is said ONLY on a confirmed missing function or missing column. Any other failure is "error", so a network fault is never mistaken for an old database: the callers then
+ * "no" is said ONLY when the error names the Chat function or the `gkind` column as missing (see above). Any other failure, including a missing column or function that is
+ * not one of those, is "error", so a network fault is never mistaken for an old database: the callers then
  * say the chat or its unread counts could not be loaded, and nothing falls back to the old Discussion.
  *
  * Until 2026-11-12 this called chat_project_group for a project that does not exist and read the refusal as "it exists"; that refusal was recorded by the database as an error
@@ -69,13 +78,13 @@ const missingKindColumn = (error: { code?: string; message?: string }) => error.
  */
 export const projectChatInstalled = cache(async (): Promise<"yes" | "no" | "error"> => {
   const { data, error } = await readMyGroups();
-  if (error) return chatNotInstalled(error) ? "no" : "error";
+  if (error) return missingChatFunction(error, "chat_my_groups") ? "no" : "error";
   const first = (data ?? [])[0] as Record<string, unknown> | undefined;
   if (first) return "gkind" in first ? "yes" : "no";
   // No group at all: ask for the one column. A failure here that is not "the column (or the function) is missing" is unknown, not "no".
   const probe = await (await createClient()).rpc("chat_my_groups").select("gkind").limit(1);
   if (!probe.error) return "yes";
-  return chatNotInstalled(probe.error) || missingKindColumn(probe.error) ? "no" : "error";
+  return missingChatFunction(probe.error, "chat_my_groups") || missingKindColumn(probe.error) ? "no" : "error";
 });
 
 /**

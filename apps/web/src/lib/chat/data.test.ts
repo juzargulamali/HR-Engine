@@ -66,6 +66,41 @@ describe("whether project chat groups exist: never asked with a call the databas
     answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? MISSING : { data: [] });
     expect(await projectChatInstalled()).toBe("no");
   });
+  it("an unrelated missing column or function is 'could not load', never the old Discussion: only the Chat function or the gkind column count", async () => {
+    const unrelated = [
+      { code: "42703", message: 'column m.sender_id does not exist' },                             // a different column, inside the database function
+      { code: "42703", message: 'column "project_status" does not exist' },
+      { code: "42883", message: "function proj_user_eligible(uuid, uuid, uuid) does not exist" },    // a different function it calls
+      { code: "PGRST202", message: "Could not find the function public.some_other_function in the schema cache" },
+      { code: "42P01", message: 'relation "chat_read_state" does not exist' },
+      { code: "42703", message: "column does not exist" },                                          // a missing column that names nothing
+    ];
+    for (const failure of unrelated) {
+      // (a) on the one-column question, for a person with no groups
+      calls.length = 0;
+      answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? { error: failure } : { data: [] });
+      answers.proj_unread_counts = { data: [{ project_id: "stale", unread: 50 }] };
+      expect(await projectChatInstalled(), failure.message).toBe("error");
+      expect(await loadProjectUnread(), failure.message).toBeNull();
+      expect(called("proj_unread_counts"), failure.message).toEqual([]);
+      expect(await loadProjectChat("p1", false), failure.message).toEqual({ state: "error" });
+      // (b) on the list read itself
+      answers.chat_my_groups = { error: failure };
+      expect(await projectChatInstalled(), failure.message).toBe("error");
+      expect(await loadProjectUnread(), failure.message).toBeNull();
+      expect(called("proj_unread_counts"), failure.message).toEqual([]);
+      // (c) on the project's own chat, for a member
+      answers.chat_project_group = { error: failure };
+      expect(await loadProjectChat("p1", true), failure.message).toEqual({ state: "error" });
+    }
+    // the errors that DO name what is expected still mean "not installed"
+    answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? { error: { code: "42703", message: 'column chat_my_groups.gkind does not exist' } } : { data: [] });
+    expect(await projectChatInstalled()).toBe("no");
+    answers.chat_my_groups = { error: { code: "42883", message: "function chat_my_groups() does not exist" } };
+    expect(await projectChatInstalled()).toBe("no");
+    answers.chat_project_group = { error: { code: "PGRST202", message: "Could not find the function public.chat_project_group(p_project) in the schema cache" } };
+    expect(await loadProjectChat("p1", true)).toEqual({ state: "not_installed" });
+  });
   it("a failed list read is not mistaken for 'not installed': unread counts then say they could not be loaded", async () => {
     answers.chat_my_groups = { error: { message: "the data service did not answer" } };
     expect(await projectChatInstalled()).toBe("error");
