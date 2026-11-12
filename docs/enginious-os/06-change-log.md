@@ -8,6 +8,16 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-12 | Release: PR #88 (Add department, migration 31) and PR #89 (Chat refusals) merged; release status reconciled | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `62aa4fe`; **no application code, no migration, no SQL run**
+
+* **PR #88, merged (checked on GitHub):** merge commit `c2935f1fb6036e12375c20c731480302791c2d0e`, pinned to head `fae6daea9f7431f6b8c389dd12684a59c0b23f01`, at the owner's request. Required CI (read on GitHub by Claude): `lint-typecheck-test` and `rls-policies` passed on `fae6dae`.
+* **PR #88, hosted database (owner-reported):** migration 31, `20270103000100_departments_company_integrity.sql`, is applied and the SQL checks passed. Which script outputs were seen was not listed. Claude ran no hosted SQL.
+* **PR #88, signed-in Preview (owner-reported):** the Department Preview test passed on `fae6dae`.
+* **PR #89, merged (checked on GitHub):** merge commit `62aa4fe08fe60dc5818b7145ade220e23b7a1811`, pinned to head `e0e3d0476535ecf12d0f76f12cd0191ea5aa6a3a`, at the owner's request. The head changed once after the owner's test: after PR #88 merged, `main` was merged into the branch and two docs conflicts (`06-change-log.md`, `README.md`) were resolved by keeping both sides; the chat code is identical to `950baf1`. This was flagged to the owner, who asked for the merge at `e0e3d04`. Required CI (read on GitHub by Claude): both checks passed on `e0e3d04`, and earlier on `950baf1`.
+* **PR #89, signed-in Preview (owner-reported):** the Chat Preview test passed on `950baf1` with no fresh Supabase membership errors during testing. No migration.
+* **Production:** verification of both is **pending the owner's confirmation** (Department in Production; the Chat check against fresh Supabase logs). Claude cannot read Vercel or the Supabase log.
+* **Docs corrected:** the status lines of `modules/people-access-job-and-department.md` and `modules/app-chat.md` section 11, the ledger (05), install-order row 31 and the README. The three dated entries below are history and are left as written: where they say "draft", "not merged" or "not applied" they describe the time they were written.
+
 ### 2026-11-12 | Chat: the app no longer asks the database about project chats it must refuse | branch `claude/chat-denied-group-requests` from `main` `402f39a` (draft PR #89, not merged); **app only: no migration, no SQL, no change to membership rules**
 
 * **Reported by the owner:** 35 Postgres errors in an hour on hosted, all "You are not a member of this group". Claude did not read the hosted log.

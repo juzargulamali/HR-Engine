@@ -2,7 +2,7 @@
 
 **Scope.** This reference covers one tab of People & Access, written when it was changed on 2026-11-12 (Add department). The rest of People & Access (the people list, Account, HR roles, Module access, company settings, invitations) has no per-control reference yet; see `docs/people-access-design.md` (an older design input, not authority) and 02 and 03 of the Map.
 
-**Status (2026-11-12).** Branch `claude/admiring-cray-uky379`, built from `main` at `402f39a`, draft PR #88, not merged. Two parts. (1) Add department: app only. (2) Database enforcement: **one additive migration, `supabase/migrations/20270103000100_departments_company_integrity.sql` (install-order row 31), not applied anywhere by Claude; hosted not applied at the time of writing.** No change to who may add departments or edit employees. Nothing was seen signed in by Claude.
+**Release status (four facts kept apart, reconciled 2026-11-12 after the merge).** **Merged:** yes. PR #88 merged into `main` with merge commit `c2935f1fb6036e12375c20c731480302791c2d0e`, pinned to head `fae6daea9f7431f6b8c389dd12684a59c0b23f01` (checked on GitHub). **Required CI on the exact head:** `lint-typecheck-test` and `rls-policies` both passed on `fae6dae` (read on GitHub by Claude before the merge). **Hosted database (owner-reported, 2026-11-12):** migration 31, `20270103000100_departments_company_integrity.sql`, is applied and the SQL checks passed. Which script outputs were seen was not listed. Claude ran no hosted SQL and did not see the results. **Signed-in Preview (owner-reported, 2026-11-12):** the Department Preview test passed on `fae6dae`. Claude saw nothing signed in. **Production:** verification is pending the owner's confirmation; Claude cannot read Vercel. Two parts: (1) Add department, app only; (2) database enforcement, one additive migration (install-order row 31). No change to who may add departments or edit employees. *(History: before the merge this line said "draft PR #88, not merged" and "not applied anywhere by Claude; hosted not applied at the time of writing".)*
 
 Sources, read at the branch head:
 
@@ -50,7 +50,7 @@ Facts (JP): **Company**, **Job title**, **Department**, **Reporting manager**; "
 **Limits, stated plainly.**
 
 * There is no rename, no remove and no parent department on this screen. A misspelt department stays until one of those is built.
-* Until migration `20270103000100` is applied to a database, only the app makes the duplicate-name check and the same-company check (the two bullets that stood here before said so). Section 4a describes the database rules once it is applied.
+* On a database without migration `20270103000100` only the app makes the duplicate-name check and the same-company check. Hosted has it (owner-reported); section 4a describes the database rules.
 * Departments here are HR departments of a company. The "department" teams of a project in Projects & Tasks are a separate record and are not affected.
 
 ## 4a. Database enforcement (migration `20270103000100_departments_company_integrity.sql`, install-order row 31)
@@ -71,7 +71,7 @@ Clearing the department (setting none) and moving a person between departments o
 
 **Order.** Apply after row 30. It depends only on the foundation tables, but timestamp order is install order. The app in this PR works before and after the migration: before, only the app's checks apply.
 
-**Hosted, as far as is known.** The owner's read-only query of 2026-11-12 returned zero active departments for every company, so there can be no duplicate active name and no blank active name there. Whether any employee record points at a removed department of another company was not reported: preflight row 2 answers it. `Unverified` by Claude.
+**Hosted (owner-reported, 2026-11-12).** The migration is applied and the SQL checks passed. Earlier the same day the owner's read-only query had returned zero active departments for every company. Claude ran no hosted SQL. It does not need to be run again; it is idempotent.
 
 ## 5. Empty and failed states
 
@@ -97,4 +97,4 @@ Before 2026-11-12 a failed read was indistinguishable from an empty company (the
 | `packages/rls-tests/test/departments-integrity.rls.test.ts` (10 tests, real PostgreSQL) | **Two transactions:** an assignment and a department's company move are run at the same moment in both orders; the second waits on the first and is refused, never both committed, and with both plain-words triggers switched off the foreign key alone still refuses it. Clearing is never checked. A name of tabs or line breaks is blank; names differing only by surrounding or repeated white space are duplicates. Also: | Before the migration the database accepts a cross-company department and a duplicate name; the preflight counts them and the migration stops, installing nothing and changing no data; on clean data it installs (twice) and the verify pack is all `OK`; **a direct update as HR Admin is refused for another company's department, while the same company, a move within the company and clearing all work**; a new employee, a removed department and moving an employee or a department between companies are covered; names are unique whatever the capitals and spaces; three creates of the same name at once keep exactly one; who may add departments is unchanged; rollback deletes nothing and re-applying restores the rules |
 | `packages/rls-tests/test/phase0.rls.test.ts` (2 tests, real PostgreSQL) | An HR Admin adds a department, gives it to an employee of the same company and reads both back in a new session; the same HR Admin cannot add one for another company or change that company's employee; people without the role cannot add one |
 
-**Not verified:** nothing signed in, in Preview or Production. The three states were seen on a temporary page with fictional data (not committed). The local-stack browser flow `apps/web/os-shell-checks/people-access-flow.mjs` was not run and has no step for Add department.
+**Not verified by Claude:** nothing signed in. The owner reported the Department Preview test passed on `fae6dae`; Production is pending the owner. The three states were seen on a temporary page with fictional data (not committed). The local-stack browser flow `apps/web/os-shell-checks/people-access-flow.mjs` was not run and has no step for Add department.
