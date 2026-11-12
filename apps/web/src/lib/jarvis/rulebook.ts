@@ -28,10 +28,13 @@ export type JarvisSwitch = "jarvis" | "writes" | "help" | "lookups" | "chat" | "
  *                         credentials, company results) are removed locally first; a text marked not for sharing is omitted entirely
  * A generic "record" source does not exist: a capability names exactly which of these it may use, and the gate refuses anything else. This is not permission to send whole
  * database records, prepared estimate or quotation documents, attachments or anything the requester cannot see.
+ *   project_closeout_evidence  NOT a JARVIS source: used only by the Project Closeout Report (APP_AI_RULES below). The evidence lines of ONE project that its
+ *                         manager reviewed on the "Review data to be sent" screen, built by lib/projects/closeout/evidence.ts from the database's allowlisted snapshot.
+ *                         It travels as record text, so the gate screens it like any record text
  */
-export type OutboundSource = "user_text" | "conversation_context" | "preferences" | "sales_facts" | "sales_record_text";
+export type OutboundSource = "user_text" | "conversation_context" | "preferences" | "sales_facts" | "sales_record_text" | "project_closeout_evidence";
 /** The sources that carry app-held data. They travel in their own request fields (never inside `input`), which only server code fills. */
-export const APP_SOURCES: readonly OutboundSource[] = ["sales_facts", "sales_record_text"];
+export const APP_SOURCES: readonly OutboundSource[] = ["sales_facts", "sales_record_text", "project_closeout_evidence"];
 
 export interface JarvisRule {
   id: string;
@@ -162,7 +165,22 @@ export const JARVIS_RULES: JarvisRule[] = [
   },
 ];
 
-const BY_ID = new Map(JARVIS_RULES.map((r) => [r.id, r]));
+/**
+ * Uses of the AI provider OUTSIDE the JARVIS panel. They go through the same outbound gate and the same deny-by-default lookup, but they are not JARVIS capabilities:
+ * nothing here can be asked for in the panel, no JARVIS action is registered for them, and they give JARVIS no read, write or send in the module they belong to.
+ */
+export const APP_AI_RULES: JarvisRule[] = [
+  {
+    id: "projects.closeout.draft", title: "Draft an internal Project Closeout Report", kind: "draft",
+    who: "Whoever manages the project (Project Manager, temporary project leader, founder), from the project's Closeout report screen. Not available in the JARVIS panel",
+    scope: "One project the requester manages; the evidence snapshot the database builds for it. It changes nothing: no completion, approval, message or stock movement",
+    display: ["the review of what will be sent", "the draft report with its source references", "statements that need checking"],
+    outbound: { provider: true, sources: ["project_closeout_evidence"], note: "Only the evidence lines the Project Manager reviewed: project, dates, scope, team names and roles, decisions, feedback, delivery, handover and equipment facts, and the optional texts they left selected. Never prices, costs, margins, payroll, chat, comments, files or contact details." },
+    confirmation: "none", pausedBy: ["jarvis"],
+  },
+];
+
+const BY_ID = new Map([...JARVIS_RULES, ...APP_AI_RULES].map((r) => [r.id, r]));
 export const ruleFor = (id: string | null | undefined): JarvisRule | null => (id ? BY_ID.get(id) ?? null : null);
 
 /** The information that never appears in a JARVIS response and never goes to the provider, in the rulebook's words. */

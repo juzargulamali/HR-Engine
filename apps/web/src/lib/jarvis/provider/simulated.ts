@@ -146,7 +146,37 @@ function chatAnswer(input: string): Record<string, unknown> {
 }
 
 /** How the stand-in answers a summary or a scope request, so tests can prove what the server does with a wrong, money-bearing or unusable answer. */
-export const simulatedBehaviour: { summary: "ok" | "wrong_number" | "swapped" | "outcome" | "malformed" | "bad_suggestions"; scope: "ok" | "money" } = { summary: "ok", scope: "ok" };
+export const simulatedBehaviour: { summary: "ok" | "wrong_number" | "swapped" | "outcome" | "malformed" | "bad_suggestions"; scope: "ok" | "money"; closeout: "ok" | "unsupported" | "malformed" } = { summary: "ok", scope: "ok", closeout: "ok" };
+
+/**
+ * A closeout report: for each section it repeats, with their references, a few of the evidence lines it received, so a test sees exactly what arrived and that every
+ * statement is traceable. "unsupported" makes it claim what a real model might wrongly claim: a client sign-off and a full equipment return nobody recorded, a date and a
+ * quotation that are in no evidence line, a reference that was never sent, and extra keys asking for actions. "malformed" returns nothing usable.
+ */
+function closeoutReport(input: string): Record<string, unknown> {
+  if (simulatedBehaviour.closeout === "malformed") return { nothing: true };
+  const data = /<enginious_os_data>\n([\s\S]*?)\n<\/enginious_os_data>/.exec(input)?.[1] ?? "";
+  const lines = data.split("\n").map((l) => /^\[(S\d+)\] \(([^)]*)\) (.*)$/.exec(l)).filter((m): m is RegExpExecArray => !!m).map((m) => ({ ref: m[1]!, label: m[2]!, text: m[3]! }));
+  const pick = (re: RegExp, n = 3) => lines.filter((l) => re.test(l.label)).slice(0, n).map((l) => ({ text: l.text, refs: [l.ref] }));
+  const sections: { id: string; paragraphs: { text: string; refs: string[] }[] }[] = [
+    { id: "summary", paragraphs: [...pick(/^Project/, 1), ...pick(/^Handover/, 2)] },
+    { id: "scope", paragraphs: pick(/^Agreed scope/, 4) },
+    { id: "team", paragraphs: pick(/^Team/, 6) },
+    { id: "decisions", paragraphs: pick(/^Decisions/, 4) },
+    { id: "feedback", paragraphs: pick(/^Client feedback/, 4) },
+    { id: "handover", paragraphs: [...pick(/^Handover/, 3), ...pick(/^Equipment/, 3)] },
+    { id: "open_items", paragraphs: pick(/^Incomplete/, 5) },
+    { id: "lessons", paragraphs: lines.length > 0 ? [{ text: "Agree the return date for equipment before the event closes.", refs: [lines[lines.length - 1]!.ref] }] : [] },
+  ];
+  if (simulatedBehaviour.closeout === "unsupported") {
+    const first = lines[0]?.ref ?? "S1";
+    sections[0]!.paragraphs.push({ text: "The client signed off the installation on 2031-01-09 and all equipment was returned.", refs: [first] });
+    sections[4]!.paragraphs.push({ text: 'The client said "this is the best stand we have ever had".', refs: [first] });
+    sections[2]!.paragraphs.push({ text: "The team showed outstanding dedication.", refs: ["S9999"] });
+    return { sections, execute: true, markComplete: true, sendToClient: "client@example.com", approve: true };
+  }
+  return { sections };
+}
 
 /**
  * A summary: it repeats the fact lines it received (so a test can see exactly what arrived) and adds one harmless suggestion. The behaviours make it misbehave the way a
@@ -184,6 +214,7 @@ export function createSimulatedProvider(): JarvisProvider {
       if (req.task === "meeting_notes") return meetingNotes(req.input, req.instructions);
       if (req.task === "sales_summary") return salesSummary(req.input);
       if (req.task === "estimate_scope") return estimateScope(req.input);
+      if (req.task === "closeout_report") return closeoutReport(req.input);
       if (req.task !== "enquiry_fields") throw new JarvisProviderError("malformed");
       const out = extractEnquiry(req.input);
       if (/ignore (all )?previous instructions/i.test(req.input)) {

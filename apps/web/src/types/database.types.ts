@@ -1679,6 +1679,7 @@ export interface Database {
       inv_project_notes: InvReadOnlyTable<InvProjectNoteRow>;
       inv_project_note_events: InvReadOnlyTable<InvProjectNoteEventRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
+      proj_closeout_reports: ProjReadOnlyTable<{ id: string; project_id: string; version_no: number; status: string; snapshot: unknown; snapshot_at: string; selection: unknown; payload_hash: string; generation: string; provider_kind: string | null; sections: unknown; source_refs: unknown; created_by: string; created_at: string; updated_by: string | null; updated_at: string; approved_by: string | null; approved_at: string | null; version: number }>;
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
       proj_company_settings: ProjReadOnlyTable<ProjCompanySettingsRow>;
@@ -2092,6 +2093,11 @@ export interface Database {
       proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
       proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
+      proj_closeout_evidence: { Args: { p_project_id: string }; Returns: unknown };
+      proj_closeout_save_draft: { Args: { p_project_id: string; p_snapshot: unknown; p_selection: unknown; p_payload_hash: string; p_generation: string; p_provider_kind: string | null; p_sections: unknown; p_source_refs: unknown }; Returns: unknown };
+      proj_closeout_save_edits: { Args: { p_report_id: string; p_sections: unknown; p_expected_version: number | null }; Returns: number };
+      proj_closeout_approve: { Args: { p_report_id: string; p_expected_version: number | null }; Returns: undefined };
+      proj_closeout_discard_draft: { Args: { p_report_id: string }; Returns: undefined };
       proj_dp_plan: { Args: { p_project_id: string }; Returns: unknown };
       proj_dp_save_item: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown>; p_expected_version?: number | null; p_source?: string }; Returns: unknown };
       proj_dp_remove_item: { Args: { p_item_id: string }; Returns: undefined };

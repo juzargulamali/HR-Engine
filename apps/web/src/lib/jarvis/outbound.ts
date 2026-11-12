@@ -17,7 +17,7 @@ import { JarvisRefusalError } from "./types";
  *      selects one, a label that names money is refused, and a number is accepted only as a count;
  *   4. a text marked as not for external sharing ("External sharing prohibited", "Internal use only", "NDA") is refused outright, for every capability and every part;
  *   5. everything is screened for protected content (pay, personal IDs, medical and bank details, credentials, company results, estimate documents, embedded files):
- *      the person's text, every fact value and every line of record text. A financial figure in the person's text or in a stored note or description is NOT protected
+ *      the person's text, every fact value and every line of record text (a Sales record's text, or the reviewed evidence of a project closeout report). A financial figure in the person's text or in a stored note or description is NOT protected
  *      content (owner policy). A hit, or a request too long to judge, is NOT sent. The provider is never asked to redact anything.
  * There is no provider call that classifies intent: routing is done locally (lib/jarvis/router.ts). Nothing here logs text: only the capability id and category tokens.
  */
@@ -51,7 +51,7 @@ export function gateProvider(provider: JarvisProvider | null, actionId: string):
       // App-held data travels only in its own fields, and only with its own approved source. Neither can stand in for the other.
       const facts = req.facts ?? [];
       const recordText = (req.recordText ?? "").trim();
-      if ((facts.length > 0) !== sources.includes("sales_facts") || (recordText.length > 0) !== sources.includes("sales_record_text")) notApproved();
+      if ((facts.length > 0) !== sources.includes("sales_facts") || (recordText.length > 0) !== (sources.includes("sales_record_text") || sources.includes("project_closeout_evidence"))) notApproved();
       if ((facts.length > 0 || recordText) && req.inputTag !== null) notApproved();
       const factLines: string[] = [];
       for (const f of facts) {
