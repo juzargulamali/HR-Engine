@@ -4,7 +4,7 @@ import { Muted, PageHeader } from "@/components/projects/parts";
 import { Alert } from "@/components/ui/alert";
 import { LoadError } from "@/components/workspace/states";
 import { evidenceItems } from "@/lib/projects/closeout/evidence";
-import { keyFacts, type ReportView } from "@/lib/projects/closeout/report";
+import { keyFacts, validateEdits, type ReportView } from "@/lib/projects/closeout/report";
 import { loadEvidence, loadReports, providerAvailability, type CloseoutReportRow } from "@/lib/projects/closeout/service";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
@@ -38,7 +38,9 @@ export default async function CloseoutPage({ params }: { params: Promise<{ id: s
   const items = evidenceItems(ev.snapshot);
   const toView = (r: CloseoutReportRow): ReportView => ({
     id: r.id, versionNo: r.version_no, status: r.status, version: r.version, generation: r.generation, snapshotAt: r.snapshot_at, approvedAt: r.approved_at,
-    approvedBy: r.approved_by ? view.nameOf(r.approved_by) : null, facts: keyFacts(r.snapshot), missing: r.snapshot.missing ?? [], sections: r.sections, refs: r.source_refs,
+    approvedBy: r.approved_by ? view.nameOf(r.approved_by) : null, facts: keyFacts(r.snapshot), missing: r.snapshot.missing ?? [],
+    // A draft's marks are computed here from its text and its stored snapshot, never read from what was saved, so a saved copy cannot hide one.
+    sections: r.status === "draft" ? validateEdits(r.sections, r.source_refs, r.snapshot, r.sections) ?? r.sections : r.sections, refs: r.source_refs,
     include: Array.isArray(r.selection?.include) ? r.selection.include : [],
   });
   const draft = reports.find((r) => r.status === "draft");

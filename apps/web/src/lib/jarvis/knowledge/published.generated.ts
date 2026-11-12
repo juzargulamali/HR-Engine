@@ -1400,10 +1400,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "lessons for the next project",
       "client sign-off not recorded"
     ],
-    "summary": "The closeout report is an internal report about one project, prepared by its Project Manager from the project's own records. You first see what would be used and can remove optional text. Writing with the AI model sends only that reviewed content to Anthropic; a facts-only draft sends nothing. The report always states recorded facts such as client sign-off and equipment still out. Nothing goes to the client, and the project is not completed by it.",
+    "summary": "The closeout report is an internal report about one project, prepared by its Project Manager from the project's own records. You first see exactly what would be used; written text such as scope wording and client words is left out unless you tick it. Writing with the AI model sends only that reviewed content to Anthropic; a facts-only draft sends nothing. The report always states recorded facts such as client sign-off and equipment still out. Nothing goes to the client, and the project is not completed by it.",
     "steps": [
       "Open the project, press Manage project and choose Closeout report.",
-      "Read Review data to be sent. Untick any text you do not want included.",
+      "Read Review data to be sent. Tick only the written text you want included.",
       "Press Send to Anthropic and write the draft, or Write a facts-only draft.",
       "Check each paragraph against its sources, edit it, then press Save edits.",
       "Press Approve version, then Download PDF on the approved version."

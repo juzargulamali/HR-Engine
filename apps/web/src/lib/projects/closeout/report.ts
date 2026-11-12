@@ -7,7 +7,10 @@
  * Project Manager. The model's answer is data: only the fields below are read from it, and it can do nothing.
  */
 import { findProtectedContent } from "@/lib/jarvis/protected";
+import { claimsAllReturned, claimsCompletion, claimsSignoff, normText, quotedRuns, sentencesOf, snapshotStrings } from "./claims";
 import type { EvidenceCategory, EvidenceItem, EvidenceSnapshot } from "./evidence";
+
+export { claimsAllReturned, claimsCompletion, claimsSignoff } from "./claims";
 
 export const REPORT_SECTIONS = [
   { id: "summary", title: "Executive summary", categories: ["project", "handover", "delivery", "open_items", "equipment"] },
@@ -25,18 +28,20 @@ export type SectionId = (typeof REPORT_SECTIONS)[number]["id"];
  * blocking flags contradict the records and stop approval until the sentence is changed; the others ask the Project Manager to check.
  *   no_source           a factual paragraph that cites no evidence line
  *   unverified_figure   a number or date that is in none of the lines the paragraph cites
- *   unverified_quote    quoted words that are in none of the evidence lines
+ *   unverified_quote    quoted words that are nowhere in the project's recorded text (the snapshot)
  *   signoff_unrecorded  says the client signed off, accepted or approved, when no client sign-off is recorded (a mention of the client next to accept, approve or
  *                       sign is enough: reword it if it is about something else, such as an approved scope change)
+ *   completion_unrecorded  says the project itself was completed or closed, when no completion record exists
  *   equipment_out       says the equipment is back, when some is recorded as still out
  *   suggestion          a lesson suggested by the AI provider, for the Project Manager to judge
  */
-export type ParagraphFlag = "no_source" | "unverified_figure" | "unverified_quote" | "signoff_unrecorded" | "equipment_out" | "suggestion";
-export const BLOCKING_FLAGS: readonly ParagraphFlag[] = ["unverified_quote", "signoff_unrecorded", "equipment_out"];
+export type ParagraphFlag = "no_source" | "unverified_figure" | "unverified_quote" | "signoff_unrecorded" | "completion_unrecorded" | "equipment_out" | "suggestion";
+export const BLOCKING_FLAGS: readonly ParagraphFlag[] = ["unverified_quote", "signoff_unrecorded", "completion_unrecorded", "equipment_out"];
 export const FLAG_WORDS: Record<ParagraphFlag, string> = {
   no_source: "No source reference. Check it against the records, or remove it.",
   unverified_figure: "A number or date here is not in the sources it cites. Check it.",
-  unverified_quote: "The quoted words are not in the recorded text. Quote only the exact recorded text, or remove the quotation marks.",
+  unverified_quote: "The quoted words are not in the project's records. Quote only the exact recorded text, or remove the quotation marks.",
+  completion_unrecorded: "This says the project was completed or closed, but no completion is recorded. Say that completion is not recorded.",
   signoff_unrecorded: "This says the client signed off or accepted, but no client sign-off is recorded. Say that it is not recorded.",
   equipment_out: "This says the equipment is back, but some is recorded as still out.",
   suggestion: "A suggestion from the AI model, not a recorded fact. Keep it only if you agree.",
@@ -87,26 +92,11 @@ export const CLOSEOUT_INSTRUCTIONS = [
 ].join("\n");
 export const CLOSEOUT_GUARD = "Write only from the evidence lines. Where the evidence does not state something, say it is not recorded: never guess.";
 
-/**
- * The claim checks are word patterns. They lean towards marking too much: a marked sentence costs the Project Manager a rewording, an unmarked false claim costs trust.
- * They cannot recognise every phrasing, which is why the Recorded facts above the narrative never depend on them.
- */
-/** The sentence itself says the thing is NOT so. Only a negation that governs the claim counts: "not only did the client sign off" and "signed off without snags" do not. */
-const DENIES = /\b(?:not\s+(?:yet\s+)?(?:been\s+)?(?:recorded|signed|accepted|approved|confirmed|given|received|returned|back)|no\s+(?:client\s+|customer\s+|recorded\s+|record\s+of\s+(?:a\s+|any\s+)?)?(?:sign[\s-]?off|acceptance|approval|confirmation)|(?:is|are|was|were|has|have|had|did|does|do|could|can)(?:\s+not|n['’]t)\s+(?!only\b)|unrecorded|awaiting|pending|yet\s+to\s+be|still\s+(?:out|outstanding|to\s+be))\b/i;
-const SIGNOFF_WORDS = /\bsign(?:ed|s|ing)?[\s-]?off\b|\bsigned\s+(?:the\s+|a\s+|an\s+)?(?:\w+\s+)?(?:handover|completion|certificate|acceptance|form)\b|\b(?:handover|hand-over|completion|acceptance|certificate)\s+(?:was|were|has\s+been|is)\s+(?:signed|accepted|given|granted|received)\b|\bfinal\s+(?:approval|acceptance)\b|\bhanded\s+over\s+to\s+the\s+(?:client|customer)\b/i;
-const ACCEPT_WORDS = /\b(?:accept(?:ed|s|ance)?|approv(?:ed|es|al)|signed|sign(?:s|ing)?)\b/i;
-const CLIENT_WORDS = /\b(?:client|customer|end[\s-]client|agency)(?:['’]s)?\b/i;
-const RETURN_ALL = /\b(?:all|every(?:thing)?|each|both|fully|completely|complete(?:d)?|entire(?:ly)?|whole|nothing|none|no\s+(?:equipment|hardware|kit|items?|units?|panels?|stock))\b/i;
-const RETURN_WORDS = /\b(?:return(?:ed|s)?|back|came\s+back|remain(?:s|ed|ing)?|outstanding|on\s+site|missing|checked\s+in)\b/i;
 const MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
 const WRITTEN_DATE = new RegExp(`\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(${MONTHS.map((m) => `${m}|${m.slice(0, 3)}`).join("|")})\\.?\\s+(\\d{4})\\b`, "gi");
 /** "5 March 2027" becomes 2027-03-05, so a date written out is compared with the recorded date and not digit by digit. */
 const isoDates = (text: string) => text.replace(WRITTEN_DATE, (_m, dd: string, mon: string, yyyy: string) => `${yyyy}-${String(MONTHS.findIndex((m) => m.startsWith(mon.toLowerCase().slice(0, 3))) + 1).padStart(2, "0")}-${dd.padStart(2, "0")}`);
 const NUMBER = /\b\d{4}-\d{2}-\d{2}\b|\b\d{1,2}\/\d{1,2}\/\d{2,4}\b|\b\d+(?:[.,]\d+)*\b/g;
-/** Quoted words in any quotation style. A single-quoted run counts only when the quote marks stand at word edges, so an apostrophe does not open a quotation. */
-const QUOTES = [/["“]([^"”]{2,})["”]/g, /«\s*([^»]{2,}?)\s*»/g, /(?<![A-Za-z0-9])['‘]([^'’\n]{2,}?)['’](?![A-Za-z0-9])/g];
-const sentences = (text: string) => text.split(/(?<=[.!?;])\s+|\n/).filter((x) => x.trim());
-const norm = (x: string) => x.toLowerCase().replace(/[“”"‘’'«»]/g, "").replace(/\s+/g, " ").trim();
 const escapeRe = (x: string) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 export function equipmentStillOut(s: Pick<EvidenceSnapshot, "equipment">): number {
@@ -119,21 +109,24 @@ export function clientSignoffRecorded(s: Pick<EvidenceSnapshot, "completion" | "
   return s.project.kind === "client" && !!s.completion && s.completion.evidence_type !== "internal_note";
 }
 
-/** Does a sentence say the client signed off, accepted or approved the work? `clientName` (the recorded client) counts as "the client". */
-export function claimsSignoff(sentence: string, clientName: string | null): boolean {
-  if (DENIES.test(sentence)) return false;
-  if (SIGNOFF_WORDS.test(sentence)) return true;
-  const namesClient = CLIENT_WORDS.test(sentence) || (!!clientName && clientName.trim().length >= 3 && new RegExp(escapeRe(clientName.trim()), "i").test(sentence));
-  return namesClient && ACCEPT_WORDS.test(sentence);
+/**
+ * The BLOCKING marks of one paragraph, from its text and the snapshot alone. This is exactly what the database computes when a version is approved
+ * (proj_closeout_text_blocks): the same patterns, the same recorded facts, and quotations compared with the words held in the snapshot. Nothing a caller supplies
+ * (marks, source references) takes part, so a block cannot be cleared by sending different marks.
+ */
+export function blocksFor(text: string, s: Pick<EvidenceSnapshot, "completion" | "project" | "equipment">, recordedWords: string): ParagraphFlag[] {
+  const out: ParagraphFlag[] = [];
+  const parts = sentencesOf(text);
+  if (s.project.kind === "client" && !clientSignoffRecorded(s) && parts.some((x) => claimsSignoff(x, s.project.client))) out.push("signoff_unrecorded");
+  if (!s.completion && parts.some(claimsCompletion)) out.push("completion_unrecorded");
+  if (equipmentStillOut(s) > 0 && parts.some(claimsAllReturned)) out.push("equipment_out");
+  if (quotedRuns(text).some((q) => !recordedWords.includes(normText(q)))) out.push("unverified_quote");
+  return out;
 }
-/** Does a sentence say that everything is back? */
-export function claimsAllReturned(sentence: string): boolean {
-  if (/\bstill\s+out\b|\bsome\b|\bpart(?:ly|ial(?:ly)?)\b|\bnot\s+(?:all|yet|been|every)\b|(?:is|are|was|were|has|have|had|does|do|did)n['’]t\b|(?:is|are|was|were|has|have|had|does|do|did)\s+not\b/i.test(sentence)) return false;
-  return (RETURN_ALL.test(sentence) && RETURN_WORDS.test(sentence)) || /\b(?:equipment|hardware|kit)\s+return\s+(?:is|was)\s+complete\b/i.test(sentence);
-}
+export const recordedWordsOf = (s: unknown) => normText(snapshotStrings(s).join("\n"));
 
 /** The flags of one paragraph, against the evidence it cites and the snapshot. Used on the provider's answer AND on every edit the Project Manager saves. */
-export function flagsFor(text: string, refs: readonly string[], section: SectionId, sources: ReadonlyMap<string, string>, s: Pick<EvidenceSnapshot, "completion" | "project" | "equipment">, keep: readonly ParagraphFlag[] = []): ParagraphFlag[] {
+export function flagsFor(text: string, refs: readonly string[], section: SectionId, sources: ReadonlyMap<string, string>, s: Pick<EvidenceSnapshot, "completion" | "project" | "equipment">, keep: readonly ParagraphFlag[] = [], recordedWords: string = recordedWordsOf(s)): ParagraphFlag[] {
   const flags = new Set<ParagraphFlag>(keep.filter((f) => f === "suggestion"));
   const cited = refs.map((r) => sources.get(r)).filter((x): x is string => !!x);
   if (cited.length === 0 && section !== "lessons") flags.add("no_source");
@@ -141,10 +134,7 @@ export function flagsFor(text: string, refs: readonly string[], section: Section
   const numbers = isoDates(text).match(NUMBER) ?? [];
   // A figure counts as sourced when it stands as a whole number in a cited line ("P2.6" does not contain the number 6, but it does contain 2.6).
   if (cited.length > 0 && numbers.some((x) => !new RegExp(`(?<![\\d])${escapeRe(x)}(?![\\d])`).test(citedText))) flags.add("unverified_figure");
-  const all = norm([...sources.values()].join("\n"));
-  for (const re of QUOTES) for (const m of text.matchAll(re)) if (!all.includes(norm(m[1]!))) flags.add("unverified_quote");
-  if (s.project.kind === "client" && !clientSignoffRecorded(s) && sentences(text).some((x) => claimsSignoff(x, s.project.client))) flags.add("signoff_unrecorded");
-  if (equipmentStillOut(s) > 0 && sentences(text).some(claimsAllReturned)) flags.add("equipment_out");
+  for (const f of blocksFor(text, s, recordedWords)) flags.add(f);
   return [...flags];
 }
 

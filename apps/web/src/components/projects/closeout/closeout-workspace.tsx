@@ -94,7 +94,7 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
         </section>
         <section>
           <h3 className="text-sm font-semibold">Optional text ({summary.optional.filter((o) => o.selected).length} of {summary.optional.length} included)</h3>
-          <Muted className="mt-1">Text that people wrote. Untick anything you do not want to include. Client feedback, our response and notes are left out unless you tick them.</Muted>
+          <Muted className="mt-1">Text that people wrote: scope wording, exclusions, reasons for decisions, written effects on dates, the client&apos;s words, our response and notes. <strong>None of it is included unless you tick it.</strong> The recorded facts (who, when, status, dates and counts) are included without it.</Muted>
           {summary.optional.length === 0 ? <Muted className="mt-2">There is no optional text on this project.</Muted> : (
             <ul className="mt-2 space-y-2" data-testid="closeout-optional">
               {summary.optional.map((o) => (
@@ -116,10 +116,9 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
         ) : null}
         {summary.dropped.length > 0 ? <Alert role="status">This project has more records than one report can take. {summary.dropped.length} line{summary.dropped.length === 1 ? " is" : "s are"} left out to keep the size bounded (optional text and the longest lists first). The status, sign-off and equipment lines are always kept.</Alert> : null}
         <details>
-          <summary className="cursor-pointer text-[13px] text-accent">Show every line ({summary.chars.toLocaleString("en-GB")} characters)</summary>
-          <ol className="mt-2 space-y-1 text-[12px]" data-testid="closeout-lines">
-            {items.filter((x) => !x.withheld && !summary.dropped.includes(x.ref) && (!x.optional || include.has(x.optional.key))).map((x) => <li key={x.ref}><span className="font-mono text-muted-foreground">[{x.ref}]</span> {x.text}</li>)}
-          </ol>
+          <summary className="cursor-pointer text-[13px] font-medium text-accent" data-testid="closeout-exact-toggle">Show the exact evidence that would be sent ({summary.lines} lines, {summary.chars.toLocaleString("en-GB")} characters)</summary>
+          <Muted className="mt-2">This is the whole of it, line for line, with your current ticks. It changes as you tick and untick.</Muted>
+          <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-[12px]" data-testid="closeout-lines">{summary.text}</pre>
         </details>
         {hasDraft ? <Alert role="status">Writing the draft again replaces the current draft, including your edits. Approved versions are not affected.</Alert> : null}
         <div className="rounded-md border border-[hsl(var(--os-amber)/0.5)] bg-[hsl(var(--os-amber)/0.08)] p-3 text-[13px]" data-testid="closeout-anthropic-note">
@@ -147,7 +146,7 @@ function KeyFacts({ report }: { report: ReportView }) {
   return (
     <div data-testid="closeout-facts">
       <h3 className="text-sm font-semibold">Recorded facts</h3>
-      <Muted>From the project&apos;s records as they were on {formatDateTime(report.snapshotAt)}. These are not written by the AI model and cannot be edited here.</Muted>
+      <Muted>From the project&apos;s records as they were on {formatDateTime(report.snapshotAt)}. Completion, client sign-off and equipment return are stated here from the records only. They are not written by the AI model and cannot be edited. Where the narrative below differs, these stand.</Muted>
       <dl className="mt-2 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-2">
         {report.facts.map((f) => (
           <div key={f.label} className="flex gap-2">
@@ -213,6 +212,10 @@ function DraftEditor({ projectId, draft, onNotice, onReview }: { projectId: stri
       actions={<Badge variant="outline">Internal draft</Badge>}>
       <div className="space-y-5" data-testid="closeout-draft">
         <KeyFacts report={draft} />
+        <div>
+          <h3 className="text-sm font-semibold">Narrative</h3>
+          <Muted>{draft.generation === "generated" ? "Written by the AI model and edited by you." : "The recorded lines, for you to edit."} It is checked for statements about sign-off, completion, equipment return and quotations that the records do not support, but the checks are word patterns and cannot catch every wording: read it against the Recorded facts.</Muted>
+        </div>
         {blocking > 0 ? <Alert variant="destructive" role="alert" data-testid="closeout-blocking">{blocking} statement{blocking === 1 ? "" : "s"} contradict{blocking === 1 ? "s" : ""} the project&apos;s records. Change {blocking === 1 ? "it" : "them"} and save before approving.</Alert> : null}
         {sections.map((s) => (
           <section key={s.id} data-testid={`closeout-section-${s.id}`}>

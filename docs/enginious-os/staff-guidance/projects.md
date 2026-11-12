@@ -455,10 +455,10 @@ You can prepare the Delivery plan in Excel. Download template gives a workbook w
 - links: Projects -> /projects
 - screens: /projects/[id]/closeout
 
-The closeout report is an internal report about one project, prepared by its Project Manager from the project's own records. You first see what would be used and can remove optional text. Writing with the AI model sends only that reviewed content to Anthropic; a facts-only draft sends nothing. The report always states recorded facts such as client sign-off and equipment still out. Nothing goes to the client, and the project is not completed by it.
+The closeout report is an internal report about one project, prepared by its Project Manager from the project's own records. You first see exactly what would be used; written text such as scope wording and client words is left out unless you tick it. Writing with the AI model sends only that reviewed content to Anthropic; a facts-only draft sends nothing. The report always states recorded facts such as client sign-off and equipment still out. Nothing goes to the client, and the project is not completed by it.
 
 1. Open the project, press Manage project and choose Closeout report.
-2. Read Review data to be sent. Untick any text you do not want included.
+2. Read Review data to be sent. Tick only the written text you want included.
 3. Press Send to Anthropic and write the draft, or Write a facts-only draft.
 4. Check each paragraph against its sources, edit it, then press Save edits.
 5. Press Approve version, then Download PDF on the approved version.

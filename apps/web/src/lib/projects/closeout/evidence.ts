@@ -38,7 +38,11 @@ export const CATEGORY_LABELS: Record<EvidenceCategory, string> = {
   open_items: "Incomplete, deferred and cancelled items",
 };
 
-/** One line of evidence. `optional` items are free text a person wrote: they are sent only when the Project Manager selects them on the review screen. */
+/**
+ * One line of evidence. `optional` items are free text a person wrote (scope wording, exclusions, a decision's reason, a written effect on dates, the client's words, our
+ * response, notes). EVERY optional item starts unticked: it is sent only when the Project Manager deliberately ticks it on the review screen. The structured facts
+ * (who, when, status, counts, dates) are part of the evidence without a tick.
+ */
 export interface EvidenceItem {
   ref: string; category: EvidenceCategory; text: string;
   /** The record this line comes from (for the link back to the source). */
@@ -97,10 +101,10 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   // ---- scope: the original agreement and the final scope stay distinct
   const sc = s.scope;
   add("scope", s.handover ? (sc.changed ? `The agreed scope now differs from the scope on the accepted handover. Approved scope changes: ${sc.approved_changes}.` : `The agreed scope is the same as on the accepted handover. Approved scope changes: ${sc.approved_changes}.`) : `Approved scope changes: ${sc.approved_changes}.`, "project", p.id, "Feedback & changes");
-  if (sc.original_text?.trim()) add("scope", `ORIGINAL scope, as agreed at handover (as written): ${clip(sc.original_text.trim(), LIMITS.optionalChars)}`, "handover", s.handover?.id ?? null, "Sales handover scope", { key: "scope-original", label: "Original scope (as agreed at handover)", defaultOn: true });
-  if (sc.original_exclusions_text?.trim()) add("scope", `ORIGINAL exclusions (as written): ${clip(sc.original_exclusions_text.trim(), LIMITS.optionalChars)}`, "handover", s.handover?.id ?? null, "Sales handover exclusions", { key: "scope-original-exclusions", label: "Original exclusions", defaultOn: true });
-  if (sc.current_text?.trim() && (sc.changed || !sc.original_text?.trim())) add("scope", `FINAL agreed scope (as written): ${clip(sc.current_text.trim(), LIMITS.optionalChars)}`, "project", p.id, "Agreed scope", { key: "scope-current", label: "Final agreed scope", defaultOn: true });
-  if (sc.current_exclusions_text?.trim() && (sc.changed || !sc.original_exclusions_text?.trim())) add("scope", `FINAL exclusions (as written): ${clip(sc.current_exclusions_text.trim(), LIMITS.optionalChars)}`, "project", p.id, "Agreed exclusions", { key: "scope-current-exclusions", label: "Final exclusions", defaultOn: true });
+  if (sc.original_text?.trim()) add("scope", `ORIGINAL scope, as agreed at handover (as written): ${clip(sc.original_text.trim(), LIMITS.optionalChars)}`, "handover", s.handover?.id ?? null, "Sales handover scope", { key: "scope-original", label: "Original scope (as agreed at handover)", defaultOn: false });
+  if (sc.original_exclusions_text?.trim()) add("scope", `ORIGINAL exclusions (as written): ${clip(sc.original_exclusions_text.trim(), LIMITS.optionalChars)}`, "handover", s.handover?.id ?? null, "Sales handover exclusions", { key: "scope-original-exclusions", label: "Original exclusions", defaultOn: false });
+  if (sc.current_text?.trim() && (sc.changed || !sc.original_text?.trim())) add("scope", `FINAL agreed scope (as written): ${clip(sc.current_text.trim(), LIMITS.optionalChars)}`, "project", p.id, "Agreed scope", { key: "scope-current", label: "Final agreed scope", defaultOn: false });
+  if (sc.current_exclusions_text?.trim() && (sc.changed || !sc.original_exclusions_text?.trim())) add("scope", `FINAL exclusions (as written): ${clip(sc.current_exclusions_text.trim(), LIMITS.optionalChars)}`, "project", p.id, "Agreed exclusions", { key: "scope-current-exclusions", label: "Final exclusions", defaultOn: false });
   if (!sc.original_text?.trim() && !sc.current_text?.trim()) add("scope", "No agreed scope text is recorded.", "project", p.id, "Project details");
 
   // ---- team: names, roles and recorded ownership only. No effort, dedication or performance is inferred.
@@ -120,8 +124,8 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   for (const x of s.decisions.slice(0, LIMITS.decisions)) {
     const base = `${KIND[x.kind]} "${one(x.title ?? "untitled", 160)}": ${x.status} by ${person(x.decided_by)} on ${d(x.decided_at) ?? "a date that is not recorded"}; raised by ${person(x.proposed_by)} on ${d(x.proposed_at)}.${x.fields?.length ? ` Fields changed: ${x.fields.join(", ").replace(/_/g, " ")}.` : ""}`;
     add("decisions", `${base} Recorded reason: ${x.reason?.trim() ? "one is recorded" : "none recorded"}.`, x.kind, x.id, KIND[x.kind]);
-    if (x.reason?.trim()) add("decisions", `Reason recorded for "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.reason.trim(), 600)}`, x.kind, x.id, `${KIND[x.kind]} reason`, { key: `decision-reason:${x.id}`, label: `Reason: ${one(x.title ?? KIND[x.kind], 80)}`, defaultOn: true });
-    if (x.effect_on_dates?.trim()) add("decisions", `Stated effect on dates of "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.effect_on_dates.trim(), 400)}`, x.kind, x.id, "Scope change effect on dates", { key: `decision-dates:${x.id}`, label: `Effect on dates: ${one(x.title ?? "", 80)}`, defaultOn: true });
+    if (x.reason?.trim()) add("decisions", `Reason recorded for "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.reason.trim(), 600)}`, x.kind, x.id, `${KIND[x.kind]} reason`, { key: `decision-reason:${x.id}`, label: `Reason: ${one(x.title ?? KIND[x.kind], 80)}`, defaultOn: false });
+    if (x.effect_on_dates?.trim()) add("decisions", `Stated effect on dates of "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.effect_on_dates.trim(), 400)}`, x.kind, x.id, "Scope change effect on dates", { key: `decision-dates:${x.id}`, label: `Effect on dates: ${one(x.title ?? "", 80)}`, defaultOn: false });
   }
   more("decisions", s.decisions.length, LIMITS.decisions, "decisions");
   if (s.decisions.length === 0) add("decisions", "No decided scope change, plan change or correction is recorded.", "project", p.id, "Feedback & changes");
@@ -290,6 +294,6 @@ export function reviewSummary(items: readonly EvidenceItem[], selection: Closeou
     categories, teamNames: s.team.slice(0, LIMITS.team).map((m) => m.name),
     optional: items.filter((x) => x.optional && !x.withheld).map((x) => ({ key: x.optional!.key, label: x.optional!.label, text: x.text, selected: on.has(x.optional!.key), ref: x.ref })),
     withheld: items.filter((x) => x.withheld).map((x) => ({ ref: x.ref, label: x.optional?.label ?? x.source.label, why: WITHHELD_WORDS[x.withheld!] })),
-    missing: s.missing, dropped: dropped.map((x) => x.ref), chars: text.length, hash: payloadHash(text),
+    missing: s.missing, dropped: dropped.map((x) => x.ref), chars: text.length, lines: sent.length, text, hash: payloadHash(text),
   };
 }

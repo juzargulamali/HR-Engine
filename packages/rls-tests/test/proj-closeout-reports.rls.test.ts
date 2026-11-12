@@ -196,12 +196,27 @@ describe("Project Closeout Report", () => {
     await call(U.pm, `proj_closeout_save_edits('${draft}', '[]'::jsonb, 3)`);
     await expect(call(U.pm, `proj_closeout_approve('${draft}', 4)`)).rejects.toThrow(/empty/);
     await call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 4)`);
-    await call(U.pm, `proj_closeout_approve('${draft}', 5)`);
-    await call(U.pm, `proj_closeout_approve('${draft}', 5)`);                       // a second click
+    // Approval is enforced in the database. A statement the records do not support blocks it even when the function is called directly, and whatever marks the
+    // request carries: an empty "flags" list does not clear the block. Rewording does.
+    const forged = (text: string) => [{ id: "handover", title: "Testing and handover", paragraphs: [{ text, refs: ["S1"], flags: [] }] }];
+    let v = 5;
+    for (const text of ["The client signed off the installation on site.", "The project was completed on time.", "All equipment is back in the warehouse.", 'The client said "best stand we ever had".', "Fictional Motors were delighted with the final result."]) {
+      await call(U.pm, `proj_closeout_save_edits('${draft}', ${j(forged(text))}, ${v})`); v += 1;
+      await expect(call(U.pm, `proj_closeout_approve('${draft}', ${v})`), text).rejects.toThrow(/1 statement\(s\) in this draft contradict the project's records/);
+      await expect(call(U.founder, `proj_closeout_approve('${draft}', ${v})`), text).rejects.toThrow(/contradict the project's records/);
+    }
+    // the same through the draft-save path: sections with a blocked sentence and no marks are stored, and still cannot be approved
+    const re = await saveDraft(U.pm, await evidence(U.pm), { sections: forged("The client gave final approval.") });
+    expect(re.id).toBe(draft);
+    await expect(call(U.pm, `proj_closeout_approve('${draft}', ${re.version})`)).rejects.toThrow(/contradict the project's records/);
+    expect((await admin<Row>(`select status from proj_closeout_reports where id = '${draft}'`))[0]!.status).toBe("draft");
+    await call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, ${re.version})`);          // reworded: the normal review and approval goes through
+    await call(U.pm, `proj_closeout_approve('${draft}', ${re.version + 1})`);
+    await call(U.pm, `proj_closeout_approve('${draft}', ${re.version + 1})`);       // a second click
     const [row] = await admin<Row>(`select status, approved_by, approved_at, sections from proj_closeout_reports where id = '${draft}'`);
     expect(row).toMatchObject({ status: "approved", approved_by: U.pm });
     expect(row!.sections[0].paragraphs[0].text).toBe("Delivered, with one item open.");
-    await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 6)`)).rejects.toThrow(/approved report cannot be edited/);
+    await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 99)`)).rejects.toThrow(/approved report cannot be edited/);
     await expect(call(U.pm, `proj_closeout_discard_draft('${draft}')`)).rejects.toThrow(/approved report is kept/);
     expect(await fingerprint()).toBe(before);                                       // approving completed nothing, told nobody, moved no stock
     expect((await admin<Row>(`select status from proj_projects where id = '${P1}'`))[0]!.status).toBe("in_progress");
@@ -232,13 +247,62 @@ describe("Project Closeout Report", () => {
     expect((await admin<Row>(`select version_no, status from proj_closeout_reports where project_id = '${P1}'`))).toEqual([{ version_no: 1, status: "approved" }]);
   });
 
-  it("provider use is bounded per project per day, and only a manager can spend it", async () => {
-    await expect(call(U.eng, `proj_closeout_take_call('${P1}', 3)`)).rejects.toThrow(/Only the Project Manager/);
-    await expect(call(U.pm, `proj_closeout_take_call('${P2}', 3)`)).rejects.toThrow(/Only the Project Manager/);
-    await expect(call(U.pm, `proj_closeout_take_call('${P1}', 0)`)).rejects.toThrow(/daily limit/);
-    expect([await call(U.pm, `proj_closeout_take_call('${P1}', 3)`), await call(U.founder, `proj_closeout_take_call('${P1}', 3)`), await call(U.pm, `proj_closeout_take_call('${P1}', 3)`), await call(U.pm, `proj_closeout_take_call('${P1}', 3)`)]).toEqual([true, true, true, false]);
-    expect((await admin<Row>(`select calls from proj_closeout_usage where project_id = '${P1}'`))[0]!.calls).toBe(3);
-    expect(await q(U.eng, `select 1 from proj_closeout_usage`)).toHaveLength(0);
+  it("the database marks the same sentences the app marks (shared cases), from the text and the stored snapshot alone", async () => {
+    const cases = JSON.parse(readFileSync(path.join(__dirname, "../../../apps/web/src/lib/projects/closeout/claim-cases.json"), "utf8")).cases as { text: string; blocks: string[] }[];
+    // The situation the cases are written for: a client project with no completion record and equipment still out.
+    const snap = { project: { kind: "client", client: "Fictional Motors" }, completion: null, equipment: { requests: [{ lines: [{ sent: 4, returned: 1 }] }] }, feedback: [{ request_text: "Please make the welcome loop brighter" }] };
+    for (const c of cases) {
+      const [row] = await admin<{ b: string[] }>(`select proj_closeout_text_blocks('${c.text.replace(/'/g, "''")}', ${j(snap)}) b`);
+      expect(row!.b, c.text).toEqual(c.blocks);
+    }
+    // Once the record exists, the same sentences are fine: a signed handover, and everything returned.
+    const done = { ...snap, completion: { evidence_type: "signed_handover" }, equipment: { requests: [{ lines: [{ sent: 4, returned: 4 }] }] } };
+    for (const text of ["The client signed off the installation.", "The project was completed on time.", "Everything is back in the warehouse."]) {
+      expect((await admin<{ b: string[] }>(`select proj_closeout_text_blocks('${text}', ${j(done)}) b`))[0]!.b, text).toEqual([]);
+    }
+    // An internal note is not a client sign-off; an internal project has no client sign-off to claim.
+    expect((await admin<{ b: string[] }>(`select proj_closeout_text_blocks('The client signed off.', ${j({ ...done, completion: { evidence_type: "internal_note" } })}) b`))[0]!.b).toEqual(["signoff_unrecorded"]);
+    expect((await admin<{ b: string[] }>(`select proj_closeout_text_blocks('The client signed off.', ${j({ ...snap, project: { kind: "internal", client: null } })}) b`))[0]!.b).toEqual([]);
+    for (const who of [U.pm, U.eng]) await expect(q(who, `select proj_closeout_text_blocks('x', '{}'::jsonb)`)).rejects.toThrow(/permission denied/);
+  });
+
+  it("one provider call per project and exact reviewed content: an atomic claim, a reusable result, a retryable failure and a daily limit", async () => {
+    const H1 = "p9-aaaaaaaaaaaaaaaa", H2 = "p9-bbbbbbbbbbbbbbbb";
+    const claim = (user: string, hash: string, limit = 3, project = P1) => call<Row>(user, `proj_closeout_claim('${project}', '${hash}', ${limit})`);
+    const finish = (user: string, hash: string, ok: boolean) => call(user, `proj_closeout_finish('${P1}', '${hash}', ${ok}, ${ok ? "'simulated'" : "null"}, ${ok ? j({ sections: [{ id: "summary", paragraphs: [{ text: "Stored.", refs: ["S1"] }] }] }) : "null"})`);
+    const used = async () => Number((await admin<Row>(`select coalesce(sum(calls), 0) n from proj_closeout_usage where project_id = '${P1}'`))[0]!.n);
+    await expect(claim(U.eng, H1)).rejects.toThrow(/Only the Project Manager/);
+    await expect(claim(U.pm, H1, 3, P2)).rejects.toThrow(/Only the Project Manager/);
+    await expect(claim(U.pm, H1, 0)).rejects.toThrow(/daily limit/);
+    // Two requests at the same instant, from the Project Manager and a founder: exactly one may call the provider.
+    const both = await Promise.all([claim(U.pm, H1), claim(U.founder, H1)]);
+    expect(both.map((r) => r.state).sort()).toEqual(["claimed", "in_progress"]);
+    expect(await used()).toBe(1);
+    expect((await claim(U.pm, H1)).state).toBe("in_progress");                    // still being written: nothing is sent, nothing is counted
+    // A failure can be tried again, and counts again.
+    await finish(U.pm, H1, false);
+    expect((await claim(U.pm, H1)).state).toBe("claimed");
+    expect(await used()).toBe(2);
+    // A stored result is returned to every later request for the same content, and is not counted, whatever the draft is by then (a facts-only draft, for example).
+    await finish(U.pm, H1, true);
+    for (const who of [U.pm, U.founder]) expect(await claim(who, H1)).toMatchObject({ state: "done", provider_kind: "simulated", answer: { sections: [{ id: "summary" }] } });
+    expect(await used()).toBe(2);
+    await finish(U.pm, H1, false);                                                // finishing something that is not claimed changes nothing
+    expect((await claim(U.pm, H1)).state).toBe("done");
+    // Different content is its own claim; the limit is per project per day and refuses before anything is sent.
+    expect((await claim(U.pm, H2)).state).toBe("claimed");
+    expect(await used()).toBe(3);
+    await finish(U.pm, H2, false);
+    expect((await claim(U.pm, H2)).state).toBe("limit");
+    expect((await claim(U.pm, H1)).state).toBe("done");                           // at the limit a stored result is still available
+    expect(await used()).toBe(3);
+    // A claim that never finished (the server stopped) can be claimed again after three minutes.
+    await db.seed(`update proj_closeout_usage set calls = 0 where project_id = '${P1}'; update proj_closeout_generations set status = 'claimed', claimed_at = now() - interval '4 minutes' where project_id = '${P1}' and payload_hash = '${H2}'`);
+    expect((await claim(U.pm, H2)).state).toBe("claimed");
+    await expect(call(U.eng, `proj_closeout_finish('${P1}', '${H2}', false, null, null)`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.pm, `proj_closeout_finish('${P1}', '${H2}', true, 'simulated', '{}'::jsonb)`)).rejects.toThrow(/Malformed result/);
+    for (const who of [U.eng, U.outsider]) { expect(await q(who, `select 1 from proj_closeout_usage`)).toHaveLength(0); expect(await q(who, `select 1 from proj_closeout_generations`)).toHaveLength(0); }
+    expect((await q(U.pm, `select 1 from proj_closeout_generations`)).length).toBe(2);
   });
 
   it("the owner packs: preflight has no STOP, verify says OK on every row", async () => {
@@ -246,7 +310,7 @@ describe("Project Closeout Report", () => {
     // Row 2 (no write privilege) is checked on hosted and by projects.rls.test.ts; other suites in this harness may grant every table to signed-in users.
     const rows = (await admin(pack("proj_closeout_reports_20_verify_readonly.sql"))).filter((r) => !String(r.item).startsWith("signed-in users can only READ"));
     expect(rows.filter((r) => r.result !== "OK" && r.result !== "INFO")).toEqual([]);
-    expect(rows.length).toBeGreaterThanOrEqual(8);
+    expect(rows.length).toBeGreaterThanOrEqual(11);
   });
 
   it("rollback: the reports are gone, nothing else is, and applying the migration again works", async () => {

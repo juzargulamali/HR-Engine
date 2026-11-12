@@ -2093,7 +2093,8 @@ export interface Database {
       proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
       proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
-      proj_closeout_take_call: { Args: { p_project_id: string; p_limit: number }; Returns: boolean };
+      proj_closeout_claim: { Args: { p_project_id: string; p_payload_hash: string; p_limit: number }; Returns: unknown };
+      proj_closeout_finish: { Args: { p_project_id: string; p_payload_hash: string; p_ok: boolean; p_provider_kind: string | null; p_answer: unknown }; Returns: undefined };
       proj_closeout_evidence: { Args: { p_project_id: string }; Returns: unknown };
       proj_closeout_save_draft: { Args: { p_project_id: string; p_snapshot: unknown; p_selection: unknown; p_payload_hash: string; p_generation: string; p_provider_kind: string | null; p_sections: unknown; p_source_refs: unknown }; Returns: unknown };
       proj_closeout_save_edits: { Args: { p_report_id: string; p_sections: unknown; p_expected_version: number | null }; Returns: number };

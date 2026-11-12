@@ -12,13 +12,27 @@ import { CLOSEOUT_DAILY_LIMIT } from "./service";
 import { generateCloseoutDraft, type CloseoutReportRow } from "./service";
 
 /** A stand-in for the database: the evidence function, the report table and the save function, with the same rules the real ones have (proved in packages/rls-tests). */
-function fakeDb(state: { snapshot: EvidenceSnapshot; reports: CloseoutReportRow[]; manager?: boolean; evidenceFails?: boolean; calls: string[]; taken?: number }) {
+function fakeDb(state: { snapshot: EvidenceSnapshot; reports: CloseoutReportRow[]; manager?: boolean; evidenceFails?: boolean; calls: string[]; taken?: number; generations?: Map<string, { status: string; answer: unknown; kind: string | null }> }) {
   return {
     rpc: async (name: string, args: Record<string, unknown>) => {
       state.calls.push(name);
       if (state.manager === false) return { data: null, error: { code: name === "proj_closeout_evidence" ? "P0002" : "42501", message: "Only the Project Manager" } };
       if (name === "proj_closeout_evidence") return state.evidenceFails ? { data: null, error: { code: "XX000", message: "boom" } } : { data: { ...state.snapshot, taken_at: new Date().toISOString() }, error: null };
-      if (name === "proj_closeout_take_call") { state.taken = (state.taken ?? 0) + 1; return { data: state.taken <= Number(args.p_limit), error: null }; }
+      // The same decisions proj_closeout_claim makes (proved on PostgreSQL, including two claims at the same instant, in packages/rls-tests).
+      if (name === "proj_closeout_claim") {
+        const gens = (state.generations ??= new Map()); const g = gens.get(String(args.p_payload_hash));
+        if (g?.status === "done") return { data: { state: "done", answer: g.answer, provider_kind: g.kind }, error: null };
+        if (g?.status === "claimed") return { data: { state: "in_progress" }, error: null };
+        if ((state.taken ?? 0) >= Number(args.p_limit)) return { data: { state: "limit" }, error: null };
+        state.taken = (state.taken ?? 0) + 1;
+        gens.set(String(args.p_payload_hash), { status: "claimed", answer: null, kind: null });
+        return { data: { state: "claimed" }, error: null };
+      }
+      if (name === "proj_closeout_finish") {
+        const g = state.generations?.get(String(args.p_payload_hash));
+        if (g?.status === "claimed") Object.assign(g, args.p_ok ? { status: "done", answer: args.p_answer, kind: args.p_provider_kind } : { status: "failed" });
+        return { data: null, error: null };
+      }
       if (name === "proj_closeout_save_draft") {
         const { taken_at: _a, ...given } = args.p_snapshot as EvidenceSnapshot; const { taken_at: _b, ...now } = state.snapshot;
         if (JSON.stringify(given) !== JSON.stringify(now)) return { data: null, error: { code: "40001", message: "The project's records changed" } };
@@ -33,7 +47,8 @@ function fakeDb(state: { snapshot: EvidenceSnapshot; reports: CloseoutReportRow[
   } as never;
 }
 const reviewed = (s: EvidenceSnapshot, selection: CloseoutSelection | null) => payloadHash(buildOutbound(evidenceItems(s), selection).text);
-const defaults = (s: EvidenceSnapshot): CloseoutSelection => ({ include: evidenceItems(s).filter((x) => x.optional?.defaultOn).map((x) => x.optional!.key) });
+/** What a Project Manager might deliberately tick: the scope wording and the decision reasons (nothing is ticked by default). */
+const defaults = (s: EvidenceSnapshot): CloseoutSelection => ({ include: evidenceItems(s).filter((x) => x.optional && /^(scope-|decision-)/.test(x.optional.key)).map((x) => x.optional!.key) });
 const everything = (s: EvidenceSnapshot): CloseoutSelection => ({ include: evidenceItems(s).filter((x) => x.optional).map((x) => x.optional!.key) });
 
 beforeEach(() => { simulatedProviderCalls.length = 0; simulatedBehaviour.closeout = "ok"; });
@@ -67,36 +82,50 @@ describe("closeout evidence: what may leave, decided by an allowlist", () => {
   });
 
   it("keeps the original agreement distinct from the final scope", () => {
-    const text = buildOutbound(items, null).text;
+    const text = buildOutbound(items, defaults(s)).text;
     expect(text).toContain("ORIGINAL scope, as agreed at handover (as written): LED welcome wall 6 x 4 m");
     expect(text).toContain("FINAL agreed scope (as written): LED welcome wall 6 x 4 m plus a second kiosk");
     expect(text).toContain("The agreed scope now differs from the scope on the accepted handover. Approved scope changes: 1.");
   });
 
-  it("free text is optional: the client's words, our response and notes go only when selected; the PM can remove the rest", () => {
+  it("every free text starts unticked: scope wording, exclusions, decision reasons, written date effects, client words, our response and notes go only when the PM ticks them", () => {
+    expect(items.filter((x) => x.optional).length).toBe(9);
+    expect(items.some((x) => x.optional?.defaultOn)).toBe(false);
     const byDefault = buildOutbound(items, null).text;
-    expect(byDefault).not.toContain("Please make the welcome loop brighter");
-    expect(byDefault).not.toContain("Brightness raised");
-    expect(byDefault).not.toContain("rehearsal the evening before");
-    expect(byDefault).toContain("Agreed with the client on the 12 Feb call");          // a decision's recorded reason is on by default
-    expect(byDefault).toContain("Client feedback 1, received 2027-03-02");              // the fact that feedback was recorded always goes
-    const none = buildOutbound(items, { include: [] }).text;
-    for (const t of ["Agreed with the client", "LED welcome wall 6 x 4 m", "One extra install day"]) expect(none).not.toContain(t);
+    expect(byDefault).toBe(buildOutbound(items, { include: [] }).text);
+    for (const t of ["LED welcome wall 6 x 4 m", "Rigging by venue", "Agreed with the client on the 12 Feb call", "One extra install day", "Please make the welcome loop brighter", "Brightness raised", "rehearsal the evening before"]) expect(byDefault, t).not.toContain(t);
+    // the permitted structured facts are there without a tick: that a change was approved, by whom and when; that feedback was recorded and resolved; the scope differs
+    expect(byDefault).toContain('Scope change "Add a second kiosk": approved by Pat Manager on 2027-02-12; raised by Eli Engineer on 2027-02-11. Recorded reason: one is recorded.');
+    expect(byDefault).toContain("Client feedback 1, received 2027-03-02, recorded as a correction within scope: resolved on 2027-03-02 by Casey Content.");
+    expect(byDefault).toContain("The agreed scope now differs from the scope on the accepted handover. Approved scope changes: 1.");
+    expect(byDefault).toContain("Client sign-off: NOT RECORDED");
+    // each one goes only when its own key is ticked
+    const one = (key: string) => buildOutbound(items, { include: [key] }).text;
+    expect(one("scope-original")).toContain("ORIGINAL scope, as agreed at handover (as written): LED welcome wall 6 x 4 m");
+    expect(one("scope-original")).not.toContain("Rigging by venue");
+    expect(one(`decision-reason:${ID.change}`)).toContain("Agreed with the client on the 12 Feb call");
+    expect(one(`decision-dates:${ID.change}`)).toContain("One extra install day");
     const all = buildOutbound(items, everything(s)).text;
     expect(all).toContain('the client\'s request (exact recorded text): "Please make the welcome loop brighter"');
     expect(all).toContain("Brightness raised and confirmed on site");
     expect(selectedItems(items, { include: ["not-a-key"] }).some((x) => x.optional)).toBe(false);
+    // the review shows exactly what would be sent, and the screening still applies to a ticked text
+    expect(reviewSummary(items, { include: ["scope-original"] }, s).text).toBe(one("scope-original"));
+    const money = fixtureSnapshot({ scope: { ...s.scope, original_text: "LED wall for AED 90,000" } });
+    expect(buildOutbound(evidenceItems(money), { include: ["scope-original"] }).text).not.toContain("90,000");
   });
 
   it("the review summary shows the categories, the team names, each optional text and what is missing", () => {
-    const r = reviewSummary(items, null, fixtureSnapshot({ missing: ["Equipment: the equipment records could not be read"] }));
+    const r = reviewSummary(items, defaults(s), fixtureSnapshot({ missing: ["Equipment: the equipment records could not be read"] }));
     expect(r.categories.map((c) => c.category)).toEqual(["project", "scope", "team", "decisions", "feedback", "delivery", "handover", "equipment", "open_items"]);
     expect(r.teamNames).toEqual(["Pat Manager", "Casey Content", "Eli Engineer", "Pri Programmer"]);
     expect(r.optional.find((o) => o.key === `feedback-request:${ID.feedback}`)).toMatchObject({ selected: false, label: "Feedback 1: the client's words" });
     expect(r.optional.find((o) => o.key === "scope-original")).toMatchObject({ selected: true });
     expect(r.missing).toEqual(["Equipment: the equipment records could not be read"]);
-    expect(r.hash).toBe(reviewed(s, null));
+    expect(r.hash).toBe(reviewed(s, defaults(s)));
     expect(reviewed(s, { include: [] })).not.toBe(r.hash);
+    expect(reviewed(s, null)).toBe(reviewed(s, { include: [] }));
+    expect(reviewSummary(items, null, s).optional.every((o) => !o.selected)).toBe(true);
   });
 
   it("a source that could not be read is stated in the evidence, never left out as if there were nothing", () => {
@@ -405,6 +434,54 @@ describe("closeout generation: one bounded call through the outbound gate, with 
     expect(state.reports[0]!.snapshot.handover!.notes_text).toBe("Edited while the report was being written");   // stored with the records it was checked against
     expect(await run(state)).toMatchObject({ ok: true, reused: true });
     expect(simulatedProviderCalls).toHaveLength(1);
+  });
+
+  it("two requests for the same reviewed content at the same moment make ONE provider call", async () => {
+    const state = fresh();
+    let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+    let calls = 0;
+    const slow = { kind: "simulated" as const, structured: async (req: never) => { calls += 1; await gate; return createSimulatedProvider().structured(req); } };
+    const first = run(state, { provider: slow as never });
+    await new Promise((r) => setTimeout(r, 5));                                        // the first request has claimed and is waiting for the provider
+    const second = await run(state, { provider: slow as never });
+    expect(second).toMatchObject({ ok: false, code: "in_progress" });
+    expect((second as { message: string }).message).toMatch(/already being written from exactly this content, so nothing was sent again/);
+    release();
+    expect(await first).toMatchObject({ ok: true, reused: false });
+    expect(calls).toBe(1);
+    expect(state.taken).toBe(1);
+    expect(state.reports).toHaveLength(1);
+    expect(await run(state, { provider: slow as never })).toMatchObject({ ok: true, reused: true });   // afterwards the same content is simply reused
+    expect(calls).toBe(1);
+  });
+
+  it("a stored result is reused when the PM writes a facts-only draft and then chooses AI again with identical content; nothing is sent again", async () => {
+    const state = fresh();
+    expect(await run(state)).toMatchObject({ ok: true, reused: false, mode: "ai" });
+    const ai = JSON.stringify(state.reports[0]!.sections);
+    expect(await run(state, { mode: "facts" })).toMatchObject({ ok: true, mode: "facts" });
+    expect(state.reports[0]).toMatchObject({ generation: "none", provider_kind: null });
+    expect(await run(state)).toMatchObject({ ok: true, reused: true, mode: "ai" });
+    expect(simulatedProviderCalls).toHaveLength(1);                                    // one call in all
+    expect(state.taken).toBe(1);                                                       // and one unit of the daily limit
+    expect(state.reports).toHaveLength(1);
+    expect(state.reports[0]).toMatchObject({ generation: "generated", provider_kind: "simulated" });
+    expect(JSON.stringify(state.reports[0]!.sections)).toBe(ai);
+    expect(JSON.stringify(state.generations!.values().next().value!.answer)).not.toMatch(/flags|execute/);   // what is stored is the answer's own fields only
+  });
+
+  it("a failed call is released: the retry calls the provider again, and both count toward the daily limit", async () => {
+    const state = fresh();
+    const { JarvisProviderError } = await import("@/lib/jarvis/provider");
+    expect(await run(state, { provider: { kind: "simulated", structured: async () => { throw new JarvisProviderError("timeout"); } } as never })).toMatchObject({ ok: false, code: "provider_failed" });
+    expect([...state.generations!.values()].map((g) => g.status)).toEqual(["failed"]);
+    expect(await run(state)).toMatchObject({ ok: true, reused: false });
+    expect(simulatedProviderCalls).toHaveLength(1);
+    expect(state.taken).toBe(2);
+    simulatedBehaviour.closeout = "malformed";
+    const other = fresh();
+    expect(await run(other)).toMatchObject({ ok: false, code: "unusable" });
+    expect([...other.generations!.values()].map((g) => g.status)).toEqual(["failed"]);  // an unusable answer is not kept for reuse
   });
 
   it("AI drafts are limited per project per day; at the limit nothing is sent, and a facts-only draft still works", async () => {

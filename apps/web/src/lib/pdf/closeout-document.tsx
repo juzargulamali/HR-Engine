@@ -59,7 +59,7 @@ export function CloseoutDocument({ report, projectName, reference }: { report: R
           ))}
         </View>
         <Text style={s.note}>
-          Recorded facts are taken from the project&apos;s records as they were on {day(report.snapshotAt)}. Version {report.versionNo}, approved {day(report.approvedAt)}{report.approvedBy ? ` by ${report.approvedBy}` : ""}.
+          Recorded facts above are taken from the project&apos;s records as they were on {day(report.snapshotAt)}; completion, client sign-off and equipment return are stated there from the records only, and stand where the narrative differs. Version {report.versionNo}, approved {day(report.approvedAt)}{report.approvedBy ? ` by ${report.approvedBy}` : ""}.
           {report.missing.length > 0 ? ` Could not be read when this was written: ${report.missing.join("; ")}.` : ""}
         </Text>
         {report.sections.map((sec) => (

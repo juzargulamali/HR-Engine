@@ -14,11 +14,12 @@ import { CloseoutWorkspace } from "./closeout-workspace";
 
 const s = fixtureSnapshot();
 const items = evidenceItems(s);
-const defaults = items.filter((x) => x.optional?.defaultOn).map((x) => x.optional!.key);
-const sent = buildOutbound(items, { include: defaults }).sent;
+const defaults = items.filter((x) => x.optional?.defaultOn).map((x) => x.optional!.key);   // nothing: every optional text starts unticked
+const ticked = items.filter((x) => x.optional && /^(scope-|decision-)/.test(x.optional.key)).map((x) => x.optional!.key);
+const sent = buildOutbound(items, { include: ticked }).sent;
 const view = (over: Partial<ReportView> = {}): ReportView => ({
   id: "r1", versionNo: 1, status: "draft", version: 3, generation: "generated", snapshotAt: "2027-03-06T10:00:00Z", approvedAt: null, approvedBy: null, facts: keyFacts(s), missing: [],
-  sections: factsOnlyDraft(sent), refs: toSourceRefs(sent), include: defaults, ...over,
+  sections: factsOnlyDraft(sent), refs: toSourceRefs(sent), include: ticked, ...over,
 });
 const props = (over: Partial<Parameters<typeof CloseoutWorkspace>[0]> = {}) => ({
   projectId: "p1", items, team: s.team.map((m) => ({ name: m.name })), missing: [] as string[], defaultInclude: defaults, draft: null, approved: [] as ReportView[],
@@ -37,11 +38,19 @@ describe("Closeout report: review data to be sent", () => {
     expect(within(review).getByTestId("closeout-team").textContent).toBe("Pat Manager, Casey Content, Eli Engineer, Pri Programmer");
     expect(within(review).getByTestId("closeout-anthropic-note").textContent).toMatch(/Generating sends the reviewed content above to Anthropic/);
     expect(review.textContent).toMatch(/Never included: prices, costs, margins, budgets, payroll, project chat, task comments, files and attachments, contact details/);
-    // the client's words are shown, and are NOT selected until the PM ticks them
-    const words = screen.getByTestId(`closeout-opt-feedback-request:${ID.feedback}`) as HTMLInputElement;
-    expect(words.checked).toBe(false);
+    // every optional text is shown, and NONE is selected until the PM ticks it: scope wording, exclusions, reasons, date effects, client words, response, notes
+    expect(defaults).toEqual([]);
+    const boxes = within(review).getByTestId("closeout-optional").querySelectorAll('input[type="checkbox"]');
+    expect(boxes).toHaveLength(9);
+    expect([...boxes].every((b) => !(b as HTMLInputElement).checked)).toBe(true);
     expect(within(review).getByTestId("closeout-optional").textContent).toContain("Please make the welcome loop brighter");
-    expect((screen.getByTestId("closeout-opt-scope-original") as HTMLInputElement).checked).toBe(true);
+    expect(review.textContent).toMatch(/Optional text \(0 of 9 included\)/);
+    expect(review.textContent).toMatch(/None of it is included unless you tick it/);
+    // the exact outbound evidence is there to read, and holds none of the optional text yet
+    const exact = within(review).getByTestId("closeout-lines").textContent!;
+    expect(exact).toBe(buildOutbound(items, { include: [] }).text);
+    expect(exact).toContain("Client sign-off: NOT RECORDED");
+    for (const t of ["LED welcome wall 6 x 4 m", "Agreed with the client", "One extra install day", "Please make the welcome loop brighter"]) expect(exact).not.toContain(t);
     expect(screen.getByRole("button", { name: "Send to Anthropic and write the draft" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Write a facts-only draft (nothing is sent)" })).toBeTruthy();
     expect(actions.generateCloseout).not.toHaveBeenCalled();                            // nothing is sent by opening the screen
@@ -49,14 +58,16 @@ describe("Closeout report: review data to be sent", () => {
 
   it("sends the selection the PM left ticked, with the fingerprint of exactly that content", async () => {
     render(<CloseoutWorkspace {...props()} />);
-    fireEvent.click(screen.getByTestId("closeout-opt-scope-original"));                 // remove optional content
-    fireEvent.click(screen.getByTestId(`closeout-opt-feedback-request:${ID.feedback}`)); // add the client's words
+    fireEvent.click(screen.getByTestId("closeout-opt-scope-original"));                 // opt in to the original scope wording
+    fireEvent.click(screen.getByTestId("closeout-opt-scope-current"));
+    fireEvent.click(screen.getByTestId("closeout-opt-scope-current"));                  // ticked, then removed again
+    fireEvent.click(screen.getByTestId(`closeout-opt-feedback-request:${ID.feedback}`)); // opt in to the client's words
+    expect(screen.getByTestId("closeout-lines").textContent).toContain("ORIGINAL scope, as agreed at handover (as written): LED welcome wall 6 x 4 m");
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Send to Anthropic and write the draft" })); });
     await waitFor(() => expect(actions.generateCloseout).toHaveBeenCalledTimes(1));
     const fd = formData(actions.generateCloseout);
     const include = JSON.parse(String(fd.include)) as string[];
-    expect(include).toContain(`feedback-request:${ID.feedback}`);
-    expect(include).not.toContain("scope-original");
+    expect(include.sort()).toEqual([`feedback-request:${ID.feedback}`, "scope-original"].sort());
     expect(fd).toMatchObject({ projectId: "p1", mode: "ai", reviewedHash: payloadHash(buildOutbound(items, { include }).text) });
     expect(Object.keys(fd).sort()).toEqual(["include", "mode", "projectId", "reviewedHash"]);   // the browser sends no evidence, only what was selected
   });

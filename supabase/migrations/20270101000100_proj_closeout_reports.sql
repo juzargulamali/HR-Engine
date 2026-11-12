@@ -1,5 +1,6 @@
 -- Projects & Tasks Phase 2, part 2: the Project Closeout Report. ADDITIVE ONLY. Applied AFTER 20261231000100 (it reads the Delivery Plan).
--- Two new tables (the reports and a small usage counter) and seven functions; no existing table, policy or function is changed.
+-- Three new tables (the reports, a daily usage counter and the record of provider calls per reviewed content) and ten functions; no existing table, policy or
+-- function is changed.
 --
 -- WHAT IT IS
 --   An INTERNAL report the Project Manager drafts from the project's own records, edits, and approves as a version. Generating or approving a report never completes a
@@ -243,9 +244,10 @@ end;
 $$;
 
 -- Approval freezes the version. It changes nothing else: not the project, not its completion, not stock; and it sends nothing.
+-- It is refused HERE while any paragraph is blocked (proj_closeout_blocks), however the request arrives.
 create or replace function proj_closeout_approve(p_report_id uuid, p_expected_version integer)
 returns void language plpgsql security definer set search_path = public as $$
-declare r proj_closeout_reports;
+declare r proj_closeout_reports; v_blocks jsonb;
 begin
   select * into r from proj_closeout_reports where id = p_report_id;
   if not found or not proj_can_manage(r.project_id) then raise exception 'Report not found' using errcode = 'P0002'; end if;
@@ -255,6 +257,11 @@ begin
   if p_expected_version is null then raise exception 'Reload the report and try again' using errcode = '22023'; end if;
   if p_expected_version is not null and r.version <> p_expected_version then raise exception 'This report was changed by someone else. Reload and try again' using errcode = '40001'; end if;
   if jsonb_array_length(r.sections) = 0 then raise exception 'The report is empty. Write or generate it first' using errcode = '23514'; end if;
+  -- The blocks are computed here from the stored text and the stored snapshot. Whatever marks the draft carries are not read.
+  v_blocks := proj_closeout_blocks(r.snapshot, r.sections);
+  if jsonb_array_length(v_blocks) > 0 then
+    raise exception '% statement(s) in this draft contradict the project''s records (a client sign-off, a completion or an equipment return that is not recorded, or a quotation that is not in the records). Change them, save, then approve', jsonb_array_length(v_blocks) using errcode = '23514';
+  end if;
   update proj_closeout_reports set status = 'approved', approved_by = auth.uid(), approved_at = now(), updated_at = now(), version = version + 1 where id = r.id;
 end;
 $$;
@@ -273,38 +280,165 @@ begin
 end;
 $$;
 
--- A bound on provider use: at most p_limit AI drafts per project per day (Dubai). Called by the server before the ONE provider call of a draft; a refused or failed
--- call still counts, so a loop cannot spend more than the limit. Returns whether this call is within the limit.
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- Blocking statements, enforced HERE. A paragraph is blocked when, by its own words, it says something the snapshot stored with the report does not support:
+--   signoff_unrecorded     the client signed off, accepted or approved (directly or by implication), and no client sign-off is recorded
+--   completion_unrecorded  the project itself was completed or closed, and no completion record exists
+--   equipment_out          the equipment is all back, and some is recorded as still out
+--   unverified_quote       quoted words that are nowhere in the snapshot's recorded text
+-- Only the paragraph TEXT and the stored SNAPSHOT take part. Marks or source references a caller sends are ignored, so a block cannot be cleared by sending different
+-- marks: it clears when the sentence is reworded, or when the record exists and a new draft is taken. The patterns are the ones in
+-- apps/web/src/lib/projects/closeout/claims.ts (a test keeps the two identical). They are word patterns, not understanding: see that file for what they cannot catch.
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+create or replace function proj_closeout_text_blocks(p_text text, p_snapshot jsonb)
+returns text[] language plpgsql stable set search_path = public as $$
+declare
+  c_denies constant text := '\y(?:not\s+(?:yet\s+)?(?:been\s+)?(?:recorded|signed|accepted|approved|confirmed|given|received|returned|back|completed|closed)|no\s+(?:client\s+|customer\s+|recorded\s+|record\s+of\s+(?:a\s+|any\s+)?)?(?:sign[\s-]?off|acceptance|approval|confirmation|completion)|(?:is|are|was|were|has|have|had|did|does|do|could|can)(?:\s+not|n[''’]t)\s+(?!only\y)|unrecorded|awaiting|pending|yet\s+to\s+be|still\s+(?:out|outstanding|open|to\s+be))\y';
+  c_signoff constant text := '\ysign(?:ed|s|ing)?[\s-]?off\y|\ysigned\s+(?:the\s+|a\s+|an\s+)?(?:\w+\s+)?(?:handover|completion|certificate|acceptance|form)\y|\y(?:handover|hand-over|completion|acceptance|certificate)\s+(?:was|were|has\s+been|is)\s+(?:signed|accepted|given|granted|received)\y|\yfinal\s+(?:approval|acceptance)\y|\yhanded\s+over\s+to\s+the\s+(?:client|customer)\y|\ygreen\s+light\y|\yblessing\y|\y(?:formally|officially)\s+(?:accepted|approved|closed|handed\s+over)\y';
+  c_accept constant text := '\y(?:accept(?:ed|s|ance)?|approv(?:ed|es|al)|signed|sign(?:s|ing)?|go-?ahead|closed\s+out)\y|\y(?:satisfied|happy|delighted|pleased|content)\s+with\s+(?:the\s+|our\s+)?(?:final\s+|finished\s+|overall\s+|completed\s+)?(?:result|outcome|installation|stand|project|delivery|work|handover|everything)\y|\yhappy\s+to\s+(?:accept|sign|close|approve)\y|\yagree(?:d|s)?\s+(?:that\s+)?(?:the\s+)?(?:work|project|installation|stand|delivery)\s+(?:is|was|were)\s+(?:complete|completed|done|finished)\y|\yno\s+(?:further\s+)?(?:objections?|snags?|comments?)\y|\yconfirmed\s+(?:that\s+)?(?:the\s+)?(?:work|project|installation|stand|delivery|handover)\y';
+  c_client constant text := '\y(?:client|customer|end[\s-]client|agency)(?:[''’]s)?\y';
+  c_return_all constant text := '\y(?:all|every(?:thing)?|each|both|fully|completely|complete(?:d)?|entire(?:ly)?|whole|nothing|none|no\s+(?:equipment|hardware|kit|items?|units?|panels?|stock))\y';
+  c_return_words constant text := '\y(?:return(?:ed|s)?|back|came\s+back|remain(?:s|ed|ing)?|outstanding|on\s+site|missing|checked\s+in)\y';
+  c_return_exempt constant text := '\ystill\s+out\y|\ysome\y|\ypart(?:ly|ial(?:ly)?)\y|\ynot\s+(?:all|yet|been|every)\y|(?:is|are|was|were|has|have|had|does|do|did)n[''’]t\y|(?:is|are|was|were|has|have|had|does|do|did)\s+not\y';
+  c_return_complete constant text := '\y(?:equipment|hardware|kit)\s+return\s+(?:is|was)\s+complete\y';
+  c_completion constant text := '\y(?:project|job|engagement|contract)\s+(?:was|is|has\s+been|had\s+been|were)\s+(?:successfully\s+|fully\s+|formally\s+|officially\s+|now\s+)?(?:completed?|finished|closed(?:\s+out)?|concluded|wrapped\s+up)\y|\y(?:completed|finished|closed\s+out|concluded|wrapped\s+up)\s+the\s+(?:project|job|engagement|contract)\y|\yproject\s+(?:closed|completed|finished|concluded)\y|\y(?:successful|final)\s+(?:project\s+)?(?:completion|close-?out)\y|\ybrought\s+the\s+project\s+to\s+a\s+close\y';
+  c_quote_double constant text := '["“]([^"”]{2,})["”]';
+  c_quote_guillemet constant text := '«\s*([^»]{2,}?)\s*»';
+  c_quote_single constant text := '(^|[^A-Za-z0-9])[''‘]([^''’]{2,}?)[''’]([^A-Za-z0-9]|$)';
+  v_out text[] := '{}'; v_sentence text; v_client text := btrim(coalesce(p_snapshot #>> '{project,client}', ''));
+  v_is_client boolean := (p_snapshot #>> '{project,kind}') = 'client';
+  v_has_completion boolean := jsonb_typeof(p_snapshot -> 'completion') = 'object';
+  v_signoff_recorded boolean; v_still_out numeric; v_words text; v_names_client boolean; v_quote text; m text[];
+  v_signoff boolean := false; v_completion boolean := false; v_returned boolean := false;
+begin
+  if p_text is null or btrim(p_text) = '' then return v_out; end if;
+  v_signoff_recorded := v_is_client and v_has_completion and coalesce(p_snapshot #>> '{completion,evidence_type}', '') <> 'internal_note';
+  select coalesce(sum(greatest(0, coalesce((l ->> 'sent')::numeric, 0) - coalesce((l ->> 'returned')::numeric, 0))), 0) into v_still_out
+    from jsonb_array_elements(case when jsonb_typeof(p_snapshot #> '{equipment,requests}') = 'array' then p_snapshot #> '{equipment,requests}' else '[]'::jsonb end) r,
+         jsonb_array_elements(case when jsonb_typeof(r -> 'lines') = 'array' then r -> 'lines' else '[]'::jsonb end) l;
+  for v_sentence in select x from regexp_split_to_table(p_text, '[.!?;]\s+|\n') x where btrim(x) <> '' loop
+    if v_is_client and not v_signoff_recorded and not v_signoff and v_sentence !~* c_denies then
+      v_names_client := v_sentence ~* c_client or (length(v_client) >= 3 and position(lower(v_client) in lower(v_sentence)) > 0);
+      if v_sentence ~* c_signoff or (v_names_client and v_sentence ~* c_accept) then v_signoff := true; end if;
+    end if;
+    if not v_has_completion and not v_completion and v_sentence !~* c_denies and v_sentence ~* c_completion then v_completion := true; end if;
+    if v_still_out > 0 and not v_returned and v_sentence !~* c_return_exempt and ((v_sentence ~* c_return_all and v_sentence ~* c_return_words) or v_sentence ~* c_return_complete) then v_returned := true; end if;
+  end loop;
+  if v_signoff then v_out := v_out || 'signoff_unrecorded'::text; end if;
+  if v_completion then v_out := v_out || 'completion_unrecorded'::text; end if;
+  if v_returned then v_out := v_out || 'equipment_out'::text; end if;
+  -- Quotations: every quoted run must be found in the words the snapshot holds (lower case, quotation marks removed, white space collapsed).
+  select btrim(regexp_replace(regexp_replace(lower(coalesce(string_agg(v #>> '{}', E'\n'), '')), '[“”"‘’''«»]', '', 'g'), '\s+', ' ', 'g')) into v_words
+    from jsonb_path_query(p_snapshot, 'strict $.**') v where jsonb_typeof(v) = 'string';
+  for v_quote in
+    select (regexp_matches(p_text, c_quote_double, 'gi'))[1]
+    union all select (regexp_matches(p_text, c_quote_guillemet, 'gi'))[1]
+    union all select (regexp_matches(p_text, c_quote_single, 'gi'))[2]
+  loop
+    if position(btrim(regexp_replace(regexp_replace(lower(v_quote), '[“”"‘’''«»]', '', 'g'), '\s+', ' ', 'g')) in v_words) = 0 then
+      v_out := v_out || 'unverified_quote'::text; exit;
+    end if;
+  end loop;
+  return v_out;
+end;
+$$;
+
+-- The blocked paragraphs of a report: [{"section": id, "paragraph": n (from 1), "blocks": [text]}]. Empty array = nothing blocks approval.
+create or replace function proj_closeout_blocks(p_snapshot jsonb, p_sections jsonb)
+returns jsonb language sql stable set search_path = public as $$
+  select coalesce(jsonb_agg(jsonb_build_object('section', x.section, 'paragraph', x.n, 'blocks', to_jsonb(x.blocks)) order by x.sn, x.n), '[]'::jsonb)
+  from (
+    select s.value ->> 'id' as section, s.ordinality as sn, p.ordinality as n, proj_closeout_text_blocks(p.value ->> 'text', p_snapshot) as blocks
+    from jsonb_array_elements(case when jsonb_typeof(p_sections) = 'array' then p_sections else '[]'::jsonb end) with ordinality s,
+         jsonb_array_elements(case when jsonb_typeof(s.value -> 'paragraphs') = 'array' then s.value -> 'paragraphs' else '[]'::jsonb end) with ordinality p
+  ) x where cardinality(x.blocks) > 0;
+$$;
+
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- One provider call per project and per exact reviewed content. proj_closeout_claim is called by the server BEFORE the provider and decides, under a lock on the
+-- project row, which of these is true for (project, payload hash):
+--   "done"         a result for exactly this content is already stored: it is returned and nothing is sent (also after a facts-only draft replaced the AI draft)
+--   "in_progress"  another request claimed it less than three minutes ago and has not finished: nothing is sent
+--   "limit"        today's limit for the project is used up: nothing is sent
+--   "claimed"      this request may make the ONE call; it then calls proj_closeout_finish with the result or the failure
+-- So two requests at the same instant make one call. A failed call is marked failed and can be claimed again. A claim that never finished (the server stopped) can be
+-- claimed again after three minutes.
+-- THE DAILY LIMIT counts claims that lead to a provider call, per project per day (Dubai), whether the call then succeeds or fails. It does not count: a stored
+-- result being reused, a request refused as in progress or over the limit, or a facts-only draft.
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 create table if not exists proj_closeout_usage (
   project_id uuid not null references proj_projects(id) on delete cascade,
   usage_day  date not null,
   calls      integer not null default 0,
   primary key (project_id, usage_day)
 );
+create table if not exists proj_closeout_generations (
+  project_id    uuid not null references proj_projects(id) on delete cascade,
+  payload_hash  text not null check (length(payload_hash) between 16 and 128),
+  status        text not null check (status in ('claimed', 'done', 'failed')),
+  provider_kind text check (provider_kind is null or provider_kind in ('anthropic', 'simulated')),
+  -- The provider's answer reduced to the report's own fields: {"sections": [{"id", "paragraphs": [{"text", "refs"}]}]}. Kept so identical content is never sent twice.
+  answer        jsonb,
+  claimed_by    uuid not null references auth.users(id),
+  claimed_at    timestamptz not null default now(),
+  finished_at   timestamptz,
+  primary key (project_id, payload_hash),
+  constraint proj_closeout_generations_done check ((status = 'done') = (answer is not null))
+);
 alter table proj_closeout_usage enable row level security;
+alter table proj_closeout_generations enable row level security;
 drop policy if exists proj_closeout_usage_select on proj_closeout_usage;
 create policy proj_closeout_usage_select on proj_closeout_usage for select using (proj_can_manage(project_id));
-revoke all on table proj_closeout_usage from anon, authenticated, public;
-grant select on table proj_closeout_usage to authenticated;
+drop policy if exists proj_closeout_generations_select on proj_closeout_generations;
+create policy proj_closeout_generations_select on proj_closeout_generations for select using (proj_can_manage(project_id));
+revoke all on table proj_closeout_usage, proj_closeout_generations from anon, authenticated, public;
+grant select on table proj_closeout_usage, proj_closeout_generations to authenticated;
 
-create or replace function proj_closeout_take_call(p_project_id uuid, p_limit integer)
-returns boolean language plpgsql security definer set search_path = public as $$
-declare v_day date := (now() at time zone 'Asia/Dubai')::date; v_used integer;
+create or replace function proj_closeout_claim(p_project_id uuid, p_payload_hash text, p_limit integer)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare g proj_closeout_generations; v_day date := (now() at time zone 'Asia/Dubai')::date; v_used integer;
 begin
   perform proj_closeout_require_manager(p_project_id);
   if p_limit is null or p_limit < 1 or p_limit > 50 then raise exception 'The daily limit must be between 1 and 50' using errcode = '22023'; end if;
+  if p_payload_hash is null or length(p_payload_hash) not between 16 and 128 then raise exception 'Malformed request' using errcode = '22023'; end if;
+  perform 1 from proj_projects where id = p_project_id for update;          -- one claim at a time per project
+  delete from proj_closeout_generations where project_id = p_project_id and claimed_at < now() - interval '60 days';
+  select * into g from proj_closeout_generations where project_id = p_project_id and payload_hash = p_payload_hash;
+  if found and g.status = 'done' then return jsonb_build_object('state', 'done', 'answer', g.answer, 'provider_kind', g.provider_kind); end if;
+  if found and g.status = 'claimed' and g.claimed_at > now() - interval '3 minutes' then return jsonb_build_object('state', 'in_progress'); end if;
   insert into proj_closeout_usage as u (project_id, usage_day, calls) values (p_project_id, v_day, 1)
   on conflict (project_id, usage_day) do update set calls = u.calls + 1 where u.calls < p_limit
   returning u.calls into v_used;
-  return v_used is not null;
+  if v_used is null then return jsonb_build_object('state', 'limit'); end if;
+  insert into proj_closeout_generations as x (project_id, payload_hash, status, claimed_by) values (p_project_id, p_payload_hash, 'claimed', auth.uid())
+  on conflict (project_id, payload_hash) do update set status = 'claimed', provider_kind = null, answer = null, claimed_by = auth.uid(), claimed_at = now(), finished_at = null;
+  return jsonb_build_object('state', 'claimed', 'used', v_used);
+end;
+$$;
+
+-- The result of a claimed call: stored (p_ok) or marked failed so it can be tried again. Only a claim that is still open is finished.
+create or replace function proj_closeout_finish(p_project_id uuid, p_payload_hash text, p_ok boolean, p_provider_kind text, p_answer jsonb)
+returns void language plpgsql security definer set search_path = public as $$
+begin
+  perform proj_closeout_require_manager(p_project_id);
+  if coalesce(p_ok, false) and (p_answer is null or coalesce(jsonb_typeof(p_answer -> 'sections'), '') <> 'array' or length(p_answer::text) > 400000 or coalesce(p_provider_kind, '') not in ('anthropic', 'simulated')) then
+    raise exception 'Malformed result' using errcode = '22023';
+  end if;
+  update proj_closeout_generations set
+      status = case when coalesce(p_ok, false) then 'done' else 'failed' end,
+      provider_kind = case when coalesce(p_ok, false) then p_provider_kind else null end,
+      answer = case when coalesce(p_ok, false) then p_answer else null end, finished_at = now()
+    where project_id = p_project_id and payload_hash = p_payload_hash and status = 'claimed';
 end;
 $$;
 
 revoke all on function
-  proj_closeout_take_call(uuid, integer), proj_closeout_evidence(uuid), proj_closeout_require_manager(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
+  proj_closeout_text_blocks(text, jsonb), proj_closeout_blocks(jsonb, jsonb), proj_closeout_claim(uuid, text, integer), proj_closeout_finish(uuid, text, boolean, text, jsonb),
+  proj_closeout_evidence(uuid), proj_closeout_require_manager(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
   proj_closeout_save_edits(uuid, jsonb, integer), proj_closeout_approve(uuid, integer), proj_closeout_discard_draft(uuid)
   from public, anon, authenticated;
 grant execute on function
-  proj_closeout_take_call(uuid, integer), proj_closeout_evidence(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
+  proj_closeout_claim(uuid, text, integer), proj_closeout_finish(uuid, text, boolean, text, jsonb),
+  proj_closeout_evidence(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
   proj_closeout_save_edits(uuid, jsonb, integer), proj_closeout_approve(uuid, integer), proj_closeout_discard_draft(uuid)
   to authenticated;
