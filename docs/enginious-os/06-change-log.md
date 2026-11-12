@@ -8,6 +8,17 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-12 | People & Access: Add department on Job & department | branch `claude/admiring-cray-uky379` from `main` `402f39a`; **app only: no migration, no SQL, no change to permissions, no hosted data change**
+
+* **Why:** the Department list on People & Access, Job & department was empty. The owner's read-only query on hosted returned zero active departments for every company (owner-reported), and no screen or action in the app created one, although the database has always allowed an HR Admin of the company to do so (`departments_write`, `supabase/migrations/20260922000000_phase0_foundations.sql`).
+* **What:** **Add department** under the job form, for whoever may edit job details of that employee (HR Admin of the employee's company; `canEditJobDetails`). Server action `addDepartment` (`apps/web/src/lib/actions/peopleAccess.ts`): the company is read from the employee record, the name is trimmed, a blank name and a name already used in that company (whatever its capitals) are refused, and the new department is returned so the list offers and selects it at once. It is assigned only by **Save job details**, as before.
+* **Failed read fixed:** a company with no departments ("No departments have been created for <Company> yet. Add the first one below.") and departments that could not be read ("Departments could not be loaded...") are now different messages; after a failed read a save leaves the person's department as it is. Before, a failed read looked like an empty list (`apps/web/src/lib/people-access/data.ts`, `components/people-access/job-panel.tsx`).
+* **Not built (kept out of scope):** rename, remove, parent departments, a unique rule in the database.
+* **Tests (local):** `lib/actions/peopleAccess.test.ts` (addDepartment, 5), new `components/people-access/job-panel.test.tsx` (5), `lib/people-access/data.test.ts` (1 added), `packages/rls-tests/test/phase0.rls.test.ts` (2 added; 24 pass on a real PostgreSQL); typecheck and lint of the changed folders pass.
+* **Docs:** new `modules/people-access-job-and-department.md`; 02 (People & Access paragraph), 03 (role matrix row), README; staff guidance topic `people-add-department`, republished.
+* **Not verified:** nothing signed in. The states were seen on a temporary page with fictional data. The rest of People & Access still has no per-control reference.
+* **Earlier the same day:** the docs-only release record of PR #86 merged as PR #87, merge `402f39aae739ace6ca856f75fdf430d914d09b60` (required CI green on head `d3e4bd1`, read on GitHub).
+
 ### 2026-11-12 | Release: PR #86 (Projects & Tasks Phase 2B: Operations) merged; release status reconciled | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `5b75ade`; **no application code, no migration, no SQL run**
 
 * **Merged (checked on GitHub):** PR #86 merged into `main` with merge commit `5b75ade12ad36342cca6e21b78b1d140eabc7cbc`, pinned to head `4799524b5953e4a6a846ca2c54d34ce926af1d57`, at the owner's request. Before merging Claude confirmed that `4799524` was still the PR head.

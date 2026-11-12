@@ -52,6 +52,22 @@ Access to a module (Sales, Projects, Inventory and so on) is given by the people
 
 1. Open People & Access if you manage access, or ask the person who does.
 
+## Add a department and give it to someone
+- id: people-add-department
+- area: people
+- status: published
+- keywords: department; add department; create department; new department; department list empty; no departments; assign department; change department; job and department; reporting manager
+- links: People & Access -> /people-access
+- screens: /people-access
+
+An HR Admin adds departments for their own company in People & Access, on a person's Job & department tab. A new department joins that company's list and is selected for the person on screen; it is given to them only when Save job details is pressed. A name already used in the company is refused. If the screen says departments could not be loaded, reload the page; that is not the same as having none. Departments cannot be renamed or removed here yet.
+
+1. Open People & Access and choose an employee of your company.
+2. Open the Job & department tab.
+3. Under Add a department, type the name and press Add department.
+4. Check the Department list shows it selected, then press Save job details.
+5. For the next person, choose the department from the list and press Save job details.
+
 ## Make someone an Operations Manager, or stop it
 - id: people-operations-manager-access
 - area: people
