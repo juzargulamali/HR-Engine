@@ -169,6 +169,16 @@ describe("HR Admin", () => {
     expect(d.jobView?.managers).toEqual([{ id: "e2", name: "Karim Noor" }]);
   });
 
+  it("tells a company with no departments apart from departments that could not be loaded", async () => {
+    const none = await ok({ person: `u:${AMINA}` });
+    expect(none.jobView).toMatchObject({ departments: [], departmentsLoaded: true });
+    failingTables.add("departments");
+    try {
+      const failed = await ok({ person: `u:${AMINA}` });
+      expect(failed.jobView).toMatchObject({ departments: [], departmentsLoaded: false });
+    } finally { failingTables.delete("departments"); }
+  });
+
   it("cannot edit the job of an employee of another company", async () => {
     tables.employees = [{ ...tables.employees![0]!, company_id: CB }];
     const d = await ok({ person: `u:${AMINA}` });

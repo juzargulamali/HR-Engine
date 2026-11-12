@@ -57,6 +57,8 @@ export interface PaJobView {
   managerName: string | null;
   /** Only filled for someone who may edit (HR Admin of the company): the choices for the form. */
   departments: { id: string; name: string }[];
+  /** False when the company's departments could not be read: the screen then says so and never shows an empty list or "no department". */
+  departmentsLoaded: boolean;
   managers: { id: string; name: string }[];
 }
 
@@ -284,7 +286,9 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
 
   let jobView: PaJobView | null = null;
   if (employee) {
-    const { data: deps } = await supabase.from("departments").select("id, name").eq("company_id", employee.companyId).is("deleted_at", null).order("name");
+    // A failed read is kept apart from "this company has no departments": the first says it could not load, the second offers to add one.
+    const { data: deps, error: depsError } = await supabase.from("departments").select("id, name").eq("company_id", employee.companyId).is("deleted_at", null).order("name");
+    if (depsError) console.error("[people-access] departments could not be loaded", depsError.message);
     const departments = (deps ?? []).map((d) => ({ id: d.id, name: d.name }));
     const mgr = employee.managerId ? employees.find((e) => e.id === employee.managerId) : null;
     jobView = {
@@ -292,6 +296,7 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
       departmentName: departments.find((d) => d.id === employee.departmentId)?.name ?? null,
       managerName: mgr ? `${mgr.firstName} ${mgr.lastName}`.trim() : null,
       departments: canEditJob ? departments : [],
+      departmentsLoaded: !depsError,
       managers: canEditJob ? employees.filter((e) => e.companyId === employee.companyId && e.id !== employee.id).map((m) => ({ id: m.id, name: `${m.firstName} ${m.lastName}`.trim() })) : [],
     };
   }

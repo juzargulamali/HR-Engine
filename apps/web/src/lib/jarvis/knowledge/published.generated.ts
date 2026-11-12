@@ -341,6 +341,40 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "people-add-department",
+    "area": "people",
+    "title": "Add a department and give it to someone",
+    "keywords": [
+      "department",
+      "add department",
+      "create department",
+      "new department",
+      "department list empty",
+      "no departments",
+      "assign department",
+      "change department",
+      "job and department",
+      "reporting manager"
+    ],
+    "summary": "An HR Admin adds departments for their own company in People & Access, on a person's Job & department tab. A new department joins that company's list and is selected for the person on screen; it is given to them only when Save job details is pressed. A name already used in the company is refused. If the screen says departments could not be loaded, reload the page; that is not the same as having none. Departments cannot be renamed or removed here yet.",
+    "steps": [
+      "Open People & Access and choose an employee of your company.",
+      "Open the Job & department tab.",
+      "Under Add a department, type the name and press Add department.",
+      "Check the Department list shows it selected, then press Save job details.",
+      "For the next person, choose the department from the list and press Save job details."
+    ],
+    "links": [
+      {
+        "label": "People & Access",
+        "href": "/people-access"
+      }
+    ],
+    "screens": [
+      "/people-access"
+    ]
+  },
+  {
     "id": "people-operations-manager-access",
     "area": "people",
     "title": "Make someone an Operations Manager, or stop it",
