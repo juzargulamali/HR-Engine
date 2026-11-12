@@ -1689,6 +1689,7 @@ export interface Database {
       proj_project_members: ProjReadOnlyTable<ProjMemberRow>;
       proj_sales_links: ProjReadOnlyTable<ProjSalesLinkRow>;
       proj_handovers: ProjReadOnlyTable<ProjHandoverRow>;
+      proj_equipment_reviews: ProjReadOnlyTable<{ id: string; project_id: string; request_id: string; field: string; old_date: string | null; new_date: string | null; changed_by: string | null; changed_at: string; resolved_at: string | null; resolved_by: string | null; resolution_note: string | null }>;
       proj_milestones: ProjReadOnlyTable<ProjMilestoneRow>;
       proj_deliverables: ProjReadOnlyTable<ProjDeliverableRow>;
       proj_tasks: ProjReadOnlyTable<ProjTaskRow>;

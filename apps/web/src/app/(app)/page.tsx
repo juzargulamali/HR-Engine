@@ -35,6 +35,9 @@ import { approvalCandidates, budgetCandidates, buildAttention, commercialApprova
 import { dateText } from "@/lib/projects/format";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
 import { loadProjectsDay } from "@/lib/my-day/projects-day";
+import { loadMyEquipmentReviews, loadOperationsDay } from "@/lib/my-day/operations-day";
+import { equipmentReviewCandidates, opsAnswerCandidates, opsCandidatesFailed, opsDaySummary } from "@/lib/my-day/operations";
+import { OperationsSummary } from "@/components/my-day/operations-summary";
 import { loadMyWaitingRequests, waitingText } from "@/lib/my-day/waiting";
 import type { LiveSummary } from "@/lib/my-day/live";
 import { cn } from "@/lib/utils";
@@ -107,7 +110,7 @@ export default async function DashboardPage() {
   // becomes its own error row and never hides, empties or delays the others. Approving isn't an HR/CEO-only capability (a line manager or
   // Finance approver needs it too), so the approvals count is read for anyone; the company-wide sections below stay gated to canViewHrAlerts.
   // The approvals count covers the steps routed to this person by name AND the Recovery Leave queue steps they may decide (the same rule as the Approvals page).
-  const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead, notesRead] = await Promise.allSettled([
+  const [approvalsRead, salesRead, projectsRead, equipmentRead, budgetRead, waitingRead, notesRead, opsRead, bookingReviewsRead] = await Promise.allSettled([
     loadMyPendingApprovalItems(supabase, session),
     loadSalesToday(),
     loadProjectsDay(today),
@@ -115,6 +118,8 @@ export default async function DashboardPage() {
     loadBudgetDay(session.userId),
     session.employeeId ? loadMyWaitingRequests(supabase, session.employeeId) : Promise.resolve(null),
     loadWaitingNotes(),
+    loadOperationsDay(),
+    loadMyEquipmentReviews(),
   ]);
   const failedSource = (what: string, r: PromiseSettledResult<unknown>) => {
     if (r.status === "rejected") logServerError({ route: ROUTE, operation: `load ${what}` }, r.reason);
@@ -126,6 +131,10 @@ export default async function DashboardPage() {
   failedSource("project budget decisions", budgetRead);
   failedSource("my submitted requests", waitingRead);
   failedSource("dispatch and return notes", notesRead);
+  failedSource("operations", opsRead);
+  failedSource("equipment bookings to review", bookingReviewsRead);
+  // Operations, for people with Operations access only (null otherwise: nothing is read, nothing is shown). A failed read is "error", never an empty summary.
+  const opsDay = opsRead.status === "fulfilled" ? opsRead.value : "error";
   // A failed read is "error", never 0: the tile shows "—" and the greeting says the approvals could not be loaded.
   const myPendingApprovals: number | "error" = approvalsRead.status === "fulfilled" ? approvalsRead.value.length : "error";
 
@@ -355,6 +364,10 @@ export default async function DashboardPage() {
         ? [ok("budgets", budgetCandidates(budgetRead.value.day, now)), ...(budgetRead.value.day.pmReadFailed ? [failed("budget-projects")] : [])]
         : []),
     ...(notesRead.status === "rejected" || notesRead.value.status === "error" ? [failed("notes")] : notesRead.value.status === "ok" ? [ok("notes", noteCandidates(notesRead.value, now))] : []),
+    // Operations: only what the person can act on themselves. A handover to assign is already listed once by the Projects source above.
+    ...(opsDay === "error" ? [failed("operations")] : opsDay ? [opsCandidatesFailed(opsDay) ? failed("operations") : ok("operations", opsAnswerCandidates(opsDay, now))] : []),
+    // "Review equipment booking" on the projects this person manages: the Project Manager's action.
+    ...(bookingReviewsRead.status === "rejected" ? [failed("project-equipment")] : bookingReviewsRead.value ? [ok("project-equipment", equipmentReviewCandidates(bookingReviewsRead.value, now))] : []),
     ...(showHrView ? [hrSectionError ? failed("hr") : ok("hr", hrCandidates({ contracts: contractsEndingCount, probation: probationDueCount, docs: docsExpiringCount, identity: identityExpiringCount }))] : []),
   ];
   const attention = buildAttention(sources);
@@ -434,6 +447,8 @@ export default async function DashboardPage() {
           {stats.map((card, n) => <li key={n} className={stats.length % 2 === 1 && n === stats.length - 1 ? "col-span-2 xl:col-span-1" : undefined}>{card}</li>)}
         </ul>
       ) : null}
+
+      {opsDay ? <OperationsSummary summary={opsDay === "error" ? "error" : opsDaySummary(opsDay, today)} /> : null}
 
       {/* On a phone the order is what needs you first, then the clock; on a wide screen the left column is the week and the pipeline, the right one what waits on you. */}
       <div className={cn("flex flex-col gap-4 xl:items-start", hasLeft ? "xl:grid xl:grid-cols-[minmax(0,68fr)_minmax(0,32fr)]" : "xl:grid xl:grid-cols-1")}>
