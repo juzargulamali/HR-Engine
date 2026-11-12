@@ -125,8 +125,8 @@ describe("Project Closeout Report", () => {
     expect(e.milestones.map((m: Row) => [m.title, m.status])).toEqual([["Design approved", "accepted"], ["Client walkthrough", "planned"]]);
     const lines = e.plan[0].lines as Row[];
     expect(lines.map((l) => [l.section, l.released])).toEqual([["hardware", true], ["content", true], ["programming", true]]);
-    expect(lines[1].task).toMatchObject({ status: "done", assignee: "content" });
-    expect(lines[2].task.status).not.toBe("done");
+    expect(lines[1]!.task).toMatchObject({ status: "done", assignee: "content" });
+    expect(lines[2]!.task.status).not.toBe("done");
     expect(e.tasks).toMatchObject({ total: 2, done: 1, open: 1 });
     expect(e.tasks.not_finished).toHaveLength(1);
   });
@@ -165,7 +165,7 @@ describe("Project Closeout Report", () => {
     await expect(saveDraft(U.pm, await evidence(U.pm), { generation: "failed" })).rejects.toThrow(/Unknown generation/);
     const [row] = await admin<Row>(`select * from proj_closeout_reports where id = '${draft}'`);
     expect(row).toMatchObject({ status: "draft", payload_hash: "p2-fedcba9876543210", generation: "generated", provider_kind: "simulated", created_by: U.pm });
-    expect(row.snapshot.scope.approved_changes).toBe(1);
+    expect(row!.snapshot.scope.approved_changes).toBe(1);
     expect(await fingerprint()).toBe(before);
   });
 
@@ -196,7 +196,7 @@ describe("Project Closeout Report", () => {
     await call(U.pm, `proj_closeout_approve('${draft}', 5)`);                       // a second click
     const [row] = await admin<Row>(`select status, approved_by, approved_at, sections from proj_closeout_reports where id = '${draft}'`);
     expect(row).toMatchObject({ status: "approved", approved_by: U.pm });
-    expect(row.sections[0].paragraphs[0].text).toBe("Delivered, with one item open.");
+    expect(row!.sections[0].paragraphs[0].text).toBe("Delivered, with one item open.");
     await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, null)`)).rejects.toThrow(/approved report cannot be edited/);
     await expect(call(U.pm, `proj_closeout_discard_draft('${draft}')`)).rejects.toThrow(/approved report is kept/);
     expect(await fingerprint()).toBe(before);                                       // approving completed nothing, told nobody, moved no stock
@@ -211,8 +211,8 @@ describe("Project Closeout Report", () => {
       update proj_project_details set scope = 'Rewritten later' where project_id = '${P1}';
     `);
     const [v1] = await admin<Row>(`select snapshot from proj_closeout_reports where id = '${draft}'`);
-    expect(v1.snapshot.completion).toBeNull();
-    expect(v1.snapshot.scope.current_text).toBe("LED welcome wall 6 x 4 m plus a second kiosk");
+    expect(v1!.snapshot.completion).toBeNull();
+    expect(v1!.snapshot.scope.current_text).toBe("LED welcome wall 6 x 4 m plus a second kiosk");
     // The completed project: the sign-off is now recorded, and the equipment is STILL out. Two separate facts.
     const e = await evidence(U.pm);
     expect(e.project.status).toBe("completed");
