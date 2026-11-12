@@ -7,15 +7,15 @@ select n, item, result from (
   union all select 2, 'employee records whose department belongs to another company (must be 0)',
          (select case when count(*) = 0 then '0 - OK' else count(*)::text || ' - RESOLVE FIRST (list A below)' end
             from employees e join departments d on d.id = e.department_id where d.company_id <> e.company_id)
-  union all select 3, 'active department names used more than once in one company, ignoring capitals and extra spaces (must be 0)',
+  union all select 3, 'active department names used more than once in one company, ignoring capitals and all white space at the ends or repeated inside (must be 0)',
          (select case when count(*) = 0 then '0 - OK' else count(*)::text || ' - RESOLVE FIRST (list B below)' end
             from (select 1 from departments where deleted_at is null
-                   group by company_id, lower(regexp_replace(btrim(coalesce(name, '')), '\s+', ' ', 'g')) having count(*) > 1) x)
-  union all select 4, 'active departments with a blank name (must be 0)',
+                   group by company_id, lower(btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g'))) having count(*) > 1) x)
+  union all select 4, 'active departments with a blank name, including one made only of spaces or tabs (must be 0)',
          (select case when count(*) = 0 then '0 - OK' else count(*)::text || ' - RESOLVE FIRST (list C below)' end
-            from departments where deleted_at is null and btrim(coalesce(name, '')) = '')
-  union all select 5, 'trg_employees_department_company',
-         case when exists (select 1 from pg_trigger where tgname = 'trg_employees_department_company' and not tgisinternal) then 'already installed' else 'not installed yet' end
+            from departments where deleted_at is null and btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g')) = '')
+  union all select 5, 'employees_department_company_fkey (the composite foreign key)',
+         case when exists (select 1 from pg_constraint where conname = 'employees_department_company_fkey') then 'already installed' else 'not installed yet' end
   union all select 6, 'INFO active departments', (select count(*)::text from departments where deleted_at is null)
   union all select 7, 'INFO employee records that have a department, and of those how many point at a removed department (allowed: they keep it until changed)',
          (select count(*)::text || ' / ' || count(*) filter (where d.deleted_at is not null)::text from employees e join departments d on d.id = e.department_id)
@@ -29,10 +29,10 @@ select n, item, result from (
 -- List B (run only if row 3 is not 0): the departments that share a name in one company, with how many employees each has.
 -- select c.legal_name as company, d.id, d.name, d.created_at, (select count(*) from employees e where e.department_id = d.id) as employees
 --   from departments d join companies c on c.id = d.company_id
---  where d.deleted_at is null and (d.company_id, lower(regexp_replace(btrim(coalesce(d.name, '')), '\s+', ' ', 'g'))) in (
---        select company_id, lower(regexp_replace(btrim(coalesce(name, '')), '\s+', ' ', 'g')) from departments where deleted_at is null group by 1, 2 having count(*) > 1)
+--  where d.deleted_at is null and (d.company_id, lower(btrim(regexp_replace(coalesce(d.name, ''), '\s+', ' ', 'g')))) in (
+--        select company_id, lower(btrim(regexp_replace(coalesce(name, ''), '\s+', ' ', 'g'))) from departments where deleted_at is null group by 1, 2 having count(*) > 1)
 --  order by c.legal_name, lower(d.name), d.created_at;
 
 -- List C (run only if row 4 is not 0): active departments with a blank name.
 -- select c.legal_name as company, d.id, d.created_at, (select count(*) from employees e where e.department_id = d.id) as employees
---   from departments d join companies c on c.id = d.company_id where d.deleted_at is null and btrim(coalesce(d.name, '')) = '' order by c.legal_name, d.created_at;
+--   from departments d join companies c on c.id = d.company_id where d.deleted_at is null and btrim(regexp_replace(coalesce(d.name, ''), '\s+', ' ', 'g')) = '' order by c.legal_name, d.created_at;

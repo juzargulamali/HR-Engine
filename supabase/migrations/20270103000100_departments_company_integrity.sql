@@ -2,6 +2,10 @@
 --
 --   1. An employee's department must be a department of the employee's own company. Until now only the app checked this (People & Access, Job & department);
 --      employees.department_id is a plain reference to departments(id), so a direct update could point an employee at another company's department.
+--      The rule is a composite foreign key, employees(department_id, company_id) -> departments(id, company_id). A foreign key is checked with row locks, so it
+--      holds when two changes happen at the same moment (an employee is given a department while that department is moved to another company: one of the two
+--      is refused, whichever commits second). A trigger alone cannot promise that, because each transaction only sees the other's work once it has committed.
+--      An employee with no department is not checked, so clearing the department always works.
 --   2. Within one company, two ACTIVE departments cannot have the same name once the name is trimmed, its inner spaces are collapsed and its capitals are ignored.
 --      Until now only the app checked this before inserting, so two people adding the same name at the same moment could both succeed.
 --
@@ -10,10 +14,11 @@
 -- rows are affected; run supabase/manual-sql/dept_integrity_00_preflight_readonly.sql to list them, decide what to do with each, then apply again.
 -- Additive and idempotent: it can be run twice.
 
--- The name as it is compared: trimmed, runs of white space as one space, lower case.
+-- The name as it is compared: every run of white space (spaces, tabs, line breaks) becomes one space FIRST, then the ends are trimmed, then lower case.
+-- Collapsing before trimming matters: trimming removes spaces only, so a name made of tabs, or with a tab at either end, would otherwise not be reduced.
 create or replace function department_name_key(p_name text)
 returns text language sql immutable set search_path = public as $$
-  select lower(regexp_replace(btrim(coalesce(p_name, '')), '\s+', ' ', 'g'));
+  select lower(btrim(regexp_replace(coalesce(p_name, ''), '\s+', ' ', 'g')));
 $$;
 
 do $$
@@ -30,8 +35,23 @@ begin
 end $$;
 
 -- 1. The employee's department belongs to the employee's company.
--- Checked when an employee is created and whenever the department or the company of an employee changes. A new assignment must also be to a department that
--- has not been removed. A row whose department and company are both unchanged is not re-checked, so an unrelated edit of an employee is never refused.
+-- 1a. The rule itself: a composite foreign key. departments(id, company_id) is made a key so it can be referenced; id alone is already unique, so this adds no
+--     new restriction on departments. The existing reference employees.department_id -> departments(id) stays. With the default MATCH SIMPLE an employee whose
+--     department_id is null is not checked. The default ON UPDATE NO ACTION refuses moving a department to another company while employees are in it.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'departments_id_company_key' and conrelid = 'public.departments'::regclass) then
+    alter table departments add constraint departments_id_company_key unique (id, company_id);
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'employees_department_company_fkey' and conrelid = 'public.employees'::regclass) then
+    alter table employees add constraint employees_department_company_fkey foreign key (department_id, company_id) references departments (id, company_id);
+  end if;
+end $$;
+
+-- 1b. Two things the foreign key does not say, and plain words for the common case. The trigger runs first, so a person normally sees its sentence; the foreign
+--     key above is what holds when two changes race. Checked when an employee is created and whenever the department or the company of an employee changes.
+--     A new assignment must be to a department that has not been removed. A row whose department and company are both unchanged is not re-checked, so an
+--     unrelated edit of an employee is never refused, and someone whose department is removed later keeps it.
 create or replace function employees_department_company_check()
 returns trigger language plpgsql security definer set search_path = public as $$
 declare v_company uuid; v_deleted timestamptz;
@@ -55,7 +75,8 @@ drop trigger if exists trg_employees_department_company on employees;
 create trigger trg_employees_department_company before insert or update of department_id, company_id on employees
   for each row execute function employees_department_company_check();
 
--- A department cannot be moved to another company while employees of its present company are in it.
+-- A department cannot be moved to another company while employees of its present company are in it. The foreign key enforces this (also under concurrent
+-- writes); this trigger only gives the common case a plain sentence.
 create or replace function departments_company_move_check()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin

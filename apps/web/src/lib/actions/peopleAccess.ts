@@ -150,7 +150,8 @@ export async function updateJobDetails(_prev: ActionState, fd: FormData): Promis
   if (patch.job_title === employee.job_title && patch.department_id === employee.department_id && patch.manager_id === employee.manager_id) return { error: null };
   const { data: updated, error } = await supabase.from("employees").update(patch).eq("id", employee.id).select("id");
   // The database refuses a department of another company, or one that has been removed, whatever this action checked above.
-  if (error && (error.code === "23514" || /belongs to another company|has been removed/i.test(error.message ?? ""))) return { error: "Choose a department of this employee's company." };
+  // (The trigger's sentence in the usual case; the composite foreign key's refusal when two changes raced.)
+  if (error && (error.code === "23514" || /belongs to another company|has been removed|employees_department_company_fkey/i.test(error.message ?? ""))) return { error: "Choose a department of this employee's company." };
   if (error) return { error: error.message };
   if (!updated || updated.length === 0) return { error: "The change was not saved: you are not allowed to edit this employee record." };
   revalidatePath("/people-access");
@@ -177,7 +178,7 @@ const departmentSchema = z.object({
 export async function addDepartment(_prev: ActionState & { id?: string; name?: string }, fd: FormData): Promise<ActionState & { id?: string; name?: string }> {
   const p = departmentSchema.safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: p.error.issues[0]?.message ?? "Check the form and try again." };
-  const name = p.data.name.replace(/\s+/g, " ");
+  const name = p.data.name.replace(/\s+/g, " ").trim();
   const session = await getCurrentSession();
   if (!session) return { error: "Sign in again to continue." };
   const supabase = await createClient();
@@ -188,7 +189,9 @@ export async function addDepartment(_prev: ActionState & { id?: string; name?: s
 
   const existing = await supabase.from("departments").select("id, name").eq("company_id", employee.company_id).is("deleted_at", null);
   if (existing.error) return { error: "The company's departments could not be checked, so nothing was added. Try again in a moment." };
-  if ((existing.data ?? []).some((d) => d.name.trim().toLowerCase() === name.toLowerCase())) return { error: `This company already has a department called "${name}". Choose it in the list.` };
+  // Compared as the database compares them: runs of white space as one space, ends trimmed, capitals ignored.
+  const key = (v: string) => v.replace(/\s+/g, " ").trim().toLowerCase();
+  if ((existing.data ?? []).some((d) => key(d.name) === key(name))) return { error: `This company already has a department called "${name}". Choose it in the list.` };
 
   const { data: created, error } = await supabase.from("departments").insert({ company_id: employee.company_id, name }).select("id, name").maybeSingle();
   // The database has the last word on the name too: if someone else added the same name between the check above and this insert, its unique rule refuses the second one.
