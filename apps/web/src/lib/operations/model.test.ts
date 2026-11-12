@@ -187,6 +187,10 @@ describe("Operations: the figures behind the summary cards", () => {
       ["shortage", "UAE-P-2027-0001", "Warehouse"], ["release_failed", "UAE-P-2027-0003", "Warehouse"], ["booking_review", "UAE-P-2027-0001", "Pat Manager"],
       ["not_sent", "UAE-P-2027-0001", "Pat Manager"], ["still_out", "UAE-P-2027-0003", "Warehouse"]]);
     expect(equipmentIssues(overview({ projects: [project()] }), TODAY)).toEqual([]);
+    // a partly dispatched request is listed with its dispatched and total lines and opens the Equipment tab
+    expect(equipmentIssues(overview({ projects: [project({ equipment: [req({ state: "partially_dispatched", lines: 4, dispatched_lines: 1 })] })] }), TODAY)).toEqual([
+      { kind: "partial_dispatch", key: "partial:q1", project: "UAE-P-2027-0001 Fictional Expo stand", text: "UAE-R-00001: 1 of 4 lines dispatched", owner: "Warehouse", href: "/projects/p1/equipment" }]);
+    expect(equipmentIssues(overview({ projects: [project({ equipment: [req({ state: "dispatched", lines: 4, dispatched_lines: 4 })] })] }), TODAY)).toEqual([]);
   });
   it("the week chart and its list are the same records: every live project is in exactly one bucket", () => {
     expect(weekStart("2027-02-20")).toBe("2027-02-15");                                           // a Saturday belongs to the week that began on Monday

@@ -112,6 +112,25 @@ describe("Operations Overview", () => {
     expect(document.body.textContent).not.toMatch(/score \d|\d+ ?%|performance score/i);
   });
 
+  it("shows a partly dispatched request with its count and Equipment link, and the event edition as secondary text only where one is recorded", async () => {
+    const partly = { ...live, edition: "Fictional Auto Expo · 2027 · Dubai", equipment: [{ ...live.equipment[0]!, state: "partially_dispatched" as const, lines: 4, reserved_lines: 0, short_lines: 0, short_rent: 0, dispatched_lines: 1 }] };
+    data.overview = { state: "ok", data: { ...overview, projects: [partly, { ...live, id: "p4", reference: "UAE-P-2027-0004", name: "Quiet job", equipment: [] }] } };
+    await renderPage(OperationsOverviewPage);
+    const issue = screen.getByTestId("ops-equipment-partial_dispatch");
+    expect(issue.textContent).toMatch(/Partly dispatched.*UAE-P-2027-0002 Fictional Motors launch.*UAE-R-00002: 1 of 4 lines dispatched · With Warehouse/);
+    expect(within(issue).getByRole("link").getAttribute("href")).toBe("/projects/p2/equipment");
+    expect(within(screen.getByTestId("ops-summary")).getByRole("link", { name: /Equipment issues/ }).textContent).toContain("1");
+    expect(within(screen.getByTestId("ops-install-UAE-P-2027-0002")).getByTestId("ops-edition").textContent).toBe("Fictional Auto Expo · 2027 · Dubai");
+    expect(within(screen.getByTestId("ops-project-UAE-P-2027-0002")).getByTestId("ops-edition").textContent).toBe("Fictional Auto Expo · 2027 · Dubai");
+    expect(within(screen.getByTestId("ops-project-UAE-P-2027-0004")).queryByTestId("ops-edition")).toBeNull();
+    cleanup();
+    data.overview = { state: "error" };
+    await renderPage(OperationsOverviewPage);
+    expect(screen.queryByTestId("ops-equipment")).toBeNull();                                    // a failed read shows neither, only that it could not load
+    expect(screen.queryByTestId("ops-edition")).toBeNull();
+    expect(document.body.textContent).toMatch(/could not be loaded|could not load/i);
+  });
+
   it("a refused read, a failed read and an empty company each say what happened; a failed read is never a figure or a label", async () => {
     data.overview = { state: "denied" };
     await renderPage(OperationsOverviewPage);

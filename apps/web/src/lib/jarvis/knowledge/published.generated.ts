@@ -1514,6 +1514,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "delivery timeline",
       "next installations",
       "equipment issues",
+      "partly dispatched",
+      "event edition",
       "delivery by week",
       "equipment lines ready",
       "team pressure"
@@ -1524,7 +1526,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press a card at the top to jump to its list.",
       "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.",
       "For other items press the button on the item and speak to the person named under With.",
-      "Under Next installations read the label and how many equipment lines are ready. Open the project to see more."
+      "Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab."
     ],
     "links": [
       {

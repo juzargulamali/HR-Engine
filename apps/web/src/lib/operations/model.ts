@@ -268,9 +268,9 @@ export function installationsWithin(o: Overview, today: string, days = AT_RISK_W
   }).sort((a, b) => a.start.localeCompare(b.start) || a.reference.localeCompare(b.reference));
 }
 
-export type EquipmentIssueKind = "shortage" | "booking_review" | "overdue_return" | "release_failed" | "not_sent" | "still_out";
+export type EquipmentIssueKind = "shortage" | "booking_review" | "overdue_return" | "release_failed" | "partial_dispatch" | "not_sent" | "still_out";
 export const EQUIPMENT_ISSUE_WORDS: Record<EquipmentIssueKind, string> = {
-  shortage: "Shortage", booking_review: "Booking to review", overdue_return: "Return overdue", release_failed: "Reservations not released", not_sent: "Request not sent", still_out: "Complete, still out",
+  shortage: "Shortage", booking_review: "Booking to review", overdue_return: "Return overdue", release_failed: "Reservations not released", partial_dispatch: "Partly dispatched", not_sent: "Request not sent", still_out: "Complete, still out",
 };
 export interface EquipmentIssue { kind: EquipmentIssueKind; key: string; project: string; text: string; owner: string; href: string }
 /** Recorded equipment problems, most pressing kind first. "Request not sent" is listed only inside the 14-day window: a draft far ahead of its dates is not a problem. */
@@ -282,13 +282,14 @@ export function equipmentIssues(o: Overview, today: string): EquipmentIssue[] {
     for (const q of p.equipment) {
       if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, project, text: equipmentLine(q), owner: "Warehouse", href });
       if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, project, text: `${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at) ?? "on a date that is not recorded"}`, owner: "Warehouse", href });
+      if (q.state === "partially_dispatched") out.push({ kind: "partial_dispatch", key: `partial:${q.id}`, project, text: `${q.code}: ${q.dispatched_lines} of ${plural(q.lines, "line")} dispatched`, owner: "Warehouse", href });
       if (q.state === "draft" && soon.has(p.id)) out.push({ kind: "not_sent", key: `draft:${q.id}`, project, text: `${q.code} has not been sent to the warehouse`, owner: p.pm, href });
     }
     if (p.equipment_reviews > 0) out.push({ kind: "booking_review", key: `review:${p.id}`, project, text: `${plural(p.equipment_reviews, "booking")} to review after a committed date changed`, owner: p.pm, href });
     if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, project, text: "Unused reservations were not released at completion", owner: "Warehouse", href });
     if (completeButOut(p) && !p.equipment.some((q) => q.return_overdue)) out.push({ kind: "still_out", key: `out:${p.id}`, project, text: `Delivery complete, ${plural(unitsOut(p), "unit")} still out`, owner: "Warehouse", href });
   }
-  const order: EquipmentIssueKind[] = ["shortage", "release_failed", "overdue_return", "booking_review", "not_sent", "still_out"];
+  const order: EquipmentIssueKind[] = ["shortage", "release_failed", "overdue_return", "booking_review", "partial_dispatch", "not_sent", "still_out"];
   return out.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.project.localeCompare(b.project));
 }
 

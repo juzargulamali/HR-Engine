@@ -483,7 +483,7 @@ Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged f
 - id: operations-overview-decisions
 - area: projects
 - status: published
-- keywords: operations overview; needs my decision; handover stalled; installation at risk; blocker not resolved; summary cards; delivery timeline; next installations; equipment issues; delivery by week; equipment lines ready; team pressure
+- keywords: operations overview; needs my decision; handover stalled; installation at risk; blocker not resolved; summary cards; delivery timeline; next installations; equipment issues; partly dispatched; event edition; delivery by week; equipment lines ready; team pressure
 - links: Overview -> /operations; Handovers -> /projects/handovers
 - screens: /operations
 
@@ -493,7 +493,7 @@ The Overview is for Operations Managers. Four cards at the top give the counts a
 2. Press a card at the top to jump to its list.
 3. Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.
 4. For other items press the button on the item and speak to the person named under With.
-5. Under Next installations read the label and how many equipment lines are ready. Open the project to see more.
+5. Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab.
 
 ## Project health labels in Operations
 - id: operations-project-health

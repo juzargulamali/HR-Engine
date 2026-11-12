@@ -84,6 +84,7 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
                   <div className="min-w-0">
                     <p className="flex flex-wrap items-center gap-x-2 gap-y-1"><Link href={`/projects/${p.id}/work`} className="min-w-0 break-words text-sm font-medium text-accent underline-offset-4 hover:underline">{p.reference} {p.name}</Link><HealthBadge health={h.health} /></p>
                     <p className="mt-0.5 text-[13px] text-muted-foreground">{p.pm_id ? p.pm : "No Project Manager"}{p.venue ? ` · ${p.venue}` : ""}</p>
+                    {p.edition ? <p className="text-[12.5px] text-muted-foreground" data-testid="ops-edition">{p.edition}</p> : null}
                     {h.health !== "on_track" ? <p className="mt-0.5 text-[13px]"><Link href={h.evidence[0]!.href} className="underline-offset-4 hover:underline">{h.evidence[0]!.text}</Link>{h.evidence.length > 1 ? <span className="text-muted-foreground"> · {h.evidence.length - 1} more below</span> : null}</p> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-col sm:items-end sm:justify-center">
@@ -140,7 +141,7 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
         </Panel>
 
         <Panel id="equipment" className="scroll-mt-20" title={`Equipment issues (${issues.length})`} description="Recorded by the warehouse or raised by a date change. Operations reads them; the owner named on each line acts.">
-          {issues.length === 0 ? <Muted>No shortage, overdue return, booking to review or unreleased reservation is recorded.</Muted> : (
+          {issues.length === 0 ? <Muted>No shortage, overdue return, partial dispatch, booking to review or unreleased reservation is recorded.</Muted> : (
             <ul className="divide-y" data-testid="ops-equipment">
               {issues.map((x) => (
                 <li key={x.key} className="py-2.5 first:pt-0 last:pb-0" data-testid={`ops-equipment-${x.kind}`}>
@@ -212,6 +213,7 @@ function HealthCard({ p, health, chatHref }: { p: OverviewProject; health: Retur
       <p className="mt-1 text-[13px] text-muted-foreground">
         {p.pm_id ? p.pm : "No Project Manager"} · {p.install_start ? `Installation ${dateText(p.install_start)}` : p.event_start ? `Show ${dateRangeText(p.event_start, p.event_end)}` : "No date recorded"}{isFinished(p.status) ? " · Delivery complete" : ""}
       </p>
+      {p.edition ? <p className="text-[12.5px] text-muted-foreground" data-testid="ops-edition">{p.edition}</p> : null}
       <ul className="mt-2 space-y-0.5 text-[13px]" aria-label="Evidence">
         {shown.map((e, i) => <li key={i} className="flex gap-1.5"><span aria-hidden className="text-muted-foreground">›</span><Link href={e.href} className="min-w-0 break-words underline-offset-4 hover:underline">{e.text}</Link></li>)}
         {health.evidence.length > shown.length ? <li className="text-muted-foreground">and {health.evidence.length - shown.length} more on the project</li> : null}

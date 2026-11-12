@@ -185,7 +185,7 @@ Panel `#installations`. Description: "Starting within 14 days, with the Project 
 
 Listed: live projects whose installation start (or show start, when no installation date is recorded) is **today or within 14 days**, soonest first, then by reference. Today counts; day 15 does not; a finished project and a project with neither date never appear (test "installations in the next 14 days").
 
-Each row: reference and name (link to `/projects/<id>/work`); the **health label** (section 4.7); the Project Manager ("No Project Manager" when none) and the venue; when the label is not On track, the first piece of evidence as a link, with "N more below" when there is more; the kind mark (Installation or Show), the date and "today", "tomorrow" or "in N days"; and the readiness bar.
+Each row: reference and name (link to `/projects/<id>/work`); the **health label** (section 4.7); the Project Manager ("No Project Manager" when none) and the venue; the project's **event edition** as a second, smaller line when it has one; when the label is not On track, the first piece of evidence as a link, with "N more below" when there is more; the kind mark (Installation or Show), the date and "today", "tomorrow" or "in N days"; and the readiness bar.
 
 **Readiness bar** (`readiness` in MO; VS `ReadinessBar`): "R of T equipment lines ready" with a small bar, green when all are ready, amber otherwise. **It is drawn only with a real denominator**: T is the number of lines on the project's requests whose state is Reserved, Partly ready or Short (with the warehouse, nothing dispatched yet), and R is the reserved lines of those requests. A draft, a dispatched or a returned request is not counted. When T is zero no bar is drawn and the row says "No equipment request recorded" (no request at all) or "No equipment lines waiting to be reserved" (test "readiness has a real denominator or is not drawn").
 
@@ -214,10 +214,11 @@ Panel `#equipment`. Description: "Recorded by the warehouse or raised by a date 
 | **Reservations not released** (`release_failed`) | The failed release of section 9.4 is pending | "Unused reservations were not released at completion" | Warehouse |
 | **Return overdue** (`overdue_return`) | Units are out and the expected return has passed | "N units from <code> due back <date>" | Warehouse |
 | **Booking to review** (`booking_review`) | The project has an open equipment review (section 9.2) | "N bookings to review after a committed date changed" | The Project Manager |
+| **Partly dispatched** (`partial_dispatch`) | A request is partly dispatched (some lines have gone out, not all). Restored on 2026-11-12 after the redesign had dropped it | "<code>: D of N lines dispatched" (lines with stock out, of the request's lines) | Warehouse |
 | **Request not sent** (`not_sent`) | A request is still a draft **and the project is in Next installations** (starts within 14 days). A draft far ahead of its dates is not listed | "<code> has not been sent to the warehouse" | The Project Manager |
 | **Complete, still out** (`still_out`) | A finished project with units out and no overdue return on any of its requests (an overdue one is listed as Return overdue instead) | "Delivery complete, N units still out" | Warehouse |
 
-Order: by kind in the order of the table, then by project. Red outline for the first three kinds, amber for the others. Empty: "No shortage, overdue return, booking to review or unreleased reservation is recorded."
+Order: by kind in the order of the table, then by project. Red outline for the first three kinds, amber for the others. Empty: "No shortage, overdue return, partial dispatch, booking to review or unreleased reservation is recorded." Tests: `model.test.ts` "equipment issues come from records..." and `operations-pages.test.tsx` "shows a partly dispatched request with its count and Equipment link...".
 
 **Equipment line** (`equipmentLine`, used for a shortage): "<code>: <state>." then " R of L lines reserved." only while the state is Reserved, Partly ready or Short (a draft with lines reads " N lines on the draft, nothing reserved yet."; once stock is out the count is not said), then, when lines are short, " N lines short (a to buy, b to rent, c with no plan yet)." and, when units are out, " N units out, due back <date>" or ", no return date recorded", with " (overdue)" when the expected return has passed. State words: Not sent to the warehouse yet, Cancelled, No lines, Reserved, Partly ready, Short, Partly dispatched, Dispatched, Still out, Returned (`STATE_WORDS`). A line to buy or rent is short, never reserved (section 9.1).
 
@@ -266,7 +267,7 @@ Two kinds of line, each a link (`pressure` in MO, filtered in OV to `overlap` an
 | Overlap | The same person is an active member of two live projects of the company whose recorded windows overlap. A window is installation start (else event start) to event end; **both projects need a start and an event end**, and both must end today or later. The read returns at most 60 pairs | "<Person> is on <A> and <B>, whose delivery dates overlap <from> to <to>." | `/projects/<A>/people` |
 | Overdue reviews | A project has tasks in Ready for review whose due date has passed | "<Ref>: N reviews past the task's due date." | `/projects/<id>/work` |
 
-There is no threshold in this panel: every recorded case is listed. Shortages and overdue returns moved to Equipment issues (section 4.6). **Partial dispatch is no longer listed on the Overview**: `pressure` still returns it, the page does not draw it; a partly dispatched request shows on the project's Equipment tab (section 9.1).
+There is no threshold in this panel: every recorded case is listed. Shortages and overdue returns moved to Equipment issues (section 4.6). Partial dispatch is listed under Equipment issues too (section 4.6, **Partly dispatched**, with dispatched of total lines and a link to the Equipment tab); the first redesign commit had dropped it and it was restored the same day.
 
 Footer of the page: "Read <date>. Operations reads these records; it does not change tasks, bookings or stock. Each link opens the screen where the responsible person acts."
 
@@ -276,7 +277,7 @@ On a phone everything is one column in this order: the summary cards (two across
 
 ### 4.11 In the code, no longer on the screen
 
-`topIssue` ("Most relevant issue"), `upcomingDelivery` and the shortage, partial dispatch and overdue return lines of `pressure` are still in MO and still tested in `model.test.ts`, but the Overview does not call or draw them after `265c516` (checked by searching `apps/web/src` for their names at `16d6f42`). The project card with Status, Venue, Dismantling "Not recorded on the project", Next milestone and Tasks is gone with them.
+`topIssue` ("Most relevant issue"), `upcomingDelivery` and the shortage, partial dispatch and overdue return lines of `pressure` (the page now takes those three from `equipmentIssues`) are still in MO and still tested in `model.test.ts`, but the Overview does not call or draw them after `265c516` (checked by searching `apps/web/src` for their names at `16d6f42`). The project card with Status, Venue, Dismantling "Not recorded on the project", Next milestone and Tasks is gone with them.
 
 ## 5. The two reads
 
@@ -464,7 +465,7 @@ Where the edition is shown:
 | Projects directory | Under the project name "Event edition: <label>"; filter **Event edition** ("All editions", then each edition once, latest show first), offered only when at least one visible project has an edition; address parameter `edition`. A failed read: "Event editions could not be loaded just now, so no project shows its edition and the edition filter is not offered. Everything else is shown." | Everyone who sees the row (`proj_project_editions` returns only projects the caller may see in the directory) | DI; test `directory.test.ts` |
 | Handover brief | Fact **Event edition** (label), only when the handover has one | Readers of the handover | HB; test `handover-brief.test.tsx` |
 | Sales event page | Card **Delivery projects for <edition> (N)**: "Projects delivered for this edition that you can see in Projects. A project keeps the edition it was handed over with.", each with its reference (link to `/projects/<id>`), name and status. Drawn only when at least one project is visible to the viewer; a failed read says "The delivery projects of <edition> could not be loaded. Reload to try again." | Sales access to open the page; rows only for projects the viewer may see in Projects (`proj_projects_for_edition`) | EV; [`sales-events-and-exhibitions.md`](./sales-events-and-exhibitions.md) |
-| Operations | A flagged enquiry is headed by its edition label in Upcoming Work and under Coming up from Sales, with **Event edition** under More (read live from the enquiry, not a copy). Since the redesign of 2026-11-12 the Overview no longer prints a project's edition label (the read still returns it) | Operations Managers | OV, UC |
+| Operations | A flagged enquiry is headed by its edition label in Upcoming Work and under Coming up from Sales, with **Event edition** under More (read live from the enquiry, not a copy). On the Overview a project's edition label is secondary text under the Project Manager line in Next installations and on the Project health card, only where the project carries one (nothing is printed otherwise) | Operations Managers | OV, UC |
 | Closeout Report evidence | A line "Event edition: <label>. Venue: ... Published show dates: ..." or "Event edition: not recorded." | Whoever manages the project | CE; M section 8; [`projects-closeout-report.md`](./projects-closeout-report.md) section 3 |
 
 ## 9. Equipment: readiness, booking review, finished projects
@@ -576,7 +577,7 @@ The Operations notices carry the enquiry's reference and id, never what was writ
 10. **Nothing was checked signed in by Claude; Claude ran no hosted migration; no browser flow exists for this phase** (`apps/web/os-shell-checks/README.md` lists none). The owner reported on 2026-11-12 that the signed-in Preview checks of PR #86 passed; that was before the redesign commits, which nobody has checked signed in.
 11. **A Sales answer is shown to every Operations Manager of the company on My Day**, not only to the one who asked, because the read gives the asker's name and not their id (section 14.2).
 12. **Health is only as good as the records.** A project with dates and nothing recorded against it reads On track; a problem nobody recorded does not show. The label is not a forecast.
-13. **Partial dispatch is no longer listed on the Overview** (section 4.9).
+13. Partial dispatch is back on the Overview under Equipment issues (section 4.6); the project's event edition is back as secondary text (sections 4.4 and 4.7).
 
 ## 13. Rollout and tests
 
