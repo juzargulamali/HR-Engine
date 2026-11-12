@@ -501,7 +501,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "reply to the team",
       "discussion moved to chat"
     ],
-    "summary": "Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it, and so are the company's Operations Managers, shown with Operations beside their name; nobody else sees it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.",
+    "summary": "Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it, and so are the company's Operations Managers, shown with Operations beside their name; nobody else sees it; the project says so. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.",
     "steps": [
       "Press the Chat button at the corner of any page and choose the project under Projects.",
       "Or open the project and press Chat in its header.",
