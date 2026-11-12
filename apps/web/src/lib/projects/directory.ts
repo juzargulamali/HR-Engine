@@ -1,4 +1,4 @@
-import { allowedStatusMoves, isFinishedProject, isProjFounder, liveStatusesFor, PROJECT_STATUSES, type ProjGrant, type ProjectKind, type StatusMove } from "@enginious-hr/domain";
+import { allowedStatusMoves, isFinishedProject, isOpsManager, isProjFounder, liveStatusesFor, PROJECT_STATUSES, type ProjGrant, type ProjectKind, type StatusMove } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
 
 /**
@@ -60,8 +60,8 @@ export function editionChoices(byProject: ReadonlyMap<string, ProjectEdition>, r
 export const filterByEdition = <T extends Pick<DirectoryRowLite, "id">>(rows: readonly T[], byProject: ReadonlyMap<string, ProjectEdition>, editionId: string): T[] =>
   editionId ? rows.filter((r) => byProject.get(r.id)?.editionId === editionId) : [...rows];
 
-/** Members and founders of the project's company may see its milestones; everyone else sees the summary only. */
-export const canSeeProjectDetails = (row: Pick<DirectoryRowLite, "is_member" | "company_id">, grants: readonly ProjGrant[]) => row.is_member || isProjFounder(grants, row.company_id);
+/** Members, founders and Operations Managers of the project's company may see its milestones and open it in full; everyone else sees the summary only. */
+export const canSeeProjectDetails = (row: Pick<DirectoryRowLite, "is_member" | "company_id">, grants: readonly ProjGrant[]) => row.is_member || isProjFounder(grants, row.company_id) || isOpsManager(grants, row.company_id);
 
 /** The ids whose milestones may be fetched at all. Nothing is requested for the rest, so nothing reaches the page. */
 export const milestoneProjectIds = (rows: readonly Pick<DirectoryRowLite, "id" | "is_member" | "company_id">[], grants: readonly ProjGrant[]): string[] =>

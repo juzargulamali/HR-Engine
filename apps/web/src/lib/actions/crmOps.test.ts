@@ -102,10 +102,10 @@ describe("removeOpsPlanning", () => {
 });
 
 describe("answerOpsQuestion", () => {
-  it("sends only the answer, keeps the enquiry flagged and changes no planning field", async () => {
+  it("sends only the answer, leaves the flag as it is and changes no planning field", async () => {
     expect(await answerOpsQuestion(idle, fd({ id: O, expectedVersion: "7", answer: "  Yes, three points at 500 kg  " }))).toEqual({ error: null });
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc).toHaveBeenCalledWith("crm_set_ops_planning", { p_id: O, p_flag: true, p_fields: { answer: "Yes, three points at 500 kg" }, p_expected_version: 7 });
+    expect(rpc).toHaveBeenCalledWith("crm_set_ops_planning", { p_id: O, p_flag: null, p_fields: { answer: "Yes, three points at 500 kg" }, p_expected_version: 7 });
     expect(revalidatePath).toHaveBeenCalledWith(`/sales/opportunities/${O}`);
   });
 

@@ -73,7 +73,7 @@ describe("Today page", () => {
     expect(html).toContain("Al Khail Roadshow still has equipment to send");
     expect(html).toContain("Project Al Khail Roadshow · request REQ-0049");
     expect(html).toContain("Dispatch today, 14:00");
-    expect(html).toContain("1 line ready to send");
+    expect(html).toContain("1 line has reserved stock to send");
     expect(html).toContain("Gulf Bank Summit needs its equipment prepared");
     expect(html).toContain("1 of 2 lines fully reserved · 1 still to reserve");
     expect(html).toContain("1 item is overdue from Dubai Expo Pavilion");

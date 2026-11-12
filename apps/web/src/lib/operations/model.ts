@@ -19,7 +19,7 @@ export interface UpcomingRow {
   planning: UpcomingPlanning | null; handover: null | { id: string; status: string; submitted_at: string | null; pm: string | null; project_id: string | null };
 }
 export interface RequestState {
-  id: string; code: string; status: string; state: "draft" | "cancelled" | "reserved" | "partially_ready" | "short" | "partially_dispatched" | "dispatched" | "still_out" | "returned";
+  id: string; code: string; status: string; state: "draft" | "cancelled" | "empty" | "reserved" | "partially_ready" | "short" | "partially_dispatched" | "dispatched" | "still_out" | "returned";
   lines: number; reserved_lines: number; partial_lines: number; short_lines: number; short_buy: number; short_rent: number; short_no_plan: number; dispatched_lines: number; returned_lines: number;
   units_asked: number; units_short: number; units_dispatched: number; units_returned: number; units_out: number; needed_from: string | null; needed_until: string | null;
   expected_return_at: string | null; return_overdue: boolean;
@@ -31,7 +31,9 @@ export interface OverviewHandover {
 export interface OverviewBlocker { task_id: string; title: string; since: string; reason: string | null; assignee: string; unblock_owner: string | null; cross_team: boolean }
 export interface OverviewProject {
   id: string; reference: string; name: string; kind: string; status: string; pm_id: string | null; pm: string; chat_group_id: string | null; venue: string | null; install_start: string | null; event_start: string | null;
-  event_end: string | null; edition: string | null; tasks_open: number; tasks_overdue: number; reviews_waiting: number; reviews_overdue: number; blockers: OverviewBlocker[];
+  event_end: string | null; edition: string | null; tasks_open: number; tasks_overdue: number; reviews_waiting: number; reviews_overdue: number;
+  /** Up to five blocked tasks, oldest first; `blockers_total` is how many there are in all. */
+  blockers: OverviewBlocker[]; blockers_total: number;
   next_milestone: null | { id: string; title: string; due_date: string | null; status: string }; milestones_overdue: number; corrections_open: number; plan_changes_open: number;
   plan_unreleased: number; equipment: RequestState[]; equipment_reviews: number; release_failed: boolean;
 }
@@ -46,7 +48,7 @@ export const TEAM_WORDS: Record<string, string> = { engineering: "Engineering", 
 export const RISK_WORDS: Record<UpcomingPlanning["risk"], string> = { unknown: "Not assessed", low: "Low", medium: "Medium", high: "High" };
 export const HANDOVER_WORDS: Record<string, string> = { draft: "Being prepared by Sales", submitted: "Waiting for a Project Manager", pm_assigned: "Waiting for the Project Manager to accept", clarification_requested: "Question sent back to Sales", accepted: "Accepted" };
 export const STATE_WORDS: Record<RequestState["state"], string> = {
-  draft: "Not sent to the warehouse yet", cancelled: "Cancelled", reserved: "Reserved", partially_ready: "Partly ready", short: "Short", partially_dispatched: "Partly dispatched",
+  draft: "Not sent to the warehouse yet", cancelled: "Cancelled", empty: "No lines", reserved: "Reserved", partially_ready: "Partly ready", short: "Short", partially_dispatched: "Partly dispatched",
   dispatched: "Dispatched", still_out: "Still out", returned: "Returned",
 };
 
@@ -80,8 +82,13 @@ export function equipmentLine(q: RequestState): string {
     ? ` ${plural(q.short_lines, "line")} short (${[q.short_buy > 0 ? `${q.short_buy} to buy` : null, q.short_rent > 0 ? `${q.short_rent} to rent` : null, q.short_no_plan > 0 ? `${q.short_no_plan} with no plan yet` : null].filter(Boolean).join(", ")}).`
     : "";
   const out = n(q.units_out) > 0 ? ` ${plural(n(q.units_out), "unit")} out${q.expected_return_at ? `, due back ${day(q.expected_return_at)}` : ", no return date recorded"}${q.return_overdue ? " (overdue)" : ""}.` : "";
-  return `${q.code}: ${STATE_WORDS[q.state] ?? q.state}. ${q.reserved_lines} of ${plural(q.lines, "line")} reserved.${short}${out}`.trim();
+  // "N of M lines reserved" is said only while the request is with the warehouse and nothing has gone out: a draft has nothing reserved, and once stock is out
+  // the question is what is out and what is short.
+  const reserved = ["reserved", "partially_ready", "short"].includes(q.state) ? ` ${q.reserved_lines} of ${plural(q.lines, "line")} reserved.` : q.state === "draft" && q.lines > 0 ? ` ${plural(q.lines, "line")} on the draft, nothing reserved yet.` : "";
+  return `${q.code}: ${STATE_WORDS[q.state] ?? q.state}.${reserved}${short}${out}`.trim();
 }
+/** How many tasks are blocked in all (the list carries at most five of them). */
+export const blockedCount = (p: Pick<OverviewProject, "blockers" | "blockers_total">) => Math.max(n(p.blockers_total), p.blockers.length);
 export const unitsOut = (p: Pick<OverviewProject, "equipment">) => p.equipment.reduce((a, q) => a + n(q.units_out), 0);
 export const isFinished = (status: string) => status === "completed" || status === "archived";
 /** A finished project whose equipment is still out: two separate facts, both shown. */
@@ -103,12 +110,15 @@ export function riskReasons(p: OverviewProject, today: string): string[] {
   const start = day(p.install_start) ?? day(p.event_start);
   if (!start || isFinished(p.status)) return [];
   const days = daysBetween(today, start);
-  if (days < 0 || days > AT_RISK_WINDOW_DAYS) return [];
+  // From 14 days before the start until the event ends: a shortage matters most once installation has begun. A project whose end is not recorded drops out
+  // the day after its start.
+  const over = day(p.event_end) ? daysBetween(today, day(p.event_end)!) < 0 : days < 0;
+  if (days > AT_RISK_WINDOW_DAYS || over) return [];
   const out: string[] = [];
   const short = p.equipment.filter((q) => q.short_lines > 0);
   if (short.length > 0) out.push(`equipment short on ${short.map((q) => q.code).join(", ")}`);
   if (p.equipment.some((q) => q.state === "draft")) out.push("an equipment request has not been sent to the warehouse");
-  if (p.blockers.length > 0) out.push(plural(p.blockers.length, "blocked task"));
+  if (blockedCount(p) > 0) out.push(plural(blockedCount(p), "blocked task"));
   if (p.tasks_overdue > 0) out.push(plural(p.tasks_overdue, "overdue task"));
   if (p.milestones_overdue > 0) out.push(plural(p.milestones_overdue, "overdue milestone"));
   if (p.plan_unreleased > 0) out.push(`${plural(p.plan_unreleased, "delivery plan line")} not released to the teams`);
@@ -139,7 +149,8 @@ export function decisions(o: Overview, today: string): DecisionItem[] {
         owner: b.unblock_owner ?? p.pm, date: day(b.since), href: `/projects/${p.id}/work?task=${b.task_id}`, action: "Open the task" });
     }
     const reasons = riskReasons(p, today);
-    if (reasons.length > 0) out.push({ kind: "at_risk_installation", key: `risk:${p.id}`, title: `${p.reference} ${p.name}`, detail: `${p.install_start ? "Installation" : "The event"} starts ${day(p.install_start) ?? day(p.event_start)}: ${reasons.join("; ")}.`, owner: p.pm, date: day(p.install_start) ?? day(p.event_start), href: `/projects/${p.id}/work`, action: "Open the project" });
+    const start = day(p.install_start) ?? day(p.event_start)!;
+    if (reasons.length > 0) out.push({ kind: "at_risk_installation", key: `risk:${p.id}`, title: `${p.reference} ${p.name}`, detail: `${p.install_start ? "Installation" : "The event"} ${start < today ? "started" : "starts"} ${start}: ${reasons.join("; ")}.`, owner: p.pm, date: day(p.install_start) ?? day(p.event_start), href: `/projects/${p.id}/work`, action: "Open the project" });
     if (p.equipment_reviews > 0) out.push({ kind: "equipment_review", key: `review:${p.id}`, title: `${p.reference} ${p.name}`, detail: `A committed date changed while equipment is booked. ${plural(p.equipment_reviews, "booking")} to review. The booking itself has not been changed.`, owner: p.pm, date: null, href: `/projects/${p.id}/equipment`, action: "Review equipment booking" });
     if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, title: `${p.reference} ${p.name}`, detail: "Releasing unused reservations failed when the project finished. The warehouse releases them on the request.", owner: "Warehouse", date: null, href: `/projects/${p.id}/equipment`, action: "Open the Equipment tab" });
   }

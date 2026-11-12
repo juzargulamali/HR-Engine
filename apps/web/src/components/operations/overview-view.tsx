@@ -4,7 +4,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Muted, Panel } from "@/components/projects/parts";
 import { CompanyTabs, ReadState, Unknown } from "@/components/operations/parts";
 import type { OpsResult } from "@/lib/operations/data";
-import { completeButOut, datesWord, DECISION_WORDS, decisions, equipmentLine, nextResponsible, pressure, STAGE_WORDS, topIssue, upcomingDelivery, type Overview, type PressureItem, type UpcomingRow } from "@/lib/operations/model";
+import { blockedCount, completeButOut, datesWord, DECISION_WORDS, decisions, equipmentLine, nextResponsible, pressure, STAGE_WORDS, topIssue, upcomingDelivery, type Overview, type PressureItem, type UpcomingRow } from "@/lib/operations/model";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import { cn } from "@/lib/utils";
 
@@ -78,7 +78,7 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
                   <div><dt className="text-muted-foreground">Show</dt><dd>{p.event_start || p.event_end ? dateRangeText(p.event_start, p.event_end) : <Unknown />}</dd></div>
                   <div><dt className="text-muted-foreground">Dismantling</dt><dd><Unknown>Not recorded on the project</Unknown></dd></div>
                   <div><dt className="text-muted-foreground">Next milestone</dt><dd>{p.next_milestone ? `${p.next_milestone.title}${p.next_milestone.due_date ? `, ${dateText(p.next_milestone.due_date)}` : ""}` : <Unknown>None open</Unknown>}</dd></div>
-                  <div><dt className="text-muted-foreground">Tasks</dt><dd>{p.tasks_open} open{p.tasks_overdue > 0 ? `, ${p.tasks_overdue} overdue` : ""}{p.blockers.length > 0 ? `, ${p.blockers.length} blocked` : ""}</dd></div>
+                  <div><dt className="text-muted-foreground">Tasks</dt><dd>{p.tasks_open} open{p.tasks_overdue > 0 ? `, ${p.tasks_overdue} overdue` : ""}{blockedCount(p) > 0 ? `, ${blockedCount(p)} blocked` : ""}</dd></div>
                   <div><dt className="text-muted-foreground">Most relevant issue</dt><dd className={cn(issue && "font-medium")}>{issue ?? "Nothing recorded"}</dd></div>
                 </dl>
                 {p.equipment.length > 0 ? <ul className="mt-2 space-y-0.5 text-[13px] text-muted-foreground">{p.equipment.map((q) => <li key={q.id}><Link href={`/projects/${p.id}/equipment`} className="underline-offset-4 hover:underline">{equipmentLine(q)}</Link></li>)}</ul> : <p className="mt-2 text-[13px] text-muted-foreground">Equipment: no request recorded.</p>}

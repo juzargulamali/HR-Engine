@@ -1,4 +1,4 @@
-import { canUsePeopleAccess, canViewHrAlerts, canViewStock, hasCrmCapability, hasInvCapability, hasProjCapability, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
+import { canUsePeopleAccess, canViewHrAlerts, canViewStock, hasCrmCapability, hasInvCapability, hasProjCapability, holdsAssignPm, hasRoleAnyScope, isAnyCrmFounder, isSysAdmin } from "@enginious-hr/domain";
 import type { CrmGrant, InvGrant, ModuleGrantRef, ProjGrant, RoleGrant } from "@enginious-hr/domain";
 
 /**
@@ -273,7 +273,8 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
             { href: "/projects/calendar", label: "Calendar", iconKey: "projects" },
           ]
         : [{ href: "/projects", label: "Projects", iconKey: "projects" }];
-    if (projGrants.length > 0 && anyCap("assign_pm")) mainLinks.push({ href: "/projects/new", label: "New internal project", iconKey: "projects", secondary: true });
+    // An internal project needs assign_pm itself (or founder): an Operations Manager assigns Project Managers but does not create projects.
+    if (projGrants.some((g) => holdsAssignPm([g], g.companyId))) mainLinks.push({ href: "/projects/new", label: "New internal project", iconKey: "projects", secondary: true });
     const manage: NavLinkData[] = [];
     if (projGrants.length > 0) {
       if (anyCap("assign_pm") || proj?.pendingHandovers) manage.push({ href: "/projects/handovers", label: "Handovers", iconKey: "projects" });

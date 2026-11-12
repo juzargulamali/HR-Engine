@@ -100,7 +100,61 @@ end;
 $fn$;
 revoke all on function chat_is_member(uuid, uuid), chat_project_group(uuid), chat_my_groups() from public, anon, authenticated;
 grant execute on function chat_project_group(uuid), chat_my_groups() to authenticated;
+create or replace function chat_group_members(p_group uuid)
+returns table (user_id uuid, name text)
+language plpgsql security definer set search_path = public as $fn$
+declare v_user uuid := auth.uid(); v_company uuid; v_project uuid;
+begin
+  if v_user is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if not chat_is_member(v_user, p_group) then raise exception 'You are not a member of this group' using errcode = '42501'; end if;
+  select g.company_id, g.project_id into v_company, v_project from chat_groups g where g.id = p_group;
+  if v_project is not null then
+    return query
+      select distinct m.user_id, chat_name(m.user_id) from proj_project_members m
+      where m.project_id = v_project and m.removed_at is null and chat_is_project_member(m.user_id, v_project) order by 2;
+  else
+    return query
+      select distinct g.user_id, chat_name(g.user_id) from crm_company_grants g join profiles p on p.id = g.user_id and p.is_active
+      where g.company_id = v_company and g.revoked_at is null order by 2;
+  end if;
+end;
+$fn$;
+revoke all on function chat_group_members(uuid) from public, anon, authenticated;
+grant execute on function chat_group_members(uuid) to authenticated;
 drop function if exists chat_is_ops(uuid, uuid);
+
+-- Sales links: the wrapper goes, the earlier function takes its name back. The internal project guard and the handover notice for Operations go.
+do $$
+begin
+  if to_regprocedure('public.proj_set_sales_link_base(uuid, uuid, boolean)') is not null then
+    drop function if exists proj_set_sales_link(uuid, uuid, boolean);
+    alter function proj_set_sales_link_base(uuid, uuid, boolean) rename to proj_set_sales_link;
+    revoke all on function proj_set_sales_link(uuid, uuid, boolean) from public, anon, authenticated;
+    grant execute on function proj_set_sales_link(uuid, uuid, boolean) to authenticated;
+  end if;
+end $$;
+drop trigger if exists trg_proj_internal_project_guard on proj_projects;
+drop function if exists proj_internal_project_guard();
+drop trigger if exists trg_proj_handover_submitted_ops on proj_handovers;
+drop function if exists proj_handover_submitted_ops();
+drop function if exists proj_holds_assign_pm(uuid);
+create or replace function proj_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer set search_path = public as $fn$
+begin
+  perform proj_require_user();
+  if not exists (
+    select 1 from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+     where g.user_id = auth.uid() and g.revoked_at is null
+       and ('founder' = any (g.capabilities) or 'manage_access' = any (g.capabilities) or 'assign_pm' = any (g.capabilities))
+  ) then return; end if;
+  return query
+    select p.id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when proj_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by 2, p.email;
+end;
+$fn$;
+
 
 -- Closeout evidence: the wrapped function goes, the earlier one takes its name back.
 do $$

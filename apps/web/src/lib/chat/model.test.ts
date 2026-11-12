@@ -70,7 +70,7 @@ describe("project groups in the list", () => {
   });
   it("describes who is in a group, and that a finished project is read-only", () => {
     expect(membershipLine({ kind: "sales" })).toMatch(/Sales access/);
-    expect(membershipLine({ kind: "project" })).toBe("The people on this project");
+    expect(membershipLine({ kind: "project" })).toBe("The people on this project, and the company's Operations Managers");
     expect(membershipLine({ kind: "project", readOnly: true })).toMatch(/finished/);
   });
   it("finds a group by part of its name or reference", () => {

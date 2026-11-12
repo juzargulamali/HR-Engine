@@ -16,6 +16,8 @@ import { loadFormContext, loadHeld } from "@/lib/inventory/stock";
 import type { Candidate, FormContext } from "@/lib/inventory/stock-candidates";
 import { WAREHOUSE_COOKIE, ALL_WAREHOUSES } from "@/lib/inventory/working-location";
 import { heldTotals, requestItemTotals, sendItemsOf, sentCodesOf, unitHolder, type HolderOf } from "@/lib/inventory/workspace";
+import { EquipmentReviewPanel } from "@/components/projects/equipment-readiness";
+import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Project equipment" };
@@ -57,6 +59,8 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
     return <div className="space-y-4">{back}<LoadError what="this request" retryHref={`/inventory/requests/${id}`} /></div>;
   }
   const can = requestCapabilities(model, ctx, locations, manage);
+  // A committed project date that changed while this request is with the warehouse: the warehouse sees it HERE, on the request, where the booking is changed.
+  const reviews = r.kind === "project" && r.project_id ? await loadEquipmentReadiness(r.project_id) : ({ state: "none" } as const);
   const live = r.status === "submitted" || r.status === "in_progress";
   const project = r.kind === "project" && !!r.project_id;
   const wanted = firstParam(sp, "step");
@@ -136,6 +140,8 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
         <p className="mt-1 text-sm text-muted-foreground">{project ? "One place for this project's equipment: prepare it, send it out, receive it back." : "Prepare the equipment, then give it to the employee."}</p>
       </div>
       <WorkspaceHeader model={model} pickupName={pickupName} />
+      {reviews.state === "ok" ? <EquipmentReviewPanel reviews={reviews.readiness.reviews.filter((v) => v.requestId === id)} projectId={r.project_id!} canReview={can.operableLocationIds.length > 0 || manage} />
+        : reviews.state === "error" ? <Alert role="status">Whether a project date changed for this request could not be loaded. Reload to check before changing the booking.</Alert> : null}
       {tabs}
       {content}
       {!project && r.employee_id && can.warehouse ? (

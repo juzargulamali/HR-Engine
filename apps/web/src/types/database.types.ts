@@ -1848,7 +1848,7 @@ export interface Database {
       crm_update_observation: { Args: { p_id: string; p_kind: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: undefined };
       crm_remove_observation: { Args: { p_id: string }; Returns: undefined };
       crm_set_opportunity_edition: { Args: { p_id: string; p_edition: string | null; p_expected_version?: number | null }; Returns: number };
-      crm_set_ops_planning: { Args: { p_id: string; p_flag: boolean; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: number };
+      crm_set_ops_planning: { Args: { p_id: string; p_flag: boolean | null; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: number };
       crm_ops_planning: { Args: { p_opportunity_id: string }; Returns: unknown };
       crm_people: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null; company_ids: string[] }[] };
       crm_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };

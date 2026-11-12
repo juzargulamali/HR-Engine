@@ -522,9 +522,11 @@ describe("Operations navigation", () => {
     expect(ids).toEqual(["my-day", "me", "operations", "projects", "company"]);
   });
 
-  it("gives an Operations Manager the handover and new-project entries that assigning Project Managers gives", () => {
+  it("gives an Operations Manager the Handovers entry, and not New internal project (that needs PM assignment itself)", () => {
     const hrefs = hrefsOf(buildNavModules([], proj(["operations"])));
-    expect(hrefs).toEqual(expect.arrayContaining(["/projects/handovers", "/projects/new"]));
+    expect(hrefs).toContain("/projects/handovers");
+    expect(hrefs).not.toContain("/projects/new");
+    expect(hrefsOf(buildNavModules([], proj(["assign_pm"])))).toContain("/projects/new");
     expect(buildNavModules([], proj(["operations"])).find((m) => m.id === "projects")?.href).toBe("/projects");
     // It is not access management.
     expect(hrefs).not.toContain("/people-access");

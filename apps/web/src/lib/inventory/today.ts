@@ -201,7 +201,8 @@ export function requestRow(r: RequestInput, ctx: BuildContext): QueueRow | null 
     title = r.kind === "project"
       ? (started ? `${r.forLabel} still has equipment to send` : `${r.forLabel} is ${ready}`)
       : (started ? `Equipment for ${r.forLabel} is only partly sent` : `Equipment for ${r.forLabel} is ${ready}`);
-    facts.push({ text: `${plural(unsent.length, "line")} ready to send${sent.length > 0 ? `, ${sent.length} sent` : ""}` });
+    // "has reserved stock to send", not "ready to send": a line that is only partly reserved is counted here AND among the short lines below.
+    facts.push({ text: `${plural(unsent.length, "line")} ${unsent.length === 1 ? "has" : "have"} reserved stock to send${sent.length > 0 ? `, ${sent.length} sent` : ""}` });
     if (toReserve.length > 0) facts.push({ text: `${plural(toReserve.length, "line")} still to reserve`, tone: "warn" });
     if (toBuyOrRent.length > 0) facts.push({ text: `${plural(toBuyOrRent.length, "line")} to buy or rent`, tone: "warn" });
   }

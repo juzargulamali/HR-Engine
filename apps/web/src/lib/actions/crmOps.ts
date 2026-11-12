@@ -16,7 +16,9 @@ import { isMissingDatabaseFunction } from "@/lib/crm/zoho-save";
  */
 
 const uuid = z.string().uuid();
-const optionalDate = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date").optional());
+/** A real calendar date: 2027-02-31 has the right shape and is not one. */
+const realDate = (v: string) => /^\d{4}-\d{2}-\d{2}$/.test(v) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+const optionalDate = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.string().refine(realDate, "Use a valid date").optional());
 const optionalInt = z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().int().optional());
 const optionalNote = (what: string) =>
   z.preprocess((v) => (typeof v === "string" && v.trim() === "" ? undefined : v), z.string().trim().max(OPS_TEXT_MAX, `${what} can be at most ${OPS_TEXT_MAX} characters`).optional());
@@ -107,7 +109,7 @@ export async function answerOpsQuestion(_prev: ActionState, formData: FormData):
   const supabase = await createClient();
   const stale = await staleMessage(supabase, d.id, d.expectedVersion);
   if (stale) return { error: stale };
-  const { error } = await supabase.rpc("crm_set_ops_planning", { p_id: d.id, p_flag: true, p_fields: { answer: d.answer }, p_expected_version: d.expectedVersion ?? null });
+  const { error } = await supabase.rpc("crm_set_ops_planning", { p_id: d.id, p_flag: null, p_fields: { answer: d.answer }, p_expected_version: d.expectedVersion ?? null });
   if (error) return fail(error);
   refresh(d.id);
   return { error: null };

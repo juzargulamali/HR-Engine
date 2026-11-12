@@ -31,7 +31,7 @@ const overview: Overview = {
   handovers: [{ id: "h1", sales_reference: "UAE-O-2027-0002", title: "Mall roadshow", status: "submitted", submitted_at: "2027-02-18T08:00:00Z", pm_id: null, pm: null, pm_assigned_at: null, install_start: null, event_start: null, event_end: null, venue: null, edition: null, clarification_requested_at: null }],
   projects: [{
     id: "p1", reference: "UAE-P-2027-0001", name: "Fictional Expo stand", kind: "client", status: "completed", pm_id: "u-pm", pm: "Pat Manager", chat_group_id: "g1", venue: null, install_start: "2027-02-26", event_start: "2027-03-01",
-    event_end: "2027-03-05", edition: null, tasks_open: 0, tasks_overdue: 0, reviews_waiting: 0, reviews_overdue: 0, blockers: [], next_milestone: null, milestones_overdue: 0, corrections_open: 0, plan_changes_open: 0,
+    event_end: "2027-03-05", edition: null, tasks_open: 0, tasks_overdue: 0, reviews_waiting: 0, reviews_overdue: 0, blockers: [], blockers_total: 0, next_milestone: null, milestones_overdue: 0, corrections_open: 0, plan_changes_open: 0,
     plan_unreleased: 0, equipment_reviews: 0, release_failed: false,
     equipment: [{ id: "q1", code: "UAE-R-00001", status: "in_progress", state: "still_out", lines: 2, reserved_lines: 0, partial_lines: 0, short_lines: 0, short_buy: 0, short_rent: 0, short_no_plan: 0, dispatched_lines: 2, returned_lines: 0,
       units_asked: 6, units_short: 0, units_dispatched: 6, units_returned: 3, units_out: 3, needed_from: null, needed_until: null, expected_return_at: "2027-03-08T08:00:00Z", return_overdue: false }],
@@ -55,7 +55,7 @@ describe("Operations Overview", () => {
     expect(project.textContent).toContain("Delivery complete · equipment still out");
     expect(project.textContent).toMatch(/Venue\s*Not recorded/);
     expect(project.textContent).toContain("Not recorded on the project");                       // dismantling: unknown is said, not guessed
-    expect(project.textContent).toContain("UAE-R-00001: Still out. 0 of 2 lines reserved. 3 units out, due back 2027-03-08.");
+    expect(project.textContent).toContain("UAE-R-00001: Still out. 3 units out, due back 2027-03-08.");
     expect(within(project).getByRole("link", { name: "Open project chat" }).getAttribute("href")).toBe("/operations?company=c1&chat=g1");
     expect(document.body.textContent).not.toMatch(/score|capacity \d|%/i);
   });

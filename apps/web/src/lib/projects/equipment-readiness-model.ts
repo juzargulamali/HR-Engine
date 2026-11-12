@@ -4,7 +4,7 @@
  */
 import { dateText, formatDateTime } from "./format";
 
-export type ReadinessState = "draft" | "cancelled" | "reserved" | "partially_ready" | "short" | "partially_dispatched" | "dispatched" | "still_out" | "returned";
+export type ReadinessState = "draft" | "cancelled" | "empty" | "reserved" | "partially_ready" | "short" | "partially_dispatched" | "dispatched" | "still_out" | "returned";
 export interface RequestReadiness {
   id: string; code: string; status: string; state: ReadinessState;
   lines: number; reservedLines: number; partialLines: number; shortLines: number; shortBuy: number; shortRent: number; shortNoPlan: number; dispatchedLines: number; returnedLines: number;
@@ -27,7 +27,7 @@ export type EquipmentReadinessResult = { state: "ok"; readiness: EquipmentReadin
 export const READINESS_LOAD_ERROR = "Equipment readiness could not be loaded";
 
 export const READINESS_LABEL: Record<ReadinessState, string> = {
-  draft: "Not sent to the warehouse yet", cancelled: "Cancelled", reserved: "Reserved", partially_ready: "Partly ready", short: "Short",
+  draft: "Not sent to the warehouse yet", cancelled: "Cancelled", empty: "No lines", reserved: "Reserved", partially_ready: "Partly ready", short: "Short",
   partially_dispatched: "Partly dispatched", dispatched: "Dispatched", still_out: "Still out", returned: "Returned",
 };
 export const REVIEW_FIELD_LABEL: Record<ReviewField, string> = { install_start: "Installation start", event_start: "Event start", event_end: "Event end" };
@@ -87,13 +87,15 @@ export function readinessLine(r: RequestReadiness): { label: string; detail: str
   switch (r.state) {
     case "draft": return { label, detail: r.lines === 0 ? "No lines yet" : `${lines(r.lines)} on the draft`, tone: "amber" };
     case "cancelled": return { label, detail: null, tone: "quiet" };
+    case "empty": return { label, detail: "The request has no lines, so nothing is reserved", tone: "amber" };
     case "reserved": return { label, detail: r.lines === 0 ? "No lines" : `${r.lines === 1 ? "The line is" : `All ${r.lines} lines are`} reserved for the request dates`, tone: "quiet" };
     case "partially_ready": return { label, detail: `${r.lines - r.shortLines} of ${lines(r.lines)} reserved · ${shortPart(r)}`, tone: "amber" };
     case "short": { const how = shortBreakdown(r); return { label, detail: `${r.shortLines} of ${lines(r.lines)} short${how ? `: ${how}` : ""}`, tone: "red" }; }
     case "partially_dispatched": return { label, detail: `${r.dispatchedLines} of ${lines(r.lines)} dispatched · ${unitsText(r.unitsOut)} out${r.shortLines > 0 ? ` · ${shortPart(r)}` : ""}`, tone: "amber" };
-    case "dispatched": return { label, detail: `${unitsText(r.unitsOut)} out${r.returnOverdue ? " · return overdue" : ""}`, tone: r.returnOverdue ? "red" : "quiet" };
-    case "still_out": return { label, detail: `${qty(r.unitsReturned)} of ${unitsText(r.unitsDispatched)} returned · ${unitsText(r.unitsOut)} still out${r.returnOverdue ? " · return overdue" : ""}`, tone: r.returnOverdue ? "red" : "amber" };
-    case "returned": return { label, detail: `${unitsText(r.unitsReturned)} dispatched and returned`, tone: "quiet" };
+    // The database never reports these three while a line is short; the short part is appended all the same, so a short line can never be dropped from the sentence.
+    case "dispatched": return { label, detail: `${unitsText(r.unitsOut)} out${r.returnOverdue ? " · return overdue" : ""}${r.shortLines > 0 ? ` · ${shortPart(r)}` : ""}`, tone: r.returnOverdue ? "red" : r.shortLines > 0 ? "amber" : "quiet" };
+    case "still_out": return { label, detail: `${qty(r.unitsReturned)} of ${unitsText(r.unitsDispatched)} returned · ${unitsText(r.unitsOut)} still out${r.returnOverdue ? " · return overdue" : ""}${r.shortLines > 0 ? ` · ${shortPart(r)}` : ""}`, tone: r.returnOverdue ? "red" : "amber" };
+    case "returned": return { label, detail: `${unitsText(r.unitsReturned)} dispatched and returned${r.shortLines > 0 ? ` · ${shortPart(r)}` : ""}`, tone: r.shortLines > 0 ? "amber" : "quiet" };
   }
 }
 

@@ -50,6 +50,13 @@ export function hasProjCapability(grants: readonly ProjGrant[], companyId: strin
   );
 }
 
+/**
+ * proj_holds_assign_pm: 'assign_pm' ITSELF (or founder), without the Operations implication. Creating an internal project and changing a project's Sales links ask
+ * for this; an Operations Manager assigns Project Managers but does neither.
+ */
+export const holdsAssignPm = (grants: readonly ProjGrant[], companyId: string) =>
+  grants.some((g) => g.companyId === companyId && (g.capabilities.includes("founder") || g.capabilities.includes("assign_pm")));
+
 /** proj_is_founder */
 export const isProjFounder = (grants: readonly ProjGrant[], companyId: string) =>
   grants.some((g) => g.companyId === companyId && g.capabilities.includes("founder"));

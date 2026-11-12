@@ -42,7 +42,7 @@ export const archivedHeading = (count: number): string => `Archived (${count})`;
 export const OPERATIONS_READER_NOTE = "You are reading this as Operations Manager. You are not on this project's team.";
 /** Who is in a group, in words (the server decides; this only describes it). */
 export const membershipLine = (g: Pick<ChatGroup, "kind" | "readOnly">): string =>
-  g.kind === "project" ? (g.readOnly ? "This project is finished: the conversation can be read, not added to" : "The people on this project") : "Everyone with Sales access to this company";
+  g.kind === "project" ? (g.readOnly ? "This project is finished: the conversation can be read, not added to" : "The people on this project, and the company's Operations Managers") : "Everyone with Sales access to this company";
 export const filterGroups = <T extends Pick<ChatGroup, "name">>(groups: readonly T[], query: string): T[] => {
   const q = query.trim().toLowerCase();
   return q ? groups.filter((g) => g.name.toLowerCase().includes(q)) : [...groups];

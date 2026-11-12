@@ -75,7 +75,7 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
     if (groupsRef.current.length === 0) return;
     setOpen(true);
     if (known) { setNotice(null); setOpenGroup(groupId); }
-    else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project."); }
+    else { setOpenGroup(null); setNotice("That conversation is not available to you. A project's chat is open to the people on that project and to the company's Operations Managers."); }
   }, []);
 
   useEffect(() => {

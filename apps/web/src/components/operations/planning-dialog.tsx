@@ -12,8 +12,8 @@ import { Textarea } from "@/components/ui/textarea";
 import type { UpcomingRow } from "@/lib/operations/model";
 
 /**
- * The Operations side of a flagged enquiry: provisional Project Manager, risk, capacity conflict and a question for Sales. Saving writes the planning row and tells
- * the enquiry's owner. It does not create a project, book anyone or reserve stock, and the dialog says so next to the field where that could be assumed.
+ * The Operations side of a flagged enquiry: provisional Project Manager, risk, capacity conflict and a question for Sales. Saving writes the planning row and a line in the
+ * enquiry's history, where Sales reads it. It does not create a project, book anyone or reserve stock, and the dialog says so next to the field where that could be assumed.
  */
 export function PlanningDialog({ row, people }: { row: UpcomingRow; people: { id: string; name: string }[] }) {
   const [open, setOpen] = useState(false);
@@ -47,7 +47,7 @@ export function PlanningDialog({ row, people }: { row: UpcomingRow; people: { id
             </div>
             <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="capacityConflict" className="mt-1" defaultChecked={p?.capacity_conflict ?? false} /> Capacity conflict: this job clashes with other work</label>
             <Field label="What it clashes with" htmlFor="ops-capacity"><Input id="ops-capacity" name="capacityNote" maxLength={500} defaultValue={p?.capacity_note ?? ""} /></Field>
-            <Field label="Ask Sales to confirm" htmlFor="ops-question" hint={p?.answer ? "Sales has answered. Changing the question clears that answer and asks again." : "Sales is told and answers on the enquiry."}>
+            <Field label="Ask Sales to confirm" htmlFor="ops-question" hint={p?.answer ? "Sales has answered. Changing the question clears that answer and asks again." : "Sales sees the question on the enquiry, in its Operations planning panel and its history, and answers there. No separate notice is sent."}>
               <Textarea id="ops-question" name="question" rows={3} maxLength={1000} value={question} onChange={(e) => setQuestion(e.target.value)} />
             </Field>
           </ActionForm>

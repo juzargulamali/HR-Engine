@@ -8,7 +8,7 @@ const req = (over: Partial<RequestState> = {}): RequestState => ({
 });
 const project = (over: Partial<OverviewProject> = {}): OverviewProject => ({
   id: "p1", reference: "UAE-P-2027-0001", name: "Fictional Expo stand", kind: "client", status: "in_progress", pm_id: "u-pm", pm: "Pat Manager", chat_group_id: "g1", venue: "Expo Hall 4", install_start: "2027-02-26",
-  event_start: "2027-03-01", event_end: "2027-03-05", edition: "Fictional Auto Expo · 2027 · Dubai", tasks_open: 4, tasks_overdue: 0, reviews_waiting: 0, reviews_overdue: 0, blockers: [], next_milestone: null,
+  event_start: "2027-03-01", event_end: "2027-03-05", edition: "Fictional Auto Expo · 2027 · Dubai", tasks_open: 4, tasks_overdue: 0, reviews_waiting: 0, reviews_overdue: 0, blockers: [], blockers_total: 0, next_milestone: null,
   milestones_overdue: 0, corrections_open: 0, plan_changes_open: 0, plan_unreleased: 0, equipment: [], equipment_reviews: 0, release_failed: false, ...over,
 });
 const overview = (over: Partial<Overview> = {}): Overview => ({ company_id: "c1", taken_at: "2027-02-20T08:00:00Z", handovers: [], projects: [], overlaps: [], ...over });
@@ -57,7 +57,9 @@ describe("Operations: Overview", () => {
     expect(equipmentLine(req())).toBe("UAE-R-00001: Reserved. 2 of 2 lines reserved.");
     expect(equipmentLine(req({ state: "partially_ready", reserved_lines: 1, short_lines: 1, short_buy: 1 }))).toBe("UAE-R-00001: Partly ready. 1 of 2 lines reserved. 1 line short (1 to buy).");
     expect(equipmentLine(req({ state: "short", reserved_lines: 0, short_lines: 2, short_rent: 1, short_no_plan: 1 }))).toBe("UAE-R-00001: Short. 0 of 2 lines reserved. 2 lines short (1 to rent, 1 with no plan yet).");
-    expect(equipmentLine(req({ state: "still_out", reserved_lines: 0, dispatched_lines: 2, units_out: 3, return_overdue: true }))).toBe("UAE-R-00001: Still out. 0 of 2 lines reserved. 3 units out, due back 2027-03-08 (overdue).");
+    expect(equipmentLine(req({ state: "still_out", reserved_lines: 0, dispatched_lines: 2, units_out: 3, return_overdue: true }))).toBe("UAE-R-00001: Still out. 3 units out, due back 2027-03-08 (overdue).");
+    expect(equipmentLine(req({ state: "draft", status: "draft", reserved_lines: 0 }))).toBe("UAE-R-00001: Not sent to the warehouse yet. 2 lines on the draft, nothing reserved yet.");
+    expect(equipmentLine(req({ state: "empty", lines: 0, reserved_lines: 0 }))).toBe("UAE-R-00001: No lines.");
     expect(equipmentLine(req({ state: "dispatched", reserved_lines: 0, units_out: 1, expected_return_at: null }))).toContain("1 unit out, no return date recorded.");
   });
 

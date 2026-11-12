@@ -3,9 +3,13 @@
 -- WHAT IT ADDS
 --   1. OPERATIONS MANAGER: a new Projects capability 'operations', given per company through the existing Projects grant (People & Access, proj_grant_access,
 --      proj_revoke_access, the existing audit trigger). It lets its holder: read the Operations reads below for that company, assign or reassign Project Managers
---      through the existing handover functions (it implies 'assign_pm'), read that company's projects in full without joining them (proj_can_view_details), and
---      read and post in that company's project Chat groups. It gives NO Sales, Finance, HR or Warehouse right, and no task or delivery write: those stay with
---      their own grants and with the Project Manager. A founder holds every capability, so a founder
+--      (it implies 'assign_pm': the handover functions, reassigning the Project Manager of a live project, reading the company's handovers), read that company's
+--      projects in full without joining them (proj_can_view_details), and read and post in that company's project Chat groups.
+--      WHAT IT DOES NOT GIVE: any Sales, Finance, HR or Warehouse right; creating, editing, completing or managing a project; creating, assigning, moving or
+--      reviewing a task; editing the Delivery Plan; deciding a correction or a change; restricted files; the commercial record of a scope change; creating an
+--      internal project; changing a project's Sales links (those two stay with 'assign_pm' itself and founders).
+--      WHAT A READER OF A PROJECT CAN DO, and so an Operations Manager can too, as any project member can: comment on a task, raise a correction, add an
+--      unrestricted file or link, and post in the project's old Discussion. Each is recorded under their name. They are participation, not management. A founder holds every capability, so a founder
 --      also sees Operations; Chat access needs the capability itself (explicit), not the founder shortcut.
 --   2. SALES -> OPERATIONS PLANNING: eight planning fields on an enquiry that SALES owns (flag, expected decision date, whether dates are tentative, dismantling date,
 --      expected teams, what Sales still has to confirm, a note written for Operations), and one row per flagged enquiry that OPERATIONS owns (provisional Project
@@ -46,8 +50,9 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- An Operations Manager READS the projects of their companies in full, as a founder does, without being on each project: the directory row, the plan, tasks,
--- milestones, people, site dates and equipment. Reading only: every write still asks for membership, management or its own capability, restricted files stay with
--- whoever manages the project, and the commercial record of a scope change stays with 'view_commercial'.
+-- milestones, people, site dates and equipment. With that comes what every reader of a project may do (comment on a task, raise a correction, add an unrestricted
+-- file or link); everything that manages the project or its work still asks for membership, management or its own capability. Restricted files stay with whoever
+-- manages the project, and the commercial record of a scope change stays with 'view_commercial'.
 create or replace function proj_can_view_details(p_project_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
@@ -64,6 +69,84 @@ returns boolean language sql stable security definer set search_path = public as
            or proj_has_capability(pr.company_id, 'operations')
            or (proj_has_access(pr.company_id) and pr.status in ('planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold'))
            or proj_sales_linked(pr.id)));
+$$;
+
+-- 'assign_pm' ITSELF (or founder), without the Operations implication: for the two things an Operations Manager must not do through it.
+create or replace function proj_holds_assign_pm(p_company_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+    where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null and ('founder' = any (g.capabilities) or 'assign_pm' = any (g.capabilities)));
+$$;
+
+-- An internal project is created only by proj_create_internal_project, which asks for assign_pm. Operations implies assign_pm for handovers, not for this.
+create or replace function proj_internal_project_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is not null and not proj_holds_assign_pm(new.company_id) then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can create an internal project' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_proj_internal_project_guard on proj_projects;
+create trigger trg_proj_internal_project_guard before insert on proj_projects for each row when (new.kind = 'internal') execute function proj_internal_project_guard();
+
+-- A project's Sales links: the function installed earlier is kept under a new name and wrapped with the same narrower test.
+do $$
+begin
+  if to_regprocedure('public.proj_set_sales_link_base(uuid, uuid, boolean)') is null then
+    alter function proj_set_sales_link(uuid, uuid, boolean) rename to proj_set_sales_link_base;
+  end if;
+end $$;
+create or replace function proj_set_sales_link(p_project_id uuid, p_user_id uuid, p_linked boolean)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_company uuid;
+begin
+  select company_id into v_company from proj_projects where id = p_project_id;
+  if v_company is not null and not proj_holds_assign_pm(v_company) and proj_has_capability(v_company, 'operations') then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can change who in Sales is linked to a project' using errcode = '42501';
+  end if;
+  perform proj_set_sales_link_base(p_project_id, p_user_id, p_linked);
+end;
+$$;
+
+-- An Operations Manager is told when a handover is submitted without a Project Manager (the existing function tells founders and assign_pm holders by name of
+-- capability), and sees the names of Sales colleagues where an assigner does.
+create or replace function proj_handover_submitted_ops()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare r record;
+begin
+  if new.pm_user_id is null then
+    for r in select g.user_id from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+              where g.company_id = new.company_id and g.revoked_at is null and 'operations' = any (g.capabilities)
+                and not ('founder' = any (g.capabilities) or 'assign_pm' = any (g.capabilities)) loop
+      perform proj_notify(null, r.user_id, 'project_handover_submitted',
+        jsonb_build_object('handover_id', new.id, 'title', new.title, 'reference', new.crm_reference), 'handover:' || new.id || ':rev:' || new.revision, false);
+    end loop;
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_proj_handover_submitted_ops on proj_handovers;
+create trigger trg_proj_handover_submitted_ops after update of status on proj_handovers for each row
+  when (new.status = 'submitted' and old.status is distinct from new.status) execute function proj_handover_submitted_ops();
+
+create or replace function proj_staff_directory()
+returns table (user_id uuid, full_name text, email text)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  perform proj_require_user();
+  if not exists (
+    select 1 from proj_company_grants g join profiles p on p.id = g.user_id and p.is_active
+     where g.user_id = auth.uid() and g.revoked_at is null
+       and ('founder' = any (g.capabilities) or 'manage_access' = any (g.capabilities) or 'assign_pm' = any (g.capabilities) or 'operations' = any (g.capabilities))
+  ) then return; end if;
+  return query
+    select p.id, coalesce(nullif(btrim(p.full_name), ''), split_part(p.email, '@', 1)), case when proj_is_any_founder() then p.email end
+    from profiles p where p.is_active
+    order by 2, p.email;
+end;
 $$;
 
 -- The companies the caller is Operations Manager of (founder included).
@@ -139,38 +222,52 @@ end;
 $$;
 
 -- SALES: flag or unflag an enquiry for Operations planning and set the planning fields. The enquiry's owner or a Sales founder, as for any other edit.
+-- p_flag: true flags, false removes the flag, NULL leaves it as it is (an answer to Operations does not flag an enquiry that was removed).
 -- p_fields keys (each optional; a key that is absent is left alone, null clears): decision_date, dates_tentative, dismantle_date, teams, to_confirm, note, answer.
 create or replace function crm_set_ops_planning(p_id uuid, p_flag boolean, p_fields jsonb default '{}'::jsonb, p_expected_version integer default null)
 returns integer language plpgsql security definer set search_path = public as $$
-declare v crm_opportunities; v_new integer; f jsonb := coalesce(p_fields, '{}'::jsonb); v_was boolean; v_bad text;
+declare v crm_opportunities; v_new integer; f jsonb := coalesce(p_fields, '{}'::jsonb); v_was boolean; v_now boolean; v_bad text; v_rows integer;
 begin
   v := crm_lock_opportunity(p_id);
   perform crm_check_version(v, p_expected_version);
   perform crm_require_owner_or_founder(v);
   select k into v_bad from jsonb_object_keys(f) k where k not in ('decision_date', 'dates_tentative', 'dismantle_date', 'teams', 'to_confirm', 'note', 'answer') limit 1;
   if v_bad is not null then raise exception 'Unknown planning field' using errcode = '22023'; end if;
-  if coalesce(p_flag, false) and v.stage = 'lost' then raise exception 'A lost enquiry cannot be flagged for Operations planning' using errcode = '23514'; end if;
   v_was := v.ops_flagged_at is not null;
-  update crm_opportunities set
-      ops_flagged_at = case when coalesce(p_flag, false) then coalesce(ops_flagged_at, now()) else null end,
-      ops_flagged_by = case when coalesce(p_flag, false) then coalesce(ops_flagged_by, auth.uid()) else null end,
-      ops_decision_date = case when f ? 'decision_date' then nullif(f ->> 'decision_date', '')::date else ops_decision_date end,
-      ops_dates_tentative = case when f ? 'dates_tentative' then coalesce((f ->> 'dates_tentative')::boolean, true) else ops_dates_tentative end,
-      ops_dismantle_date = case when f ? 'dismantle_date' then nullif(f ->> 'dismantle_date', '')::date else ops_dismantle_date end,
-      ops_teams = case when f ? 'teams' then coalesce((select array_agg(distinct t order by t) from jsonb_array_elements_text(case when jsonb_typeof(f -> 'teams') = 'array' then f -> 'teams' else '[]'::jsonb end) t), '{}') else ops_teams end,
-      ops_to_confirm = case when f ? 'to_confirm' then nullif(btrim(f ->> 'to_confirm'), '') else ops_to_confirm end,
-      ops_note = case when f ? 'note' then nullif(btrim(f ->> 'note'), '') else ops_note end,
-      version = version + 1, updated_at = now()
-    where id = v.id returning version into v_new;
+  v_now := coalesce(p_flag, v_was);
+  if v_now and not v_was and v.stage = 'lost' then raise exception 'A lost enquiry cannot be flagged for Operations planning' using errcode = '23514'; end if;
+  if (f ? 'teams' and jsonb_typeof(f -> 'teams') not in ('array', 'null'))
+     or (f ? 'dates_tentative' and jsonb_typeof(f -> 'dates_tentative') not in ('boolean', 'null')) then
+    raise exception 'Check the planning details: a value is not in the expected form' using errcode = '22023';
+  end if;
+  begin
+    update crm_opportunities set
+        ops_flagged_at = case when v_now then coalesce(ops_flagged_at, now()) else null end,
+        ops_flagged_by = case when v_now then coalesce(ops_flagged_by, auth.uid()) else null end,
+        ops_decision_date = case when f ? 'decision_date' then nullif(f ->> 'decision_date', '')::date else ops_decision_date end,
+        ops_dates_tentative = case when f ? 'dates_tentative' then coalesce((f ->> 'dates_tentative')::boolean, true) else ops_dates_tentative end,
+        ops_dismantle_date = case when f ? 'dismantle_date' then nullif(f ->> 'dismantle_date', '')::date else ops_dismantle_date end,
+        ops_teams = case when f ? 'teams' then coalesce((select array_agg(distinct t order by t) from jsonb_array_elements_text(case when jsonb_typeof(f -> 'teams') = 'array' then f -> 'teams' else '[]'::jsonb end) t), '{}') else ops_teams end,
+        ops_to_confirm = case when f ? 'to_confirm' then nullif(btrim(f ->> 'to_confirm'), '') else ops_to_confirm end,
+        ops_note = case when f ? 'note' then nullif(btrim(f ->> 'note'), '') else ops_note end,
+        version = version + 1, updated_at = now()
+      where id = v.id returning version into v_new;
+  exception when invalid_datetime_format or datetime_field_overflow or invalid_text_representation or check_violation then
+    raise exception 'Check the planning details: a date is not a real date, a team is not one of the five, or a text is too long' using errcode = '22023';
+  end;
   if f ? 'answer' and nullif(btrim(f ->> 'answer'), '') is not null then
     update ops_enquiry_planning set answer = left(btrim(f ->> 'answer'), 1000), answered_by = auth.uid(), answered_at = now()
       where opportunity_id = v.id and question is not null;
-    perform ops_notify_managers(v.company_id, 'project_ops_sales_answered', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_answer:' || v.id::text);
+    get diagnostics v_rows = row_count;
+    -- Operations is told only when there was a question to answer.
+    if v_rows > 0 then
+      perform ops_notify_managers(v.company_id, 'project_ops_sales_answered', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_answer:' || v.id::text);
+    end if;
   end if;
-  if coalesce(p_flag, false) and not v_was then
+  if v_now and not v_was then
     perform crm_log_event(v.id, v.company_id, 'details_changed', null, null, 'Flagged for Operations planning');
     perform ops_notify_managers(v.company_id, 'project_ops_enquiry_flagged', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_flag:' || v.id::text);
-  elsif not coalesce(p_flag, false) and v_was then
+  elsif not v_now and v_was then
     perform crm_log_event(v.id, v.company_id, 'details_changed', null, null, 'Removed from Operations planning');
   end if;
   return v_new;
@@ -181,7 +278,7 @@ $$;
 -- A provisional Project Manager must be someone who could be assigned (proj_user_eligible), and is only a note: nothing else is written anywhere.
 create or replace function ops_set_enquiry_planning(p_opportunity_id uuid, p_patch jsonb)
 returns void language plpgsql security definer set search_path = public as $$
-declare o crm_opportunities; f jsonb := coalesce(p_patch, '{}'::jsonb); v_pm uuid; v_bad text; v_what text[] := '{}';
+declare o crm_opportunities; f jsonb := coalesce(p_patch, '{}'::jsonb); v_pm uuid; v_bad text; v_what text[] := '{}'; old ops_enquiry_planning; v_question text;
 begin
   select * into o from crm_opportunities where id = p_opportunity_id;
   if not found or not proj_has_capability(o.company_id, 'operations') then raise exception 'Enquiry not found' using errcode = 'P0002'; end if;
@@ -189,33 +286,44 @@ begin
   if o.stage = 'lost' then raise exception 'This enquiry was lost' using errcode = '23514'; end if;
   select k into v_bad from jsonb_object_keys(f) k where k not in ('provisional_pm_id', 'risk', 'risk_note', 'capacity_conflict', 'capacity_note', 'question') limit 1;
   if v_bad is not null then raise exception 'Unknown planning field' using errcode = '22023'; end if;
+  if (f ? 'risk' and coalesce(nullif(f ->> 'risk', ''), 'unknown') not in ('unknown', 'low', 'medium', 'high'))
+     or (f ? 'capacity_conflict' and jsonb_typeof(f -> 'capacity_conflict') not in ('boolean', 'null'))
+     or (f ? 'provisional_pm_id' and nullif(f ->> 'provisional_pm_id', '') is not null and (f ->> 'provisional_pm_id') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$')
+     or length(coalesce(f ->> 'risk_note', '')) > 500 or length(coalesce(f ->> 'capacity_note', '')) > 500 or length(coalesce(f ->> 'question', '')) > 1000 then
+    raise exception 'Check the planning details: a choice is not valid or a text is too long' using errcode = '22023';
+  end if;
   if f ? 'provisional_pm_id' then
     v_pm := nullif(f ->> 'provisional_pm_id', '')::uuid;
     if v_pm is not null and not proj_user_eligible(o.company_id, v_pm) then
       raise exception 'Choose someone who has Projects access for this company' using errcode = '23514';
     end if;
   end if;
+  v_question := nullif(btrim(f ->> 'question'), '');
   insert into ops_enquiry_planning (opportunity_id, company_id, updated_by) values (o.id, o.company_id, auth.uid()) on conflict (opportunity_id) do nothing;
+  select * into old from ops_enquiry_planning where opportunity_id = o.id for update;
   update ops_enquiry_planning set
       provisional_pm_id = case when f ? 'provisional_pm_id' then v_pm else provisional_pm_id end,
       risk = case when f ? 'risk' then coalesce(nullif(f ->> 'risk', ''), 'unknown') else risk end,
       risk_note = case when f ? 'risk_note' then nullif(btrim(f ->> 'risk_note'), '') else risk_note end,
       capacity_conflict = case when f ? 'capacity_conflict' then coalesce((f ->> 'capacity_conflict')::boolean, false) else capacity_conflict end,
       capacity_note = case when f ? 'capacity_note' then nullif(btrim(f ->> 'capacity_note'), '') else capacity_note end,
-      question = case when f ? 'question' then nullif(btrim(f ->> 'question'), '') else question end,
-      question_by = case when f ? 'question' then case when nullif(btrim(f ->> 'question'), '') is null then null else auth.uid() end else question_by end,
-      question_at = case when f ? 'question' then case when nullif(btrim(f ->> 'question'), '') is null then null else now() end else question_at end,
-      answer = case when f ? 'question' then null else answer end,
-      answered_by = case when f ? 'question' then null else answered_by end,
-      answered_at = case when f ? 'question' then null else answered_at end,
+      question = case when f ? 'question' then v_question else question end,
+      -- a question that did not change keeps who asked it, when, and the answer Sales gave
+      question_by = case when f ? 'question' and v_question is distinct from question then case when v_question is null then null else auth.uid() end else question_by end,
+      question_at = case when f ? 'question' and v_question is distinct from question then case when v_question is null then null else now() end else question_at end,
+      answer = case when f ? 'question' and v_question is distinct from question then null else answer end,
+      answered_by = case when f ? 'question' and v_question is distinct from question then null else answered_by end,
+      answered_at = case when f ? 'question' and v_question is distinct from question then null else answered_at end,
       updated_by = auth.uid(), updated_at = now()
     where opportunity_id = o.id;
-  if f ? 'provisional_pm_id' then v_what := v_what || case when v_pm is null then 'provisional Project Manager removed' else 'provisional Project Manager named: ' || proj_display_name(v_pm) end; end if;
-  if f ? 'capacity_conflict' and coalesce((f ->> 'capacity_conflict')::boolean, false) then v_what := v_what || 'capacity conflict flagged'::text; end if;
-  if f ? 'question' and nullif(btrim(f ->> 'question'), '') is not null then v_what := v_what || 'asked Sales to confirm details'::text; end if;
+  -- The enquiry's history gets a line only for what actually changed.
+  if f ? 'provisional_pm_id' and v_pm is distinct from old.provisional_pm_id then v_what := v_what || case when v_pm is null then 'provisional Project Manager removed' else 'provisional Project Manager named: ' || proj_display_name(v_pm) end; end if;
+  if f ? 'capacity_conflict' and coalesce((f ->> 'capacity_conflict')::boolean, false) and not old.capacity_conflict then v_what := v_what || 'capacity conflict flagged'::text; end if;
+  if f ? 'capacity_conflict' and not coalesce((f ->> 'capacity_conflict')::boolean, false) and old.capacity_conflict then v_what := v_what || 'capacity conflict cleared'::text; end if;
+  if f ? 'question' and v_question is not null and v_question is distinct from old.question then v_what := v_what || 'asked Sales to confirm details'::text; end if;
+  -- Sales reads this on the enquiry (the "From Operations" block and this history line). No notice is sent: Sales has no notice list of its own.
   if cardinality(v_what) > 0 then
     perform crm_log_event(o.id, o.company_id, 'details_changed', null, null, 'Operations: ' || array_to_string(v_what, '; '));
-    -- Sales reads this on the enquiry (the "From Operations" block and the history line above). No notice is sent: Sales has no notice list of its own.
   end if;
 end;
 $$;
@@ -374,6 +482,33 @@ begin
 end;
 $$;
 
+-- Who can be mentioned in a group. A project group lists the people on the project and, marked as such in their name, the company's Operations Managers, who read
+-- and post there too. Members only.
+create or replace function chat_group_members(p_group uuid)
+returns table (user_id uuid, name text)
+language plpgsql security definer set search_path = public as $$
+declare v_user uuid := auth.uid(); v_company uuid; v_project uuid;
+begin
+  if v_user is null then raise exception 'Not signed in' using errcode = '28000'; end if;
+  if not chat_is_member(v_user, p_group) then raise exception 'You are not a member of this group' using errcode = '42501'; end if;
+  select g.company_id, g.project_id into v_company, v_project from chat_groups g where g.id = p_group;
+  if v_project is not null then
+    return query
+      select x.uid, x.label from (
+        select distinct m.user_id as uid, chat_name(m.user_id) as label from proj_project_members m
+          where m.project_id = v_project and m.removed_at is null and chat_is_project_member(m.user_id, v_project)
+        union
+        select g.user_id, chat_name(g.user_id) || ' (Operations)' from proj_company_grants g join proj_projects pr on pr.company_id = g.company_id
+          where pr.id = v_project and g.revoked_at is null and 'operations' = any (g.capabilities) and chat_is_ops(g.user_id, v_project) and not chat_is_project_member(g.user_id, v_project)
+      ) x order by 2;
+  else
+    return query
+      select distinct g.user_id, chat_name(g.user_id) from crm_company_grants g join profiles p on p.id = g.user_id and p.is_active
+      where g.company_id = v_company and g.revoked_at is null order by 2;
+  end if;
+end;
+$$;
+
 -- The caller's groups. Two more columns: the project's real status (the panel puts ARCHIVED projects under a collapsed section) and whether the group is open to the
 -- caller through Operations only. The return type changes, so the function is dropped and created again in this transaction.
 drop function if exists chat_my_groups();
@@ -449,6 +584,9 @@ begin
       -- One open review per request and date: a second change keeps the first "old" date, so the review shows where the booking was made from.
       insert into proj_equipment_reviews (project_id, request_id, field, old_date, new_date, changed_by) values (new.project_id, r.id, c.field, c.old_date, c.new_date, auth.uid())
         on conflict (request_id, field) where resolved_at is null do update set new_date = excluded.new_date, changed_by = excluded.changed_by, changed_at = now();
+      -- Changed back to the date the booking was made for: there is nothing left to review.
+      delete from proj_equipment_reviews v where v.request_id = r.id and v.field = c.field and v.resolved_at is null and v.old_date is not distinct from v.new_date;
+      continue when not exists (select 1 from proj_equipment_reviews v where v.request_id = r.id and v.field = c.field and v.resolved_at is null);
       select pm_user_id into v_pm from proj_projects where id = new.project_id;
       perform proj_notify(new.project_id, v_pm, 'project_equipment_review', jsonb_build_object('request_id', r.id, 'request_code', r.code), 'equipment_review:' || r.id::text);
     end loop;
@@ -478,18 +616,20 @@ end;
 $$;
 
 -- The state of ONE request, from its lines and reservations (inv_line_progress). Internal: callers check access.
---   state: draft | cancelled | reserved | partially_ready | short | partially_dispatched | dispatched | still_out | returned
+--   state: draft | cancelled | empty | reserved | partially_ready | short | partially_dispatched | dispatched | still_out | returned
 --   A line whose shortage is to be bought or rented is SHORT (counted in short_buy / short_rent). It is not reserved until stock is reserved for it.
 create or replace function inv_request_state(p_request_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare r inv_requests; v jsonb;
+declare r inv_requests; v jsonb; v_lines int; v_short int; v_out numeric; v_disp numeric; v_disp_lines int; v_res int;
 begin
   select * into r from inv_requests where id = p_request_id;
   if not found then return null; end if;
+  -- "short" for a line: what is asked and neither reserved for the window nor already sent. inv_line_progress reports a shortage only while the request is with
+  -- the warehouse; a draft has nothing reserved, so it is never counted as reserved either.
   select jsonb_build_object(
       'lines', count(*),
-      'reserved_lines', count(*) filter (where x.short = 0 and x.dispatched = 0),
-      'partial_lines', count(*) filter (where x.short > 0 and x.win > 0 and x.dispatched = 0),
+      'reserved_lines', count(*) filter (where x.dispatched = 0 and x.win >= x.qty),
+      'partial_lines', count(*) filter (where x.short > 0 and (x.win > 0 or x.dispatched > 0)),
       'short_lines', count(*) filter (where x.short > 0),
       'short_buy', count(*) filter (where x.short > 0 and x.shortage_action = 'need_to_buy'),
       'short_rent', count(*) filter (where x.short > 0 and x.shortage_action = 'need_to_rent'),
@@ -499,21 +639,27 @@ begin
       'units_asked', coalesce(sum(x.qty), 0), 'units_short', coalesce(sum(x.short), 0), 'units_dispatched', coalesce(sum(x.dispatched), 0),
       'units_returned', coalesce(sum(x.returned), 0), 'units_out', coalesce(sum(greatest(0, x.dispatched - x.returned)), 0))
     into v
-    from (select l.qty, l.shortage_action, (p ->> 'reserved_for_window')::numeric as win, (p ->> 'dispatched')::numeric as dispatched, (p ->> 'returned')::numeric as returned,
-                 (p ->> 'shortage')::numeric as short
-          from inv_request_lines l cross join lateral inv_line_progress(l) p where l.request_id = r.id and l.status <> 'cancelled') x;
+    from (select l.qty, l.shortage_action, y.win, y.dispatched, y.returned,
+                 case when r.status in ('submitted', 'in_progress', 'fulfilled') and l.status = 'open' then greatest(0, l.qty - greatest(y.win, y.dispatched)) else 0 end as short
+          from inv_request_lines l
+          cross join lateral (select (p ->> 'reserved_for_window')::numeric as win, (p ->> 'dispatched')::numeric as dispatched, (p ->> 'returned')::numeric as returned from inv_line_progress(l) p) y
+          where l.request_id = r.id and l.status <> 'cancelled') x;
+  v_lines := (v ->> 'lines')::int; v_short := (v ->> 'short_lines')::int; v_out := (v ->> 'units_out')::numeric; v_disp := (v ->> 'units_dispatched')::numeric;
+  v_disp_lines := (v ->> 'dispatched_lines')::int; v_res := (v ->> 'reserved_lines')::int;
   return v || jsonb_build_object('id', r.id, 'code', r.code, 'status', r.status, 'needed_from', r.needed_from, 'needed_until', r.needed_until, 'expected_return_at', r.expected_return_at,
-    'return_overdue', ((v ->> 'units_out')::numeric > 0 and r.expected_return_at is not null and r.expected_return_at < now()),
+    'return_overdue', (v_out > 0 and r.expected_return_at is not null and r.expected_return_at < now()),
+    -- A request is "reserved" only when every line is; "returned" or "dispatched" only when no line is short. Anything else says what is missing.
     'state', case
       when r.status = 'draft' then 'draft' when r.status = 'cancelled' then 'cancelled'
-      when (v ->> 'units_dispatched')::numeric > 0 and (v ->> 'units_out')::numeric = 0 and (v ->> 'dispatched_lines')::int >= (v ->> 'lines')::int then 'returned'
-      when (v ->> 'units_out')::numeric > 0 and (v ->> 'dispatched_lines')::int < (v ->> 'lines')::int then 'partially_dispatched'
-      when (v ->> 'units_out')::numeric > 0 and (v ->> 'units_returned')::numeric > 0 then 'still_out'
-      when (v ->> 'units_out')::numeric > 0 then 'dispatched'
-      when (v ->> 'units_dispatched')::numeric > 0 then 'returned'
-      when (v ->> 'short_lines')::int > 0 and (v ->> 'short_lines')::int < (v ->> 'lines')::int then 'partially_ready'
-      when (v ->> 'short_lines')::int > 0 then 'short'
-      else 'reserved' end);
+      when v_lines = 0 then 'empty'
+      when v_disp > 0 and (v_short > 0 or v_disp_lines < v_lines) then 'partially_dispatched'
+      when v_disp > 0 and v_out = 0 then 'returned'
+      when v_out > 0 and (v ->> 'units_returned')::numeric > 0 then 'still_out'
+      when v_out > 0 then 'dispatched'
+      when v_short > 0 and v_short < v_lines then 'partially_ready'
+      when v_short > 0 then 'short'
+      when v_res = v_lines then 'reserved'
+      else 'partially_ready' end);
 end;
 $$;
 
@@ -568,7 +714,9 @@ begin
     'projects', coalesce((
       select jsonb_agg(jsonb_build_object(
           'id', p.id, 'reference', p.reference, 'name', p.name, 'kind', p.kind, 'status', p.status, 'pm_id', p.pm_user_id, 'pm', proj_display_name(p.pm_user_id),
-          'chat_group_id', (select g.id from chat_groups g where g.project_id = p.id),
+          -- only when the caller can open it: Chat needs the capability itself or a place on the project, which a founder may not have
+          'chat_group_id', case when chat_is_ops(auth.uid(), p.id) or chat_is_project_member(auth.uid(), p.id) then (select g.id from chat_groups g where g.project_id = p.id) end,
+          'blockers_total', (select count(*) from proj_tasks t where t.project_id = p.id and t.blocked_at is not null and t.status in ('todo', 'in_progress', 'ready_for_review')),
           'venue', d.location, 'install_start', d.install_start, 'event_start', d.event_start, 'event_end', d.event_end, 'edition', d.edition_snapshot ->> 'label',
           'tasks_open', (select count(*) from proj_tasks t where t.project_id = p.id and t.status in ('todo', 'in_progress', 'ready_for_review')),
           'tasks_overdue', (select count(*) from proj_tasks t where t.project_id = p.id and t.status in ('todo', 'in_progress') and t.due_date < current_date),
@@ -615,6 +763,7 @@ begin
           and coalesce(db.install_start, db.event_start) is not null and db.event_end is not null
           and coalesce(da.install_start, da.event_start) <= db.event_end and coalesce(db.install_start, db.event_start) <= da.event_end
           and da.event_end >= current_date and db.event_end >= current_date
+        order by 6, ma.user_id, pa.reference, pb.reference
         limit 60) o), '[]'::jsonb));
 end;
 $$;
@@ -642,6 +791,8 @@ end;
 $$;
 
 revoke all on function
+  proj_holds_assign_pm(uuid), proj_internal_project_guard(), proj_set_sales_link_base(uuid, uuid, boolean), proj_set_sales_link(uuid, uuid, boolean), proj_handover_submitted_ops(),
+  proj_staff_directory(), chat_group_members(uuid),
   ops_company_ids(), ops_require(uuid), ops_notify_managers(uuid, text, jsonb, text), crm_set_ops_planning(uuid, boolean, jsonb, integer), ops_set_enquiry_planning(uuid, jsonb),
   ops_edition_snapshot(uuid), ops_upcoming_work(uuid), crm_ops_planning(uuid), proj_handover_edition(), proj_details_edition(), proj_project_editions(),
   proj_projects_for_edition(uuid), chat_is_ops(uuid, uuid), chat_is_member(uuid, uuid), chat_project_group(uuid), chat_my_groups(), proj_details_dates_changed(),
@@ -649,6 +800,7 @@ revoke all on function
   proj_closeout_evidence(uuid)
   from public, anon, authenticated;
 grant execute on function
+  proj_set_sales_link(uuid, uuid, boolean), proj_staff_directory(), chat_group_members(uuid),
   ops_company_ids(), crm_set_ops_planning(uuid, boolean, jsonb, integer), ops_set_enquiry_planning(uuid, jsonb), ops_upcoming_work(uuid), crm_ops_planning(uuid),
   proj_project_editions(), proj_projects_for_edition(uuid), chat_project_group(uuid), chat_my_groups(), proj_resolve_equipment_review(uuid, text),
   proj_equipment_readiness(uuid), ops_overview(uuid), proj_closeout_evidence(uuid)
