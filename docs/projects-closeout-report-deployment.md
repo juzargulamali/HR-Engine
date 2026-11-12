@@ -1,6 +1,6 @@
 # Project Closeout Report (Projects & Tasks Phase 2, part 2): rollout
 
-Migration `supabase/migrations/20270101000100_proj_closeout_reports.sql` (install-order row 29). **Status (2026-11-12): applied on the hosted database by the owner with the preflight and verify packs, all passed (owner-reported); the app is merged in PR #84 (`e12c22f`); Production deployment and smoke check `Unverified`. Whether a live Anthropic call was among the owner's tests was not stated.** Reference: `docs/enginious-os/modules/projects-closeout-report.md`.
+Migration `supabase/migrations/20270101000100_proj_closeout_reports.sql` (install-order row 29). **Status (2026-11-12): applied on the hosted database by the owner with the preflight and verify packs, all passed (owner-reported); the app is merged in PR #84 (`e12c22f`); Production: Vercel deployed `e12c22f` and the signed-in smoke check of the Closeout report passed (owner-reported). A live Anthropic call remains `Unverified`.** Reference: `docs/enginious-os/modules/projects-closeout-report.md`.
 
 ## What it adds
 Three tables (`proj_closeout_reports`, the daily counter `proj_closeout_usage` and `proj_closeout_generations`, which records each provider call per reviewed content and keeps its result for reuse) and ten functions. Nothing existing is altered. Signed-in users can read the table through row-level security (only whoever manages the project) and cannot write them; every change goes through a function that checks the caller. Nothing here completes a project, notifies anyone or touches stock.

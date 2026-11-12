@@ -1,6 +1,6 @@
 # Delivery Plan (Projects & Tasks Phase 2, part 1): rollout
 
-Migration `supabase/migrations/20261231000100_proj_delivery_plan.sql` (install-order row 28). **Status (2026-11-12): applied on the hosted database by the owner with the preflight and verify packs, all passed (owner-reported); the app is merged in PR #84 (`e12c22f`); Production deployment and smoke check `Unverified`.** Reference: `docs/enginious-os/modules/projects-delivery-plan.md`.
+Migration `supabase/migrations/20261231000100_proj_delivery_plan.sql` (install-order row 28). **Status (2026-11-12): applied on the hosted database by the owner with the preflight and verify packs, all passed (owner-reported); the app is merged in PR #84 (`e12c22f`); Production: Vercel deployed `e12c22f` and the signed-in smoke check of the Delivery plan passed (owner-reported).** Reference: `docs/enginious-os/modules/projects-delivery-plan.md`.
 
 ## What it adds
 Six tables (`proj_dp_state`, `proj_dp_items`, `proj_dp_lines`, `proj_dp_delegations`, `proj_dp_corrections`, `proj_dp_changes`) and sixteen functions. Nothing existing is altered. Signed-in users can read the tables through row-level security (people who can read the project's details) and cannot write them; every change goes through a function that checks the caller.
