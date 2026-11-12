@@ -6,6 +6,7 @@ import { isSysAdmin, ROLES } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createEmailLinkClient } from "@/lib/supabase/email-link";
 import type { ActionState } from "./companies";
 
 const inviteUserSchema = z.object({
@@ -85,7 +86,9 @@ export async function resendInvite(email: string): Promise<{ error: string | nul
 
   const supabase = await createClient();
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
+  // Sent with the email-link client, not the session client: see lib/supabase/email-link.ts. With the session client the link could only
+  // be completed in THIS administrator's browser, so the person it was sent to always saw "invalid or has expired".
+  const { error } = await createEmailLinkClient().auth.resetPasswordForEmail(parsed.data.email, {
     ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/set-password` } : {}),
   });
   if (error) {

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { canManageAccountStatus } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
+import { createEmailLinkClient } from "@/lib/supabase/email-link";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseHoldings, type AccountHoldings } from "@/lib/people-access/holdings";
@@ -221,7 +222,8 @@ export async function adminSendPasswordReset(userId: string): Promise<{ error: s
   }
 
   const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
-  const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
+  // Sent with the email-link client: with the session client the link could only be completed in the administrator's own browser (lib/supabase/email-link.ts).
+  const { error } = await createEmailLinkClient().auth.resetPasswordForEmail(profile.email, {
     ...(siteUrl ? { redirectTo: `${siteUrl.replace(/\/$/, "")}/reset-password` } : {}),
   });
   if (error) {

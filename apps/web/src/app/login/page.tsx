@@ -1,5 +1,6 @@
 import { OsLogo } from "@/components/brand/os-logo";
 import { ThemeToggle } from "@/components/theme/theme-toggle";
+import { EmailLinkForwarder } from "./email-link-forwarder";
 import { LoginForm } from "./login-form";
 
 export const metadata = { title: "Sign in" };
@@ -29,6 +30,7 @@ export default async function LoginPage({
             <p className="mt-1 text-sm text-muted-foreground">Sign in with the account your HR team set up for you.</p>
           </div>
         </div>
+        <EmailLinkForwarder />
         <LoginForm next={next} />
       </div>
     </div>

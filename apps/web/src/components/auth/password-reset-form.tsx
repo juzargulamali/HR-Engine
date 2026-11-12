@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { getPasswordIssues, PASSWORD_REQUIREMENTS_TEXT } from "@enginious-hr/domain";
+import { isUsedOrExpired, readEmailLink } from "@/lib/auth/email-link";
 import { createClient } from "@/lib/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/alert";
 
 type Status = "checking" | "ready" | "invalid";
+type Reason = "used" | "other-browser" | "unknown";
 
 /**
  * Shared by /set-password (invite completion) and /reset-password
@@ -21,6 +23,7 @@ type Status = "checking" | "ready" | "invalid";
  */
 export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
   const [status, setStatus] = useState<Status>("checking");
+  const [reason, setReason] = useState<Reason>("unknown");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -32,16 +35,16 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
     let cancelled = false;
 
     async function establishSession() {
-      const hash = window.location.hash.startsWith("#") ? window.location.hash.slice(1) : window.location.hash;
-      const params = new URLSearchParams(hash);
-      const accessToken = params.get("access_token");
-      const refreshToken = params.get("refresh_token");
+      const link = readEmailLink(window.location.hash, window.location.search);
 
       let ok = false;
-      if (accessToken && refreshToken) {
+      if (link.kind === "tokens") {
         const supabase = createClient();
-        const { error: sessionError } = await supabase.auth.setSession({ access_token: accessToken, refresh_token: refreshToken });
+        const { error: sessionError } = await supabase.auth.setSession({ access_token: link.accessToken, refresh_token: link.refreshToken });
         ok = !sessionError;
+      } else if (!cancelled) {
+        // Say which of the two it is: a link that was already used or is too old, or one that can only be finished where it was asked for.
+        setReason(isUsedOrExpired(link) ? "used" : link.kind === "code" ? "other-browser" : "unknown");
       }
 
       if (cancelled) return;
@@ -143,11 +146,14 @@ export function PasswordResetForm({ mode }: { mode: "invite" | "reset" }) {
   }
 
   if (status === "invalid") {
+    const next = mode === "invite" ? "Ask HR to send you a new invite from People & Access." : "Request a new one from the forgot-password page.";
     return (
-      <Alert variant="destructive">
-        {mode === "invite"
-          ? "This link is invalid or has expired. Ask HR to send you a new invite from People & Access."
-          : "This link is invalid or has expired. Request a new one from the forgot-password page."}
+      <Alert variant="destructive" data-testid="email-link-invalid" data-reason={reason}>
+        {reason === "used"
+          ? `This link has already been used or has expired. A link works once, and some email systems open it before you do. ${next}`
+          : reason === "other-browser"
+            ? `This link cannot be finished here. It was made in a way that only works in the browser that asked for it. ${next}`
+            : `This link is invalid or has expired. ${next}`}
       </Alert>
     );
   }

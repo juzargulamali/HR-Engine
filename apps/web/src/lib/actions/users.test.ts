@@ -4,10 +4,12 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
+vi.mock("@/lib/supabase/email-link", () => ({ createEmailLinkClient: vi.fn() }));
 
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createEmailLinkClient } from "@/lib/supabase/email-link";
 import { inviteUser, resendInvite, deleteUserAccount } from "./users";
 import { adminSendPasswordReset } from "./account-status";
 
@@ -47,6 +49,7 @@ describe.each(NOT_SYS_ADMIN)("account actions are refused for %s, and reach no s
     expect((await adminSendPasswordReset(TARGET_ID)).error).toMatch(/Only a System Administrator/);
     expect(createAdminClient).not.toHaveBeenCalled();
     expect(createClient).not.toHaveBeenCalled();
+    expect(createEmailLinkClient).not.toHaveBeenCalled();
   });
 });
 
@@ -80,9 +83,12 @@ describe("resendInvite and adminSendPasswordReset", () => {
     const rpc = vi.fn().mockResolvedValue({ error: null });
     const resetPasswordForEmail = vi.fn().mockResolvedValue({ error: resetError });
     const maybeSingle = vi.fn().mockResolvedValue({ data: profile });
-    const client = { rpc, auth: { resetPasswordForEmail }, from: vi.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle }) }) })) };
+    // The session client must never send the e-mail: a link it asks for can only be completed in the administrator's own browser.
+    const sessionReset = vi.fn().mockResolvedValue({ error: null });
+    const client = { rpc, auth: { resetPasswordForEmail: sessionReset }, from: vi.fn(() => ({ select: () => ({ eq: () => ({ maybeSingle }) }) })) };
     vi.mocked(createClient).mockResolvedValue(client as never);
-    return { rpc, resetPasswordForEmail, from: client.from };
+    vi.mocked(createEmailLinkClient).mockReturnValue({ auth: { resetPasswordForEmail } } as never);
+    return { rpc, resetPasswordForEmail, sessionReset, from: client.from };
   }
 
   it("resend sends the reset-style e-mail to /set-password and logs invitation_resent against the account", async () => {
@@ -91,6 +97,7 @@ describe("resendInvite and adminSendPasswordReset", () => {
     const c = userClient({ id: TARGET_ID });
     expect(await resendInvite("invited@example.invalid")).toEqual({ error: null });
     expect(c.resetPasswordForEmail).toHaveBeenCalledWith("invited@example.invalid", { redirectTo: "https://hr.example.test/set-password" });
+    expect(c.sessionReset).not.toHaveBeenCalled();
     expect(c.rpc).toHaveBeenCalledWith("log_security_event", { p_action: "invitation_resent", p_target_user_id: TARGET_ID });
   });
 
@@ -108,6 +115,7 @@ describe("resendInvite and adminSendPasswordReset", () => {
     const c = userClient({ email: "real.address@example.invalid" });
     expect(await adminSendPasswordReset(TARGET_ID)).toEqual({ error: null });
     expect(c.resetPasswordForEmail).toHaveBeenCalledWith("real.address@example.invalid", { redirectTo: "https://hr.example.test/reset-password" });
+    expect(c.sessionReset).not.toHaveBeenCalled();
     expect(c.rpc).toHaveBeenCalledWith("log_security_event", { p_action: "password_reset_sent_by_admin", p_target_user_id: TARGET_ID });
   });
 
