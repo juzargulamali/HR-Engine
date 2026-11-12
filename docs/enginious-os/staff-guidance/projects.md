@@ -61,7 +61,7 @@ Each project has one group in Chat, named by the project's reference and name. I
 1. Press the Chat button at the corner of any page and choose the project under Projects.
 2. Or open the project and press Chat in its header.
 3. Write your message; type @ and choose a name to mention someone.
-4. An old Discussion link opens the same group. An archived project's group is under Archived.
+4. An old Discussion link opens the same group. A completed or archived project's group is under Archived.
 
 ## Accept a Sales handover
 - id: projects-handover
@@ -467,11 +467,11 @@ The closeout report is an internal report about one project, prepared by its Pro
 - id: operations-upcoming-work
 - area: projects
 - status: published
-- keywords: upcoming work; flagged enquiries; operations planning; provisional project manager; capacity conflict; ask sales to confirm; next step with; tentative job; plan a job before it is won
+- keywords: upcoming work; flagged enquiries; operations planning; provisional project manager; capacity conflict; ask sales to confirm; next step with; tentative job; plan a job before it is won; next unresolved item; expected decision; tentative dates
 - links: Upcoming Work -> /operations/upcoming; Overview -> /operations
 - screens: /operations/upcoming
 
-Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company, with dates, place, event, expected teams and equipment, and who has the next step. It never shows prices, quotes or Sales notes. Tentative jobs are planned here; nothing is booked until the enquiry is won and its handover is accepted. An enquiry leaves the list when its project exists or Sales removes the flag.
+Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company. Each card is headed by the event and venue and shows four things: the dates (installation, show and dismantling, marked tentative until confirmed), the expected decision, the provisional Project Manager and the next unresolved item. Press More for teams, equipment, risk and questions. It never shows prices, quotes or Sales notes. Nothing is booked until the enquiry is won and its handover is accepted.
 
 1. Open Operations, then Upcoming Work. Choose the company if you have more than one.
 2. Use the search, Stage and Next step with to narrow the list.
@@ -483,17 +483,32 @@ Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged f
 - id: operations-overview-decisions
 - area: projects
 - status: published
-- keywords: operations overview; needs my decision; handover stalled; installation at risk; blocker not resolved; upcoming delivery; team and warehouse pressure; most relevant issue
+- keywords: operations overview; needs my decision; handover stalled; installation at risk; blocker not resolved; summary cards; delivery timeline; next installations; equipment issues; delivery by week; equipment lines ready; team pressure
 - links: Overview -> /operations; Handovers -> /projects/handovers
 - screens: /operations
 
-The Overview is for Operations Managers. Needs my decision lists recorded situations: a handover with no Project Manager, a handover waiting three days or more, a blocker, an installation at risk, an equipment booking to review, reservations not released. Each names who it is with and opens the screen where that person acts. Below are Coming up from Sales, Upcoming delivery and Team and warehouse pressure. Operations changes no task, booking or stock.
+The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues and project health. Operations changes no task, booking or stock.
 
 1. Open Operations, then Overview. Choose the company if you have more than one.
-2. Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager.
-3. On the handover choose a person under Project Manager and press Assign Project Manager. They accept it; you cannot accept for them.
+2. Press a card at the top to jump to its list.
+3. Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.
 4. For other items press the button on the item and speak to the person named under With.
-5. Under Upcoming delivery read Most relevant issue, and use Open project chat to ask the team.
+5. Under Next installations read the label and how many equipment lines are ready. Open the project to see more.
+
+## Project health labels in Operations
+- id: operations-project-health
+- area: projects
+- status: published
+- keywords: project health; health label; on track; needs attention; at risk; not enough information; how the label is decided; is a project at risk; why is a project at risk
+- links: Overview -> /operations
+- screens: /operations
+
+Each live project on the Operations Overview has one label, taken from the records. At risk: it starts within 14 days or is under way and has a shortage, an unsent equipment list, a blocked or overdue task, an overdue milestone or unreleased Delivery plan lines; or equipment is overdue back. Needs attention: a blocked or overdue task or a shortage further ahead, no Project Manager, or a booking to review. Not enough information: no date recorded. On track: dates recorded and nothing against it. It is not a score.
+
+1. Open Operations, then Overview, and scroll to Project health.
+2. Read the reasons under the label. Each one opens the screen where it is dealt with.
+3. Press How the label is decided to read the rules.
+4. The label follows the records. To change it, speak to the Project Manager or the warehouse named on the item.
 
 ## After a date change: mark as reviewed
 - id: projects-equipment-booking-review
@@ -515,13 +530,13 @@ When a project's installation or event dates change after its list was sent to t
 - id: projects-chat-archived
 - area: projects
 - status: published
-- keywords: archived chats; archived project chat; old project conversation; where did the project chat go; chat missing after archive; archived section in chat
+- keywords: archived chats; archived project chat; old project conversation; where did the project chat go; chat missing after archive; archived section in chat; completed project chat; finished project chat; chat gone after completing a project
 - links: Projects -> /projects
 - screens: /projects
 
-When a project is archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A completed project that is not archived stays under Projects. If the project is restored, its group returns to Projects.
+When a project is completed or archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A link to the conversation still opens it. If the project is reopened or restored, its group returns to Projects. The project itself is not changed by this.
 
 1. Press the Chat button at the corner of any page.
 2. Scroll to Archived at the bottom of the list and press it to open the section.
 3. Choose the project to read its conversation.
-4. Or type the project's name or reference in the search box, if you have one: it finds archived groups too.
+4. Or type the project's name or reference in the search box, if you have one: it finds finished groups too.

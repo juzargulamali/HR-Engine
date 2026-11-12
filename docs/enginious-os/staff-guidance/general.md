@@ -6,13 +6,16 @@ Approved, staff-facing guidance. JARVIS answers "how do I" questions from the to
 - id: my-day
 - area: general
 - status: published
-- keywords: my day; home page; homepage; what is waiting for me; what do i need to do; dashboard; start page; today
-- links: My Day -> /
+- keywords: my day; home page; homepage; what is waiting for me; what do i need to do; dashboard; start page; today; needs me; operations summary; waiting for a decision; most urgent issue; operations on my day
+- links: My Day -> /; Operations Overview -> /operations
 - screens: /
 
-My Day is the home page. It shows what needs you today, according to what you have access to.
+My Day is the home page. It shows what needs you today, according to what you have access to. Needs me is one list of what waits for you. A Project Manager sees Review equipment booking there, one line per project. An Operations Manager also sees an Operations card with the number of situations waiting for a decision, the next three installations and the most urgent issue, and a line in Needs me when Sales answers their question. If a part cannot be loaded, the page says so and never shows zero.
 
 1. Open the home page of Enginious OS (My Day).
+2. Read Needs me first. Each line opens the screen where you act.
+3. Operations Managers: on the Operations card, press the number under Waiting for a decision to open that list in Operations.
+4. Press an installation or the most urgent issue to open that project or record.
 
 ## Decisions waiting for you
 - id: approvals

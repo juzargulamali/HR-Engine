@@ -15,16 +15,28 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "what do i need to do",
       "dashboard",
       "start page",
-      "today"
+      "today",
+      "needs me",
+      "operations summary",
+      "waiting for a decision",
+      "most urgent issue",
+      "operations on my day"
     ],
-    "summary": "My Day is the home page. It shows what needs you today, according to what you have access to.",
+    "summary": "My Day is the home page. It shows what needs you today, according to what you have access to. Needs me is one list of what waits for you. A Project Manager sees Review equipment booking there, one line per project. An Operations Manager also sees an Operations card with the number of situations waiting for a decision, the next three installations and the most urgent issue, and a line in Needs me when Sales answers their question. If a part cannot be loaded, the page says so and never shows zero.",
     "steps": [
-      "Open the home page of Enginious OS (My Day)."
+      "Open the home page of Enginious OS (My Day).",
+      "Read Needs me first. Each line opens the screen where you act.",
+      "Operations Managers: on the Operations card, press the number under Waiting for a decision to open that list in Operations.",
+      "Press an installation or the most urgent issue to open that project or record."
     ],
     "links": [
       {
         "label": "My Day",
         "href": "/"
+      },
+      {
+        "label": "Operations Overview",
+        "href": "/operations"
       }
     ],
     "screens": [
@@ -494,7 +506,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press the Chat button at the corner of any page and choose the project under Projects.",
       "Or open the project and press Chat in its header.",
       "Write your message; type @ and choose a name to mention someone.",
-      "An old Discussion link opens the same group. An archived project's group is under Archived."
+      "An old Discussion link opens the same group. A completed or archived project's group is under Archived."
     ],
     "links": [
       {
@@ -1461,9 +1473,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "ask sales to confirm",
       "next step with",
       "tentative job",
-      "plan a job before it is won"
+      "plan a job before it is won",
+      "next unresolved item",
+      "expected decision",
+      "tentative dates"
     ],
-    "summary": "Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company, with dates, place, event, expected teams and equipment, and who has the next step. It never shows prices, quotes or Sales notes. Tentative jobs are planned here; nothing is booked until the enquiry is won and its handover is accepted. An enquiry leaves the list when its project exists or Sales removes the flag.",
+    "summary": "Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company. Each card is headed by the event and venue and shows four things: the dates (installation, show and dismantling, marked tentative until confirmed), the expected decision, the provisional Project Manager and the next unresolved item. Press More for teams, equipment, risk and questions. It never shows prices, quotes or Sales notes. Nothing is booked until the enquiry is won and its handover is accepted.",
     "steps": [
       "Open Operations, then Upcoming Work. Choose the company if you have more than one.",
       "Use the search, Stage and Next step with to narrow the list.",
@@ -1495,17 +1510,21 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "handover stalled",
       "installation at risk",
       "blocker not resolved",
-      "upcoming delivery",
-      "team and warehouse pressure",
-      "most relevant issue"
+      "summary cards",
+      "delivery timeline",
+      "next installations",
+      "equipment issues",
+      "delivery by week",
+      "equipment lines ready",
+      "team pressure"
     ],
-    "summary": "The Overview is for Operations Managers. Needs my decision lists recorded situations: a handover with no Project Manager, a handover waiting three days or more, a blocker, an installation at risk, an equipment booking to review, reservations not released. Each names who it is with and opens the screen where that person acts. Below are Coming up from Sales, Upcoming delivery and Team and warehouse pressure. Operations changes no task, booking or stock.",
+    "summary": "The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues and project health. Operations changes no task, booking or stock.",
     "steps": [
       "Open Operations, then Overview. Choose the company if you have more than one.",
-      "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager.",
-      "On the handover choose a person under Project Manager and press Assign Project Manager. They accept it; you cannot accept for them.",
+      "Press a card at the top to jump to its list.",
+      "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.",
       "For other items press the button on the item and speak to the person named under With.",
-      "Under Upcoming delivery read Most relevant issue, and use Open project chat to ask the team."
+      "Under Next installations read the label and how many equipment lines are ready. Open the project to see more."
     ],
     "links": [
       {
@@ -1515,6 +1534,38 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       {
         "label": "Handovers",
         "href": "/projects/handovers"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
+    "id": "operations-project-health",
+    "area": "projects",
+    "title": "Project health labels in Operations",
+    "keywords": [
+      "project health",
+      "health label",
+      "on track",
+      "needs attention",
+      "at risk",
+      "not enough information",
+      "how the label is decided",
+      "is a project at risk",
+      "why is a project at risk"
+    ],
+    "summary": "Each live project on the Operations Overview has one label, taken from the records. At risk: it starts within 14 days or is under way and has a shortage, an unsent equipment list, a blocked or overdue task, an overdue milestone or unreleased Delivery plan lines; or equipment is overdue back. Needs attention: a blocked or overdue task or a shortage further ahead, no Project Manager, or a booking to review. Not enough information: no date recorded. On track: dates recorded and nothing against it. It is not a score.",
+    "steps": [
+      "Open Operations, then Overview, and scroll to Project health.",
+      "Read the reasons under the label. Each one opens the screen where it is dealt with.",
+      "Press How the label is decided to read the rules.",
+      "The label follows the records. To change it, speak to the Project Manager or the warehouse named on the item."
+    ],
+    "links": [
+      {
+        "label": "Overview",
+        "href": "/operations"
       }
     ],
     "screens": [
@@ -1560,14 +1611,17 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "old project conversation",
       "where did the project chat go",
       "chat missing after archive",
-      "archived section in chat"
+      "archived section in chat",
+      "completed project chat",
+      "finished project chat",
+      "chat gone after completing a project"
     ],
-    "summary": "When a project is archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A completed project that is not archived stays under Projects. If the project is restored, its group returns to Projects.",
+    "summary": "When a project is completed or archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A link to the conversation still opens it. If the project is reopened or restored, its group returns to Projects. The project itself is not changed by this.",
     "steps": [
       "Press the Chat button at the corner of any page.",
       "Scroll to Archived at the bottom of the list and press it to open the section.",
       "Choose the project to read its conversation.",
-      "Or type the project's name or reference in the search box, if you have one: it finds archived groups too."
+      "Or type the project's name or reference in the search box, if you have one: it finds finished groups too."
     ],
     "links": [
       {
@@ -1824,13 +1878,17 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "schedule next action",
       "add follow-up",
       "add a follow-up",
-      "log a follow-up"
+      "log a follow-up",
+      "dismiss handover accepted",
+      "handover accepted notice",
+      "remove handover accepted"
     ],
-    "summary": "The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up.",
+    "summary": "The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up. The Handover card on the page also tells you when a Project Manager has accepted your handover.",
     "steps": [
       "Open Follow-ups in Sales to see what is due.",
       "To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).",
-      "Choose what to do, the date and who it is for."
+      "Choose what to do, the date and who it is for.",
+      "A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days."
     ],
     "links": [
       {

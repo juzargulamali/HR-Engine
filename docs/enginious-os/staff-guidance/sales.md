@@ -94,15 +94,16 @@ Enquiries live in Sales. The quick form needs a title, where it came from, an ag
 - id: sales-follow-ups
 - area: sales
 - status: published
-- keywords: follow-up; follow up; followup; next action; to-do; todo; reminder; overdue; due today; schedule next action; add follow-up; add a follow-up; log a follow-up
+- keywords: follow-up; follow up; followup; next action; to-do; todo; reminder; overdue; due today; schedule next action; add follow-up; add a follow-up; log a follow-up; dismiss handover accepted; handover accepted notice; remove handover accepted
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up.
+The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up. The Handover card on the page also tells you when a Project Manager has accepted your handover.
 
 1. Open Follow-ups in Sales to see what is due.
 2. To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).
 3. Choose what to do, the date and who it is for.
+4. A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days.
 
 ## Log a call, email or meeting on an enquiry
 - id: sales-log-update
