@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Download } from "lucide-react";
 import { isFinishedProject, type IssuedPlanPayload } from "@enginious-hr/domain";
@@ -165,6 +166,11 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
           </div>
         )}
       </Panel>
+      {view.canManage ? (
+        <Panel title="Closeout report" description="An internal report written from this project's records: scope and final delivery, team and ownership, decisions, client feedback, handover and open items. You review what is used, edit the draft and approve a version before it can be downloaded. It can be drafted before the project is closed.">
+          <Link href={`/projects/${id}/closeout`} className={buttonVariants({ variant: "outline", size: "sm" })} data-testid="closeout-entry">Generate closeout report</Link>
+        </Panel>
+      ) : null}
     </div>
   );
 }

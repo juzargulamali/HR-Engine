@@ -108,7 +108,7 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   const KIND = { scope_change: "Scope change", plan_change: "Change to the released delivery plan", correction: "Correction" } as const;
   for (const x of s.decisions.slice(0, LIMITS.decisions)) {
     const base = `${KIND[x.kind]} "${one(x.title ?? "untitled", 160)}": ${x.status} by ${x.decided_by ?? "a person who is not recorded"} on ${d(x.decided_at) ?? "a date that is not recorded"}; raised by ${x.proposed_by} on ${d(x.proposed_at)}.${x.fields?.length ? ` Fields changed: ${x.fields.join(", ").replace(/_/g, " ")}.` : ""}`;
-    add("decisions", `${base} Recorded reason: ${x.reason?.trim() ? "selected below if included" : "none recorded"}.`, x.kind, x.id, KIND[x.kind]);
+    add("decisions", `${base} Recorded reason: ${x.reason?.trim() ? "one is recorded" : "none recorded"}.`, x.kind, x.id, KIND[x.kind]);
     if (x.reason?.trim()) add("decisions", `Reason recorded for "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.reason.trim(), 600)}`, x.kind, x.id, `${KIND[x.kind]} reason`, { key: `decision-reason:${x.id}`, label: `Reason: ${one(x.title ?? KIND[x.kind], 80)}`, defaultOn: true });
     if (x.effect_on_dates?.trim()) add("decisions", `Stated effect on dates of "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.effect_on_dates.trim(), 400)}`, x.kind, x.id, "Scope change effect on dates", { key: `decision-dates:${x.id}`, label: `Effect on dates: ${one(x.title ?? "", 80)}`, defaultOn: true });
   }

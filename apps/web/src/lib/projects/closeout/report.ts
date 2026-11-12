@@ -199,3 +199,24 @@ export function keyFacts(s: EvidenceSnapshot): { label: string; value: string; a
 }
 
 export const toSourceRefs = (sent: readonly EvidenceItem[]): SourceRef[] => sent.map((x) => ({ ref: x.ref, category: x.category, label: x.source.label, source_type: x.source.type, source_id: x.source.id, text: x.text }));
+
+/** Where the record behind a source reference can be opened in the project. */
+export function sourceHref(projectId: string, ref: Pick<SourceRef, "source_type" | "source_id">): string {
+  const base = `/projects/${projectId}`;
+  switch (ref.source_type) {
+    case "scope_change": case "feedback": return `${base}/changes`;
+    case "plan_change": case "correction": case "plan_line": case "deliverable": return `${base}/delivery`;
+    case "task": return ref.source_id ? `${base}/work?task=${ref.source_id}` : `${base}/work`;
+    case "milestone": return `${base}/work`;
+    case "equipment_line": return `${base}/equipment`;
+    case "completion": return `${base}/history`;
+    case "member": return `${base}/people`;
+    default: return base;
+  }
+}
+
+/** One report version as the screen and the download show it. Built on the server from a stored row, so a frozen version is always shown from its own snapshot. */
+export interface ReportView {
+  id: string; versionNo: number; status: "draft" | "approved"; version: number; generation: "none" | "generated"; snapshotAt: string; approvedAt: string | null; approvedBy: string | null;
+  facts: ReturnType<typeof keyFacts>; missing: string[]; sections: ReportSection[]; refs: SourceRef[]; include: string[];
+}

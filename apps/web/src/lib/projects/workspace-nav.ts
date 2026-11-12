@@ -64,7 +64,9 @@ export function manageItems(i: ManageInput): ManageItemData[] {
     { key: "documents", label: "Files & client plan", href: `${i.base}/documents` },
     { key: "history", label: "History", href: `${i.base}/history` },
   );
-  if (i.manager && i.live) items.push({ key: "complete", label: "Complete project", href: `${i.base}/complete`, hint: "Needs the client's confirmation", separatorBefore: true });
-  if (i.canReopen) items.push({ key: "reopen", label: "Reopen project", action: "reopen", separatorBefore: !(i.manager && i.live) });
+  // The internal closeout report can be drafted before the project is closed and written for a finished one, so it does not depend on `live`.
+  if (i.manager) items.push({ key: "closeout", label: "Closeout report", href: `${i.base}/closeout`, hint: "Internal; you review and approve it", separatorBefore: true });
+  if (i.manager && i.live) items.push({ key: "complete", label: "Complete project", href: `${i.base}/complete`, hint: "Needs the client's confirmation" });
+  if (i.canReopen) items.push({ key: "reopen", label: "Reopen project", action: "reopen", separatorBefore: !i.manager });
   return items;
 }
