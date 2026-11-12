@@ -9,8 +9,8 @@ Reference files (all under `docs/enginious-os/modules/`):
 * **T** [`projects-timeline-site-and-files.md`](./projects-timeline-site-and-files.md): Timeline, site bookings, dependencies, Files & client plan.
 * **P** [`projects-people-changes-history-completion.md`](./projects-people-changes-history-completion.md): People & access, Feedback & changes, History, Completion and reopening.
 * **H** [`projects-handovers-equipment-and-workflow.md`](./projects-handovers-equipment-and-workflow.md): Handovers, the Equipment tab, the Budget tab, the end-to-end workflow trace.
-* **L** [`projects-delivery-plan.md`](./projects-delivery-plan.md): the Delivery Plan (Phase 2, part 1; draft PR, not merged; migration `20261231000100` not applied by Claude): deliverables by zone, breakdown, release, corrections, proposals, Excel import and export.
-* **R** [`projects-closeout-report.md`](./projects-closeout-report.md): the Project Closeout Report (Phase 2, part 2; draft PR #84, not merged; migration `20270101000100` not applied by Claude): evidence snapshot, Review data to be sent, the AI or facts-only draft, checks, approval, PDF.
+* **L** [`projects-delivery-plan.md`](./projects-delivery-plan.md): the Delivery Plan (Phase 2, part 1; merged in PR #84, `e12c22f`; migration `20261231000100` applied on hosted, owner-reported): deliverables by zone, breakdown, release, corrections, proposals, Excel import and export.
+* **R** [`projects-closeout-report.md`](./projects-closeout-report.md): the Project Closeout Report (Phase 2, part 2; merged in PR #84, `e12c22f`; migration `20270101000100` applied on hosted, owner-reported): evidence snapshot, Review data to be sent, the AI or facts-only draft, checks, approval, PDF.
 * **C** [`app-chat.md`](./app-chat.md) section 9: the project's Chat group (membership, the end of the Discussion tab, old Discussion links).
 * [`projects-action-catalogue.md`](./projects-action-catalogue.md): every action that changes data. [`projects-phase1-changes.md`](./projects-phase1-changes.md): what Phase 1 changed, per workflow (who can act, what it does, where the user goes next), the Phase 2 boundary and the verification gaps.
 
