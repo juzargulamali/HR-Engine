@@ -2021,7 +2021,7 @@ export interface Database {
         Args: { p_company_id: string; p_name: string; p_owner_user_id: string; p_is_ongoing?: boolean; p_priority?: string; p_start_date?: string | null; p_end_date?: string | null; p_summary?: string | null; p_site_timezone?: string };
         Returns: string;
       };
-      proj_assign_pm: { Args: { p_project_id: string; p_pm_user_id: string }; Returns: undefined };
+      proj_assign_pm: { Args: { p_project_id: string; p_pm_user_id: string; p_reason?: string | null }; Returns: undefined };
       proj_set_acting_pm: { Args: { p_project_id: string; p_user_id: string; p_until: string }; Returns: undefined };
       proj_end_acting_pm: { Args: { p_project_id: string; p_user_id: string }; Returns: undefined };
       proj_update_project: { Args: { p_project_id: string; p_patch: Record<string, unknown>; p_expected_version?: number | null }; Returns: undefined };

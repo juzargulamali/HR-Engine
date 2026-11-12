@@ -29,7 +29,7 @@ export const PROJ_CAPABILITY_LABELS: Record<ProjCapability, { label: string; des
   view_audit: { label: "Read the Projects audit trail", description: "See who changed what in this company's projects, including member-only fields." },
   reopen_project: { label: "Reopen completed projects", description: "Reopen a completed project, with a reason. The completion record stays in the history." },
   override_site_conflict: { label: "Confirm overlapping site bookings", description: "Confirm a booking that overlaps another, with a recorded reason." },
-  operations: { label: "Operations Manager", description: "Open the Operations workspace for this company, assign Project Managers, and read and post in this company's project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not edit tasks or deliveries." },
+  operations: { label: "Operations Manager", description: "Open the Operations workspace for this company, assign or change Project Managers, read this company's projects, comment on tasks, raise corrections and take part in its project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not manage tasks or deliveries or add files." },
 };
 
 export interface ProjGrant {

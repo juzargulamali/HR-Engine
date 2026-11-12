@@ -52,10 +52,11 @@ describe("the Operations Manager working profile (Projects)", () => {
     expect(OPS.capabilities).toEqual(["operations"]);
     expect(OPS.label).toBe("Operations Manager");
     expect(OPS.description).toMatch(/Operations workspace/);
-    expect(OPS.description).toMatch(/assigns Project Managers/);
+    expect(OPS.description).toMatch(/assigns or changes Project Managers/);
+    expect(OPS.description).toMatch(/comments on tasks, raises corrections and takes part in its project chats/);
     expect(OPS.description).toMatch(/project chats/);
     expect(OPS.description).toMatch(/no Sales, Finance, HR or Warehouse rights/);
-    expect(OPS.description).toMatch(/does not edit tasks or deliveries/);
+    expect(OPS.description).toMatch(/does not manage tasks or deliveries or add files/);
     expect(OPS.exclusions).toBe("Cannot approve scope, see commercial information or manage access.");
     expect(OPS.exclusions).not.toMatch(/assign a PM/);
     expect(ADVANCED_GROUPS.projects.find((g) => g.id === "operational")?.capabilities).toContain("operations");

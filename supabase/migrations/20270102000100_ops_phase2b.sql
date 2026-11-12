@@ -8,8 +8,10 @@
 --      WHAT IT DOES NOT GIVE: any Sales, Finance, HR or Warehouse right; creating, editing, completing or managing a project; creating, assigning, moving or
 --      reviewing a task; editing the Delivery Plan; deciding a correction or a change; restricted files; the commercial record of a scope change; creating an
 --      internal project; changing a project's Sales links (those two stay with 'assign_pm' itself and founders).
---      WHAT A READER OF A PROJECT CAN DO, and so an Operations Manager can too, as any project member can: comment on a task, raise a correction, add an
---      unrestricted file or link, and post in the project's old Discussion. Each is recorded under their name. They are participation, not management. A founder holds every capability, so a founder
+--      WHAT AN OPERATIONS MANAGER MAY ADD TO A PROJECT they are not on: a comment on a task, a correction, and messages in the project's conversation. Each is
+--      recorded under their name. They may NOT add a file or a link through Operations alone (triggers on proj_files and proj_upload_intents).
+--      REASSIGNING THE PROJECT MANAGER of a live project keeps the existing function and now needs a reason; the reason is in the project's history, and both
+--      the outgoing and the incoming Project Manager are told. Tasks keep their owners and no equipment booking is touched. A founder holds every capability, so a founder
 --      also sees Operations; Chat access needs the capability itself (explicit), not the founder shortcut.
 --   2. SALES -> OPERATIONS PLANNING: eight planning fields on an enquiry that SALES owns (flag, expected decision date, whether dates are tentative, dismantling date,
 --      expected teams, what Sales still has to confirm, a note written for Operations), and one row per flagged enquiry that OPERATIONS owns (provisional Project
@@ -50,9 +52,9 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 -- An Operations Manager READS the projects of their companies in full, as a founder does, without being on each project: the directory row, the plan, tasks,
--- milestones, people, site dates and equipment. With that comes what every reader of a project may do (comment on a task, raise a correction, add an unrestricted
--- file or link); everything that manages the project or its work still asks for membership, management or its own capability. Restricted files stay with whoever
--- manages the project, and the commercial record of a scope change stays with 'view_commercial'.
+-- milestones, people, site dates and equipment. With that they may comment on a task, raise a correction and take part in the project's conversation.
+-- Everything that manages the project or its work still asks for membership, management or its own capability; adding a file or a link needs a place on the
+-- project (guard below). Restricted files stay with whoever manages the project, and the commercial record of a scope change stays with 'view_commercial'.
 create or replace function proj_can_view_details(p_project_id uuid)
 returns boolean language sql stable security definer set search_path = public as $$
   select exists (
@@ -69,6 +71,52 @@ returns boolean language sql stable security definer set search_path = public as
            or proj_has_capability(pr.company_id, 'operations')
            or (proj_has_access(pr.company_id) and pr.status in ('planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold'))
            or proj_sales_linked(pr.id)));
+$$;
+
+-- Files and links: a signed-in person adds one only as a founder of the company or an active member of the project. Reading a project through Operations does
+-- not make someone a contributor of documents. (The functions that add files test "can read the project", which now includes Operations: this is the narrower test.)
+create or replace function proj_file_contributor_guard()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_company uuid;
+begin
+  if auth.uid() is null then return new; end if;
+  select company_id into v_company from proj_projects where id = new.project_id;
+  if not (proj_is_founder(v_company) or proj_is_active_member(new.project_id)) then
+    raise exception 'Only the people on this project can add files or links to it' using errcode = '42501';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists trg_proj_files_contributor on proj_files;
+create trigger trg_proj_files_contributor before insert on proj_files for each row execute function proj_file_contributor_guard();
+drop trigger if exists trg_proj_upload_intents_contributor on proj_upload_intents;
+create trigger trg_proj_upload_intents_contributor before insert on proj_upload_intents for each row execute function proj_file_contributor_guard();
+
+-- Changing the Project Manager of a live project: the existing function is kept under a new name and called by this one, which adds what a reassignment needs:
+-- a reason (kept in the project's history) and a notice to the OUTGOING Project Manager (the incoming one is already told by the existing function).
+-- Who may do it is unchanged (assign_pm, which Operations implies, or founder). Tasks keep their assignees; nothing in Inventory is read or written.
+do $$
+begin
+  if to_regprocedure('public.proj_assign_pm_base(uuid, uuid)') is null then
+    alter function proj_assign_pm(uuid, uuid) rename to proj_assign_pm_base;
+  end if;
+end $$;
+create or replace function proj_assign_pm(p_project_id uuid, p_pm_user_id uuid, p_reason text default null)
+returns void language plpgsql security definer set search_path = public as $$
+declare v proj_projects; v_reason text := btrim(coalesce(p_reason, ''));
+begin
+  select * into v from proj_projects where id = p_project_id;
+  if not found or not proj_has_capability(v.company_id, 'assign_pm') then
+    raise exception 'Only a founder, or someone a founder gave PM assignment to, can change the Project Manager' using errcode = '42501';
+  end if;
+  if v.pm_user_id = p_pm_user_id then return; end if;
+  if length(v_reason) < 3 then raise exception 'Give the reason for changing the Project Manager' using errcode = '22023'; end if;
+  if length(v_reason) > 500 then raise exception 'Keep the reason under 500 characters' using errcode = '22023'; end if;
+  perform proj_assign_pm_base(p_project_id, p_pm_user_id);       -- every existing check, the membership change, the history line and the notice to the new PM
+  perform proj_log_change(v.id, 'project', v.id, 'pm_change_reason', null, v_reason);
+  perform proj_notify(v.id, v.pm_user_id, 'project_pm_changed',
+    jsonb_build_object('name', v.name, 'reference', v.reference, 'new_pm', proj_display_name(p_pm_user_id), 'reason', v_reason), 'project:' || v.id || ':pm_changed:' || p_pm_user_id, false);
+end;
 $$;
 
 -- 'assign_pm' ITSELF (or founder), without the Operations implication: for the two things an Operations Manager must not do through it.
@@ -791,6 +839,7 @@ end;
 $$;
 
 revoke all on function
+  proj_file_contributor_guard(), proj_assign_pm_base(uuid, uuid), proj_assign_pm(uuid, uuid, text),
   proj_holds_assign_pm(uuid), proj_internal_project_guard(), proj_set_sales_link_base(uuid, uuid, boolean), proj_set_sales_link(uuid, uuid, boolean), proj_handover_submitted_ops(),
   proj_staff_directory(), chat_group_members(uuid),
   ops_company_ids(), ops_require(uuid), ops_notify_managers(uuid, text, jsonb, text), crm_set_ops_planning(uuid, boolean, jsonb, integer), ops_set_enquiry_planning(uuid, jsonb),
@@ -800,7 +849,7 @@ revoke all on function
   proj_closeout_evidence(uuid)
   from public, anon, authenticated;
 grant execute on function
-  proj_set_sales_link(uuid, uuid, boolean), proj_staff_directory(), chat_group_members(uuid),
+  proj_assign_pm(uuid, uuid, text), proj_set_sales_link(uuid, uuid, boolean), proj_staff_directory(), chat_group_members(uuid),
   ops_company_ids(), crm_set_ops_planning(uuid, boolean, jsonb, integer), ops_set_enquiry_planning(uuid, jsonb), ops_upcoming_work(uuid), crm_ops_planning(uuid),
   proj_project_editions(), proj_projects_for_edition(uuid), chat_project_group(uuid), chat_my_groups(), proj_resolve_equipment_review(uuid, text),
   proj_equipment_readiness(uuid), ops_overview(uuid), proj_closeout_evidence(uuid)

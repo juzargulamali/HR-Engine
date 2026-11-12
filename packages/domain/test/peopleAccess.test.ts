@@ -37,10 +37,10 @@ describe("presets are only bundles of capabilities that exist", () => {
     const info = capabilityInfo("projects", "operations");
     expect(info.label).toBe("Operations Manager");
     expect(info.description).toMatch(/Operations workspace for this company/);
-    expect(info.description).toMatch(/assign Project Managers/);
-    expect(info.description).toMatch(/read and post in this company's project chats/);
+    expect(info.description).toMatch(/assign or change Project Managers/);
+    expect(info.description).toMatch(/comment on tasks, raise corrections and take part in its project chats/);
     expect(info.description).toMatch(/no Sales, Finance, HR or Warehouse rights/);
-    expect(info.description).toMatch(/does not edit tasks or deliveries/);
+    expect(info.description).toMatch(/does not manage tasks or deliveries or add files/);
     expect(founderOnlyCapabilities("projects")).not.toContain("operations");
     expect(grantableCapabilities("projects", ["manage_access"])).toContain("operations");
     expect(ACCESS_PRESETS.projects.find((p) => p.id === "projects-operations")?.capabilities).toEqual(["operations"]);

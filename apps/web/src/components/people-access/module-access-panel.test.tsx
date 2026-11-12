@@ -184,7 +184,7 @@ describe("Operations Manager is a Projects working profile", () => {
     edit(/projects & tasks access/i);
     const radio = screen.getByRole("radio", { name: /^operations manager/i }) as HTMLInputElement;
     expect(radio.disabled).toBe(false);
-    expect(screen.getAllByText(/Opens the Operations workspace for this company, assigns Project Managers, and reads and posts in this company's project chats\. Gives no Sales, Finance, HR or Warehouse rights, and does not edit tasks or deliveries\./).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/Opens the Operations workspace for this company, assigns or changes Project Managers, reads this company's projects, comments on tasks, raises corrections and takes part in its project chats\. Gives no Sales, Finance, HR or Warehouse rights, and does not manage tasks or deliveries or add files\./).length).toBeGreaterThan(0);
     fireEvent.click(radio);
     expect(actions.applyModuleAccess).not.toHaveBeenCalled();
     expect(posted()).toEqual(["operations"]);

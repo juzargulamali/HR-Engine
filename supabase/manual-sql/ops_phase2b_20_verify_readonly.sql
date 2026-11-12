@@ -10,15 +10,15 @@ select item, result from (
          case when exists (select 1 from unnest(array['ops_enquiry_planning', 'proj_equipment_reviews']) t, unnest(array['insert', 'update', 'delete']) p where has_table_privilege('authenticated', 'public.' || t, p))
                 or exists (select 1 from unnest(array['ops_enquiry_planning', 'proj_equipment_reviews']) t, unnest(array['select', 'insert', 'update', 'delete']) p where has_table_privilege('anon', 'public.' || t, p))
               then 'FAIL - a write privilege is granted' else 'OK' end
-  union all select 5, 'the sixteen functions the app calls (thirteen new, three replaced) exist; signed-in users can call them; anon and public cannot',
+  union all select 5, 'the seventeen functions the app calls (thirteen new, four replaced) exist; signed-in users can call them; anon and public cannot',
          case when (select count(*) from (values
-              ('public.proj_set_sales_link(uuid, uuid, boolean)'), ('public.proj_staff_directory()'), ('public.chat_group_members(uuid)'), ('public.ops_company_ids()'), ('public.crm_set_ops_planning(uuid, boolean, jsonb, integer)'), ('public.ops_set_enquiry_planning(uuid, jsonb)'), ('public.ops_upcoming_work(uuid)'),
+              ('public.proj_assign_pm(uuid, uuid, text)'), ('public.proj_set_sales_link(uuid, uuid, boolean)'), ('public.proj_staff_directory()'), ('public.chat_group_members(uuid)'), ('public.ops_company_ids()'), ('public.crm_set_ops_planning(uuid, boolean, jsonb, integer)'), ('public.ops_set_enquiry_planning(uuid, jsonb)'), ('public.ops_upcoming_work(uuid)'),
               ('public.crm_ops_planning(uuid)'), ('public.proj_project_editions()'), ('public.proj_projects_for_edition(uuid)'), ('public.chat_project_group(uuid)'), ('public.chat_my_groups()'),
               ('public.proj_resolve_equipment_review(uuid, text)'), ('public.proj_equipment_readiness(uuid)'), ('public.ops_overview(uuid)'), ('public.proj_closeout_evidence(uuid)')) f(sig)
               where to_regprocedure(f.sig) is not null and has_function_privilege('authenticated', f.sig, 'execute') and not has_function_privilege('anon', f.sig, 'execute')
-                and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 16 then 'OK' else 'FAIL - missing or privileges differ' end
+                and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 17 then 'OK' else 'FAIL - missing or privileges differ' end
   union all select 6, 'the internal helpers are NOT callable by signed-in users, anon or public',
-         case when exists (select 1 from (values ('public.proj_holds_assign_pm(uuid)'), ('public.proj_internal_project_guard()'), ('public.proj_set_sales_link_base(uuid, uuid, boolean)'), ('public.proj_handover_submitted_ops()'), ('public.ops_require(uuid)'), ('public.ops_notify_managers(uuid, text, jsonb, text)'), ('public.ops_edition_snapshot(uuid)'), ('public.chat_is_ops(uuid, uuid)'),
+         case when exists (select 1 from (values ('public.proj_file_contributor_guard()'), ('public.proj_assign_pm_base(uuid, uuid)'), ('public.proj_holds_assign_pm(uuid)'), ('public.proj_internal_project_guard()'), ('public.proj_set_sales_link_base(uuid, uuid, boolean)'), ('public.proj_handover_submitted_ops()'), ('public.ops_require(uuid)'), ('public.ops_notify_managers(uuid, text, jsonb, text)'), ('public.ops_edition_snapshot(uuid)'), ('public.chat_is_ops(uuid, uuid)'),
                 ('public.chat_is_member(uuid, uuid)'), ('public.inv_request_state(uuid)'), ('public.inv_project_release_pending(uuid)'), ('public.proj_closeout_evidence_base(uuid)'), ('public.proj_handover_edition()'), ('public.proj_details_edition()'),
                 ('public.proj_details_dates_changed()')) f(sig)
               where to_regprocedure(f.sig) is null or has_function_privilege('authenticated', f.sig, 'execute') or has_function_privilege('anon', f.sig, 'execute')) then 'FAIL - callable or missing' else 'OK' end
@@ -28,8 +28,8 @@ select item, result from (
          case when not exists (select 1 from pg_proc p where p.pronamespace = 'public'::regnamespace
                                and p.proname in ('ops_set_enquiry_planning', 'crm_set_ops_planning', 'ops_upcoming_work', 'ops_overview', 'proj_equipment_readiness', 'proj_resolve_equipment_review', 'proj_details_dates_changed', 'inv_request_state')
                                and p.prosrc ~* '(insert into inv_|update inv_|delete from inv_|inv_reserve|inv_release|inv_dispatch|inv_change_request_window|insert into proj_projects|insert into proj_tasks|insert into proj_project_members|proj_create_task)') then 'OK' else 'CHANGED' end
-  union all select 9, 'the five triggers are installed (handover edition, project edition, date change review, internal project guard, handover notice for Operations)',
-         case when (select count(*) from pg_trigger where not tgisinternal and tgname in ('trg_proj_handover_edition', 'trg_proj_details_edition', 'trg_proj_details_dates_changed', 'trg_proj_internal_project_guard', 'trg_proj_handover_submitted_ops')) = 5 then 'OK' else 'MISSING' end
+  union all select 9, 'the seven triggers are installed (handover edition, project edition, date change review, internal project guard, handover notice for Operations, and the two file and link guards)',
+         case when (select count(*) from pg_trigger where not tgisinternal and tgname in ('trg_proj_handover_edition', 'trg_proj_details_edition', 'trg_proj_details_dates_changed', 'trg_proj_internal_project_guard', 'trg_proj_handover_submitted_ops', 'trg_proj_files_contributor', 'trg_proj_upload_intents_contributor')) = 7 then 'OK' else 'MISSING' end
   union all select 10, 'an accepted handover and its project hold the same edition (the copy made at acceptance)',
          case when not exists (select 1 from proj_handovers h join proj_project_details d on d.project_id = h.project_id
                                where h.status = 'accepted' and h.event_edition_id is distinct from d.event_edition_id and d.event_edition_id is not null) then 'OK' else 'FAIL' end
@@ -48,7 +48,12 @@ select item, result from (
   union all select 15, 'Operations implies PM assignment for handovers only: an internal project and a project''s Sales links still need assign_pm itself',
          case when (select prosrc from pg_proc where oid = to_regprocedure('public.proj_set_sales_link(uuid, uuid, boolean)')) like '%proj_holds_assign_pm%'
                    and (select prosrc from pg_proc where oid = to_regprocedure('public.proj_internal_project_guard()')) like '%proj_holds_assign_pm%' then 'OK' else 'CHANGED' end
-  union all select 16, 'INFO enquiries flagged for Operations: ' || (select count(*) from crm_opportunities where ops_flagged_at is not null)::text
+  union all select 16, 'changing a live project''s Project Manager needs a reason and tells the outgoing Project Manager; files and links need a place on the project',
+         case when (select prosrc from pg_proc where oid = to_regprocedure('public.proj_assign_pm(uuid, uuid, text)')) like '%Give the reason for changing the Project Manager%'
+                   and (select prosrc from pg_proc where oid = to_regprocedure('public.proj_assign_pm(uuid, uuid, text)')) like '%project_pm_changed%'
+                   and to_regprocedure('public.proj_assign_pm(uuid, uuid)') is null
+                   and (select prosrc from pg_proc where oid = to_regprocedure('public.proj_file_contributor_guard()')) like '%proj_is_active_member%' then 'OK' else 'CHANGED' end
+  union all select 17, 'INFO enquiries flagged for Operations: ' || (select count(*) from crm_opportunities where ops_flagged_at is not null)::text
                        || '; projects with an event edition: ' || (select count(*) from proj_project_details where event_edition_id is not null)::text
                        || '; open equipment reviews: ' || (select count(*) from proj_equipment_reviews where resolved_at is null)::text, 'INFO'
 ) x order by ord;

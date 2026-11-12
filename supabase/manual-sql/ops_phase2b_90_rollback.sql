@@ -133,6 +133,18 @@ begin
     grant execute on function proj_set_sales_link(uuid, uuid, boolean) to authenticated;
   end if;
 end $$;
+do $$
+begin
+  if to_regprocedure('public.proj_assign_pm_base(uuid, uuid)') is not null then
+    drop function if exists proj_assign_pm(uuid, uuid, text);
+    alter function proj_assign_pm_base(uuid, uuid) rename to proj_assign_pm;
+    revoke all on function proj_assign_pm(uuid, uuid) from public, anon, authenticated;
+    grant execute on function proj_assign_pm(uuid, uuid) to authenticated;
+  end if;
+end $$;
+drop trigger if exists trg_proj_files_contributor on proj_files;
+drop trigger if exists trg_proj_upload_intents_contributor on proj_upload_intents;
+drop function if exists proj_file_contributor_guard();
 drop trigger if exists trg_proj_internal_project_guard on proj_projects;
 drop function if exists proj_internal_project_guard();
 drop trigger if exists trg_proj_handover_submitted_ops on proj_handovers;

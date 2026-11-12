@@ -79,7 +79,7 @@ export const ACCESS_PROFILES: Record<AccessModule, readonly AccessProfile[]> = {
     PR("projects", "project-directory-viewer", "Project directory viewer", "Sees the directory of ongoing projects. Details only where added to a project.", ["view_commercial", "assign_pm", "approve_scope", "manage_access"], []),
     // Exactly ['operations']: the database treats it as assign_pm too (proj_has_capability), so the bundle does not repeat it. Sales, Finance, HR and Warehouse
     // are other modules with their own grants; task and delivery editing belong to the Project Manager on the project, which no company-wide right gives.
-    PR("projects", "operations-manager", "Operations Manager", "Opens the Operations workspace for this company, assigns Project Managers, and reads and posts in this company's project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not edit tasks or deliveries.", ["approve_scope", "view_commercial", "manage_access"], ["operations"]),
+    PR("projects", "operations-manager", "Operations Manager", "Opens the Operations workspace for this company, assigns or changes Project Managers, reads this company's projects, comments on tasks, raises corrections and takes part in its project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not manage tasks or deliveries or add files.", ["approve_scope", "view_commercial", "manage_access"], ["operations"]),
   ],
 };
 

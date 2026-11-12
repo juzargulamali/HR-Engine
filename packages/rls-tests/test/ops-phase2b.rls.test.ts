@@ -257,9 +257,41 @@ describe("Operations (Phase 2B)", () => {
     expect(Number((await admin(`select count(*) n from proj_sales_links where project_id = '${PROJECT}' and removed_at is null`))[0]!.n)).toBeGreaterThanOrEqual(1);
     await call(U.founder, `proj_set_sales_link('${PROJECT}', '${U.sales}', true)`);                          // a founder still can
     expect((await rows(U.ops, `select user_id from proj_staff_directory()`)).length).toBeGreaterThan(3);     // names for the people it assigns
-    // what a reader of a project may do, an Operations Manager may too, under their own name: comment on a task, raise a correction
+    // what an Operations Manager may add to a project they are not on, under their own name: a comment on a task and a correction
     await call(U.ops, `proj_comment_task('${task}', 'Hall access is confirmed')`);
     expect((await admin<Row>(`select author_id from proj_task_comments where task_id = '${task}'`))[0]!.author_id).toBe(U.ops);
+    const corr = await call<string>(U.ops, `proj_dp_raise_correction('${PROJECT}', 'task', '${task}', 'The wall is 6 x 4 m, not 5 x 4 m')`);
+    expect((await admin<Row>(`select raised_by, status from proj_dp_corrections where id = '${corr}'`))[0]).toMatchObject({ raised_by: U.ops, status: "open" });
+    await expect(call(U.ops, `proj_dp_decide_correction('${corr}', 'accept', 'ok')`)).rejects.toThrow();          // raising is not deciding
+    // ... and what they may NOT add through Operations alone: a link or a file. A member still can.
+    await expect(call(U.ops, `proj_add_link('${PROJECT}', 'Ops link', 'https://example.invalid/ops')`)).rejects.toThrow(/Only the people on this project can add files or links/);
+    await expect(rows(U.ops, `select * from proj_create_upload_intent('${PROJECT}', 'a.pdf', 'application/pdf', 1000, 'a.pdf')`)).rejects.toThrow(/Only the people on this project can add files or links/);
+    expect(Number((await admin(`select count(*) n from proj_files where project_id = '${PROJECT}' and uploaded_by = '${U.ops}'`))[0]!.n)).toBe(0);
+    expect(Number((await admin(`select count(*) n from proj_upload_intents where project_id = '${PROJECT}'`))[0]!.n)).toBe(0);
+    expect(await call<string>(U.member, `proj_add_link('${PROJECT}', 'Member link', 'https://example.invalid/m')`)).toBeTruthy();
+    // cross-company: the other company's Operations Manager can do none of it
+    await expect(call(U.opsB, `proj_comment_task('${task}', 'x')`)).rejects.toThrow();
+    await expect(call(U.opsB, `proj_dp_raise_correction('${PROJECT}', 'task', '${task}', 'x')`)).rejects.toThrow();
+    await expect(call(U.opsB, `proj_add_link('${PROJECT}', 'x', 'https://example.invalid/x')`)).rejects.toThrow();
+    await expect(call(U.opsB, `proj_assign_pm('${PROJECT}', '${U.member}', 'Trying from another company')`)).rejects.toThrow(/can change the Project Manager/);
+    // Reassigning the Project Manager of a live project: the existing workflow, with a reason in the history and both Project Managers told.
+    const fpBefore = JSON.stringify(await admin(`select (select md5(string_agg(row(t.id, t.assignee_id, t.status)::text, ',' order by t.id)) from proj_tasks t where t.project_id = '${PROJECT}') tasks,
+      (select count(*) from inv_requests) requests, (select count(*) from inv_reservations) reservations`));
+    await expect(call(U.member, `proj_assign_pm('${PROJECT}', '${U.member}', 'I would like it')`)).rejects.toThrow(/can change the Project Manager/);
+    await expect(call(U.ops, `proj_assign_pm('${PROJECT}', '${U.member}', null)`)).rejects.toThrow(/Give the reason/);
+    await expect(call(U.ops, `proj_assign_pm('${PROJECT}', '${U.member}')`)).rejects.toThrow(/Give the reason/);
+    await expect(call(U.ops, `proj_assign_pm('${PROJECT}', '${U.wh}', 'Warehouse person')`)).rejects.toThrow(/Projects access/);
+    await call(U.ops, `proj_assign_pm('${PROJECT}', '${U.member}', 'Pat is on leave for the installation week')`);
+    expect((await admin<Row>(`select pm_user_id from proj_projects where id = '${PROJECT}'`))[0]!.pm_user_id).toBe(U.member);
+    expect((await admin<Row>(`select role from proj_project_members where project_id = '${PROJECT}' and user_id = '${U.pm}' and removed_at is null`))[0]!.role).toBe("member");   // the outgoing PM stays on the project
+    const log = await admin<Row>(`select field, to_value from proj_change_log where project_id = '${PROJECT}' and field in ('pm', 'pm_change_reason') order by id desc limit 2`);
+    expect(log.map((l) => [l.field, l.to_value]).sort()).toEqual([["pm", "member"], ["pm_change_reason", "Pat is on leave for the installation week"]]);
+    expect((await admin<Row>(`select payload from notifications where user_id = '${U.pm}' and type = 'project_pm_changed'`))[0]!.payload).toMatchObject({ new_pm: "member", reason: "Pat is on leave for the installation week" });
+    expect(await admin(`select 1 from notifications where user_id = '${U.member}' and type = 'project_assigned'`)).toHaveLength(1);
+    expect(JSON.stringify(await admin(`select (select md5(string_agg(row(t.id, t.assignee_id, t.status)::text, ',' order by t.id)) from proj_tasks t where t.project_id = '${PROJECT}') tasks,
+      (select count(*) from inv_requests) requests, (select count(*) from inv_reservations) reservations`))).toBe(fpBefore);   // tasks keep their owners; no booking is touched
+    await call(U.founder, `proj_assign_pm('${PROJECT}', '${U.pm}', 'Pat is back')`);        // back, for the rest of this journey
+    await expect(q(U.ops, `select proj_assign_pm_base('${PROJECT}', '${U.member}')`)).rejects.toThrow(/permission denied/);
     // the other company's Operations Manager, Sales and the warehouse read none of it
     for (const who of [U.opsB, U.sales, U.wh]) expect(await q(who, `select 1 from proj_tasks where project_id = '${PROJECT}'`), who).toEqual([]);
     // revoked: the group is gone on the next read, and posting is refused
@@ -398,6 +430,7 @@ describe("Operations (Phase 2B)", () => {
     expect((await admin<{ c: string[] }>(`select proj_capability_list() c`))[0]!.c).not.toContain("operations");
     expect((await admin(`select to_regprocedure('public.proj_set_sales_link_base(uuid, uuid, boolean)') b, to_regprocedure('public.proj_set_sales_link(uuid, uuid, boolean)') f, to_regprocedure('public.proj_holds_assign_pm(uuid)') h`))[0]).toMatchObject({ b: null, h: null });
     expect((await rows(U.pm, `select name from chat_group_members('${GROUP}')`)).map((r) => r.name).sort()).toEqual(["member", "pm"]);
+    expect((await admin(`select to_regprocedure('public.proj_assign_pm(uuid, uuid)') two, to_regprocedure('public.proj_assign_pm(uuid, uuid, text)') three, to_regprocedure('public.proj_file_contributor_guard()') g`))[0]).toMatchObject({ three: null, g: null });
     expect((await call<Row>(U.pm, `proj_closeout_evidence('${PROJECT}')`)).project.reference).toMatch(/^UAE-P-/);   // the closeout report works as before
     expect((await rows(U.pm, `select gid from chat_my_groups()`)).map((r) => r.gid)).toContain(GROUP);
     await expect(call(U.ops, `chat_project_group('${PROJECT}')`)).rejects.toThrow(/not a member/);
