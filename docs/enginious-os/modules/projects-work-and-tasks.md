@@ -26,7 +26,7 @@ Every database function named here was looked up with `create or replace functio
 
 | Role (word used below) | Meaning | Where the screen works it out | Where the database enforces it |
 |---|---|---|---|
-| Reader | May open the project's details: an active member of the project, or a founder of the project's company. **Phase 2B (branch, not merged, migration `20270102000100` not applied by Claude):** also an Operations Manager of the company, who manages nothing ([`operations.md`](./operations.md) section 2) | `loadProjectView` (`L/projects/data.ts`): `projectViewLevel` must be `details`; `canViewProjectDetails` (`domain`) | `proj_can_view_details` (`SQL-core`); the select policy `<table>_select` on `proj_milestones`, `proj_deliverables`, `proj_tasks`, `proj_task_collaborators`, `proj_task_dependencies`, `proj_task_events`, `proj_task_comments`, `proj_change_log` is `using (proj_can_view_details(project_id))` (`SQL-core`, the `do $$` loop) |
+| Reader | May open the project's details: an active member of the project, or a founder of the project's company. **Phase 2B (merged as PR #86, migration `20270102000100` not applied by Claude):** also an Operations Manager of the company, who manages nothing ([`operations.md`](./operations.md) section 2) | `loadProjectView` (`L/projects/data.ts`): `projectViewLevel` must be `details`; `canViewProjectDetails` (`domain`) | `proj_can_view_details` (`SQL-core`); the select policy `<table>_select` on `proj_milestones`, `proj_deliverables`, `proj_tasks`, `proj_task_collaborators`, `proj_task_dependencies`, `proj_task_events`, `proj_task_comments`, `proj_change_log` is `using (proj_can_view_details(project_id))` (`SQL-core`, the `do $$` loop) |
 | Manager | The Project Manager, a temporary project leader whose date has not passed, or a founder of the project's company | `view.canManage` = `canManageProject(standing)` (`domain`, `L/projects/data.ts`) | `proj_can_manage` (`SQL-core`: `proj_is_founder` or `proj_is_pm`, the latter includes an unexpired `acting_pm` membership); `proj_require_manager` (`SQL-base`) |
 | Head | Head of the department team the task or deliverable belongs to | `standing.headOfTeamIds` (teams whose `head_user_id` is the viewer), `view.headOfTeamIds` | `proj_is_team_head` (`SQL-core`: active profile, team not removed, still an active member) |
 | Assignee | The task's one accountable person, while still a member | `taskActorRole` (`domain`) | `proj_task_actor_role` (`SQL-D`) |
@@ -109,7 +109,7 @@ Each line also shows "Owner: {owner} · Due {date}" or "Owner: {owner} · No due
 
 ### 3.3 Phase 2B: equipment readiness, Review equipment booking, equipment still out, the event edition
 
-Added on branch `claude/projects-phase-2b-operations` (2026-11-12; not merged; migration `20270102000100_ops_phase2b.sql` not applied by Claude, hosted `Unverified`; code read only, not seen signed in). Full reference: [`operations.md`](./operations.md) sections 8.1 and 9. Coverage index rows 250, 255 and 257.
+Added by PR #86 (2026-11-12; merged, merge `5b75ade`; migration `20270102000100_ops_phase2b.sql` not applied by Claude, on hosted treated as applied from the owner's reports of 2026-11-12, not checked by Claude; code read only, not seen signed in). Full reference: [`operations.md`](./operations.md) sections 8.1 and 9. Coverage index rows 250, 255 and 257.
 
 | What | Where | Who | Behaviour | Source |
 |---|---|---|---|---|

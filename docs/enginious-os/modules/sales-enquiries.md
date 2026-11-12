@@ -6,7 +6,7 @@ Related references: stage moves, hold, resume and reopen: [`sales-pipeline-and-s
 
 **Later change: Sales employee launch (2026-11-11, Sales employee launch, branch `claude/admiring-cray-uky379`; no migration; not seen signed-in).** Sections 2 (the reads, search, quick filters), 3 (event dates from the edition), 4 (the guide under the header), 4.1 (dates and Create event or edition) and 4.3 (the timeline and its two views) are updated below and were re-read against the code for the changed parts only; the rest of this reference was not re-read.
 
-**Later change: Projects & Tasks Phase 2B (2026-11-12, branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude; not seen signed in).** The Overview tab gains the **Operations planning** panel: new section 4.6 and the Overview row of the tab table in section 4. Only those parts were written against the code; the rest of this reference was not re-read.
+**Later change: Projects & Tasks Phase 2B (2026-11-12, merged as PR #86, merge `5b75ade`; migration `20270102000100` not applied by Claude; not seen signed in).** The Overview tab gains the **Operations planning** panel: new section 4.6 and the Overview row of the tab table in section 4. Only those parts were written against the code; the rest of this reference was not re-read.
 
 ## 1. Who sees what
 
@@ -216,7 +216,7 @@ Dialog: New owner (people with Sales access to the company), Reason (kept in the
 
 ### 4.6 Operations planning (Overview tab; `ops-planning-panel.tsx`, `ops-planning-forms.tsx`, `lib/actions/crmOps.ts`, `lib/crm/ops-planning.ts`, `ops-planning-data.ts`)
 
-Added by Projects & Tasks Phase 2B (2026-11-12; branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100_ops_phase2b.sql` not applied by Claude, hosted `Unverified`; code read only, not seen signed in). The full per-control reference, with every label and message, is [`operations.md`](./operations.md) section 7; this section is the Sales summary.
+Added by Projects & Tasks Phase 2B (2026-11-12; merged as PR #86, merge `5b75ade`; migration `20270102000100_ops_phase2b.sql` not applied by Claude, on hosted treated as applied from the owner's reports of 2026-11-12, not checked by Claude; code read only, not seen signed in). The full per-control reference, with every label and message, is [`operations.md`](./operations.md) section 7; this section is the Sales summary.
 
 **Where.** Left column of the Overview tab, after Follow-ups. It loads on its own ("Loading the Operations planning details…") so it never holds up the tab.
 

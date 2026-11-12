@@ -430,7 +430,7 @@ Shared meanings:
 | (11) Surface | UI over DB function |
 
 #### `sales.handover_notice.dismiss`
-Added 2026-11-12 (branch `claude/projects-phase-2b-operations`, draft PR #86, not merged; commit `d9e8338`, read at `16d6f42`). App only: no SQL and no new migration; it reuses a Projects function that already existed. Reference: [follow-ups](./sales-followups.md) section 2.1.
+Added 2026-11-12 (merged as PR #86, merge `5b75ade`; commit `d9e8338`, read at `16d6f42`). App only: no SQL and no new migration; it reuses a Projects function that already existed. Reference: [follow-ups](./sales-followups.md) section 2.1.
 
 | Field | Entry |
 |---|---|
@@ -1145,7 +1145,7 @@ Part 2 added the other six Sales actions, **all enabled when the pilot is on** (
 | (10) Retry | **Idempotent per confirmation id (jti)**; both writes commit together or not at all |
 | (11) Surface | **JARVIS action** (UI-only, through the panel); not callable by the model or by chat text |
 
-### 3.10 Operations planning (references: [enquiries 4.6](./sales-enquiries.md), [Operations](./operations.md) section 7; Projects & Tasks Phase 2B, branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude)
+### 3.10 Operations planning (references: [enquiries 4.6](./sales-enquiries.md), [Operations](./operations.md) section 7; Projects & Tasks Phase 2B, merged as PR #86, merge `5b75ade`; migration `20270102000100` not applied by Claude)
 
 All three are one database function, `crm_set_ops_planning(id, flag, fields, expected_version)` (`supabase/migrations/20270102000100_ops_phase2b.sql` section 2). None books, reserves or creates anything. Operations never sees value, currency, budget, payment terms, the brief, scope, exclusions, risks, estimates, proposals, files or activity notes, flagged or not.
 
