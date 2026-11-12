@@ -149,6 +149,8 @@ export async function updateJobDetails(_prev: ActionState, fd: FormData): Promis
   const patch = { job_title: d.jobTitle || null, department_id: d.departmentId ?? null, manager_id: d.managerId ?? null };
   if (patch.job_title === employee.job_title && patch.department_id === employee.department_id && patch.manager_id === employee.manager_id) return { error: null };
   const { data: updated, error } = await supabase.from("employees").update(patch).eq("id", employee.id).select("id");
+  // The database refuses a department of another company, or one that has been removed, whatever this action checked above.
+  if (error && (error.code === "23514" || /belongs to another company|has been removed/i.test(error.message ?? ""))) return { error: "Choose a department of this employee's company." };
   if (error) return { error: error.message };
   if (!updated || updated.length === 0) return { error: "The change was not saved: you are not allowed to edit this employee record." };
   revalidatePath("/people-access");
@@ -189,6 +191,8 @@ export async function addDepartment(_prev: ActionState & { id?: string; name?: s
   if ((existing.data ?? []).some((d) => d.name.trim().toLowerCase() === name.toLowerCase())) return { error: `This company already has a department called "${name}". Choose it in the list.` };
 
   const { data: created, error } = await supabase.from("departments").insert({ company_id: employee.company_id, name }).select("id, name").maybeSingle();
+  // The database has the last word on the name too: if someone else added the same name between the check above and this insert, its unique rule refuses the second one.
+  if (error && (error.code === "23505" || /uq_departments_company_name_active|duplicate key/i.test(error.message ?? ""))) return { error: `This company already has a department called "${name}". Someone added it a moment ago. Reload the page and choose it in the list.` };
   if (error || !created) return { error: "The department was not added: you are not allowed to add departments for this company." };
   revalidatePath("/people-access");
   return { error: null, id: created.id, name: created.name };

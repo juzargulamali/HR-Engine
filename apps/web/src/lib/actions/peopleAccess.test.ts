@@ -10,6 +10,8 @@ let updated: { table: string; patch: Record<string, unknown> }[] = [];
 let updateResult: Record<string, unknown>[] = [{ id: "x" }];
 let inserted: { table: string; row: Record<string, unknown> }[] = [];
 let insertRefused = false;
+let insertError: { code?: string; message: string } | null = null;
+let updateError: { code?: string; message: string } | null = null;
 let listError = false;
 const NEW = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 
@@ -24,8 +26,8 @@ function from(table: string) {
     maybeSingle: async () => ({ data: rows()[0] ?? null }),
     // awaiting the chain itself is a list read
     then: (resolve: (v: unknown) => unknown) => Promise.resolve(listError && table === "departments" ? { data: null, error: { message: "down" } } : { data: rows(), error: null }).then(resolve),
-    insert: (row: Record<string, unknown>) => { inserted.push({ table, row }); return { select: () => ({ maybeSingle: async () => (insertRefused ? { data: null, error: { message: "new row violates row-level security policy" } } : { data: { id: NEW, ...row }, error: null }) }) }; },
-    update: (patch: Record<string, unknown>) => { updated.push({ table, patch }); return { eq: () => ({ select: async () => ({ data: updateResult, error: null }) }) }; },
+    insert: (row: Record<string, unknown>) => { inserted.push({ table, row }); return { select: () => ({ maybeSingle: async () => (insertError ? { data: null, error: insertError } : insertRefused ? { data: null, error: { message: "new row violates row-level security policy" } } : { data: { id: NEW, ...row }, error: null }) }) }; },
+    update: (patch: Record<string, unknown>) => { updated.push({ table, patch }); return { eq: () => ({ select: async () => (updateError ? { data: null, error: updateError } : { data: updateResult, error: null }) }) }; },
   };
   return chain;
 }
@@ -52,7 +54,7 @@ const idle = { error: null };
 beforeEach(() => {
   tables = {};
   updated = [];
-  inserted = []; insertRefused = false; listError = false;
+  inserted = []; insertRefused = false; listError = false; insertError = null; updateError = null;
   updateResult = [{ id: "x" }];
   sessionGrants = [{ role: "hr_admin", companyId: C, countryCode: null }];
   rpc.mockReset().mockResolvedValue({ data: "ok", error: null });
@@ -252,5 +254,20 @@ describe("addDepartment", () => {
     expect(inserted).toEqual([]);
     listError = false; insertRefused = true;
     expect((await addDepartment(idle, fd({ employeeId: E1, name: "Content" }))).error).toMatch(/not allowed to add departments for this company/);
+  });
+
+  it("when two people add the same name at the same moment, the second is told it already exists, in words", async () => {
+    insertError = { code: "23505", message: 'duplicate key value violates unique constraint "uq_departments_company_name_active"' };
+    const r = await addDepartment(idle, fd({ employeeId: E1, name: "Content" }));
+    expect(r.error).toBe('This company already has a department called "Content". Someone added it a moment ago. Reload the page and choose it in the list.');
+    expect(r.id).toBeUndefined();
+  });
+});
+
+describe("updateJobDetails: the database's own refusal of another company's department", () => {
+  it("is shown as the same sentence the app uses, never as a database message", async () => {
+    tables = { employees: [{ id: E1, company_id: C, job_title: null, department_id: null, manager_id: null, deleted_at: null }], departments: [{ id: D1, company_id: C, deleted_at: null }] };
+    updateError = { code: "23514", message: "The department belongs to another company. Choose a department of this employee's company." };
+    expect((await updateJobDetails(idle, fd({ employeeId: E1, departmentId: D1 }))).error).toBe("Choose a department of this employee's company.");
   });
 });
