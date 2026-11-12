@@ -41,7 +41,10 @@ export type ProjectChat = { state: "ready"; groupId: string } | { state: "not_me
  * have given. When it is true the database is asked and still decides, so nothing here can let anyone in.
  */
 export async function loadProjectChat(projectId: string, mayBeMember = true): Promise<ProjectChat> {
-  if (!mayBeMember) return (await projectChatInstalled()) ? { state: "not_member" } : { state: "not_installed" };
+  if (!mayBeMember) {
+    const installed = await projectChatInstalled();
+    return installed === "yes" ? { state: "not_member" } : installed === "no" ? { state: "not_installed" } : { state: "error" };
+  }
   const { data, error } = await (await createClient()).rpc("chat_project_group", { p_project: projectId });
   if (error) {
     if (chatNotInstalled(error)) return { state: "not_installed" };
@@ -50,20 +53,29 @@ export async function loadProjectChat(projectId: string, mayBeMember = true): Pr
   return typeof data === "string" ? { state: "ready", groupId: data } : { state: "error" };
 }
 
+/** The group list does not have the column that project groups added: this database is from before them. Only this, or a missing function, means "not installed". */
+const missingKindColumn = (error: { code?: string; message?: string }) => error.code === "42703" || /column .*gkind.* does not exist/i.test(error.message ?? "");
+
 /**
- * Whether this database has project groups (migration 20261230000100). Asked once per request, and answered without a refused call: it looks at what the person's own group
- * list returns (a row from that migration carries the group's kind), and only when the list is empty asks for that one column, which a database without the migration does not
- * have. Until 2026-11-12 this called chat_project_group for a project that does not exist and read the refusal as "it exists"; that refusal was recorded by the database as an
- * error on every page that showed unread project chat counts.
+ * Whether this database has project groups (migration 20261230000100): "yes", "no", or "error" when it could not be found out. Asked once per request, and answered without a
+ * refused call: it looks at what the person's own group list returns (a row from that migration carries the group's kind), and only when the list is empty asks for that one
+ * column, which a database without the migration does not have.
+ *
+ * "no" is said ONLY on a confirmed missing function or missing column. Any other failure is "error", so a network fault is never mistaken for an old database: the callers then
+ * say the chat or its unread counts could not be loaded, and nothing falls back to the old Discussion.
+ *
+ * Until 2026-11-12 this called chat_project_group for a project that does not exist and read the refusal as "it exists"; that refusal was recorded by the database as an error
+ * on every page that showed unread project chat counts.
  */
-export const projectChatInstalled = cache(async (): Promise<boolean> => {
+export const projectChatInstalled = cache(async (): Promise<"yes" | "no" | "error"> => {
   const { data, error } = await readMyGroups();
-  // A failure that is not "missing" counts as installed, as before: the list read then reports the failure, and nothing falls back to the old Discussion's counts.
-  if (error) return !chatNotInstalled(error);
+  if (error) return chatNotInstalled(error) ? "no" : "error";
   const first = (data ?? [])[0] as Record<string, unknown> | undefined;
-  if (first) return "gkind" in first;
+  if (first) return "gkind" in first ? "yes" : "no";
+  // No group at all: ask for the one column. A failure here that is not "the column (or the function) is missing" is unknown, not "no".
   const probe = await (await createClient()).rpc("chat_my_groups").select("gkind").limit(1);
-  return !probe.error;
+  if (!probe.error) return "yes";
+  return chatNotInstalled(probe.error) || missingKindColumn(probe.error) ? "no" : "error";
 });
 
 /**
@@ -72,7 +84,9 @@ export const projectChatInstalled = cache(async (): Promise<boolean> => {
  */
 export const loadProjectUnread = cache(async (): Promise<Map<string, number> | null> => {
   const db = await createClient();
-  if (await projectChatInstalled()) {
+  const installed = await projectChatInstalled();
+  if (installed === "error") return null;                                                       // unknown: "could not be loaded", never the old Discussion's counts
+  if (installed === "yes") {
     const r = await loadChatGroups();
     if (r.state !== "ok") return null;
     return new Map(r.groups.filter((g) => g.kind === "project" && g.projectId && g.unread > 0).map((g) => [g.projectId as string, g.unread]));

@@ -26,28 +26,50 @@ beforeEach(() => { answers = { chat_project_group: REFUSED }; calls.length = 0; 
 describe("whether project chat groups exist: never asked with a call the database must refuse", () => {
   it("reads it from the person's own group list when they have a group", async () => {
     answers.chat_my_groups = { data: [group("p1", 2)] };
-    expect(await projectChatInstalled()).toBe(true);
+    expect(await projectChatInstalled()).toBe("yes");
     expect(called("chat_project_group")).toEqual([]);
   });
   it("with no group at all it asks for the one column that only that migration returns", async () => {
     answers.chat_my_groups = () => ({ data: [] });
-    expect(await projectChatInstalled()).toBe(true);
+    expect(await projectChatInstalled()).toBe("yes");
     expect(called("chat_my_groups").map((c) => c.columns)).toContain("gkind");
     answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? { error: { code: "42703", message: "column \"gkind\" does not exist" } } : { data: [] });
-    expect(await projectChatInstalled()).toBe(false);
+    expect(await projectChatInstalled()).toBe("no");
     expect(called("chat_project_group")).toEqual([]);
   });
   it("a list from before project groups (no kind on its rows), and a database without Chat, are both 'not installed'", async () => {
     const { gkind: _k, project_id: _p, read_only: _r, project_status: _s, via_operations: _v, ...old } = group(null, 1);
     answers.chat_my_groups = { data: [old] };
-    expect(await projectChatInstalled()).toBe(false);
+    expect(await projectChatInstalled()).toBe("no");
     answers.chat_my_groups = MISSING;
-    expect(await projectChatInstalled()).toBe(false);
+    expect(await projectChatInstalled()).toBe("no");
     expect(called("chat_project_group")).toEqual([]);
+  });
+  it("a person with no groups whose follow-up request fails: unknown, not 'not installed', and nothing falls back to the old Discussion", async () => {
+    // the list reads fine and is empty; the one-column question then fails for a reason that is not a missing column or function
+    for (const failure of [{ message: "the data service did not answer" }, { code: "57014", message: "canceling statement due to statement timeout" }, { code: "PGRST301", message: "JWT expired" }]) {
+      calls.length = 0;
+      answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? { error: failure } : { data: [] });
+      answers.proj_unread_counts = { data: [{ project_id: "stale", unread: 50 }] };
+      expect(await projectChatInstalled()).toBe("error");
+      expect(await loadProjectUnread()).toBeNull();                                               // "could not be loaded", never zero and never the old counts
+      expect(called("proj_unread_counts")).toEqual([]);
+      expect(await loadProjectChat("p1", false)).toEqual({ state: "error" });                      // not the old Discussion, and not "not a member"
+      expect(called("chat_project_group")).toEqual([]);
+    }
+    // only a confirmed missing column, or a missing function, is "not installed": then, and only then, the old Discussion's counts are used
+    calls.length = 0;
+    answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? { error: { code: "42703", message: 'column chat_my_groups.gkind does not exist' } } : { data: [] });
+    expect(await projectChatInstalled()).toBe("no");
+    expect([...(await loadProjectUnread())!]).toEqual([["stale", 50]]);
+    expect(await loadProjectChat("p1", false)).toEqual({ state: "not_installed" });
+    answers.chat_my_groups = (_a, columns) => (columns === "gkind" ? MISSING : { data: [] });
+    expect(await projectChatInstalled()).toBe("no");
   });
   it("a failed list read is not mistaken for 'not installed': unread counts then say they could not be loaded", async () => {
     answers.chat_my_groups = { error: { message: "the data service did not answer" } };
-    expect(await projectChatInstalled()).toBe(true);
+    expect(await projectChatInstalled()).toBe("error");
+    expect(await loadProjectChat("p1", false)).toEqual({ state: "error" });
     expect(await loadProjectUnread()).toBeNull();
     expect(called("proj_unread_counts")).toEqual([]);                                             // no fall back to the old Discussion's counts
   });

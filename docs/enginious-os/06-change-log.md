@@ -8,12 +8,13 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
-### 2026-11-12 | Chat: the app no longer asks the database about project chats it must refuse | branch `claude/chat-denied-group-requests` from `main` `402f39a`; **app only: no migration, no SQL, no change to membership rules**
+### 2026-11-12 | Chat: the app no longer asks the database about project chats it must refuse | branch `claude/chat-denied-group-requests` from `main` `402f39a` (draft PR #89, not merged); **app only: no migration, no SQL, no change to membership rules**
 
 * **Reported by the owner:** 35 Postgres errors in an hour on hosted, all "You are not a member of this group". Claude did not read the hosted log.
 * **Traced:** the message is raised by `chat_project_group`, `chat_messages`, `chat_group_members`, `chat_post` and `chat_mark_read`. Two app callers raised it in normal use (`apps/web/src/lib/chat/data.ts`): (1) `projectChatInstalled` called `chat_project_group` for a project that does not exist, on purpose, once per page that shows unread project chat counts, for everyone including members; (2) `loadProjectChat` asked for the project's group on every project page for anyone who could open the project in full, which is refused for a Projects founder who is not on its team.
 * **Fixed:** (1) the installed check now reads the person's own group list and is never refused; (2) the project page asks the database only about a team member or an Operations Manager of the project's company, and tells anyone else that the chat is not shown to them. Direct links, the chat list and members' read-only access to finished chats were not sources and are unchanged.
-* **Tests (local):** new `lib/chat/data.test.ts` (10), `projects/[id]/discussion/page.test.tsx` (2 added), `ops-phase2b.rls.test.ts` (1 added; reproduces the refusal as a member and as a non-member on a real PostgreSQL), `lib/projects/load-errors.test.ts` adjusted.
+* **Follow-up the same day:** the installed check now has three answers. Only a confirmed missing function or column is "not installed"; any other failure, including a failed follow-up request for a person with no groups, is "could not load" and never falls back to the old Discussion.
+* **Tests (local):** new `lib/chat/data.test.ts` (11), `projects/[id]/discussion/page.test.tsx` (2 added), `ops-phase2b.rls.test.ts` (1 added; reproduces the refusal as a member and as a non-member on a real PostgreSQL), `lib/projects/load-errors.test.ts` adjusted.
 * **Docs:** `modules/app-chat.md` section 11; staff guidance topic `projects-chat`, republished.
 * **Not verified:** nothing signed in; the hosted log was not read, so how many of the 35 each caller produced is inferred.
 
