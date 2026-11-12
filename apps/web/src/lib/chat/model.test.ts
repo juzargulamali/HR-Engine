@@ -85,11 +85,22 @@ describe("archived project groups", () => {
   const live = { name: "UAE-P-1 · Fictional Alpha", kind: "project" as const, projectStatus: "active", unread: 2, mentions: 0 };
   const done = { name: "UAE-P-2 · Fictional Beta", kind: "project" as const, projectStatus: "completed", unread: 0, mentions: 0 };
   const old = { name: "UAE-P-3 · Fictional Gamma", kind: "project" as const, projectStatus: "archived", unread: 4, mentions: 1 };
-  it("orders the sections Sales, Projects, Archived; a completed project stays under Projects", () => {
+  it("orders the sections Sales, Projects, Archived; completed and archived projects both sit under Archived", () => {
     const sections = groupSections([old, sales, live, done]);
     expect(sections.map((s) => [s.title, s.groups.map((g) => g.name), s.archived === true])).toEqual([
-      ["Sales", ["Sales — UAE"], false], ["Projects", ["UAE-P-1 · Fictional Alpha", "UAE-P-2 · Fictional Beta"], false], ["Archived", ["UAE-P-3 · Fictional Gamma"], true]]);
-    expect(archivedHeading(sections[2]!.groups.length)).toBe("Archived (1)");
+      ["Sales", ["Sales — UAE"], false], ["Projects", ["UAE-P-1 · Fictional Alpha"], false], ["Archived", ["UAE-P-3 · Fictional Gamma", "UAE-P-2 · Fictional Beta"], true]]);
+    expect(archivedHeading(sections[2]!.groups.length)).toBe("Archived (2)");
+  });
+  it("a reopened project's group is back under Projects, whether it was completed or archived", () => {
+    expect(groupSections([sales, { ...done, projectStatus: "active" }]).map((s) => [s.title, s.groups.length])).toEqual([["Sales", 1], ["Projects", 1]]);
+    expect(groupSections([sales, { ...done, projectStatus: "on_hold" }]).map((s) => s.title)).toEqual(["Sales", "Projects"]);
+  });
+  it("without the project's status, the server's read-only flag decides; a live group is never read-only", () => {
+    expect(isArchivedGroup({ kind: "project", readOnly: true })).toBe(true);
+    expect(isArchivedGroup({ kind: "project", projectStatus: null, readOnly: true })).toBe(true);
+    expect(isArchivedGroup({ kind: "project", projectStatus: "active", readOnly: true })).toBe(false);
+    expect(isArchivedGroup({ kind: "project", readOnly: false })).toBe(false);
+    expect(isArchivedGroup({ kind: "sales", readOnly: true })).toBe(false);
   });
   it("leaves the Archived section out when nothing is archived, and Sales groups are never archived", () => {
     expect(groupSections([sales, live]).map((s) => s.title)).toEqual(["Sales", "Projects"]);

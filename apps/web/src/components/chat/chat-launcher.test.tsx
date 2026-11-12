@@ -85,6 +85,8 @@ describe("the floating Chat button", () => {
   it("a finished project's group shows no composer, only a read-only note", async () => {
     render(<ChatLauncher userId="u" initialGroups={[project({ readOnly: true })]} />);
     fireEvent.click(screen.getByTestId("chat-launcher"));
+    // a finished project's group sits under the collapsed Archived section
+    fireEvent.click(screen.getByTestId("chat-archived-toggle"));
     fireEvent.click(screen.getByTestId("chat-group-project:p1"));
     await waitFor(() => expect(screen.getByTestId("chat-read-only")).toBeTruthy());
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -105,15 +107,31 @@ describe("the floating Chat button", () => {
       render(<ChatLauncher userId="u" initialGroups={[g({}), project({ projectStatus: "active" }), project({ id: "pg2", key: "project:p2", name: "UAE-P-2 · Fictional Beta", projectId: "p2", readOnly: true, projectStatus: "completed" }), archived()]} />);
       fireEvent.click(screen.getByTestId("chat-launcher"));
       expect(sectionNames()).toEqual(["Sales groups", "Projects groups", "Archived groups"]);
-      // a completed project that is not archived stays where it was
-      expect(screen.getByRole("region", { name: "Projects groups" }).textContent).toContain("UAE-P-2 · Fictional Beta");
+      // a completed project's group is finished too: it is not under Projects any more
+      expect(screen.getByRole("region", { name: "Projects groups" }).textContent).not.toContain("UAE-P-2 · Fictional Beta");
       const toggle = screen.getByTestId("chat-archived-toggle");
-      expect(toggle.textContent).toBe("Archived (1)");
+      expect(toggle.textContent).toBe("Archived (2)");
       expect(toggle.getAttribute("aria-expanded")).toBe("false");
       expect(screen.queryByTestId("chat-group-project:p9")).toBeNull();
       fireEvent.click(toggle);
       expect(toggle.getAttribute("aria-expanded")).toBe("true");
       expect(screen.getByTestId("chat-group-project:p9").textContent).toContain("UAE-P-9 · Fictional Omega stand");
+      expect(screen.getByTestId("chat-group-project:p2").textContent).toContain("UAE-P-2 · Fictional Beta");
+    });
+    it("opens a completed project's group from a direct link, read-only, and returns it to Projects when the project is reopened", async () => {
+      const done = (over: Partial<ChatGroup> = {}) => project({ id: "pg2", key: "project:p2", name: "UAE-P-2 · Fictional Beta", projectId: "p2", readOnly: true, projectStatus: "completed", ...over });
+      address = "chat=pg2";
+      render(<ChatLauncher userId="u" initialGroups={[g({}), done()]} />);
+      await waitFor(() => expect(screen.getByTestId("chat-thread-title").textContent).toBe("UAE-P-2 · Fictional Beta"));
+      expect(screen.getByTestId("chat-read-only")).toBeTruthy();
+      expect(screen.queryByRole("textbox")).toBeNull();
+      cleanup();
+      address = "";
+      vi.mocked(chatGroups).mockResolvedValue({ ok: true, groups: [g({}), done({ projectStatus: "active", readOnly: false })] });
+      render(<ChatLauncher userId="u" initialGroups={[g({}), done()]} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      await waitFor(() => expect(screen.queryByTestId("chat-archived-toggle")).toBeNull());
+      expect(screen.getByRole("region", { name: "Projects groups" }).textContent).toContain("UAE-P-2 · Fictional Beta");
     });
     it("keeps an archived group's unread and mentions: in the button total, and on the heading while collapsed", () => {
       render(<ChatLauncher userId="u" initialGroups={[g({ unread: 1 }), archived({ unread: 3, mentions: 1 })]} />);

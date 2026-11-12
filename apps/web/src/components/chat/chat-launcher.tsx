@@ -40,7 +40,7 @@ export function ChatLauncher({ userId, initialGroups }: { userId: string; initia
   const [notice, setNotice] = useState<string | null>(null);
   const groupsRef = useRef(initialGroups);
   const [find, setFind] = useState("");
-  // The groups of archived projects sit under "Archived (N)", closed until asked for. A search opens it (below), so an archived group is still found by name.
+  // The groups of completed and archived projects sit under "Archived (N)", closed until asked for. A search opens it (below), so a finished group is still found by name.
   const [archivedOpen, setArchivedOpen] = useState(false);
   const router = useRouter();
   const pathname = usePathname();

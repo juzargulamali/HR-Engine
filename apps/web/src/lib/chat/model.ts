@@ -10,7 +10,7 @@ export interface ChatGroup {
   kind?: ChatGroupKind; projectId?: string | null;
   /** A finished project's conversation: it can be read, not written (the server refuses a post). */
   readOnly?: boolean;
-  /** The project's real status (null for a Sales group; absent on a database without it). Only "archived" changes where the group is listed. */
+  /** The project's real status (null for a Sales group; absent on a database without it). "completed" and "archived" list the group under Archived. */
   projectStatus?: string | null;
   /** The viewer reads this project group as Operations Manager of its company and is not on the project's team. */
   viaOperations?: boolean;
@@ -22,14 +22,20 @@ export const CHAT_PARAM = "chat";
 export const CHAT_OPEN_EVENT = "enginious:open-chat";
 export const openChatGroup = (groupId: string): void => { window.dispatchEvent(new CustomEvent(CHAT_OPEN_EVENT, { detail: { groupId } })); };
 
-/** An archived project's group. A completed project that is not archived is NOT one: it stays in the Projects section. */
-export const isArchivedGroup = (g: Pick<ChatGroup, "kind" | "projectStatus">): boolean => g.kind === "project" && g.projectStatus === "archived";
+/**
+ * A finished project's group: the project is completed or archived, so its conversation is read-only. Both sit under the collapsed "Archived (N)". The project's
+ * own status is not changed by where its chat is listed: a completed project keeps its lifecycle and its equipment-return tracking. On a database that does not
+ * send the project's status, the server's read-only flag (set for exactly these two statuses) decides.
+ */
+export const isArchivedGroup = (g: Pick<ChatGroup, "kind" | "projectStatus" | "readOnly">): boolean =>
+  g.kind === "project" && (g.projectStatus === "archived" || g.projectStatus === "completed" || (g.projectStatus == null && g.readOnly === true));
 export interface ChatSection<T> { title: string; groups: T[]; /** The Archived section: drawn as a disclosure, closed until asked for. */ archived?: boolean }
 /**
- * The group list in sections: Sales groups, then project groups (already most recent first from the server), then the groups of archived projects. A section with no group is
- * left out. Nothing is dropped: an archived group keeps its unread and mention counts, and a restored project's group is simply back under Projects on the next refresh.
+ * The group list in sections: Sales groups, then the groups of live projects (already most recent first from the server), then the groups of completed and archived projects.
+ * A section with no group is left out. Nothing is dropped: a finished group keeps its unread and mention counts, and a reopened or restored project's group is simply back
+ * under Projects on the next refresh.
  */
-export function groupSections<T extends Pick<ChatGroup, "kind" | "projectStatus">>(groups: readonly T[]): ChatSection<T>[] {
+export function groupSections<T extends Pick<ChatGroup, "kind" | "projectStatus" | "readOnly">>(groups: readonly T[]): ChatSection<T>[] {
   const sales = groups.filter((g) => (g.kind ?? "sales") === "sales");
   const projects = groups.filter((g) => g.kind === "project" && !isArchivedGroup(g));
   const archived = groups.filter(isArchivedGroup);
