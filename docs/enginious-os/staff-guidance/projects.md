@@ -414,3 +414,35 @@ A won job passes from Sales to a founder, to the Project Manager, to the warehou
 3. Project Manager: press Accept handover, add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
 4. Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.
 5. Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list.
+
+## The Delivery plan of a project
+- id: projects-delivery-plan
+- area: projects
+- status: published
+- keywords: delivery plan; deliverables by zone; breakdown lines; release the plan; release work to the teams; delegate a section; accountable owner; raise a correction; proposed change to released work
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+The Delivery plan lists what the project delivers, zone by zone. Each deliverable has one accountable owner and a needed-by date, and only the breakdown it needs: Hardware, Content, Programming, Installation, Testing. Everyone on the project can read all of it. The Project Manager adds deliverables and releases the work; a person a section was delegated to fills in that section. Release creates the tasks and adds the hardware to the draft equipment request, once.
+
+1. Open the project and choose the Delivery plan tab.
+2. Project Manager: press Add deliverable, then Add line for each part it needs. Use Who defines each section to hand a section to Engineering, Content or Programming.
+3. Project Manager: press Release plan. Tasks go to their people; hardware goes on the draft equipment request, which you still submit on the Equipment tab.
+4. Anyone: press Correction on a deliverable or line if something is wrong. The lead decides and you see the decision under Decisions.
+5. After release a change is a proposal: press Edit, then Propose change. The Project Manager approves or rejects it.
+
+## Fill the Delivery plan from Excel
+- id: projects-delivery-plan-excel
+- area: projects
+- status: published
+- keywords: delivery plan excel; download template; import excel; export excel; delivery plan workbook; deliverables sheet; breakdown sheet; reimport the plan
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery/import
+
+You can prepare the Delivery plan in Excel. Download template gives a workbook with a Deliverables sheet and an optional Breakdown sheet; a simple job needs only Deliverables. Export Excel gives the current plan with its IDs, so you can edit and import it again without making duplicates. Importing shows a preview first and saves nothing until you confirm. Blank cells and missing rows never delete anything, and importing never releases work.
+
+1. On the Delivery plan press Download template, or Export Excel to edit the current plan.
+2. Fill one row per deliverable. Keep the ID columns as they are; leave them empty for new rows.
+3. Press Import Excel and upload the file. Read the preview: Add, Update, Unchanged, Needs attention.
+4. Answer anything under Needs attention, such as a name that matches two people, then press Import.
+5. Back on the Delivery plan, the Project Manager presses Release plan when the work should go to the teams.

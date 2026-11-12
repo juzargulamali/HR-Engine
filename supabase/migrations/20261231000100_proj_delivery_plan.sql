@@ -142,9 +142,8 @@ begin
     execute format('alter table %I enable row level security', t);
     execute format('drop policy if exists %I on %I', t || '_select', t);
     execute format('create policy %I on %I for select using (proj_can_view_details(project_id))', t || '_select', t);
-    execute format('revoke all on table %I from anon, public', t);
-    execute format('revoke insert, update, delete, truncate on table %I from authenticated', t);
-    execute format('grant select on table %I to authenticated', t);
+    execute format('revoke all on table %I from anon, authenticated, public', t);   -- Supabase's broad defaults are taken away first
+    execute format('grant select on table %I to authenticated', t);                   -- read only, and only through the policy above
   end loop;
 end $$;
 
@@ -681,7 +680,7 @@ $$;
 -- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 create or replace function proj_dp_plan(p_project_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
-declare v_inv boolean := to_regclass('public.inv_request_lines') is not null; v_equipment jsonb := '{}'::jsonb; v jsonb;
+declare v_inv boolean := to_regclass('public.inv_request_lines') is not null; v_equipment jsonb := '{}'::jsonb; v_names jsonb := '{}'::jsonb; v jsonb;
 begin
   if not proj_can_view_details(p_project_id) then raise exception 'Project not found' using errcode = 'P0002'; end if;
   if v_inv then
@@ -695,6 +694,11 @@ begin
       where l.id in (select request_line_id from proj_dp_lines where project_id = $1 and request_line_id is not null)
     $q$ into v_equipment using p_project_id;
   end if;
+  -- The NAME of a chosen stock item, for every reader of the plan (a member sees the same names on the Equipment tab). Nothing else of the catalogue is exposed.
+  if to_regclass('public.inv_items') is not null then
+    execute 'select coalesce(jsonb_object_agg(i.id, i.name), ''{}''::jsonb) from inv_items i where i.id in (select inv_item_id from proj_dp_lines where project_id = $1 and inv_item_id is not null)'
+      into v_names using p_project_id;
+  end if;
   select jsonb_build_object(
     'rev', coalesce((select rev from proj_dp_state where project_id = p_project_id), 0),
     'can_manage', proj_can_manage(p_project_id),
@@ -704,7 +708,7 @@ begin
         'id', i.id, 'key', i.item_key, 'zone', i.zone, 'title', i.title, 'specs', i.specs, 'owner_id', i.owner_id, 'owner_name', case when i.owner_id is null then null else proj_display_name(i.owner_id) end,
         'needed_by', i.needed_by, 'image_file_id', i.image_file_id, 'released_at', i.released_at, 'version', i.version, 'sort_order', i.sort_order,
         'lines', coalesce((select jsonb_agg(jsonb_build_object(
-            'id', l.id, 'key', l.line_key, 'section', l.section, 'description', l.description, 'qty', l.qty, 'inv_item_id', l.inv_item_id,
+            'id', l.id, 'key', l.line_key, 'section', l.section, 'description', l.description, 'qty', l.qty, 'inv_item_id', l.inv_item_id, 'inv_item_name', case when l.inv_item_id is null then null else v_names->>(l.inv_item_id::text) end,
             'assignee_id', l.assignee_id, 'assignee_name', case when l.assignee_id is null then null else proj_display_name(l.assignee_id) end,
             'needed_by', l.needed_by, 'notes', l.notes, 'released_at', l.released_at, 'version', l.version,
             'task', (select jsonb_build_object('id', t.id, 'title', t.title, 'status', t.status, 'due_date', t.due_date, 'blocked', t.blocked_at is not null, 'assignee_name', proj_display_name(t.assignee_id)) from proj_tasks t where t.id = l.task_id),

@@ -12,7 +12,7 @@ export const DP_SECTION_SHEET_NAMES: Record<DpSection, string> = { hardware: "Ha
 export interface DpTask { id: string; title: string; status: string; due_date: string | null; blocked: boolean; assignee_name: string }
 export interface DpEquipment { request_id?: string; request_code?: string; request_status?: string; line_status?: string; qty?: number; reserved?: number; dispatched?: number; returned?: number; missing?: boolean }
 export interface DpLine {
-  id: string; key: string; section: DpSection; description: string; qty: number | null; inv_item_id: string | null; assignee_id: string | null; assignee_name: string | null;
+  id: string; key: string; section: DpSection; description: string; qty: number | null; inv_item_id: string | null; /** The chosen stock item's name (null when none is chosen or the name could not be read). */ inv_item_name?: string | null; assignee_id: string | null; assignee_name: string | null;
   needed_by: string | null; notes: string | null; released_at: string | null; version: number; task: DpTask | null; equipment: DpEquipment | null;
 }
 export interface DpItem {
