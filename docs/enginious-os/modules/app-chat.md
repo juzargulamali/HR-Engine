@@ -105,7 +105,7 @@ Status: branch `claude/projects-phase-2b-operations` (2026-11-12), draft PR #86,
   * **The project itself is not changed by where its chat is listed.** A completed project keeps its lifecycle (it can still be reopened or archived) and its equipment-return tracking (`operations.md` section 9.3).
   * **A database that does not send the project's status:** the group is placed by the server's read-only flag, which is set for exactly these two statuses (`projectStatus == null && readOnly === true`).
   * Tests: `lib/chat/model.test.ts` (19), `components/chat/chat-launcher.test.tsx` (17). Not seen signed in.
-* **Open project chat** on the Operations Overview is a link with `?chat=<group id>`: the launcher opens the group only if the server lists it for the person.
+* **Project chat** on a Project health card of the Operations Overview (labelled "Open project chat" before the redesign of 2026-11-12) is a link with `?chat=<group id>`: the launcher opens the group only if the server lists it for the person.
 
 **Mentions.** The @ picker is filled from `chat_group_members`, so an Operations Manager who is not enrolled is offered, marked "(Operations)", and can be mentioned. The membership line under a project group's name reads "The people on this project, and the company's Operations Managers" (`lib/chat/model.ts`).
 
