@@ -96,7 +96,7 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
           )}
         </Panel>
 
-        <Panel className="order-3 xl:col-start-2 xl:row-span-2 xl:row-start-1" title={`Delivery timeline, next ${TIMELINE_DAYS} days`} description="Installation, show and dismantling dates in date order. Enquiries without a project yet are marked tentative until won.">
+        <Panel className="order-3 xl:col-start-2 xl:row-span-2 xl:row-start-1" title={`Delivery timeline, next ${TIMELINE_DAYS} days`} description="Installation, show and dismantling dates in date order. Enquiries without a project yet are marked tentative until Sales confirms the dates or wins the enquiry.">
           {up.state !== "ok" ? <p role="status" className="mb-2 text-[13px] text-[hsl(var(--os-amber))]">{up.state === "error" ? "Enquiry dates could not be loaded, so only project dates are shown." : "Enquiry dates are not shown."}</p> : null}
           {entries.length === 0 ? <Muted>No installation, show or dismantling date is recorded in the next {TIMELINE_DAYS} days.</Muted> : (
             <ol className="space-y-0" data-testid="ops-timeline">

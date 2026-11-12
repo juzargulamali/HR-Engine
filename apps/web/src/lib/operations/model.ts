@@ -298,7 +298,7 @@ export interface TimelineEntry { key: string; kind: TimelineKind; date: string; 
 export const TIMELINE_DAYS = 30;
 /**
  * The next 30 days in date order: installation and show dates of live projects, and the installation, show and dismantling dates Sales recorded on flagged
- * enquiries that have no project yet (marked tentative until won). A project carries no dismantling date, so dismantling appears only for enquiries.
+ * enquiries that have no project yet (marked tentative while Sales has not confirmed the dates and the enquiry is not won). A project carries no dismantling date, so dismantling appears only for enquiries.
  */
 export function timeline(o: Overview, upcoming: readonly UpcomingRow[] | null, today: string, days = TIMELINE_DAYS): TimelineEntry[] {
   const out: TimelineEntry[] = [];
@@ -311,7 +311,7 @@ export function timeline(o: Overview, upcoming: readonly UpcomingRow[] | null, t
   }
   for (const r of upcoming ?? []) {
     if (r.handover?.project_id) continue;
-    const title = `${r.reference} ${r.title}`; const href = `/operations/upcoming?company=${r.company_id}&q=${encodeURIComponent(r.reference)}`; const tentative = !r.won;
+    const title = `${r.reference} ${r.title}`; const href = `/operations/upcoming?company=${r.company_id}&q=${encodeURIComponent(r.reference)}`; const tentative = r.dates_tentative && !r.won;
     const who = r.handover?.pm ?? (r.planning?.provisional_pm ? `${r.planning.provisional_pm} (provisional)` : r.owner);
     if (inWindow(day(r.install_start))) out.push({ key: `i:${r.id}`, kind: "installation", date: day(r.install_start)!, until: null, title, who, href, tentative });
     if (inWindow(day(r.event_start), day(r.event_end))) out.push({ key: `s:${r.id}`, kind: "show", date: day(r.event_start)!, until: day(r.event_end), title, who, href, tentative });

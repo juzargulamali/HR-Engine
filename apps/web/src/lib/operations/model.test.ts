@@ -206,6 +206,7 @@ describe("Operations: the figures behind the summary cards", () => {
       ["2027-02-26", "installation", false, "UAE-P-2027-0001"], ["2027-03-01", "show", false, "UAE-P-2027-0001"],
       ["2027-03-10", "installation", true, "UAE-O-2027-0007"], ["2027-03-12", "show", true, "UAE-O-2027-0007"], ["2027-03-15", "dismantling", true, "UAE-O-2027-0007"]]);
     expect(timeline(o, [{ ...enquiry, won: true }], TODAY).filter((e) => e.tentative)).toEqual([]);
+    expect(timeline(o, [{ ...enquiry, dates_tentative: false }], TODAY).filter((e) => e.tentative)).toEqual([]);   // Sales confirmed the dates: the same word as on the Upcoming Work card
     expect(timeline(o, [{ ...enquiry, handover: { id: "h", status: "accepted", submitted_at: null, pm: "Pat Manager", project_id: "p1" } }], TODAY)).toHaveLength(2);
     expect(timeline(o, null, TODAY)).toHaveLength(2);                                             // enquiries not loaded: the project dates still show
     expect(timeline(overview({ projects: [project({ install_start: "2027-04-30", event_start: "2027-05-02", event_end: "2027-05-04" })] }), [], TODAY)).toEqual([]);
