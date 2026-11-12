@@ -8,6 +8,15 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-12 | Release: PR #91 (invite and password links) merged; real-inbox test pending | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `0b72962`; **no application code, no migration, no SQL run**
+
+* **Merged (checked on GitHub):** PR #91 merged into `main` with merge commit `0b72962d5faa4b55d83a23d7fcfb7e76457d7396`, pinned to head `0bee73284685d630c9376010dfc74d5276e81b09`, at the owner's request. Before merging Claude confirmed the head was unchanged.
+* **Required CI on the exact head (read on GitHub by Claude):** `lint-typecheck-test` passed and `rls-policies` passed on `0bee732`.
+* **Hosted database:** no migration and no SQL in this change.
+* **Real-inbox test: pending.** The owner asked for the merge before it and will run it in Production after deployment: Invite, Resend invite for an account that never set a password, Send password reset from People & Access, and Forgot password from the sign-in page, with the administrator's emails opened in a different browser. No Preview test was run.
+* **Production:** not verified. Claude cannot read Vercel, the hosted Auth users or the Auth logs.
+* **Docs corrected:** the status line of `modules/people-access-invites-and-password-links.md` and the README. The dated entry below is history and is left as written.
+
 ### 2026-11-12 | Invite and password links: Resend invite, Send password reset and Forgot password links can be completed by the person they are sent to | branch `claude/invite-recovery-links` from `main` `c6fdc84` (not merged); **app only: no migration, no SQL, no change to Supabase Auth settings**
 
 * **Reported by the owner:** an invite sent from Preview opened the sign-in page; a Resend invite from Production showed as expired. Claude has no access to the hosted Auth users or logs.
