@@ -2092,6 +2092,17 @@ export interface Database {
       proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
       proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
+      proj_dp_plan: { Args: { p_project_id: string }; Returns: unknown };
+      proj_dp_save_item: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown>; p_expected_version?: number | null; p_source?: string }; Returns: unknown };
+      proj_dp_remove_item: { Args: { p_item_id: string }; Returns: undefined };
+      proj_dp_save_line: { Args: { p_item_id: string; p_line_id: string | null; p_fields: Record<string, unknown>; p_expected_version?: number | null; p_source?: string }; Returns: unknown };
+      proj_dp_remove_line: { Args: { p_line_id: string }; Returns: undefined };
+      proj_dp_delegate: { Args: { p_project_id: string; p_section: string; p_user: string | null }; Returns: undefined };
+      proj_dp_release: { Args: { p_project_id: string; p_item_ids?: string[] | null }; Returns: unknown };
+      proj_dp_raise_correction: { Args: { p_project_id: string; p_target_type: string; p_target_id: string | null; p_body: string }; Returns: string };
+      proj_dp_decide_correction: { Args: { p_correction_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
+      proj_dp_decide_change: { Args: { p_change_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
+      proj_dp_apply_import: { Args: { p_project_id: string; p_expected_rev: number; p_items: Record<string, unknown>[]; p_lines: Record<string, unknown>[] }; Returns: unknown };
       proj_record_plan_sent: { Args: { p_plan_id: string; p_note: string }; Returns: undefined };
       proj_record_plan_accepted: { Args: { p_plan_id: string; p_accepted_on: string; p_contact: string; p_note?: string | null }; Returns: undefined };
       proj_completion_review: { Args: { p_project_id: string }; Returns: ProjCompletionReviewRow[] };
