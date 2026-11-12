@@ -190,6 +190,8 @@ Neither action reserves, releases, dispatches or receives stock, creates a proje
 
 **Stop and ask:** neither action is flagged. `operations.enquiry.save_planning` writes text that Sales reads on the enquiry; it must not carry prices or commercial terms.
 
+**The redesign of 2026-11-12 adds no Projects action** (commits `265c516`, `4086841`, `93ec0f2`; re-checked at `16d6f42`). The Operations Overview, the Upcoming Work card and the Operations summary on My Day only read and link: every control on them is a link to an existing screen, the existing **Plan** dialog (action 108) or a disclosure. Where a finished project's chat is listed changes no data. The one new action of that day that changes data is on the Sales side: **Dismiss** on the "Handover accepted" row of Sales Follow-ups, `sales.handover_notice.dismiss` in [`sales-action-catalogue.md`](./sales-action-catalogue.md) section 3.3. It marks the person's own notice read with the existing `proj_mark_notifications_read`, the function behind Mark all read on My Work.
+
 ## Totals
 
 109 actions: D 9, H 22, P 18, W 23, T 19, C 2, L 10 (Delivery Plan, section 8), R 4 (Closeout Report, section 10), O 2 (Operations and the equipment booking review, section 11). `projects.project.reopen` is listed once (under P; the Manage project menu in D reaches the same action) and `projects.equipment.import_handover` once (under H; the Work page's "Import the handover equipment" button reaches the same action).
