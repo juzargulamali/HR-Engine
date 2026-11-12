@@ -49,7 +49,7 @@ Data (`loadFollowUps`, `apps/web/src/lib/crm/data.ts`): up to 1000 open `crm_fol
 
 **Consequences to know (all follow from reusing the existing notice):**
 
-1. **Marking all Project notices read in Projects also dismisses it**, because it is the same notice: the **Mark all read** button on My Work (`app/(app)/projects/work/mark-read-button.tsx`, `markProjectNotificationsRead`) marks every unread Project notice of the person, this one included. It applies to a Sales person who can open My Work; there is no control there that marks one notice alone.
+1. **Marking all Project notices read in Projects also dismisses it**, because it is the same notice: the **Mark all as read (N)** button on My Work (`app/(app)/projects/work/mark-read-button.tsx`, `markProjectNotificationsRead`) marks every unread Project notice of the person, this one included. It applies to a Sales person who can open My Work; there is no control there that marks one notice alone.
 2. **A person who accepted the handover themselves does not see the row.** No notice is sent to the person who acts (`proj_notify` skips the caller), and the row is skipped when `accepted_by` is the viewer. Before this change such a person saw the row for 7 days.
 3. **If no notice exists for the person** (for example `proj_notify` sent none because the person's account was inactive at that moment), the row is shown **without Dismiss** and only expires after 7 days.
 4. **If the notices cannot be read, the whole Handover card says it could not check** (the message in section 2). A dismissed notice must not reappear, and an undismissed one must not vanish, on a guess.
