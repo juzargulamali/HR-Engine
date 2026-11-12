@@ -145,6 +145,7 @@ export const ACCESS_PRESETS: Record<AccessModule, readonly AccessPreset[]> = {
   projects: [
     P("projects-basic", "Directory only", "Sees the directory of ongoing projects. Details only where added to a project.", []),
     P("projects-coordinator", "Project coordinator", "Names Project Managers and creates internal projects, reopens completed projects, confirms overlapping site bookings.", ["assign_pm", "reopen_project", "override_site_conflict"]),
+    P("projects-operations", "Operations Manager", "Opens the Operations workspace for this company, assigns Project Managers, and reads and posts in this company's project chats. No Sales, Finance, HR or Warehouse rights, and no task or delivery editing.", ["operations"]),
     P("projects-scope", "Scope approver", "Approves or rejects a change to the agreed scope of a client project.", ["approve_scope"]),
     P("projects-commercial", "Commercial viewer", "Reads the cost effect recorded against a scope change.", ["view_commercial"]),
     P("projects-audit", "Audit reader", "Reads who changed what in the company's projects.", ["view_audit"]),

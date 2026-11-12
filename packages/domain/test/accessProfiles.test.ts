@@ -26,7 +26,7 @@ describe("one source of truth for working profiles", () => {
     expect(m("inventory")).toEqual({ "Warehouse operator": ["warehouse"], "Warehouse operator — all locations": ["warehouse", "cross_location"], "Stock viewer": ["view_stock"], "Employee equipment viewer": ["view_employee_custody"] });
     expect(m("sales")).toEqual({ "Sales colleague": [], "Sales lead": ["assign_owner", "reopen_closed"] });
     expect(m("budget")).toEqual({ "Read-only": ["view"], Finance: ["finance"], "Executive approver": ["executive_approver"] });
-    expect(m("projects")).toEqual({ "Project directory viewer": [] });
+    expect(m("projects")).toEqual({ "Project directory viewer": [], "Operations Manager": ["operations"] });
     expect(PROJECTS_PM_NOTE).toBe("PM assignment and project team membership are managed on the project or handover.");
   });
 
@@ -42,6 +42,41 @@ describe("one source of truth for working profiles", () => {
       expect(recogniseAccess(module, saved).profile?.id).toBe(p.id);
     }
     expect(summariseAccess("sales", ["assign_owner", "reopen_closed", "manage_settings"])).toContain(`${capabilityInfo("sales", "manage_settings").label}: ${capabilityInfo("sales", "manage_settings").description}`);
+  });
+});
+
+describe("the Operations Manager working profile (Projects)", () => {
+  const OPS = profileById("projects", "operations-manager")!;
+
+  it("grants exactly the operations capability, says what it gives and what it does not, and sits with the operational rights", () => {
+    expect(OPS.capabilities).toEqual(["operations"]);
+    expect(OPS.label).toBe("Operations Manager");
+    expect(OPS.description).toMatch(/Operations workspace/);
+    expect(OPS.description).toMatch(/assigns Project Managers/);
+    expect(OPS.description).toMatch(/project chats/);
+    expect(OPS.description).toMatch(/no Sales, Finance, HR or Warehouse rights/);
+    expect(OPS.description).toMatch(/does not edit tasks or deliveries/);
+    expect(OPS.exclusions).toBe("Cannot approve scope, see commercial information or manage access.");
+    expect(OPS.exclusions).not.toMatch(/assign a PM/);
+    expect(ADVANCED_GROUPS.projects.find((g) => g.id === "operational")?.capabilities).toContain("operations");
+    expect(ADVANCED_GROUPS.projects.find((g) => g.id === "admin")?.capabilities).not.toContain("operations");
+    expect(capabilityInfo("projects", "operations").label).toBe("Operations Manager");
+  });
+
+  it("is recognised from the capability alone, and an access manager who is not a founder may give it", () => {
+    expect(recogniseAccess("projects", ["operations"])).toMatchObject({ profile: { id: "operations-manager" }, extras: [], custom: false });
+    expect(recogniseAccess("projects", ["operations", "view_audit"])).toMatchObject({ profile: { id: "operations-manager" }, extras: ["view_audit"] });
+    expect(evaluateGrant("projects", ["manage_access"], { capabilities: [], self: false }, ["operations"]).allowed).toBe(true);
+    expect(evaluateGrant("projects", [], { capabilities: [], self: false }, ["operations"]).allowed).toBe(false);
+  });
+
+  it("is never described as unable to assign a Project Manager, with or without other rights", () => {
+    expect(summariseAccess("projects", ["operations"]).join("\n")).not.toMatch(/assign a PM/);
+    const custom = summariseAccess("projects", ["operations", "view_audit"]).join("\n");
+    expect(custom).not.toMatch(/assign a PM/);
+    expect(custom).toMatch(/Does not include:[^\n]*approve scope/);
+    // Someone without it is told so when their rights are listed one by one.
+    expect(summariseAccess("projects", ["approve_scope", "view_audit"]).join("\n")).toMatch(/Does not include:[^\n]*Operations workspace/);
   });
 });
 

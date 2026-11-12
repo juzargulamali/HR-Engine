@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  allowedTaskMoves, canCreateTaskFor, canManageProject, canViewProjectDetails, canViewProjectSummary, hasProjCapability, hasAnyProjAccess,
+  allowedTaskMoves, canAssignPm, canCreateTaskFor, canDecideScope, isOpsManager, opsCompanyIds, PROJ_CAPABILITIES, PROJ_CAPABILITY_LABELS,
+  canManageProject, canViewProjectDetails, canViewProjectSummary, hasProjCapability, hasAnyProjAccess,
   isProjFounder, projectViewLevel, taskActorRole, type ProjectStanding, type ProjGrant, type TaskRef,
 } from "../src";
 
@@ -23,6 +24,34 @@ describe("Projects capabilities", () => {
   it("gives an empty grant access to the directory and nothing else", () => {
     expect(hasAnyProjAccess([grant(UAE)])).toBe(true);
     expect(hasProjCapability([grant(UAE)], UAE, "view_audit")).toBe(false);
+  });
+});
+
+describe("Operations Manager (mirrors proj_has_capability and ops_company_ids in 20270102000100)", () => {
+  it("is a Projects capability with a label and a description", () => {
+    expect(PROJ_CAPABILITIES).toContain("operations");
+    expect(PROJ_CAPABILITY_LABELS.operations.label).toBe("Operations Manager");
+    expect(PROJ_CAPABILITY_LABELS.operations.description).toMatch(/no Sales, Finance, HR or Warehouse rights/);
+  });
+  it("implies assigning Project Managers, in its own company only, and nothing else", () => {
+    const g = [grant(UAE, "operations")];
+    expect(canAssignPm(g, UAE)).toBe(true);
+    expect(canAssignPm(g, KSA)).toBe(false);
+    expect(canDecideScope(g, UAE)).toBe(false);
+    expect(hasProjCapability(g, UAE, "view_audit")).toBe(false);
+    expect(hasProjCapability(g, UAE, "manage_access")).toBe(false);
+    expect(isProjFounder(g, UAE)).toBe(false);
+  });
+  it("is not implied by assign_pm: the implication runs one way", () => {
+    expect(isOpsManager([grant(UAE, "assign_pm")], UAE)).toBe(false);
+    expect(isOpsManager([grant(UAE)], UAE)).toBe(false);
+  });
+  it("counts a founder, per company", () => {
+    expect(isOpsManager([grant(UAE, "founder")], UAE)).toBe(true);
+    expect(isOpsManager([grant(UAE, "operations")], UAE)).toBe(true);
+    expect(isOpsManager([grant(UAE, "operations")], KSA)).toBe(false);
+    expect(opsCompanyIds([grant(UAE, "operations"), grant(KSA, "founder"), grant("co-qat", "assign_pm"), grant(UAE, "operations")])).toEqual([UAE, KSA]);
+    expect(opsCompanyIds([grant(UAE, "assign_pm")])).toEqual([]);
   });
 });
 
@@ -113,3 +142,16 @@ describe("creating tasks (mirrors proj_create_task)", () => {
     expect(canCreateTaskFor(standing({ grants: [grant(UAE)] }), "d", "d", null, null)).toBe(false);
   });
 });
+
+describe("an Operations Manager reads a project in full without joining it, and manages nothing", () => {
+  const standing = (capabilities: string[], status = "in_progress") => ({ grants: [{ companyId: "c1", capabilities }], companyId: "c1", status, isMember: false, isPm: false, isActingPm: false, isSalesLinked: false }) as unknown as Parameters<typeof projectViewLevel>[0];
+  it("details for the holder in that company, on live and finished projects; summary only for plain access; nothing for another company", () => {
+    expect(projectViewLevel(standing(["operations"]))).toBe("details");
+    expect(projectViewLevel(standing(["operations"], "completed"))).toBe("details");
+    expect(canManageProject(standing(["operations"]))).toBe(false);
+    expect(projectViewLevel(standing([]))).toBe("summary");
+    expect(projectViewLevel(standing([], "completed"))).toBe("none");
+    expect(projectViewLevel({ ...standing(["operations"]), companyId: "c2" })).toBe("none");
+  });
+});
+

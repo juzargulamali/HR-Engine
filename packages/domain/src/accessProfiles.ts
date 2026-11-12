@@ -6,6 +6,7 @@
  * and is enforced by the database grant functions.
  *
  * Projects deliberately has no company-wide PM profile: PM assignment and project team membership are managed on the project or handover.
+ * The Operations Manager profile is not a PM profile: it names who is the Project Manager, it does not make its holder one.
  */
 import { capabilityInfo, normaliseCapabilities, type AccessModule } from "./peopleAccess";
 
@@ -43,7 +44,10 @@ const NOT_INCLUDED: Record<AccessModule, Record<string, string>> = {
   budget: {
     finance: "record funds or expenses, or decide budgets", executive_approver: "decide what someone with Finance access submits", manage_access: "give access",
   },
-  projects: { assign_pm: "assign a PM", approve_scope: "approve scope", view_commercial: "see commercial information", manage_access: "manage access" },
+  projects: {
+    assign_pm: "assign a PM", approve_scope: "approve scope", view_commercial: "see commercial information", manage_access: "manage access",
+    operations: "open the Operations workspace or the company's project chats",
+  },
 };
 
 /** "Cannot a, b or c." for the capabilities in `caps` that are not held (all of them are listed in the order given). */
@@ -73,6 +77,9 @@ export const ACCESS_PROFILES: Record<AccessModule, readonly AccessProfile[]> = {
   ],
   projects: [
     PR("projects", "project-directory-viewer", "Project directory viewer", "Sees the directory of ongoing projects. Details only where added to a project.", ["view_commercial", "assign_pm", "approve_scope", "manage_access"], []),
+    // Exactly ['operations']: the database treats it as assign_pm too (proj_has_capability), so the bundle does not repeat it. Sales, Finance, HR and Warehouse
+    // are other modules with their own grants; task and delivery editing belong to the Project Manager on the project, which no company-wide right gives.
+    PR("projects", "operations-manager", "Operations Manager", "Opens the Operations workspace for this company, assigns Project Managers, and reads and posts in this company's project chats. Gives no Sales, Finance, HR or Warehouse rights, and does not edit tasks or deliveries.", ["approve_scope", "view_commercial", "manage_access"], ["operations"]),
   ],
 };
 
@@ -96,7 +103,7 @@ const G = (spec: Record<AdvancedGroup["id"], readonly string[]>): readonly Advan
 
 export const ADVANCED_GROUPS: Record<AccessModule, readonly AdvancedGroup[]> = {
   sales: G({ operational: ["assign_owner", "reopen_closed", "confirm_availability"], visibility: ["view_audit"], configuration: ["manage_settings", "manage_approval_rules"], admin: ["manage_access", "founder"] }),
-  projects: G({ operational: ["assign_pm", "approve_scope", "reopen_project", "override_site_conflict"], visibility: ["view_commercial", "view_audit"], configuration: [], admin: ["manage_access", "founder"] }),
+  projects: G({ operational: ["operations", "assign_pm", "approve_scope", "reopen_project", "override_site_conflict"], visibility: ["view_commercial", "view_audit"], configuration: [], admin: ["manage_access", "founder"] }),
   inventory: G({ operational: ["warehouse", "cross_location", "confirm_stock", "request_for_employees"], visibility: ["view_stock", "view_employee_custody", "view_costs", "view_audit"], configuration: ["manage_catalogue"], admin: ["manage_access", "founder"] }),
   budget: G({ operational: ["finance", "executive_approver"], visibility: ["view"], configuration: [], admin: ["manage_access"] }),
 };
@@ -242,7 +249,9 @@ export function summariseAccess(module: AccessModule, caps: readonly string[]): 
   for (const c of held) lines.push(`${capabilityInfo(module, c).label}: ${capabilityInfo(module, c).description}`);
   if (!held.includes("founder")) {
     const candidates = r.profile ? r.profile.excludes : Object.keys(NOT_INCLUDED[module]);
-    const missing = candidates.filter((c) => !held.includes(c) && NOT_INCLUDED[module][c]);
+    // An Operations Manager assigns Project Managers without holding assign_pm itself (proj_has_capability), so the summary must not say they cannot.
+    const implied = module === "projects" && held.includes("operations") ? ["assign_pm"] : [];
+    const missing = candidates.filter((c) => !held.includes(c) && !implied.includes(c) && NOT_INCLUDED[module][c]);
     if (missing.length > 0) lines.push(`Does not include: ${missing.map((c) => NOT_INCLUDED[module][c]).join("; ")}.`);
   }
   return lines;

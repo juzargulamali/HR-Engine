@@ -225,6 +225,21 @@ export type CrmOpportunityRow = {
     event_end: string | null;
     technologies: CrmTechnology[];
   } | null;
+  /**
+   * Operations planning (20270102000100_ops_phase2b.sql section 2): the eight fields Sales owns on the enquiry. Optional here because a database that has not had
+   * that migration returns none of them: absent reads as "not flagged", never as an error. Written only through crm_set_ops_planning.
+   */
+  ops_flagged_at?: string | null;
+  ops_flagged_by?: string | null;
+  ops_decision_date?: string | null;
+  /** Database default true. The enquiry being won overrides it on screen: a won enquiry reads as confirmed whatever this says. */
+  ops_dates_tentative?: boolean;
+  ops_dismantle_date?: string | null;
+  /** A subset of engineering, content, programming, installation, warehouse. */
+  ops_teams?: string[];
+  ops_to_confirm?: string | null;
+  /** Written for Operations, who can read it. */
+  ops_note?: string | null;
   version: number;
   created_at: string;
   updated_at: string;

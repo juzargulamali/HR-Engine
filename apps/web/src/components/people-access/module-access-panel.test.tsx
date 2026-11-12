@@ -170,8 +170,34 @@ describe("editing is predictable", () => {
     edit(/projects & tasks access/i);
     expect(screen.getByText("PM assignment and project team membership are managed on the project or handover.")).toBeTruthy();
     const radios = screen.getAllByRole("radio");
-    expect(radios).toHaveLength(1);
+    expect(radios).toHaveLength(2);
     expect(screen.getByRole("radio", { name: /^project directory viewer/i })).toBeTruthy();
+    // Operations Manager names who the Project Manager is; it is not a PM profile and not a founder profile.
+    expect(screen.getByRole("radio", { name: /^operations manager/i })).toBeTruthy();
+    expect(screen.queryByRole("radio", { name: /founder|^project manager/i })).toBeNull();
+  });
+});
+
+describe("Operations Manager is a Projects working profile", () => {
+  it("an access manager who is not a founder can choose it, it says what it gives and what it does not, and it saves exactly the operations right", () => {
+    render(<ModuleAccessPanel {...props({ contexts: [ctx("projects")], grants: [grant("projects", [])] })} />);
+    edit(/projects & tasks access/i);
+    const radio = screen.getByRole("radio", { name: /^operations manager/i }) as HTMLInputElement;
+    expect(radio.disabled).toBe(false);
+    expect(screen.getAllByText(/Opens the Operations workspace for this company, assigns Project Managers, and reads and posts in this company's project chats\. Gives no Sales, Finance, HR or Warehouse rights, and does not edit tasks or deliveries\./).length).toBeGreaterThan(0);
+    fireEvent.click(radio);
+    expect(actions.applyModuleAccess).not.toHaveBeenCalled();
+    expect(posted()).toEqual(["operations"]);
+    expect(save().disabled).toBe(false);
+    fireEvent.submit(save().closest("form")!);
+    const sent = actions.applyModuleAccess.mock.calls[0]![1] as FormData;
+    expect(sent.get("module")).toBe("projects");
+    expect(sent.getAll("capabilities")).toEqual(["operations"]);
+  });
+
+  it("is recognised on the card from the capability alone", () => {
+    render(<ModuleAccessPanel {...props({ contexts: [ctx("projects")], grants: [grant("projects", ["operations"])] })} />);
+    expect(within(card(/projects & tasks access/i)).getByText("Operations Manager")).toBeTruthy();
   });
 });
 
