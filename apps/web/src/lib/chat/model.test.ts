@@ -78,3 +78,33 @@ describe("project groups in the list", () => {
     expect(filterGroups(groups, " ")).toHaveLength(3);
   });
 });
+
+import { archivedHeading, isArchivedGroup, OPERATIONS_READER_NOTE } from "./model";
+describe("archived project groups", () => {
+  const sales = { name: "Sales — UAE", kind: "sales" as const, projectStatus: null, unread: 1, mentions: 0 };
+  const live = { name: "UAE-P-1 · Fictional Alpha", kind: "project" as const, projectStatus: "active", unread: 2, mentions: 0 };
+  const done = { name: "UAE-P-2 · Fictional Beta", kind: "project" as const, projectStatus: "completed", unread: 0, mentions: 0 };
+  const old = { name: "UAE-P-3 · Fictional Gamma", kind: "project" as const, projectStatus: "archived", unread: 4, mentions: 1 };
+  it("orders the sections Sales, Projects, Archived; a completed project stays under Projects", () => {
+    const sections = groupSections([old, sales, live, done]);
+    expect(sections.map((s) => [s.title, s.groups.map((g) => g.name), s.archived === true])).toEqual([
+      ["Sales", ["Sales — UAE"], false], ["Projects", ["UAE-P-1 · Fictional Alpha", "UAE-P-2 · Fictional Beta"], false], ["Archived", ["UAE-P-3 · Fictional Gamma"], true]]);
+    expect(archivedHeading(sections[2]!.groups.length)).toBe("Archived (1)");
+  });
+  it("leaves the Archived section out when nothing is archived, and Sales groups are never archived", () => {
+    expect(groupSections([sales, live]).map((s) => s.title)).toEqual(["Sales", "Projects"]);
+    expect(isArchivedGroup({ kind: "sales", projectStatus: "archived" })).toBe(false);
+    expect(isArchivedGroup({ kind: "project" })).toBe(false);
+  });
+  it("a restored project's group is back under Projects", () => {
+    expect(groupSections([sales, { ...old, projectStatus: "active" }]).map((s) => [s.title, s.groups.length])).toEqual([["Sales", 1], ["Projects", 1]]);
+  });
+  it("keeps an archived group's unread and mentions in the totals, and search still finds it", () => {
+    expect(totalUnread([sales, live, old])).toBe(7);
+    expect(launcherLabel([sales, live, old])).toBe("Open chat, 7 unread, 1 mention of you");
+    expect(filterGroups([sales, live, old], "gamma")).toEqual([old]);
+  });
+  it("says in plain words that the reader is Operations, not on the team", () => {
+    expect(OPERATIONS_READER_NOTE).toBe("You are reading this as Operations Manager. You are not on this project's team.");
+  });
+});

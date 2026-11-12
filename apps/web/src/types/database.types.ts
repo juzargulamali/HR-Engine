@@ -1835,7 +1835,7 @@ export interface Database {
       crm_save_event: { Args: { p_id: string | null; p_name: string; p_kind?: string; p_website?: string | null; p_note?: string | null }; Returns: string };
       crm_add_event_with_edition: { Args: { p_name: string; p_kind: string; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_website?: string | null; p_event_note?: string | null; p_edition_note?: string | null }; Returns: unknown };
       crm_save_edition: { Args: { p_id: string | null; p_event: string | null; p_start: string; p_end: string; p_city?: string | null; p_country?: string | null; p_venue?: string | null; p_note?: string | null }; Returns: string };
-      chat_my_groups: { Args: Record<string, never>; Returns: { gid: string; gkey: string; gname: string; unread: number; mentions: number; last_at: string | null; last_sender: string | null; last_preview: string | null; gkind?: string | null; project_id?: string | null; read_only?: boolean | null }[] };
+      chat_my_groups: { Args: Record<string, never>; Returns: { gid: string; gkey: string; gname: string; unread: number; mentions: number; last_at: string | null; last_sender: string | null; last_preview: string | null; gkind?: string | null; project_id?: string | null; read_only?: boolean | null; project_status?: string | null; via_operations?: boolean | null }[] };
       chat_project_group: { Args: { p_project: string }; Returns: string };
       chat_group_members: { Args: { p_group: string }; Returns: { user_id: string; name: string }[] };
       chat_messages: { Args: { p_group: string; p_before?: number | null; p_after?: number | null; p_limit?: number }; Returns: unknown };
@@ -1848,6 +1848,8 @@ export interface Database {
       crm_update_observation: { Args: { p_id: string; p_kind: string; p_agency?: string | null; p_agency_unknown?: boolean; p_stand?: string | null; p_role?: string | null; p_note?: string | null; p_verification?: string }; Returns: undefined };
       crm_remove_observation: { Args: { p_id: string }; Returns: undefined };
       crm_set_opportunity_edition: { Args: { p_id: string; p_edition: string | null; p_expected_version?: number | null }; Returns: number };
+      crm_set_ops_planning: { Args: { p_id: string; p_flag: boolean; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: number };
+      crm_ops_planning: { Args: { p_opportunity_id: string }; Returns: unknown };
       crm_people: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null; company_ids: string[] }[] };
       crm_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
       crm_reopen_opportunity: {
@@ -2093,6 +2095,9 @@ export interface Database {
       proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
       proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
+      ops_overview: { Args: { p_company_id: string }; Returns: unknown };
+      ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
+      ops_set_enquiry_planning: { Args: { p_opportunity_id: string; p_patch: unknown }; Returns: undefined };
       proj_closeout_claim: { Args: { p_project_id: string; p_payload_hash: string; p_limit: number }; Returns: unknown };
       proj_closeout_finish: { Args: { p_project_id: string; p_payload_hash: string; p_ok: boolean; p_provider_kind: string | null; p_answer: unknown }; Returns: undefined };
       proj_closeout_evidence: { Args: { p_project_id: string }; Returns: unknown };
@@ -2101,6 +2106,10 @@ export interface Database {
       proj_closeout_approve: { Args: { p_report_id: string; p_expected_version: number | null }; Returns: undefined };
       proj_closeout_discard_draft: { Args: { p_report_id: string }; Returns: undefined };
       proj_dp_plan: { Args: { p_project_id: string }; Returns: unknown };
+      proj_equipment_readiness: { Args: { p_project_id: string }; Returns: unknown };
+      proj_resolve_equipment_review: { Args: { p_review_id: string; p_note?: string | null }; Returns: undefined };
+      proj_project_editions: { Args: Record<string, never>; Returns: { project_id: string; edition_id: string; label: string | null; start_date: string | null; end_date: string | null }[] };
+      proj_projects_for_edition: { Args: { p_edition_id: string }; Returns: { project_id: string; reference: string; name: string; status: string }[] };
       proj_dp_save_item: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown>; p_expected_version?: number | null; p_source?: string }; Returns: unknown };
       proj_dp_remove_item: { Args: { p_item_id: string }; Returns: undefined };
       proj_dp_save_line: { Args: { p_item_id: string; p_line_id: string | null; p_fields: Record<string, unknown>; p_expected_version?: number | null; p_source?: string }; Returns: unknown };

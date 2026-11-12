@@ -96,4 +96,85 @@ describe("the floating Chat button", () => {
     fireEvent.change(screen.getByTestId("chat-group-search"), { target: { value: "job 7" } });
     expect(screen.getAllByTestId(/^chat-group-project:/)).toHaveLength(1);
   });
+
+  describe("archived projects", () => {
+    const archived = (over: Partial<ChatGroup> = {}): ChatGroup => project({ id: "pg9", key: "project:p9", name: "UAE-P-9 · Fictional Omega stand", projectId: "p9", readOnly: true, projectStatus: "archived", ...over });
+    const sectionNames = () => screen.getAllByRole("region").map((r) => r.getAttribute("aria-label"));
+
+    it("lists Sales, Projects, then a collapsed \"Archived (N)\"; opening it lists the groups", () => {
+      render(<ChatLauncher userId="u" initialGroups={[g({}), project({ projectStatus: "active" }), project({ id: "pg2", key: "project:p2", name: "UAE-P-2 · Fictional Beta", projectId: "p2", readOnly: true, projectStatus: "completed" }), archived()]} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      expect(sectionNames()).toEqual(["Sales groups", "Projects groups", "Archived groups"]);
+      // a completed project that is not archived stays where it was
+      expect(screen.getByRole("region", { name: "Projects groups" }).textContent).toContain("UAE-P-2 · Fictional Beta");
+      const toggle = screen.getByTestId("chat-archived-toggle");
+      expect(toggle.textContent).toBe("Archived (1)");
+      expect(toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(screen.queryByTestId("chat-group-project:p9")).toBeNull();
+      fireEvent.click(toggle);
+      expect(toggle.getAttribute("aria-expanded")).toBe("true");
+      expect(screen.getByTestId("chat-group-project:p9").textContent).toContain("UAE-P-9 · Fictional Omega stand");
+    });
+    it("keeps an archived group's unread and mentions: in the button total, and on the heading while collapsed", () => {
+      render(<ChatLauncher userId="u" initialGroups={[g({ unread: 1 }), archived({ unread: 3, mentions: 1 })]} />);
+      expect(screen.getByTestId("chat-total-unread").textContent).toBe("4");
+      expect(screen.getByRole("button", { name: /Open chat, 4 unread, 1 mention of you/ })).toBeTruthy();
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      expect(screen.getByTestId("chat-archived-unread").textContent).toBe("3");
+      expect(screen.getByTestId("chat-archived-mention")).toBeTruthy();
+      fireEvent.click(screen.getByTestId("chat-archived-toggle"));
+      // open: the counts are on the group's own row, not twice
+      expect(screen.queryByTestId("chat-archived-unread")).toBeNull();
+      expect(screen.getByTestId("chat-group-project:p9").textContent).toContain("3");
+      expect(screen.getAllByTestId("chat-group-mention")).toHaveLength(1);
+    });
+    it("opens an archived group from a direct link, read-only", async () => {
+      address = "chat=pg9";
+      render(<ChatLauncher userId="u" initialGroups={[g({}), archived()]} />);
+      await waitFor(() => expect(screen.getByTestId("chat-thread-title").textContent).toBe("UAE-P-9 · Fictional Omega stand"));
+      expect(screen.getByTestId("chat-read-only")).toBeTruthy();
+      expect(screen.queryByRole("textbox")).toBeNull();
+    });
+    it("a restored project's group returns to Projects on the next refresh", async () => {
+      vi.mocked(chatGroups).mockResolvedValue({ ok: true, groups: [g({}), archived({ projectStatus: "active", readOnly: false })] });
+      render(<ChatLauncher userId="u" initialGroups={[g({}), archived()]} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      await waitFor(() => expect(screen.queryByTestId("chat-archived-toggle")).toBeNull());
+      expect(sectionNames()).toEqual(["Sales groups", "Projects groups"]);
+      expect(screen.getByRole("region", { name: "Projects groups" }).textContent).toContain("UAE-P-9 · Fictional Omega stand");
+      expect(screen.queryByTestId("chat-notice")).toBeNull();
+    });
+    it("leaves Sales groups as they were when nothing is archived", () => {
+      render(<ChatLauncher userId="u" initialGroups={[g({ unread: 2 }), g({ id: "g2", key: "sales_ksa", name: "Sales — KSA" })]} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      expect(sectionNames()).toEqual(["Sales groups"]);
+      expect(screen.queryByTestId("chat-archived-toggle")).toBeNull();
+      expect(screen.getByTestId("chat-group-sales_uae").textContent).toContain("2");
+    });
+    it("search finds an archived group without opening the section first", () => {
+      const many = Array.from({ length: 9 }, (_, i) => project({ id: `pg${i}`, key: `project:p${i}`, name: `UAE-P-${i} · Fictional job ${i}`, projectId: `p${i}` }));
+      render(<ChatLauncher userId="u" initialGroups={[...many, archived()]} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      expect(screen.queryByTestId("chat-group-project:p9")).toBeNull();
+      fireEvent.change(screen.getByTestId("chat-group-search"), { target: { value: "omega" } });
+      expect(screen.getByTestId("chat-group-project:p9")).toBeTruthy();
+    });
+  });
+
+  describe("reading as Operations Manager", () => {
+    it("tags the group and says so in the thread; a team member's group has neither", async () => {
+      const both = [project({ viaOperations: true }), project({ id: "pg2", key: "project:p2", name: "UAE-P-2 · Fictional Beta", projectId: "p2" })];
+      vi.mocked(chatGroups).mockResolvedValue({ ok: true, groups: both });
+      render(<ChatLauncher userId="u" initialGroups={both} />);
+      fireEvent.click(screen.getByTestId("chat-launcher"));
+      expect(screen.getAllByTestId("chat-group-operations")).toHaveLength(1);
+      expect(screen.getByTestId("chat-group-project:p1").textContent).toContain("Operations");
+      fireEvent.click(screen.getByTestId("chat-group-project:p1"));
+      await waitFor(() => expect(screen.getByTestId("chat-operations-note").textContent).toBe("You are reading this as Operations Manager. You are not on this project's team."));
+      fireEvent.click(screen.getByRole("button", { name: "Back to groups" }));
+      fireEvent.click(screen.getByTestId("chat-group-project:p2"));
+      await waitFor(() => expect(screen.getByTestId("chat-thread-title").textContent).toBe("UAE-P-2 · Fictional Beta"));
+      expect(screen.queryByTestId("chat-operations-note")).toBeNull();
+    });
+  });
 });

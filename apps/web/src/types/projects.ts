@@ -27,6 +27,13 @@ export type ProjProjectDetailsRow = {
   event_start: string | null; event_end: string | null; scope: string | null; exclusions: string | null;
   technologies: { name: string; qty: number }[]; risks: unknown[]; hold_reason: string | null; hold_review_date: string | null;
   status_before_hold: string | null; updated_at: string;
+  /** The event edition the project was sold for, copied from the handover when the project was created (absent on a database without migration 20270102000100). */
+  event_edition_id?: string | null; edition_snapshot?: ProjEditionSnapshot | null;
+}
+/** The edition as the organiser had published it when the handover was submitted. A copy: later edits to the event in Sales do not reach it. */
+export type ProjEditionSnapshot = {
+  edition_id?: string | null; event_id?: string | null; event_name?: string | null; label?: string | null; venue?: string | null; city?: string | null; country_code?: string | null;
+  start_date?: string | null; end_date?: string | null; taken_at?: string | null;
 }
 export type ProjTeamRow = { id: string; project_id: string; name: string; department_id: string | null; head_user_id: string; created_by: string | null; created_at: string; removed_at: string | null }
 export type ProjMemberRow = {
@@ -41,6 +48,7 @@ export type ProjHandoverRow = {
   pm_user_id: string | null; pm_assigned_by: string | null; pm_assigned_at: string | null; clarification_note: string | null; clarification_requested_at: string | null;
   clarification_requested_by: string | null; submitted_at: string | null; accepted_by: string | null; accepted_at: string | null; project_id: string | null;
   revision: number; version: number; created_at: string; updated_at: string;
+  event_edition_id?: string | null; edition_snapshot?: ProjEditionSnapshot | null;
 }
 export type ProjMilestoneRow = {
   id: string; project_id: string; title: string; description: string | null; due_date: string | null; is_required: boolean; client_facing: boolean;

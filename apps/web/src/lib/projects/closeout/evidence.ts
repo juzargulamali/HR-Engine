@@ -16,7 +16,9 @@ import { findProtectedContent, wholeTextRestricted } from "@/lib/jarvis/protecte
 
 export interface EvidenceSnapshot {
   taken_at: string;
-  project: { id: string; reference: string; name: string; kind: string; status: string; start_date: string | null; end_date: string | null; client: string | null; venue: string | null; install_start: string | null; event_start: string | null; event_end: string | null; project_manager: string };
+  project: { id: string; reference: string; name: string; kind: string; status: string; start_date: string | null; end_date: string | null; client: string | null; venue: string | null; install_start: string | null; event_start: string | null; event_end: string | null; project_manager: string;
+    /** The event edition the project was handed over with (a copy taken at the handover). Absent or null when the project has none. */
+    edition?: null | { label: string | null; event_name: string | null; venue: string | null; city: string | null; start_date: string | null; end_date: string | null } };
   handover: null | { id: string; sales_reference: string; title: string; venue: string | null; install_start: string | null; event_start: string | null; event_end: string | null; accepted_at: string | null; accepted_by: string | null; technologies: { name: string | null; qty: number | string | null }[]; notes_text: string | null };
   scope: { original_text: string | null; original_exclusions_text: string | null; current_text: string | null; current_exclusions_text: string | null; changed: boolean; approved_changes: number };
   team: { user_id: string; name: string; role: string; team: string | null; heads: string[]; active: boolean; tasks_done: number; tasks_assigned: number; milestones_accepted: number; deliverables_owned: string[] }[];
@@ -91,9 +93,14 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   add("project", `Project ${p.reference} "${one(p.name)}" (${p.kind === "client" ? "client project" : "internal project"}). Status: ${p.status.replace(/_/g, " ")}. Project Manager: ${person(p.project_manager)}.`, "project", p.id, "Project", "pinned");
   add("project", `Client: ${p.client ? one(p.client, 120) : "not recorded"}. Venue: ${p.venue ? one(p.venue, 160) : "not recorded"}.`, "project", p.id, "Project details");
   add("project", `Installation starts: ${d(p.install_start) ?? "not recorded"}. Event: ${range(p.event_start, p.event_end) ?? "not recorded"}. Project dates: ${range(p.start_date, p.end_date) ?? "not recorded"}.`, "project", p.id, "Project details");
+  // The event edition is a structured fact since the handover carries it: said in a line of its own, and said explicitly when there is none.
+  const ed = p.edition ?? null;
+  add("project", ed
+    ? `Event edition: ${one(ed.label ?? ed.event_name ?? "name not recorded", 160)}. Venue: ${ed.venue ? one(ed.venue, 160) : "not recorded"}. Published show dates: ${range(ed.start_date, ed.end_date) ?? "not recorded"}.`
+    : "Event edition: not recorded.", "project", p.id, "Project details");
   if (s.handover) {
     const h = s.handover;
-    add("project", `The project came from Sales handover ${h.sales_reference} "${one(h.title)}", accepted ${d(h.accepted_at) ?? "on a date that is not recorded"} by ${person(h.accepted_by)}. Event edition: not recorded as a field; see the handover notes if selected.`, "handover", h.id, "Sales handover");
+    add("project", `The project came from Sales handover ${h.sales_reference} "${one(h.title)}", accepted ${d(h.accepted_at) ?? "on a date that is not recorded"} by ${person(h.accepted_by)}.`, "handover", h.id, "Sales handover");
     if (h.technologies.length > 0) add("scope", `Technologies listed on the handover: ${h.technologies.slice(0, LIMITS.technologies).map((t) => `${one(t.name, 80)} x ${t.qty ?? "?"}`).join("; ")}${h.technologies.length > LIMITS.technologies ? `; and ${h.technologies.length - LIMITS.technologies} more` : ""}.`, "handover", h.id, "Sales handover");
     if (h.notes_text?.trim()) add("project", `Handover notes for the Project Manager (as written): ${clip(h.notes_text.trim(), LIMITS.optionalChars)}`, "handover", h.id, "Sales handover notes", { key: `handover-notes:${h.id}`, label: "Handover notes for the Project Manager", defaultOn: false });
   } else add("project", "No accepted Sales handover is recorded for this project.", "project", p.id, "Project");

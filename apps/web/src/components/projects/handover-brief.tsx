@@ -3,7 +3,7 @@ import { dateRangeText, dateText, formatDateTime as dateTimeText } from "@/lib/p
 import { Fact, Muted } from "./parts";
 import type { ProjHandoverRow } from "@/types/projects";
 
-type Brief = Pick<ProjHandoverRow, "client_name" | "location" | "site_timezone" | "install_start" | "event_start" | "event_end" | "technologies" | "scope" | "exclusions" | "risks" | "notes" | "crm_reference">;
+type Brief = Pick<ProjHandoverRow, "client_name" | "location" | "site_timezone" | "install_start" | "event_start" | "event_end" | "technologies" | "scope" | "exclusions" | "risks" | "notes" | "crm_reference"> & Pick<Partial<ProjHandoverRow>, "edition_snapshot">;
 
 function Block({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -41,6 +41,8 @@ export function HandoverBrief({ h, clarification, salesHref }: { h: Brief; clari
             <Fact label="Location">{h.location ?? "Not given"}</Fact>
             <Fact label="Installation starts">{dateText(h.install_start)}</Fact>
             <Fact label="Show">{dateRangeText(h.event_start, h.event_end)}</Fact>
+            {/* The edition Sales linked the enquiry to, as copied when the handover was submitted. Shown only when there is one. */}
+            {h.edition_snapshot ? <Fact label="Event edition" className="sm:col-span-2">{h.edition_snapshot.label ?? h.edition_snapshot.event_name ?? "Edition without a name"}</Fact> : null}
             <Fact label="Site time zone">{h.site_timezone}</Fact>
             <Fact label="Sales reference">{salesHref ? <Link href={salesHref} className="underline underline-offset-2" title="Opens for people with Sales access to this company">{h.crm_reference}</Link> : h.crm_reference}</Fact>
           </dl>

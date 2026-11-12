@@ -3,6 +3,8 @@
  * date, an equipment request's status). Nothing is estimated; where a detail was never recorded the line says so ("No one named", "No due date").
  * Two lists: work that needs THIS viewer, and work that is waiting on someone else. Permissions are not decided here: the links open the existing screens, which check.
  */
+import { READINESS_LOAD_ERROR, readinessSummary, REVIEW_FIELD_LABEL, reviewChangeText, type EquipmentReadinessResult, type EquipmentReview } from "./equipment-readiness-model";
+
 export interface AttentionTask {
   id: string; title: string; status: string; due_date: string | null; assignee_id: string; blocked_at: string | null; blocked_reason: string | null;
   unblock_owner_id: string | null; unblock_action: string | null;
@@ -35,6 +37,8 @@ export interface AttentionInput {
   reviewIds: readonly string[];
   lateMilestones: readonly AttentionMilestone[];
   equipment: EquipmentState;
+  /** Open "Review equipment booking" entries (a committed date changed while a request was with the warehouse). Absent or empty = none known. */
+  equipmentReviews?: readonly EquipmentReview[];
   userId: string;
   /** Project Manager, temporary leader or founder of this project. */
   manager: boolean;
@@ -91,6 +95,16 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
       waiting.push({ key: `e-w-${w.id}`, kind: "equipment", label: "Waiting for Warehouse", title: `Request ${w.code}`, href: i.equipmentHref(w.id), owner: "Warehouse", due: null, detail: "Submitted. The warehouse has not started preparing it.", tone: "quiet" });
     }
   }
+  // A committed date changed while a request was with the warehouse: one line per request, whatever the equipment read above said. The booking itself is not changed
+  // here or anywhere automatically; the line opens the Equipment tab, where the review lists each date and links to the request.
+  const byRequest = new Map<string, EquipmentReview[]>();
+  for (const v of i.equipmentReviews ?? []) byRequest.set(v.requestId, [...(byRequest.get(v.requestId) ?? []), v]);
+  for (const [requestId, vs] of byRequest) {
+    (i.manager ? needsYou : waiting).push({
+      key: `e-v-${requestId}`, kind: "equipment", label: "Review equipment booking", title: `Request ${vs[0]!.requestCode}`, href: `${i.equipmentHref()}#equipment-review`, owner: i.manager ? "You" : i.pmName, due: null,
+      detail: `${vs.map((v) => `${REVIEW_FIELD_LABEL[v.field]}: ${reviewChangeText(v)}`).join(" · ")}. The booking has not been changed.`, tone: "amber",
+    });
+  }
   const order: AttentionKind[] = ["blocker", "review", "overdue", "due_today", "milestone", "equipment", "in_review"];
   const rank = (a: AttentionItem) => order.indexOf(a.kind);
   // Equipment lines keep the order they were added in (a failed import before drafts before waiting); the rest go by due date.
@@ -98,12 +112,21 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
   return { needsYou: sort(needsYou), waiting: sort(waiting) };
 }
 
-/** The equipment line of the delivery summary: one confirmed state in words, or that nothing could be confirmed. */
-export function equipmentSummary(e: EquipmentState): { text: string; tone: "red" | "amber" | "quiet" } {
+/**
+ * The equipment line of the delivery summary: one confirmed state in words, or that nothing could be confirmed. A decision the manager owes (a failed import, a draft) comes
+ * first; then the readiness the database states for the requests that are with the warehouse (reserved, short, dispatched, still out); a failed readiness read says it could
+ * not be loaded and is never shown as "nothing waiting".
+ */
+export function equipmentSummary(e: EquipmentState, readiness?: EquipmentReadinessResult): { text: string; tone: "red" | "amber" | "quiet"; detail?: string | null } {
   if (e.status === "error") return { text: "Could not load the equipment state", tone: "red" };
+  if (e.status === "ok" && e.importFailed) return { text: "Import failed — review", tone: "red" };
+  if (e.status === "ok" && e.drafts.length > 0) return { text: e.drafts.length === 1 ? "Equipment draft needs submission" : `${e.drafts.length} equipment drafts need submission`, tone: "amber" };
+  if (readiness?.state === "error") return { text: READINESS_LOAD_ERROR, tone: "red" };
+  if (readiness?.state === "ok") {
+    const r = readinessSummary(readiness.readiness);
+    if (r) return r;
+  }
   if (e.status === "unavailable") return { text: "Not available to you here", tone: "quiet" };
-  if (e.importFailed) return { text: "Import failed — review", tone: "red" };
-  if (e.drafts.length > 0) return { text: e.drafts.length === 1 ? "Equipment draft needs submission" : `${e.drafts.length} equipment drafts need submission`, tone: "amber" };
   if (e.waiting.length > 0) return { text: "Waiting for Warehouse", tone: "quiet" };
   return { text: e.requests === 0 ? "No equipment request yet" : "No decision waiting", tone: "quiet" };
 }

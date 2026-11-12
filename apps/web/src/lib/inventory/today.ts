@@ -173,8 +173,10 @@ export function dispatchInstant(r: Pick<RequestInput, "plan" | "timezone" | "nee
 export function requestRow(r: RequestInput, ctx: BuildContext): QueueRow | null {
   const open = r.lines.filter((l) => l.status === "open");
   const unsent = open.filter((l) => l.reserved - l.dispatched > EPS);
-  // A line marked to buy or rent cannot be finished by preparing: it is shown under Waiting / Shortages (see `waitingRow`), not as work to prepare.
+  // A line marked to buy or rent cannot be finished by preparing: it is shown under Waiting / Shortages (see `waitingRow`), not as work to prepare. It is still SHORT:
+  // it is counted on its own (`toBuyOrRent`) and never among the fully reserved lines, and a request that has one is not simply "ready to send".
   const toReserve = open.filter((l) => l.toReserve > EPS && !isWaitingLine(l));
+  const toBuyOrRent = open.filter(isWaitingLine);
   const sent = open.filter((l) => l.dispatched > EPS && l.reserved - l.dispatched <= EPS);
   const when = dispatchInstant(r);
   const zone = safeZone(r.timezone);
@@ -188,16 +190,20 @@ export function requestRow(r: RequestInput, ctx: BuildContext): QueueRow | null 
   const facts: Fact[] = [];
   let title: string;
   if (kind === "prepare") {
-    const full = open.length - toReserve.length;
+    // Fully reserved = neither still to reserve from stock nor waiting on a purchase or rental. The three counts always add up to the open lines.
+    const full = open.length - toReserve.length - toBuyOrRent.length;
     title = r.kind === "project" ? `${r.forLabel} needs its equipment prepared` : `Equipment for ${r.forLabel} needs to be prepared`;
-    facts.push({ text: `${full} of ${plural(open.length, "line")} fully reserved · ${toReserve.length} still to reserve`, tone: "warn" });
+    facts.push({ text: `${full} of ${plural(open.length, "line")} fully reserved · ${toReserve.length} still to reserve${toBuyOrRent.length > 0 ? ` · ${toBuyOrRent.length} to buy or rent` : ""}`, tone: "warn" });
   } else {
     const started = open.some((l) => l.dispatched > EPS);
+    // Sending what is reserved while other lines are short is the existing partial dispatch. With any short line the title says "in part", never plain "ready to send".
+    const ready = toReserve.length + toBuyOrRent.length > 0 ? "ready to send in part" : "ready to send";
     title = r.kind === "project"
-      ? (started ? `${r.forLabel} still has equipment to send` : `${r.forLabel} is ready to send`)
-      : (started ? `Equipment for ${r.forLabel} is only partly sent` : `Equipment for ${r.forLabel} is ready to send`);
+      ? (started ? `${r.forLabel} still has equipment to send` : `${r.forLabel} is ${ready}`)
+      : (started ? `Equipment for ${r.forLabel} is only partly sent` : `Equipment for ${r.forLabel} is ${ready}`);
     facts.push({ text: `${plural(unsent.length, "line")} ready to send${sent.length > 0 ? `, ${sent.length} sent` : ""}` });
     if (toReserve.length > 0) facts.push({ text: `${plural(toReserve.length, "line")} still to reserve`, tone: "warn" });
+    if (toBuyOrRent.length > 0) facts.push({ text: `${plural(toBuyOrRent.length, "line")} to buy or rent`, tone: "warn" });
   }
   return {
     id: `request:${r.id}`, kind, title, forWhom, when, zone, whenLabel: words.label, late: words.late, facts,

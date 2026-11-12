@@ -10,6 +10,7 @@ import { SearchCombobox, type ComboOption } from "@/components/sales/combobox";
 import { chatMarkRead, chatMembers, chatMessages, chatPost, chatSearchItems } from "@/lib/actions/chat";
 import {
   membershipLine,
+  OPERATIONS_READER_NOTE,
   clockTime, dayHeading, filterMembers, initials, MAX_BODY, mentionQuery, mentionsStillInText, mergeMessages, SHARE_TYPES, splitMentions,
   type ChatGroup, type ChatMention, type ChatMessage, type ShareType, type SharedItem,
 } from "@/lib/chat/model";
@@ -225,6 +226,7 @@ export function ChatThread({ group, meId, onBack, onChanged }: { group: ChatGrou
         <div className="min-w-0 flex-1"><h3 className="truncate text-sm font-semibold" data-testid="chat-thread-title">{group.name}</h3><p className="text-xs text-muted-foreground">{membershipLine(group)}</p></div>
         {group.kind === "project" && group.projectId ? <Link href={`/projects/${group.projectId}/work`} className="mr-2 shrink-0 text-xs font-medium underline underline-offset-2" data-testid="chat-open-project">Open project</Link> : null}
       </div>
+      {group.viaOperations ? <p className="border-b border-border bg-secondary/40 px-4 py-2 text-xs text-muted-foreground" role="note" data-testid="chat-operations-note">{OPERATIONS_READER_NOTE}</p> : null}
 
       <div className="relative min-h-0 flex-1">
         <div ref={scroller} onScroll={onScroll} className="h-full space-y-1 overflow-y-auto px-3 py-3" aria-live="polite" aria-relevant="additions" data-testid="chat-messages">

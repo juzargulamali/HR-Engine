@@ -23,8 +23,8 @@ import { LoadError } from "@/components/workspace/states";
 import { firstParam, nextSort, parseRecordId, parseSort, parseView, sortToParam, withParams } from "@/components/workspace/url-state";
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { getProjectsContext } from "@/lib/projects/context";
-import { loadDirectoryResult } from "@/lib/projects/data";
-import { canChangeStatus, canSeeProjectDetails, DEFAULT_DIRECTORY_SORT, DIRECTORY_SORT_KEYS, milestoneProjectIds, nextMilestones, sortDirectory } from "@/lib/projects/directory";
+import { loadDirectoryResult, loadProjectEditions } from "@/lib/projects/data";
+import { canChangeStatus, canSeeProjectDetails, DEFAULT_DIRECTORY_SORT, DIRECTORY_SORT_KEYS, editionChoices, filterByEdition, milestoneProjectIds, nextMilestones, sortDirectory, type ProjectEdition } from "@/lib/projects/directory";
 import { dateRangeText, formatDate } from "@/lib/projects/format";
 import { loadProjectsAttention } from "@/lib/projects/my-work";
 import { filterDirectory } from "@/lib/projects/work-logic";
@@ -40,7 +40,12 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   const ctx = await getProjectsContext();
   if (!ctx) return null;
 
-  const [{ rows: directory, error }, attention] = await Promise.all([loadDirectoryResult(), loadProjectsAttention(ctx).catch((e) => { console.error("[projects] needs-you load failed", e); return null; })]);
+  const [{ rows: directory, error }, attention, editionsRes] = await Promise.all([
+    loadDirectoryResult(), loadProjectsAttention(ctx).catch((e) => { console.error("[projects] needs-you load failed", e); return null; }),
+    // The event edition of each project (the copy taken at the handover). A failed read leaves the directory usable and says editions could not be loaded.
+    loadProjectEditions().catch(() => ({ state: "error" as const })),
+  ]);
+  const editionBy = editionsRes.state === "ok" ? editionsRes.byProject : new Map<string, ProjectEdition>();
   if (error) return <div className="space-y-4"><PageHeader title="Projects" /><LoadError what="the projects" retryHref="/projects" /></div>;
 
   const salesOnly = ctx.grants.length === 0;
@@ -56,10 +61,12 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   const view = finished ? "table" : parseView(firstParam(sp, "view"), "table");
   const status = (PROJECT_STATUSES as readonly string[]).includes(firstParam(sp, "status")) && (finished === (firstParam(sp, "status") === "completed" || firstParam(sp, "status") === "archived")) ? firstParam(sp, "status") : "";
   const sort = parseSort(firstParam(sp, "sort"), DIRECTORY_SORT_KEYS, DEFAULT_DIRECTORY_SORT);
-  const filtered = filterDirectory(directory, { q, company, kind, status, view: finished ? "finished" : "live" });
+  const editions = editionChoices(editionBy, directory);
+  const edition = editions.some((e) => e.value === firstParam(sp, "edition")) ? firstParam(sp, "edition") : "";
+  const filtered = filterByEdition(filterDirectory(directory, { q, company, kind, status, view: finished ? "finished" : "live" }), editionBy, edition);
   const liveCount = directory.filter((d) => d.status !== "completed" && d.status !== "archived").length;
   const finishedCount = directory.length - liveCount;
-  const anyFilter = !!(q || company || kind || status);
+  const anyFilter = !!(q || company || kind || status || edition);
 
   // ---- next milestone: asked for only where the person may see project details (members and founders), nothing for anyone else
   const visibleIds = milestoneProjectIds(filtered, ctx.grants);
@@ -136,17 +143,19 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
       <div className="os-card p-3 sm:p-4">
       <ListToolbar
         search={{ value: q, placeholder: "Search by name, reference or Project Manager", label: "Search projects" }}
-        clearHref={href({}, ["q", "company", "kind", "status"])}
+        clearHref={href({}, ["q", "company", "kind", "status", "edition"])}
         filters={[
           { name: "show", label: "Show", value: finished ? "finished" : "", options: [{ value: "", label: `Ongoing (${liveCount})` }, { value: "finished", label: `Completed and archived (${finishedCount})` }] },
           { name: "kind", label: "Kind", value: kind, options: [{ value: "", label: "Client and internal" }, { value: "client", label: "Client projects" }, { value: "internal", label: "Internal projects" }] },
           { name: "status", label: "Status", value: status, options: [{ value: "", label: "Any status" }, ...PROJECT_STATUSES.filter((s) => finished === (s === "completed" || s === "archived")).map((s) => ({ value: s, label: projectStatusLabel(s) }))] },
           ...(companies.length > 1 ? [{ name: "company", label: "Company", value: company, options: [{ value: "", label: "All companies" }, ...companies.map(([id, name]) => ({ value: id, label: name }))] }] : []),
+          ...(editions.length > 0 ? [{ name: "edition", label: "Event edition", value: edition, options: [{ value: "", label: "All editions" }, ...editions]}] : []),
         ]}
       >
         {!finished && !salesOnly ? <ViewSwitch current={view} tableHref={href({ view: null })} boardHref={href({ view: "board" })} boardLabel="Board" /> : null}
       </ListToolbar>
       </div>
+      {editionsRes.state === "error" ? <Muted>Event editions could not be loaded just now, so no project shows its edition and the edition filter is not offered. Everything else is shown.</Muted> : null}
 
       {rows.length === 0 ? (
         <EmptyState
@@ -185,6 +194,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                       <Name href={detailsHref(p.id, details)} className="break-words font-medium underline-offset-2 hover:underline">{p.name}</Name>
                       {unreadBy.get(p.id) ? <span className="ml-2 rounded-full bg-accent px-1.5 text-[13px] font-semibold text-accent-foreground">{unreadBy.get(p.id)} unread</span> : null}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground"><span>{p.reference}</span><KindBadge kind={p.kind} ongoing={p.is_ongoing} /></div>
+                      {editionBy.get(p.id) ? <div className="mt-0.5 break-words text-sm text-muted-foreground" data-testid="project-edition">Event edition: {editionBy.get(p.id)!.label}</div> : null}
                     </TableCell>
                     {companies.length > 1 ? <TableCell data-label="Company" className="text-sm">{ctx.companyName(p.company_id)}</TableCell> : null}
                     <TableCell data-label="Project Manager" className="text-sm">{p.pm_name ? <span className="inline-flex items-center gap-2"><OsAvatar name={p.pm_name} size="sm" />{p.pm_name}</span> : "—"}</TableCell>

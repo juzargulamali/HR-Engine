@@ -21,7 +21,8 @@ export async function loadChatGroups(): Promise<ChatGroupsResult> {
   return {
     state: "ok",
     groups: (data ?? []).map((g) => ({ id: g.gid, key: g.gkey, name: g.gname, unread: Number(g.unread), mentions: Number(g.mentions), lastAt: g.last_at, lastSender: g.last_sender, lastPreview: g.last_preview,
-      kind: g.gkind === "project" ? "project" as const : "sales" as const, projectId: g.project_id ?? null, readOnly: g.read_only === true })),
+      kind: g.gkind === "project" ? "project" as const : "sales" as const, projectId: g.project_id ?? null, readOnly: g.read_only === true,
+      projectStatus: g.project_status ?? null, viaOperations: g.via_operations === true })),
   };
 }
 
