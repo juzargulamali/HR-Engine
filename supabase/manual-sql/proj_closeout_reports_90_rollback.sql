@@ -12,11 +12,13 @@ begin
   end if;
 end $$;
 begin;
+drop function if exists proj_closeout_take_call(uuid, integer);
 drop function if exists proj_closeout_discard_draft(uuid);
 drop function if exists proj_closeout_approve(uuid, integer);
 drop function if exists proj_closeout_save_edits(uuid, jsonb, integer);
 drop function if exists proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb);
 drop function if exists proj_closeout_require_manager(uuid);
 drop function if exists proj_closeout_evidence(uuid);
+drop table if exists proj_closeout_usage;
 drop table if exists proj_closeout_reports;
 commit;

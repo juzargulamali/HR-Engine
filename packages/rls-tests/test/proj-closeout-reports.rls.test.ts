@@ -31,7 +31,7 @@ describe("Project Closeout Report", () => {
   const admin = async <T = Row>(sql: string) => (await db.seed(sql)).rows as T[];
   const evidence = (user: string, project = P1) => call<Row>(user, `proj_closeout_evidence('${project}')`);
   const saveDraft = async (user: string, snapshot: Row | null, opts: { project?: string; generation?: string; sections?: unknown; hash?: string } = {}) =>
-    call<Row>(user, `proj_closeout_save_draft('${opts.project ?? P1}', ${snapshot ? j(snapshot) : "null"}, ${j({ include: ["scope-original"] })}, '${opts.hash ?? HASH}', '${opts.generation ?? "generated"}', 'simulated', ${j(opts.sections ?? SECTIONS)}, ${j(REFS)})`);
+    call<Row>(user, `proj_closeout_save_draft('${opts.project ?? P1}', ${snapshot ? j(snapshot) : "null"}, ${j({ include: ["scope-original"] })}, '${opts.hash ?? HASH}', '${opts.generation ?? "generated"}', ${(opts.generation ?? "generated") === "none" ? "null" : "'simulated'"}, ${j(opts.sections ?? SECTIONS)}, ${j(REFS)})`);
   const fingerprint = async () => JSON.stringify(await admin(`select
       (select md5(string_agg(row(p.id, p.status, p.updated_at)::text, ',' order by p.id)) from proj_projects p) projects,
       (select count(*) from proj_completions) completions, (select md5(coalesce(string_agg(row(t.id, t.status, t.version)::text, ',' order by t.id), '')) from proj_tasks t) tasks,
@@ -163,6 +163,7 @@ describe("Project Closeout Report", () => {
     expect(b).toMatchObject({ id: draft, version_no: 1, version: 2 });
     expect(Number((await admin(`select count(*) n from proj_closeout_reports`))[0]!.n)).toBe(1);
     await expect(saveDraft(U.pm, await evidence(U.pm), { generation: "failed" })).rejects.toThrow(/Unknown generation/);
+    await expect(call(U.pm, `proj_closeout_save_draft('${P1}', ${j(await evidence(U.pm))}, '{}'::jsonb, '${HASH}', 'generated', null, ${j(SECTIONS)}, ${j(REFS)})`)).rejects.toThrow(/Unknown generation/);
     const [row] = await admin<Row>(`select * from proj_closeout_reports where id = '${draft}'`);
     expect(row).toMatchObject({ status: "draft", payload_hash: "p2-fedcba9876543210", generation: "generated", provider_kind: "simulated", created_by: U.pm });
     expect(row!.snapshot.scope.approved_changes).toBe(1);
@@ -184,10 +185,13 @@ describe("Project Closeout Report", () => {
   it("editing and approving: managers only, a stale copy is refused, an empty report cannot be approved, approval is a repeatable step that freezes the version", async () => {
     const before = await fingerprint();
     const edited = [{ ...SECTIONS[0], paragraphs: [{ text: "Delivered, with one item open.", refs: ["S1"], flags: [] }] }];
-    await expect(call(U.eng, `proj_closeout_save_edits('${draft}', ${j(edited)}, 2)`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.eng, `proj_closeout_save_edits('${draft}', ${j(edited)}, 2)`)).rejects.toThrow(/Report not found/);
+    await expect(call(U.eng, `proj_closeout_save_edits('${id()}', ${j(edited)}, 2)`)).rejects.toThrow(/Report not found/);   // the same answer for a report that does not exist
+    await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, null)`)).rejects.toThrow(/Reload the report/);
     await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 1)`)).rejects.toThrow(/changed by someone else/);
     expect(await call<number>(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 2)`)).toBe(3);
-    await expect(call(U.outsider, `proj_closeout_approve('${draft}', 3)`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.outsider, `proj_closeout_approve('${draft}', 3)`)).rejects.toThrow(/Report not found/);
+    await expect(call(U.pm, `proj_closeout_approve('${draft}', null)`)).rejects.toThrow(/Reload the report/);
     await expect(call(U.pm, `proj_closeout_approve('${draft}', 2)`)).rejects.toThrow(/changed by someone else/);
     await call(U.pm, `proj_closeout_save_edits('${draft}', '[]'::jsonb, 3)`);
     await expect(call(U.pm, `proj_closeout_approve('${draft}', 4)`)).rejects.toThrow(/empty/);
@@ -197,7 +201,7 @@ describe("Project Closeout Report", () => {
     const [row] = await admin<Row>(`select status, approved_by, approved_at, sections from proj_closeout_reports where id = '${draft}'`);
     expect(row).toMatchObject({ status: "approved", approved_by: U.pm });
     expect(row!.sections[0].paragraphs[0].text).toBe("Delivered, with one item open.");
-    await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, null)`)).rejects.toThrow(/approved report cannot be edited/);
+    await expect(call(U.pm, `proj_closeout_save_edits('${draft}', ${j(edited)}, 6)`)).rejects.toThrow(/approved report cannot be edited/);
     await expect(call(U.pm, `proj_closeout_discard_draft('${draft}')`)).rejects.toThrow(/approved report is kept/);
     expect(await fingerprint()).toBe(before);                                       // approving completed nothing, told nobody, moved no stock
     expect((await admin<Row>(`select status from proj_projects where id = '${P1}'`))[0]!.status).toBe("in_progress");
@@ -222,10 +226,19 @@ describe("Project Closeout Report", () => {
     const d2 = await saveDraft(U.pm, e, { generation: "none" });
     expect(d2.version_no).toBe(2);
     expect(d2.id).not.toBe(draft);
-    await expect(call(U.eng, `proj_closeout_discard_draft('${d2.id}')`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.eng, `proj_closeout_discard_draft('${d2.id}')`)).rejects.toThrow(/Report not found/);
     await call(U.pm, `proj_closeout_discard_draft('${d2.id}')`);
     await call(U.pm, `proj_closeout_discard_draft('${d2.id}')`);                    // already gone: nothing happens
     expect((await admin<Row>(`select version_no, status from proj_closeout_reports where project_id = '${P1}'`))).toEqual([{ version_no: 1, status: "approved" }]);
+  });
+
+  it("provider use is bounded per project per day, and only a manager can spend it", async () => {
+    await expect(call(U.eng, `proj_closeout_take_call('${P1}', 3)`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.pm, `proj_closeout_take_call('${P2}', 3)`)).rejects.toThrow(/Only the Project Manager/);
+    await expect(call(U.pm, `proj_closeout_take_call('${P1}', 0)`)).rejects.toThrow(/daily limit/);
+    expect([await call(U.pm, `proj_closeout_take_call('${P1}', 3)`), await call(U.founder, `proj_closeout_take_call('${P1}', 3)`), await call(U.pm, `proj_closeout_take_call('${P1}', 3)`), await call(U.pm, `proj_closeout_take_call('${P1}', 3)`)]).toEqual([true, true, true, false]);
+    expect((await admin<Row>(`select calls from proj_closeout_usage where project_id = '${P1}'`))[0]!.calls).toBe(3);
+    expect(await q(U.eng, `select 1 from proj_closeout_usage`)).toHaveLength(0);
   });
 
   it("the owner packs: preflight has no STOP, verify says OK on every row", async () => {

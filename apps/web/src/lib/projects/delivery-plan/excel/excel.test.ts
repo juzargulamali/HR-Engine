@@ -205,6 +205,15 @@ describe("3. export, edit, import again", () => {
     expect(p.summary).toEqual({ add: 0, update: 0, unchanged: 4, attention: 0 });
     expect(p.payload).toEqual({ items: [], lines: [] });
   });
+  it("an untouched export is Unchanged even for someone who cannot read the stock list, or when the stock item has been retired", async () => {
+    const named = (): DeliveryPlan => { const p = existingPlan(); for (const i of p.items) for (const l of i.lines) if (l.inv_item_id) l.inv_item_name = stockNames[l.inv_item_id] ?? "LED panel P2.6"; return p; };
+    const file = await editExport(named(), () => undefined);
+    for (const inventory of [[] as Named[], null]) {
+      const p = await planOf(file, named(), { inventory });
+      expect(p.summary).toEqual({ add: 0, update: 0, unchanged: 4, attention: 0 });
+      expect(p.payload).toEqual({ items: [], lines: [] });
+    }
+  });
   it("a changed name and a changed date are Updates of the same rows, found by ID; nothing is added", async () => {
     const bytes = await editExport(existingPlan(), (wb) => {
       wb.getWorksheet("Deliverables")!.getCell("C2").value = "LED welcome wall with touch";

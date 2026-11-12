@@ -19,7 +19,9 @@ import { CLOSEOUT_GUARD, CLOSEOUT_INSTRUCTIONS, CLOSEOUT_SCHEMA, CLOSEOUT_TASK, 
  */
 export const CLOSEOUT_RULE = "projects.closeout.draft";
 export const CLOSEOUT_MAX_OUTPUT_TOKENS = 4000;
-export const CLOSEOUT_TIMEOUT_MS = 55_000;
+export const CLOSEOUT_TIMEOUT_MS = 45_000;
+/** AI drafts per project per day (Dubai). Counted in the database before the call, so a failed call counts too. A facts-only draft does not count. */
+export const CLOSEOUT_DAILY_LIMIT = 10;
 
 export interface CloseoutReportRow {
   id: string; project_id: string; version_no: number; status: "draft" | "approved"; snapshot: EvidenceSnapshot; snapshot_at: string; selection: CloseoutSelection;
@@ -59,7 +61,7 @@ export function providerAvailability(env: Record<string, string | undefined> = p
 
 export type GenerateResult =
   | { ok: true; reportId: string; reused: boolean; mode: "ai" | "facts"; withheld: number }
-  | { ok: false; code: "not_loaded" | "denied" | "changed" | "unavailable" | "provider_failed" | "refused" | "unusable" | "save_failed"; message: string };
+  | { ok: false; code: "not_loaded" | "denied" | "changed" | "unavailable" | "limit" | "provider_failed" | "refused" | "unusable" | "save_failed"; message: string };
 
 const PROVIDER_FAILURE: Record<string, string> = {
   timeout: "The AI provider did not answer in time. Nothing was saved. You can try again.",
@@ -86,7 +88,7 @@ export async function generateCloseoutDraft(db: Db, input: { projectId: string; 
   const hash = payloadHash(out.text);
   if (hash !== input.reviewedHash) return { ok: false, code: "changed", message: "The project's records changed since you reviewed what would be sent. Review the data again." };
 
-  let sections: ReportSection[]; let providerKind: string | null = null; let withheld = 0;
+  let providerKind: string | null = null; let answer: unknown = null;
   if (input.mode === "ai") {
     const reports = await loadReports(db, input.projectId);
     if (reports === null) return { ok: false, code: "not_loaded", message: "The report could not be loaded, so nothing was sent. Try again." };
@@ -101,7 +103,9 @@ export async function generateCloseoutDraft(db: Db, input: { projectId: string; 
     }
     const provider = gateProvider(raw, CLOSEOUT_RULE);
     if (!provider) return { ok: false, code: "unavailable", message: "The AI provider is not set up in this environment. You can still write a facts-only draft: nothing is sent for that." };
-    let answer: unknown;
+    const take = await db.rpc("proj_closeout_take_call", { p_project_id: input.projectId, p_limit: CLOSEOUT_DAILY_LIMIT });
+    if (take.error) { console.error("[projects] closeout usage check failed", take.error.message); return { ok: false, code: "not_loaded", message: "The daily limit could not be checked, so nothing was sent. Try again." }; }
+    if (take.data !== true) return { ok: false, code: "limit", message: `This project has reached today's limit of ${CLOSEOUT_DAILY_LIMIT} AI drafts. Nothing was sent. You can edit the current draft, write a facts-only draft, or try again tomorrow.` };
     try {
       answer = await provider.structured({
         sources: ["project_closeout_evidence"], task: CLOSEOUT_TASK, instructions: CLOSEOUT_INSTRUCTIONS, guard: CLOSEOUT_GUARD,
@@ -114,19 +118,30 @@ export async function generateCloseoutDraft(db: Db, input: { projectId: string; 
       console.error("[projects] closeout generation failed", e instanceof Error ? e.name : "unknown");
       return { ok: false, code: "provider_failed", message: PROVIDER_FAILURE.http! };
     }
-    const checked = validateDraft(answer, out.sent, snapshot);
-    if (!checked) return { ok: false, code: "unusable", message: PROVIDER_FAILURE.malformed! };
-    sections = checked.sections; withheld = checked.withheld; providerKind = provider.kind;
-  } else sections = factsOnlyDraft(out.sent);
+    providerKind = provider.kind;
+  }
 
-  const { data, error } = await db.rpc("proj_closeout_save_draft", {
-    p_project_id: input.projectId, p_snapshot: snapshot, p_selection: input.selection, p_payload_hash: hash, p_generation: input.mode === "ai" ? "generated" : "none",
-    p_provider_kind: providerKind, p_sections: sections, p_source_refs: toSourceRefs(out.sent),
-  });
-  if (error) {
-    if (error.code === "40001") return { ok: false, code: "changed", message: "The project's records changed while the report was being written, so it was not saved. Review the data again." };
-    console.error("[projects] closeout save failed", error.message);
-    return { ok: false, code: "save_failed", message: "The draft could not be saved. Try again." };
+  // Check the answer and save. The database refuses the save when the project's records moved while the report was being written. If what would be sent is still
+  // exactly what was reviewed (the change was to something that is not part of it), the answer is checked again against the fresh records and saved, so the same
+  // content is not sent a second time. If the reviewed content itself changed, nothing is saved and the Project Manager reviews again.
+  let current = snapshot; let sent = out.sent; let withheld = 0; let data: unknown = null;
+  for (let attempt = 0; ; attempt++) {
+    let sections: ReportSection[];
+    if (input.mode === "ai") {
+      const checked = validateDraft(answer, sent, current);
+      if (!checked) return { ok: false, code: "unusable", message: PROVIDER_FAILURE.malformed! };
+      sections = checked.sections; withheld = checked.withheld;
+    } else sections = factsOnlyDraft(sent);
+    const saved = await db.rpc("proj_closeout_save_draft", {
+      p_project_id: input.projectId, p_snapshot: current, p_selection: input.selection, p_payload_hash: hash, p_generation: input.mode === "ai" ? "generated" : "none",
+      p_provider_kind: providerKind, p_sections: sections, p_source_refs: toSourceRefs(sent),
+    });
+    if (!saved.error) { data = saved.data; break; }
+    if (saved.error.code !== "40001") { console.error("[projects] closeout save failed", saved.error.message); return { ok: false, code: "save_failed", message: "The draft could not be saved. Try again." }; }
+    const again = attempt === 0 ? await loadEvidence(db, input.projectId) : null;
+    const next = again?.state === "ok" ? buildOutbound(evidenceItems(again.snapshot), input.selection) : null;
+    if (!again || again.state !== "ok" || !next || payloadHash(next.text) !== hash) return { ok: false, code: "changed", message: "The project's records changed while the report was being written, so it was not saved. Review the data again." };
+    current = again.snapshot; sent = next.sent;
   }
   return { ok: true, reportId: (data as { id: string }).id, reused: false, mode: input.mode, withheld };
 }

@@ -53,10 +53,12 @@ Built in the database from an explicit allowlist. Display names come from `proj_
 
 * **Facts** (always part of the evidence): project, dates, statuses, counts, names and roles, who decided what and when, that feedback was recorded and its status, milestones, plan lines with their linked task or equipment state, the completion and sign-off lines, equipment sent, returned and still out.
 * **Optional text** (free text a person wrote; the Project Manager selects it): original and final scope and exclusions, decision reasons and effects on dates (selected by default, removable); the client's words, our response, the completion note and the handover notes (left out unless ticked).
-* **Withheld by the data policy** (never sent, whatever is ticked): a line with protected details (`findProtectedContent`), a line marked as not for external sharing (`wholeTextRestricted`), and, stricter than the general policy, **a line that mentions an amount of money** (`mentionsMoney`). The review screen lists each withheld line by its label and reason.
+* **Withheld by the data policy** (never sent, whatever is ticked). Every line is screened, including the fixed-wording ones, because titles, names and venues are typed by people: a line with protected details (`findProtectedContent`); a line marked as not for external sharing (`wholeTextRestricted`); a line with an **email address, phone number or web address** (`mentionsContact`); and, stricter than the general policy, a line that **mentions an amount of money** (`mentionsAmount`: a currency next to a figure or a number in words, or a price word such as cost, price, margin, quoted, invoice near a figure; "4K", "120 Hz", "refresh rate" and quantities are not money). The review screen lists each withheld line by its label and reason.
+* **Names:** a display name that is only a sign-in name (the fallback when a person has no full name) is sent as "a team member (full name not set)".
+* **One line each, no markup:** text people wrote has angle brackets removed, line breaks flattened and any `[S12]`-shaped text rewritten, so it cannot close the data tag, start a line of its own or pass for another evidence line.
 * **Missing sign-off:** with no completion record the evidence says `Completion: NOT RECORDED` and, for a client project, `Client sign-off: NOT RECORDED`. A completion recorded on an internal note is not a client sign-off.
 * **Equipment:** every line states asked, sent, returned and still out, and one line gives the units still out across all requests, with the note that delivery being complete does not mean the equipment is back.
-* **Bounded:** list limits (`LIMITS`), 1,500 characters per optional text, and a 20,000 character budget (`OUTBOUND_BUDGET`; the gate's own limit is 24,000). Over budget, optional text is cut first, then plan lines, then other long lists; status, sign-off and equipment summary lines are cut last. What was cut is counted on the review screen.
+* **Bounded:** list limits (`LIMITS`), 1,500 characters per optional text, and a 20,000 character budget (`OUTBOUND_BUDGET`; the gate's own limit is 24,000). Over budget, optional text is cut first, then plan lines, then other long lists. The project status, completion, sign-off, task count, equipment-still-out and "could not be read" lines are **pinned and never cut**. Every list that is cut short says how many more are recorded. What was cut is counted on the review screen.
 * `payloadHash` is a fingerprint of exactly the text that would be sent.
 
 ## 5. The screen: `/projects/[id]/closeout`
@@ -78,11 +80,13 @@ The browser sends only the project id, the selected keys, the mode and the finge
 
 ### 5.2 The provider call
 
-One request, through `gateProvider(provider, "projects.closeout.draft")`: source `project_closeout_evidence`, the evidence as record text, a fixed instruction text (R: `CLOSEOUT_INSTRUCTIONS`), at most 4,000 output tokens, a 55 second limit. The gate applies the app's AI data policy to the whole text again. The instructions say the evidence is data and not instructions, to cite references, to say when something is not recorded, never to infer a sign-off, to keep delivery and equipment return apart, to name people only for recorded ownership and never to judge effort or performance, to quote feedback only from exact recorded text, and to leave money out.
+One request, through `gateProvider(provider, "projects.closeout.draft")`: source `project_closeout_evidence`, the evidence as record text, a fixed instruction text (R: `CLOSEOUT_INSTRUCTIONS`, at most 3 paragraphs of 70 words per section), at most 4,000 output tokens, a 45 second limit. Before the call the database counts it: at most **10 AI drafts per project per day** (`proj_closeout_take_call`, S: `CLOSEOUT_DAILY_LIMIT`); a failed call counts, a reused or facts-only draft does not. The gate applies the app's AI data policy to the whole text again. The instructions say the evidence is data and not instructions, to cite references, to say when something is not recorded, never to infer a sign-off, to keep delivery and equipment return apart, to name people only for recorded ownership and never to judge effort or performance, to quote feedback only from exact recorded text, and to leave money out.
 
 * **Failure or timeout:** the message says nothing was saved and to try again. Nothing is written, so a retry cannot leave a second version.
 * **Same content again:** if the draft already holds a generated result for exactly this fingerprint, that draft is returned and nothing is sent.
+* **Records changed while writing:** if the change is to something that is not part of the reviewed content, the answer is checked again against the fresh records and saved (nothing is sent twice); if the reviewed content itself changed, nothing is saved and the Project Manager reviews again.
 * **One draft per project** (unique index): writing again updates it.
+* **Known gaps (independent review, not fixed):** two tabs pressing the button in the same second both call the provider (one draft results; both count toward the daily limit); writing a facts-only draft over an AI draft and then choosing AI again with the same content sends it again.
 
 ### 5.3 Checks on the answer (R)
 
@@ -97,7 +101,7 @@ Only `sections[].id` and `sections[].paragraphs[].{text, refs}` are read; anythi
 | `no_source` | A factual paragraph that cites nothing | To check |
 | `suggestion` | A lesson suggested by the model | Shown as a suggestion |
 
-The same checks run on every edit the Project Manager saves and again, from the stored draft, when they approve (A: `saveCloseoutEdits`, `approveCloseout`). They are word-pattern checks and can miss an unusual phrasing; that is why the **Recorded facts** exist.
+The same checks run on every edit the Project Manager saves and again, from the stored draft, when they approve (A: `saveCloseoutEdits`, `approveCloseout`). They are word-pattern checks that lean towards marking too much: a sentence that names the client next to "accepted", "approved" or "signed" is marked even when it is about something else, and is cleared by rewording. They still cannot catch every phrasing: numbers written as words, indirect speech, and a claim that the project "was completed" are not checked. That is why the **Recorded facts** exist. The stopping marks and the tick are enforced by the server action; the database function checks the manager, the version and that the report is not empty, so a manager calling the function directly could approve a marked draft (internal, managers only; the Recorded facts still come from the stored snapshot).
 
 ### 5.4 The draft
 
@@ -123,5 +127,6 @@ An approved version is frozen with its snapshot, the time the snapshot was taken
 
 * Migration `20270101000100` after `20261231000100`; guide `docs/projects-closeout-report-deployment.md`.
 * The AI draft uses the existing provider configuration (`ANTHROPIC_API_KEY`, `JARVIS_PROVIDER`, `JARVIS_DISABLED`); it does not need the JARVIS pilot list. Without a provider only the facts-only draft is offered.
-* **Not built:** a client-facing report; an event-edition field; a per-person limit on drafts per day (each draft is one call, identical content is not sent twice).
-* **Verification gaps:** nothing signed in; no live Anthropic call (the real model's adherence to the instructions is `Unverified`); the generation service is unit-tested against a stand-in for the database functions, which are themselves tested on PostgreSQL; the PDF was rendered in tests, not opened by a person.
+* **Not built:** a client-facing report; an event-edition field.
+* **Owner decision open:** the original and final scope, exclusions, decision reasons and stated effects on dates are ticked by default on the review screen (shown, and removable); client words, our response and notes are not. If every free text should start unticked, it is a one-line change (`defaultOn` in E).
+* **Verification gaps:** nothing signed in; no live Anthropic call (the real model's adherence to the instructions is `Unverified`); the generation service is unit-tested against a stand-in for the database functions, which are themselves tested on PostgreSQL (the call through the hosted API layer was not exercised); the PDF was rendered in tests, not opened by a person; the PDF shows no approver name when a founder who is not on the project's team approved. An independent review (2026-11-12) found thirteen points; ten were fixed in the same PR and are covered by tests, the rest are listed in this section and 5.2, 5.3.

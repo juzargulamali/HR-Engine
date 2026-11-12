@@ -3,7 +3,7 @@
 Migration `supabase/migrations/20270101000100_proj_closeout_reports.sql` (install-order row 29). **Status: not applied anywhere by Claude; hosted status `Unverified`.** Reference: `docs/enginious-os/modules/projects-closeout-report.md`.
 
 ## What it adds
-One table (`proj_closeout_reports`) and six functions. Nothing existing is altered. Signed-in users can read the table through row-level security (only whoever manages the project) and cannot write it; every change goes through a function that checks the caller. Nothing here completes a project, notifies anyone or touches stock.
+Two tables (`proj_closeout_reports` and the small counter `proj_closeout_usage`) and seven functions. Nothing existing is altered. Signed-in users can read the table through row-level security (only whoever manages the project) and cannot write them; every change goes through a function that checks the caller. Nothing here completes a project, notifies anyone or touches stock.
 
 ## Order
 Apply **after** row 28 (`20261231000100_proj_delivery_plan.sql`): the evidence reads the Delivery Plan tables.
@@ -15,7 +15,7 @@ Apply **after** row 28 (`20261231000100_proj_delivery_plan.sql`): the evidence r
 Preview and Production share one database: applying the migration is visible to both, but until the app with the screen is merged nothing in Production reads or writes this table.
 
 ## The AI provider
-The AI draft uses the provider settings that already exist (`ANTHROPIC_API_KEY`, `JARVIS_PROVIDER`, `JARVIS_DISABLED`). It does not need the JARVIS pilot list and adds no setting. Where no provider is set up, or `JARVIS_DISABLED=1`, the screen offers only the facts-only draft, which sends nothing. The simulated provider is refused in Production, as before.
+The AI draft uses the provider settings that already exist (`ANTHROPIC_API_KEY`, `JARVIS_PROVIDER`, `JARVIS_DISABLED`). It does not need the JARVIS pilot list and adds no setting. AI drafts are limited to 10 per project per day; a facts-only draft does not count. Where no provider is set up, or `JARVIS_DISABLED=1`, the screen offers only the facts-only draft, which sends nothing. The simulated provider is refused in Production, as before.
 
 ## Checks that do not write and send nothing (signed-in Preview)
 * As the Project Manager of a project: **Manage project > Closeout report** opens "Review data to be sent" with the source categories, the team names and the optional text. Tick and untick a text: the count changes. Do not press either button.

@@ -1,5 +1,5 @@
 -- Projects & Tasks Phase 2, part 2: the Project Closeout Report. ADDITIVE ONLY. Applied AFTER 20261231000100 (it reads the Delivery Plan).
--- One new table and six functions; no existing table, policy or function is changed.
+-- Two new tables (the reports and a small usage counter) and seven functions; no existing table, policy or function is changed.
 --
 -- WHAT IT IS
 --   An INTERNAL report the Project Manager drafts from the project's own records, edits, and approves as a version. Generating or approving a report never completes a
@@ -85,24 +85,24 @@ begin
       'tasks_assigned', (select count(*) from proj_tasks t where t.project_id = pr.id and t.assignee_id = m.user_id and t.status <> 'cancelled'),
       'milestones_accepted', (select count(*) from proj_milestones ms where ms.project_id = pr.id and ms.accepted_by = m.user_id),
       'deliverables_owned', coalesce((select jsonb_agg(i.item_key || ' ' || i.title order by i.item_key) from proj_dp_items i where i.project_id = pr.id and i.owner_id = m.user_id and i.removed_at is null), '[]'::jsonb))
-    order by (pr.pm_user_id = m.user_id) desc, proj_display_name(m.user_id)), '[]'::jsonb)
+    order by (pr.pm_user_id = m.user_id) desc, proj_display_name(m.user_id), m.user_id), '[]'::jsonb)
   into v_team
   from (select distinct on (user_id) * from proj_project_members where project_id = pr.id order by user_id, (removed_at is null) desc, added_at desc) m;
 
   select coalesce(jsonb_agg(jsonb_build_object('id', ms.id, 'title', ms.title, 'status', ms.status, 'due_date', ms.due_date, 'required', ms.is_required,
-      'accepted_at', ms.accepted_at, 'accepted_by', case when ms.accepted_by is null then null else proj_display_name(ms.accepted_by) end) order by ms.sort_order, ms.due_date nulls last), '[]'::jsonb)
+      'accepted_at', ms.accepted_at, 'accepted_by', case when ms.accepted_by is null then null else proj_display_name(ms.accepted_by) end) order by ms.sort_order, ms.due_date nulls last, ms.id), '[]'::jsonb)
   into v_milestones from proj_milestones ms where ms.project_id = pr.id;
 
   select jsonb_build_object(
       'total', count(*), 'done', count(*) filter (where status = 'done'), 'open', count(*) filter (where status in ('todo', 'in_progress', 'ready_for_review')),
       'cancelled', count(*) filter (where status = 'cancelled'), 'deferred', count(*) filter (where status = 'deferred'),
       'blocked', count(*) filter (where blocked_at is not null and status in ('todo', 'in_progress', 'ready_for_review')),
-      'not_finished', coalesce((select jsonb_agg(jsonb_build_object('id', t.id, 'title', t.title, 'status', t.status, 'assignee', proj_display_name(t.assignee_id), 'due_date', t.due_date, 'blocked', t.blocked_at is not null) order by t.due_date nulls last, t.title)
-                                from (select * from proj_tasks where project_id = pr.id and status in ('todo', 'in_progress', 'ready_for_review', 'deferred', 'cancelled') order by due_date nulls last, title limit 40) t), '[]'::jsonb))
+      'not_finished', coalesce((select jsonb_agg(jsonb_build_object('id', t.id, 'title', t.title, 'status', t.status, 'assignee', proj_display_name(t.assignee_id), 'due_date', t.due_date, 'blocked', t.blocked_at is not null) order by t.due_date nulls last, t.title, t.id)
+                                from (select * from proj_tasks where project_id = pr.id and status in ('todo', 'in_progress', 'ready_for_review', 'deferred', 'cancelled') order by due_date nulls last, title, id limit 40) t), '[]'::jsonb))
   into v_tasks from proj_tasks where project_id = pr.id;
 
   -- Decisions with who decided, when and the recorded reason. A scope change carries its title and its effect on dates; the scope texts themselves are under "scope".
-  select coalesce(jsonb_agg(x.j order by x.at), '[]'::jsonb) into v_decisions from (
+  select coalesce(jsonb_agg(x.j order by x.at, x.j->>'id'), '[]'::jsonb) into v_decisions from (
     select sc.decided_at as at, jsonb_build_object('id', sc.id, 'kind', 'scope_change', 'title', sc.title, 'status', sc.status, 'proposed_by', proj_display_name(sc.proposed_by), 'proposed_at', sc.proposed_at,
              'decided_by', case when sc.decided_by is null then null else proj_display_name(sc.decided_by) end, 'decided_at', sc.decided_at, 'reason', sc.decision_note, 'effect_on_dates', sc.effect_on_dates) as j
       from proj_scope_changes sc where sc.project_id = pr.id and sc.status in ('approved', 'rejected')
@@ -121,7 +121,7 @@ begin
   -- Client feedback: the facts always; the words of the request and of our response only as optional text the Project Manager selects.
   select coalesce(jsonb_agg(jsonb_build_object('id', f.id, 'received_on', f.received_on, 'kind', f.kind, 'status', f.status, 'resolved_at', f.resolved_at,
       'resolved_by', case when f.resolved_by is null then null else proj_display_name(f.resolved_by) end, 'responsible', case when f.responsible_user_id is null then null else proj_display_name(f.responsible_user_id) end,
-      'due_date', f.due_date, 'request_text', f.request_text, 'response_text', f.resolution) order by f.received_on, f.created_at), '[]'::jsonb)
+      'due_date', f.due_date, 'request_text', f.request_text, 'response_text', f.resolution) order by f.received_on, f.created_at, f.id), '[]'::jsonb)
   into v_feedback from proj_feedback f where f.project_id = pr.id;
 
   -- Delivery plan with the state of the linked task of each work line. Equipment lines are filled in below.
@@ -130,7 +130,7 @@ begin
       'lines', coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'key', l.line_key, 'section', l.section, 'description', l.description, 'qty', l.qty, 'released', l.released_at is not null,
           'request_line_id', l.request_line_id,
           'task', (select jsonb_build_object('status', t.status, 'completed_at', t.completed_at, 'assignee', proj_display_name(t.assignee_id)) from proj_tasks t where t.id = l.task_id))
-        order by l.sort_order, l.line_key) from proj_dp_lines l where l.item_id = i.id and l.removed_at is null), '[]'::jsonb)) order by i.sort_order, i.item_key), '[]'::jsonb)
+        order by l.sort_order, l.line_key, l.id) from proj_dp_lines l where l.item_id = i.id and l.removed_at is null), '[]'::jsonb)) order by i.sort_order, i.item_key, i.id), '[]'::jsonb)
   into v_plan from proj_dp_items i where i.project_id = pr.id and i.removed_at is null;
 
   -- Equipment: per request, what was asked, sent, returned and is still out. Delivered and returned are separate facts.
@@ -143,8 +143,8 @@ begin
           'requests', coalesce(jsonb_agg(jsonb_build_object('id', r.id, 'code', r.code, 'status', r.status, 'expected_return_at', r.expected_return_at,
             'lines', (select coalesce(jsonb_agg(jsonb_build_object('id', l.id, 'item', it.name, 'qty', l.qty, 'status', l.status,
                          'sent', coalesce((select sum(x.dispatched_qty) from inv_reservations x where x.request_line_id = l.id), 0),
-                         'returned', coalesce((select sum(x.returned_qty) from inv_reservations x where x.request_line_id = l.id), 0)) order by l.sort_order), '[]'::jsonb)
-                      from inv_request_lines l join inv_items it on it.id = l.item_id where l.request_id = r.id and l.status <> 'cancelled')) order by r.created_at), '[]'::jsonb))
+                         'returned', coalesce((select sum(x.returned_qty) from inv_reservations x where x.request_line_id = l.id), 0)) order by l.sort_order, l.id), '[]'::jsonb)
+                      from inv_request_lines l join inv_items it on it.id = l.item_id where l.request_id = r.id and l.status <> 'cancelled')) order by r.created_at, r.id), '[]'::jsonb))
         from inv_requests r where r.project_id = $1 and r.status <> 'cancelled'
       $q$ into v_equipment using pr.id;
     exception when others then
@@ -160,7 +160,7 @@ begin
         'project_manager', proj_display_name(pr.pm_user_id)),
     'handover', case when h.id is null then null else jsonb_build_object('id', h.id, 'sales_reference', h.crm_reference, 'title', h.title, 'venue', h.location, 'install_start', h.install_start,
         'event_start', h.event_start, 'event_end', h.event_end, 'accepted_at', h.accepted_at, 'accepted_by', case when h.accepted_by is null then null else proj_display_name(h.accepted_by) end,
-        'technologies', (select coalesce(jsonb_agg(jsonb_build_object('name', t->>'name', 'qty', t->'qty')), '[]'::jsonb) from jsonb_array_elements(h.technologies) t),
+        'technologies', (select coalesce(jsonb_agg(jsonb_build_object('name', t->>'name', 'qty', t->'qty') order by n), '[]'::jsonb) from jsonb_array_elements(h.technologies) with ordinality as t(t, n)),
         'notes_text', h.notes) end,
     'scope', jsonb_build_object('original_text', h.scope, 'original_exclusions_text', h.exclusions, 'current_text', d.scope, 'current_exclusions_text', d.exclusions,
         'changed', (h.id is not null and (coalesce(h.scope, '') is distinct from coalesce(d.scope, '') or coalesce(h.exclusions, '') is distinct from coalesce(d.exclusions, ''))),
@@ -168,7 +168,7 @@ begin
     'team', v_team, 'milestones', v_milestones, 'tasks', v_tasks, 'plan', v_plan, 'decisions', v_decisions, 'feedback', v_feedback,
     'completion', case when c.id is null then null else jsonb_build_object('id', c.id, 'completed_at', c.completed_at, 'completed_by', proj_display_name(c.completed_by), 'evidence_type', c.evidence_type,
         'confirmed_on', c.confirmed_on, 'has_reference', c.evidence_reference is not null, 'has_file', c.file_id is not null,
-        'resolutions', (select coalesce(jsonb_agg(jsonb_build_object('kind', r->>'kind', 'action', r->>'action', 'title', r->>'title', 'note', r->>'note')), '[]'::jsonb) from jsonb_array_elements(c.resolutions) r),
+        'resolutions', (select coalesce(jsonb_agg(jsonb_build_object('kind', r->>'kind', 'action', r->>'action', 'title', r->>'title') order by n), '[]'::jsonb) from jsonb_array_elements(c.resolutions) with ordinality as r(r, n)),
         'note_text', c.completion_note) end,
     'reopened_earlier', exists (select 1 from proj_completions x where x.project_id = pr.id and x.reopened_at is not null),
     'equipment', v_equipment,
@@ -199,6 +199,7 @@ begin
   perform proj_closeout_require_manager(p_project_id);
   perform 1 from proj_projects where id = p_project_id for update;
   if p_generation not in ('none', 'generated') then raise exception 'Unknown generation state' using errcode = '22023'; end if;
+  if (p_generation = 'generated') <> coalesce(p_provider_kind in ('anthropic', 'simulated'), false) then raise exception 'Unknown generation state' using errcode = '22023'; end if;
   if jsonb_typeof(coalesce(p_sections, '[]'::jsonb)) <> 'array' or jsonb_typeof(coalesce(p_source_refs, '[]'::jsonb)) <> 'array' then raise exception 'Malformed report' using errcode = '22023'; end if;
   if length(coalesce(p_sections, '[]'::jsonb)::text) > 400000 or length(coalesce(p_source_refs, '[]'::jsonb)::text) > 400000 then raise exception 'The report is too long to save' using errcode = '22023'; end if;
   v_snapshot := proj_closeout_evidence(p_project_id);
@@ -227,9 +228,12 @@ create or replace function proj_closeout_save_edits(p_report_id uuid, p_sections
 returns integer language plpgsql security definer set search_path = public as $$
 declare r proj_closeout_reports; v_ver integer;
 begin
+  -- One answer for "no such report" and "not yours", and no row lock before the caller is known to manage the project.
+  select * into r from proj_closeout_reports where id = p_report_id;
+  if not found or not proj_can_manage(r.project_id) then raise exception 'Report not found' using errcode = 'P0002'; end if;
   select * into r from proj_closeout_reports where id = p_report_id for update;
   if not found then raise exception 'Report not found' using errcode = 'P0002'; end if;
-  perform proj_closeout_require_manager(r.project_id);
+  if p_expected_version is null then raise exception 'Reload the report and try again' using errcode = '22023'; end if;
   if r.status <> 'draft' then raise exception 'An approved report cannot be edited. Start a new draft for a new version' using errcode = '23514'; end if;
   if p_expected_version is not null and r.version <> p_expected_version then raise exception 'This report was changed by someone else. Reload and try again' using errcode = '40001'; end if;
   if jsonb_typeof(p_sections) <> 'array' or length(p_sections::text) > 400000 then raise exception 'Malformed report' using errcode = '22023'; end if;
@@ -243,10 +247,12 @@ create or replace function proj_closeout_approve(p_report_id uuid, p_expected_ve
 returns void language plpgsql security definer set search_path = public as $$
 declare r proj_closeout_reports;
 begin
+  select * into r from proj_closeout_reports where id = p_report_id;
+  if not found or not proj_can_manage(r.project_id) then raise exception 'Report not found' using errcode = 'P0002'; end if;
   select * into r from proj_closeout_reports where id = p_report_id for update;
   if not found then raise exception 'Report not found' using errcode = 'P0002'; end if;
-  perform proj_closeout_require_manager(r.project_id);
   if r.status = 'approved' then return; end if;   -- a repeated click
+  if p_expected_version is null then raise exception 'Reload the report and try again' using errcode = '22023'; end if;
   if p_expected_version is not null and r.version <> p_expected_version then raise exception 'This report was changed by someone else. Reload and try again' using errcode = '40001'; end if;
   if jsonb_array_length(r.sections) = 0 then raise exception 'The report is empty. Write or generate it first' using errcode = '23514'; end if;
   update proj_closeout_reports set status = 'approved', approved_by = auth.uid(), approved_at = now(), updated_at = now(), version = version + 1 where id = r.id;
@@ -257,19 +263,48 @@ create or replace function proj_closeout_discard_draft(p_report_id uuid)
 returns void language plpgsql security definer set search_path = public as $$
 declare r proj_closeout_reports;
 begin
+  select * into r from proj_closeout_reports where id = p_report_id;
+  if not found then return; end if;
+  if not proj_can_manage(r.project_id) then raise exception 'Report not found' using errcode = 'P0002'; end if;
   select * into r from proj_closeout_reports where id = p_report_id for update;
   if not found then return; end if;
-  perform proj_closeout_require_manager(r.project_id);
   if r.status <> 'draft' then raise exception 'An approved report is kept. Only a draft can be discarded' using errcode = '23514'; end if;
   delete from proj_closeout_reports where id = r.id;
 end;
 $$;
 
+-- A bound on provider use: at most p_limit AI drafts per project per day (Dubai). Called by the server before the ONE provider call of a draft; a refused or failed
+-- call still counts, so a loop cannot spend more than the limit. Returns whether this call is within the limit.
+create table if not exists proj_closeout_usage (
+  project_id uuid not null references proj_projects(id) on delete cascade,
+  usage_day  date not null,
+  calls      integer not null default 0,
+  primary key (project_id, usage_day)
+);
+alter table proj_closeout_usage enable row level security;
+drop policy if exists proj_closeout_usage_select on proj_closeout_usage;
+create policy proj_closeout_usage_select on proj_closeout_usage for select using (proj_can_manage(project_id));
+revoke all on table proj_closeout_usage from anon, authenticated, public;
+grant select on table proj_closeout_usage to authenticated;
+
+create or replace function proj_closeout_take_call(p_project_id uuid, p_limit integer)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare v_day date := (now() at time zone 'Asia/Dubai')::date; v_used integer;
+begin
+  perform proj_closeout_require_manager(p_project_id);
+  if p_limit is null or p_limit < 1 or p_limit > 50 then raise exception 'The daily limit must be between 1 and 50' using errcode = '22023'; end if;
+  insert into proj_closeout_usage as u (project_id, usage_day, calls) values (p_project_id, v_day, 1)
+  on conflict (project_id, usage_day) do update set calls = u.calls + 1 where u.calls < p_limit
+  returning u.calls into v_used;
+  return v_used is not null;
+end;
+$$;
+
 revoke all on function
-  proj_closeout_evidence(uuid), proj_closeout_require_manager(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
+  proj_closeout_take_call(uuid, integer), proj_closeout_evidence(uuid), proj_closeout_require_manager(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
   proj_closeout_save_edits(uuid, jsonb, integer), proj_closeout_approve(uuid, integer), proj_closeout_discard_draft(uuid)
   from public, anon, authenticated;
 grant execute on function
-  proj_closeout_evidence(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
+  proj_closeout_take_call(uuid, integer), proj_closeout_evidence(uuid), proj_closeout_save_draft(uuid, jsonb, jsonb, text, text, text, jsonb, jsonb),
   proj_closeout_save_edits(uuid, jsonb, integer), proj_closeout_approve(uuid, integer), proj_closeout_discard_draft(uuid)
   to authenticated;

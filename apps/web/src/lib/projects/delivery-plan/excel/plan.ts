@@ -252,11 +252,15 @@ export function planDeliveryImport(input: PlanInput): ImportPlan {
     }
     if (r.stockItem) {
       if (section && section !== "hardware") issues.push({ field: "Stock item", message: "Only a Hardware line names a stock item" });
+      // The name already recorded on the line is not a change: nothing to look up, whether or not the stock list can be read.
+      else if (existing?.inv_item_id && existing.inv_item_name && words(r.stockItem) === words(existing.inv_item_name)) { /* same stock item */ }
       else if (!inventory) issues.push({ field: "Stock item", message: NO_STOCK_LIST });
       else {
         const found = lookup({ kind: "stock", ref: `Breakdown!${r.row}:stock`, field: "Stock item", typed: r.stockItem, list: inventory, currentId: existing?.inv_item_id ?? null,
-          currentName: existing?.inv_item_id ? stockName.get(existing.inv_item_id) ?? null : null });
-        if ("id" in found) set("inv_item_id", "Stock item", existing?.inv_item_id ? stockName.get(existing.inv_item_id) ?? "Another stock item" : "", found.name, found.id);
+          // The name recorded on the plan line comes first: the export writes that name, so an untouched export matches even when the person importing cannot read
+          // the stock list (a delegated lead without Inventory access) or the item has since been retired.
+          currentName: existing?.inv_item_id ? existing.inv_item_name ?? stockName.get(existing.inv_item_id) ?? null : null });
+        if ("id" in found) set("inv_item_id", "Stock item", existing?.inv_item_id ? existing.inv_item_name ?? stockName.get(existing.inv_item_id) ?? "Another stock item" : "", found.name, found.id);
         else if ("choice" in found) { choices.push(found.choice); choiceField[found.choice.ref] = "inv_item_id"; }
       }
     }

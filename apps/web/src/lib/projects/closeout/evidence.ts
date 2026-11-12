@@ -12,7 +12,7 @@
  * not for external sharing, is withheld and shown to the Project Manager as withheld. The report is stricter than the general policy on one point: a line that mentions an
  * amount of money (a price, a cost, a rate, a margin) is withheld too, wherever it was written. The outbound gate applies the general policy again to the whole text.
  */
-import { findProtectedContent, mentionsMoney, wholeTextRestricted } from "@/lib/jarvis/protected";
+import { findProtectedContent, wholeTextRestricted } from "@/lib/jarvis/protected";
 
 export interface EvidenceSnapshot {
   taken_at: string;
@@ -45,7 +45,9 @@ export interface EvidenceItem {
   source: { type: string; id: string | null; label: string };
   optional?: { key: string; label: string; defaultOn: boolean };
   /** Set when the data policy keeps this line inside Enginious OS. It is never sent, whatever is selected. */
-  withheld?: "protected" | "restricted" | "money";
+  withheld?: "protected" | "restricted" | "money" | "contact";
+  /** The facts a report must never lose (status, completion, sign-off, task counts, equipment still out, what could not be read): never cut for size. */
+  pinned?: boolean;
 }
 
 export interface CloseoutSelection { include: string[] }
@@ -56,11 +58,18 @@ const n = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x :
 const fmt = (x: number) => (Number.isInteger(x) ? String(x) : String(Math.round(x * 1000) / 1000));
 const clip = (s: string, max: number) => (s.length > max ? `${s.slice(0, max - 1).trimEnd()}…` : s);
 const one = (s: string | null | undefined, max = 240) => clip(String(s ?? "").replace(/\s+/g, " ").trim(), max);
+/**
+ * Text that people wrote is made safe to sit inside one evidence line: no angle brackets (so it cannot close the data tag or open another), no line breaks (so it
+ * cannot start a line of its own) and no "[S12]"-shaped reference (so it cannot pass for another evidence line).
+ */
+const safe = (v: string) => v.replace(/[<>]/g, "").replace(/\s*[\r\n]+\s*/g, " / ").replace(/\[\s*(S\d+)\s*\]/gi, "($1)");
+/** A display name that is only a sign-in name (the fallback when no full name is set) is part of an email address: it is not sent. */
+const person = (v: string | null | undefined, none = "a person who is not recorded") => (!v ? none : /^[a-z0-9._+-]+$/.test(v.trim()) ? "a team member (full name not set)" : v);
 const SECTION_WORDS: Record<string, string> = { hardware: "Hardware", content: "Content", programming: "Programming", installation: "Installation", testing: "Testing" };
 const EVIDENCE_TYPE_WORDS: Record<string, string> = { email_reference: "an email reference", signed_handover: "a signed handover", uploaded_confirmation: "an uploaded confirmation", internal_note: "an internal note only (no client document)" };
 
 /** Per-list limits keep the payload bounded; what is left out is counted in a line of its own, never silently dropped. */
-export const LIMITS = { team: 40, milestones: 40, plan: 60, lines: 120, decisions: 40, feedback: 30, notFinished: 40, equipmentLines: 80, optionalChars: 1500 } as const;
+export const LIMITS = { team: 40, milestones: 40, plan: 60, lines: 120, decisions: 40, feedback: 30, notFinished: 40, openMilestones: 20, resolutions: 30, technologies: 30, owned: 8, equipmentLines: 80, optionalChars: 1500 } as const;
 
 /**
  * Every evidence item of a snapshot, in a fixed order with fixed references. Deterministic: the same snapshot always gives the same items and the same references.
@@ -68,18 +77,20 @@ export const LIMITS = { team: 40, milestones: 40, plan: 60, lines: 120, decision
  */
 export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   const out: Omit<EvidenceItem, "ref">[] = [];
-  const add = (category: EvidenceCategory, text: string, type: string, id: string | null, label: string, optional?: EvidenceItem["optional"]) => { out.push({ category, text, source: { type, id, label }, ...(optional ? { optional } : {}) }); };
-  const more = (category: EvidenceCategory, total: number, shown: number, what: string) => { if (total > shown) add(category, `${total - shown} more ${what} are recorded and are not listed here.`, "project", s.project.id, "Project"); };
+  const add = (category: EvidenceCategory, text: string, type: string, id: string | null, label: string, optional?: EvidenceItem["optional"] | "pinned") => {
+    out.push({ category, text: safe(text), source: { type, id, label }, ...(optional === "pinned" ? { pinned: true } : optional ? { optional: { ...optional, label: safe(optional.label) } } : {}) });
+  };
+  const more = (category: EvidenceCategory, total: number, shown: number, what: string) => { if (total > shown) add(category, `${total - shown} more ${what} are recorded and are not listed here.`, "project", s.project.id, "Project", "pinned"); };
   const p = s.project;
 
   // ---- project
-  add("project", `Project ${p.reference} "${one(p.name)}" (${p.kind === "client" ? "client project" : "internal project"}). Status: ${p.status.replace(/_/g, " ")}. Project Manager: ${p.project_manager}.`, "project", p.id, "Project");
+  add("project", `Project ${p.reference} "${one(p.name)}" (${p.kind === "client" ? "client project" : "internal project"}). Status: ${p.status.replace(/_/g, " ")}. Project Manager: ${person(p.project_manager)}.`, "project", p.id, "Project", "pinned");
   add("project", `Client: ${p.client ? one(p.client, 120) : "not recorded"}. Venue: ${p.venue ? one(p.venue, 160) : "not recorded"}.`, "project", p.id, "Project details");
   add("project", `Installation starts: ${d(p.install_start) ?? "not recorded"}. Event: ${range(p.event_start, p.event_end) ?? "not recorded"}. Project dates: ${range(p.start_date, p.end_date) ?? "not recorded"}.`, "project", p.id, "Project details");
   if (s.handover) {
     const h = s.handover;
-    add("project", `The project came from Sales handover ${h.sales_reference} "${one(h.title)}", accepted ${d(h.accepted_at) ?? "on a date that is not recorded"} by ${h.accepted_by ?? "a person who is not recorded"}. Event edition: not recorded as a field; see the handover notes if selected.`, "handover", h.id, "Sales handover");
-    if (h.technologies.length > 0) add("scope", `Technologies listed on the handover: ${h.technologies.slice(0, 30).map((t) => `${one(t.name, 80)} x ${t.qty ?? "?"}`).join("; ")}.`, "handover", h.id, "Sales handover");
+    add("project", `The project came from Sales handover ${h.sales_reference} "${one(h.title)}", accepted ${d(h.accepted_at) ?? "on a date that is not recorded"} by ${person(h.accepted_by)}. Event edition: not recorded as a field; see the handover notes if selected.`, "handover", h.id, "Sales handover");
+    if (h.technologies.length > 0) add("scope", `Technologies listed on the handover: ${h.technologies.slice(0, LIMITS.technologies).map((t) => `${one(t.name, 80)} x ${t.qty ?? "?"}`).join("; ")}${h.technologies.length > LIMITS.technologies ? `; and ${h.technologies.length - LIMITS.technologies} more` : ""}.`, "handover", h.id, "Sales handover");
     if (h.notes_text?.trim()) add("project", `Handover notes for the Project Manager (as written): ${clip(h.notes_text.trim(), LIMITS.optionalChars)}`, "handover", h.id, "Sales handover notes", { key: `handover-notes:${h.id}`, label: "Handover notes for the Project Manager", defaultOn: false });
   } else add("project", "No accepted Sales handover is recorded for this project.", "project", p.id, "Project");
 
@@ -97,17 +108,17 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
     const owned = [
       m.tasks_assigned > 0 ? `${m.tasks_done} of ${m.tasks_assigned} assigned tasks done` : null,
       m.milestones_accepted > 0 ? `accepted ${m.milestones_accepted} milestone${m.milestones_accepted === 1 ? "" : "s"}` : null,
-      m.deliverables_owned.length > 0 ? `accountable owner of ${m.deliverables_owned.slice(0, 8).map((x) => one(x, 80)).join("; ")}` : null,
+      m.deliverables_owned.length > 0 ? `accountable owner of ${m.deliverables_owned.slice(0, LIMITS.owned).map((x) => one(x, 80)).join("; ")}${m.deliverables_owned.length > LIMITS.owned ? ` and ${m.deliverables_owned.length - LIMITS.owned} more` : ""}` : null,
       m.heads.length > 0 ? `head of ${m.heads.map((x) => one(x, 60)).join(", ")}` : null,
     ].filter(Boolean);
-    add("team", `${m.name}: ${m.role}${m.team ? `, ${one(m.team, 60)}` : ""}${m.active ? "" : " (no longer on the project)"}. Recorded ownership: ${owned.length > 0 ? owned.join("; ") : "none recorded"}.`, "member", m.user_id, "People & access");
+    add("team", `${person(m.name)}: ${m.role}${m.team ? `, ${one(m.team, 60)}` : ""}${m.active ? "" : " (no longer on the project)"}. Recorded ownership: ${owned.length > 0 ? owned.join("; ") : "none recorded"}.`, "member", m.user_id, "People & access");
   }
   more("team", s.team.length, LIMITS.team, "team members");
 
   // ---- decisions
   const KIND = { scope_change: "Scope change", plan_change: "Change to the released delivery plan", correction: "Correction" } as const;
   for (const x of s.decisions.slice(0, LIMITS.decisions)) {
-    const base = `${KIND[x.kind]} "${one(x.title ?? "untitled", 160)}": ${x.status} by ${x.decided_by ?? "a person who is not recorded"} on ${d(x.decided_at) ?? "a date that is not recorded"}; raised by ${x.proposed_by} on ${d(x.proposed_at)}.${x.fields?.length ? ` Fields changed: ${x.fields.join(", ").replace(/_/g, " ")}.` : ""}`;
+    const base = `${KIND[x.kind]} "${one(x.title ?? "untitled", 160)}": ${x.status} by ${person(x.decided_by)} on ${d(x.decided_at) ?? "a date that is not recorded"}; raised by ${person(x.proposed_by)} on ${d(x.proposed_at)}.${x.fields?.length ? ` Fields changed: ${x.fields.join(", ").replace(/_/g, " ")}.` : ""}`;
     add("decisions", `${base} Recorded reason: ${x.reason?.trim() ? "one is recorded" : "none recorded"}.`, x.kind, x.id, KIND[x.kind]);
     if (x.reason?.trim()) add("decisions", `Reason recorded for "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.reason.trim(), 600)}`, x.kind, x.id, `${KIND[x.kind]} reason`, { key: `decision-reason:${x.id}`, label: `Reason: ${one(x.title ?? KIND[x.kind], 80)}`, defaultOn: true });
     if (x.effect_on_dates?.trim()) add("decisions", `Stated effect on dates of "${one(x.title ?? "untitled", 100)}" (as written): ${clip(x.effect_on_dates.trim(), 400)}`, x.kind, x.id, "Scope change effect on dates", { key: `decision-dates:${x.id}`, label: `Effect on dates: ${one(x.title ?? "", 80)}`, defaultOn: true });
@@ -119,7 +130,7 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   const FK: Record<string, string> = { in_scope_correction: "a correction within scope", proposed_change: "a proposed change" };
   for (const [i, f] of s.feedback.slice(0, LIMITS.feedback).entries()) {
     const open = f.status === "open" || f.status === "in_progress";
-    add(open ? "open_items" : "feedback", `Client feedback ${i + 1}, received ${d(f.received_on)}, recorded as ${FK[f.kind] ?? f.kind}: ${f.status.replace(/_/g, " ")}${f.resolved_at ? ` on ${d(f.resolved_at)} by ${f.resolved_by ?? "a person who is not recorded"}` : ""}.${open ? ` Open follow-up${f.responsible ? ` with ${f.responsible}` : ""}${f.due_date ? `, due ${d(f.due_date)}` : ""}.` : ""}`, "feedback", f.id, "Client feedback");
+    add(open ? "open_items" : "feedback", `Client feedback ${i + 1}, received ${d(f.received_on)}, recorded as ${FK[f.kind] ?? f.kind}: ${f.status.replace(/_/g, " ")}${f.resolved_at ? ` on ${d(f.resolved_at)} by ${person(f.resolved_by)}` : ""}.${open ? ` Open follow-up${f.responsible ? ` with ${person(f.responsible)}` : ""}${f.due_date ? `, due ${d(f.due_date)}` : ""}.` : ""}`, "feedback", f.id, "Client feedback");
     if (f.request_text?.trim()) add("feedback", `Client feedback ${i + 1}, the client's request (exact recorded text): "${clip(f.request_text.trim(), LIMITS.optionalChars)}"`, "feedback", f.id, "Client feedback text", { key: `feedback-request:${f.id}`, label: `Feedback ${i + 1}: the client's words`, defaultOn: false });
     if (f.response_text?.trim()) add("feedback", `Client feedback ${i + 1}, our recorded response (exact recorded text): "${clip(f.response_text.trim(), LIMITS.optionalChars)}"`, "feedback", f.id, "Client feedback response", { key: `feedback-response:${f.id}`, label: `Feedback ${i + 1}: our response`, defaultOn: false });
   }
@@ -127,43 +138,48 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
   if (s.feedback.length === 0) add("feedback", "No client feedback is recorded.", "project", p.id, "Feedback & changes");
 
   // ---- delivery: milestones, plan with its linked work, task counts
-  for (const m of s.milestones.slice(0, LIMITS.milestones)) add("delivery", `Milestone "${one(m.title, 160)}"${m.required ? "" : " (optional)"}: ${m.status.replace(/_/g, " ")}${m.accepted_at ? `, accepted ${d(m.accepted_at)} by ${m.accepted_by ?? "a person who is not recorded"}` : ""}${m.due_date ? `; due ${d(m.due_date)}` : "; no due date recorded"}.`, "milestone", m.id, "Milestone");
+  for (const m of s.milestones.slice(0, LIMITS.milestones)) add("delivery", `Milestone "${one(m.title, 160)}"${m.required ? "" : " (optional)"}: ${m.status.replace(/_/g, " ")}${m.accepted_at ? `, accepted ${d(m.accepted_at)} by ${person(m.accepted_by)}` : ""}${m.due_date ? `; due ${d(m.due_date)}` : "; no due date recorded"}.`, "milestone", m.id, "Milestone");
   more("delivery", s.milestones.length, LIMITS.milestones, "milestones");
   if (s.milestones.length === 0) add("delivery", "No milestone is recorded.", "project", p.id, "Work");
   const eqLine = new Map<string, { sent: number; returned: number; qty: number }>();
   for (const r of s.equipment?.requests ?? []) for (const l of r.lines) eqLine.set(l.id, { sent: n(l.sent), returned: n(l.returned), qty: n(l.qty) });
   let lineBudget: number = LIMITS.lines;
+  const allLines = s.plan.slice(0, LIMITS.plan).reduce((a, it) => a + it.lines.length, 0);
   for (const it of s.plan.slice(0, LIMITS.plan)) {
-    add("delivery", `Deliverable ${it.key} "${one(it.title, 160)}"${it.zone ? ` in ${one(it.zone, 60)}` : ""}: accountable owner ${it.owner ?? "not recorded"}; needed by ${d(it.needed_by) ?? "not recorded"}; ${it.released ? "released to the teams" : "not released"}.`, "deliverable", it.id, "Delivery plan");
+    add("delivery", `Deliverable ${it.key} "${one(it.title, 160)}"${it.zone ? ` in ${one(it.zone, 60)}` : ""}: accountable owner ${person(it.owner, "not recorded")}; needed by ${d(it.needed_by) ?? "not recorded"}; ${it.released ? "released to the teams" : "not released"}.`, "deliverable", it.id, "Delivery plan");
     for (const l of it.lines) {
       if (lineBudget-- <= 0) break;
       const state = !l.released ? "not released"
         : l.section === "hardware" ? (() => { const e = l.request_line_id ? eqLine.get(l.request_line_id) : undefined; return !e ? "equipment line state not known" : e.sent > 0 ? `sent ${fmt(e.sent)} of ${fmt(e.qty)}, returned ${fmt(e.returned)}` : "requested, not sent"; })()
-        : l.task ? `task ${l.task.status.replace(/_/g, " ")}${l.task.completed_at ? ` on ${d(l.task.completed_at)}` : ""}, with ${l.task.assignee}` : "task state not known";
+        : l.task ? `task ${l.task.status.replace(/_/g, " ")}${l.task.completed_at ? ` on ${d(l.task.completed_at)}` : ""}, with ${person(l.task.assignee)}` : "task state not known";
       add("delivery", `${it.key} / ${l.key} ${SECTION_WORDS[l.section] ?? l.section}: "${one(l.description, 160)}"${l.qty !== null ? ` x ${fmt(n(l.qty))}` : ""}: ${state}.`, "plan_line", l.id, "Delivery plan line");
     }
   }
+  more("delivery", allLines, LIMITS.lines, "delivery plan lines");
   more("delivery", s.plan.length, LIMITS.plan, "deliverables");
   if (s.plan.length === 0) add("delivery", "No delivery plan is recorded for this project.", "project", p.id, "Delivery plan");
   const t = s.tasks;
-  add("delivery", `Tasks: ${t.total} in all; ${t.done} done, ${t.open} open (${t.blocked} blocked), ${t.deferred} deferred, ${t.cancelled} cancelled.`, "project", p.id, "Work");
+  add("delivery", `Tasks: ${t.total} in all; ${t.done} done, ${t.open} open (${t.blocked} blocked), ${t.deferred} deferred, ${t.cancelled} cancelled.`, "project", p.id, "Work", "pinned");
 
   // ---- open items: what is incomplete, deferred or cancelled
-  for (const x of t.not_finished.slice(0, LIMITS.notFinished)) add("open_items", `Task "${one(x.title, 160)}": ${x.status.replace(/_/g, " ")}${x.blocked ? " and blocked" : ""}, with ${x.assignee}${x.due_date ? `, due ${d(x.due_date)}` : ""}.`, "task", x.id, "Task");
-  for (const m of s.milestones.filter((x) => !["accepted"].includes(x.status)).slice(0, 20)) add("open_items", `Milestone "${one(m.title, 160)}" is ${m.status.replace(/_/g, " ")} (not accepted).`, "milestone", m.id, "Milestone");
-  for (const r of s.completion?.resolutions ?? []) add("open_items", `At completion, ${r.kind ?? "an item"} "${one(r.title ?? "untitled", 140)}" was decided as: ${r.action ?? "not recorded"}.`, "completion", s.completion!.id, "Completion record");
+  for (const x of t.not_finished.slice(0, LIMITS.notFinished)) add("open_items", `Task "${one(x.title, 160)}": ${x.status.replace(/_/g, " ")}${x.blocked ? " and blocked" : ""}, with ${person(x.assignee)}${x.due_date ? `, due ${d(x.due_date)}` : ""}.`, "task", x.id, "Task");
+  const openMs = s.milestones.filter((x) => x.status !== "accepted");
+  more("open_items", openMs.length, LIMITS.openMilestones, "milestones that are not accepted");
+  more("open_items", s.completion?.resolutions.length ?? 0, LIMITS.resolutions, "decisions on open items at completion");
+  for (const m of openMs.slice(0, LIMITS.openMilestones)) add("open_items", `Milestone "${one(m.title, 160)}" is ${m.status.replace(/_/g, " ")} (not accepted).`, "milestone", m.id, "Milestone");
+  for (const r of (s.completion?.resolutions ?? []).slice(0, LIMITS.resolutions)) add("open_items", `At completion, ${r.kind ?? "an item"} "${one(r.title ?? "untitled", 140)}" was decided as: ${r.action ?? "not recorded"}.`, "completion", s.completion!.id, "Completion record");
 
   // ---- handover and sign-off. Delivery complete and equipment returned are separate facts.
   if (s.completion) {
     const c = s.completion;
-    add("handover", `The project was recorded as completed on ${d(c.completed_at)} by ${c.completed_by}.`, "completion", c.id, "Completion record");
+    add("handover", `The project was recorded as completed on ${d(c.completed_at)} by ${person(c.completed_by)}.`, "completion", c.id, "Completion record", "pinned");
     add("handover", p.kind === "client"
       ? `Client sign-off: recorded as ${EVIDENCE_TYPE_WORDS[c.evidence_type] ?? c.evidence_type.replace(/_/g, " ")}${c.confirmed_on ? `, confirmed ${d(c.confirmed_on)}` : ", confirmation date not recorded"}; ${c.has_file ? "a confirmation file is attached to the record" : c.has_reference ? "a reference is recorded" : "no file or reference is recorded"}.`
-      : "Internal project: no client sign-off applies.", "completion", c.id, "Completion record");
-    if (c.note_text?.trim()) add("handover", `Completion note by ${c.completed_by} (as written): ${clip(c.note_text.trim(), LIMITS.optionalChars)}`, "completion", c.id, "Completion note", { key: `completion-note:${c.id}`, label: "Completion note", defaultOn: false });
+      : "Internal project: no client sign-off applies.", "completion", c.id, "Completion record", "pinned");
+    if (c.note_text?.trim()) add("handover", `Completion note by ${person(c.completed_by)} (as written): ${clip(c.note_text.trim(), LIMITS.optionalChars)}`, "completion", c.id, "Completion note", { key: `completion-note:${c.id}`, label: "Completion note", defaultOn: false });
   } else {
-    add("handover", "Completion: NOT RECORDED. The project has no completion record.", "project", p.id, "Complete project");
-    add("handover", p.kind === "client" ? "Client sign-off: NOT RECORDED. No client confirmation of completion is recorded." : "Internal project: no client sign-off applies.", "project", p.id, "Complete project");
+    add("handover", "Completion: NOT RECORDED. The project has no completion record.", "project", p.id, "Complete project", "pinned");
+    add("handover", p.kind === "client" ? "Client sign-off: NOT RECORDED. No client confirmation of completion is recorded." : "Internal project: no client sign-off applies.", "project", p.id, "Complete project", "pinned");
   }
   if (s.reopened_earlier) add("handover", "The project was completed earlier and then reopened; the earlier completion record is kept in History.", "project", p.id, "History");
 
@@ -178,21 +194,52 @@ export function evidenceItems(s: EvidenceSnapshot): EvidenceItem[] {
       }
     }
     more("equipment", lines, LIMITS.equipmentLines, "equipment lines");
-    add("equipment", s.equipment.requests.length === 0 ? "No equipment request is recorded for this project." : out > 0 ? `Equipment still out, all requests together: ${fmt(out)} unit${out === 1 ? "" : "s"}. Delivery being complete does not mean the equipment is back.` : "All equipment that was sent is recorded as returned.", "project", p.id, "Equipment");
+    add("equipment", s.equipment.requests.length === 0 ? "No equipment request is recorded for this project." : out > 0 ? `Equipment still out, all requests together: ${fmt(out)} unit${out === 1 ? "" : "s"}. Delivery being complete does not mean the equipment is back.` : "All equipment that was sent is recorded as returned.", "project", p.id, "Equipment", "pinned");
   }
-  for (const m of s.missing) add("equipment", `NOT AVAILABLE: ${one(m, 200)}.`, "project", p.id, "Equipment");
+  for (const m of s.missing) add("equipment", `NOT AVAILABLE: ${one(m, 200)}.`, "project", p.id, "Equipment", "pinned");
 
   return out.map((x, i) => ({ ...x, ref: `S${i + 1}`, ...withheldReason(x.text) }));
 }
 
+const CURRENCY = "(?:aed|usd|sar|eur|gbp|qar|omr|kwd|bhd|dhs?|dirhams?|riyals?|dollars?|euros?|pounds?(?!\\s+(?:of|per))|sterling)";
+const NUMBER_WORD = "(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand|million|lakh)";
+const AMOUNT = `(?:\\d[\\d,.]*\\s?(?:k|m|mn|million|thousand)?|${NUMBER_WORD}(?:[\\s-]+(?:and\\s+)?${NUMBER_WORD})*)`;
+const MONEY_RE = new RegExp(`\\b${CURRENCY}\\.?\\s?${AMOUNT}\\b|\\b${AMOUNT}\\s?${CURRENCY}\\b|[$€£]\\s?\\d`, "i");
+/** A word that is about what something costs or earns. Deliberately without "rate", "value", "total" and "charge", which event technology uses for other things. */
+const PRICE_WORD = /\b(?:pric(?:e|es|ed|ing)|costs?|costing|fees?|budgets?|margins?|mark-?ups?|discounts?|invoic(?:e|es|ed)|quot(?:ed|ation|ations)|payments?|paid|deposits?|profits?|revenues?|turnover|rental|vat|salar(?:y|ies)|wages?)\b/i;
+const FIGURE_NEAR = new RegExp(`\\b(?:\\d[\\d,.]*\\s?%?|${NUMBER_WORD})\\b`, "i");
+/**
+ * Does a line mention an amount of money? Stricter than the general policy on what counts (a currency next to a figure or a number in words; or a price word within a
+ * short distance of any figure), and narrower on what does not: "4K", "120 Hz", "refresh rate" and quantities are ordinary event-technology wording, not money.
+ */
+export function mentionsAmount(raw: string): boolean {
+  const text = raw.normalize("NFKC").replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ").replace(/\b\d+(?:\.\d+)?\s?k\b(?=\s*(?:uhd|hdr|led|oled|lcd|display|screen|panel|projector|wall|content|video|render|resolution|media|camera|monitor|tv)\b)/gi, " ").replace(/\b[48]k\b/gi, " ");
+  if (MONEY_RE.test(text)) return true;
+  return text.split(/(?<=[.!?;])\s+/).some((sentence) => {
+    const m = PRICE_WORD.exec(sentence);
+    if (!m) return false;
+    const around = sentence.slice(Math.max(0, m.index - 40), m.index + m[0].length + 40).replace(m[0], " ");
+    return FIGURE_NEAR.test(around);
+  });
+}
+const EMAIL = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+const URL = /\b(?:https?:\/\/|www\.)\S+/i;
+/** A phone-like run: an international prefix, or eight or more digits with only spaces, dots, dashes or brackets between them. Calendar dates are not phone numbers. */
+const PHONE = /(?:\+|\b00)\d[\d\s().-]{6,}\d|(?<![\w-])\d(?:[\s().-]?\d){7,}(?![\w-])/;
+export function mentionsContact(raw: string): boolean {
+  const text = raw.replace(/\b\d{4}-\d{2}-\d{2}\b/g, " ");
+  return EMAIL.test(text) || URL.test(text) || PHONE.test(text);
+}
 function withheldReason(text: string): { withheld?: EvidenceItem["withheld"] } {
   if (wholeTextRestricted(text)) return { withheld: "restricted" };
   if (findProtectedContent(text).length > 0) return { withheld: "protected" };
-  if (mentionsMoney(text)) return { withheld: "money" };
+  if (mentionsContact(text)) return { withheld: "contact" };
+  if (mentionsAmount(text)) return { withheld: "money" };
   return {};
 }
 export const WITHHELD_WORDS: Record<NonNullable<EvidenceItem["withheld"]>, string> = {
   restricted: "marked as not for external sharing", protected: "contains details that stay inside Enginious OS", money: "mentions an amount of money",
+  contact: "contains an email address, a phone number or a web address",
 };
 
 /** The optional items a selection includes. With no selection given, the defaults apply. */
@@ -212,11 +259,13 @@ export function buildOutbound(items: readonly EvidenceItem[], selection: Closeou
   const dropped: EvidenceItem[] = [];
   const line = (x: EvidenceItem) => `[${x.ref}] (${CATEGORY_LABELS[x.category]}) ${x.text}`;
   const size = (xs: readonly EvidenceItem[]) => xs.reduce((a, x) => a + line(x).length + 1, 0);
-  while (size(sent) > OUTBOUND_BUDGET && sent.length > 0) {
-    // Cut order: optional free text, then delivery plan lines, then the other long lists, each from the end. The summary lines (status, sign-off, counts, the
-    // equipment still out) are cut last of all, only if nothing else is left.
-    const last = (test: (x: EvidenceItem) => boolean) => { for (let i = sent.length - 1; i >= 0; i--) if (test(sent[i]!)) return i; return -1; };
-    const idx = [last((x) => !!x.optional), last((x) => x.source.type === "plan_line"), last((x) => ["deliverable", "task", "milestone", "member", "equipment_line"].includes(x.source.type)), sent.length - 1].find((i) => i >= 0)!;
+  for (;;) {
+    if (size(sent) <= OUTBOUND_BUDGET) break;
+    // Cut order: optional free text, then delivery plan lines, then the other long lists, then anything else, each from the end. Pinned lines (status, completion,
+    // sign-off, task counts, equipment still out, what could not be read, and the "N more are not listed" lines) are never cut.
+    const last = (test: (x: EvidenceItem) => boolean) => { for (let i = sent.length - 1; i >= 0; i--) if (!sent[i]!.pinned && test(sent[i]!)) return i; return -1; };
+    const idx = [last((x) => !!x.optional), last((x) => x.source.type === "plan_line"), last((x) => ["deliverable", "task", "milestone", "member", "equipment_line"].includes(x.source.type)), last(() => true)].find((i) => i >= 0);
+    if (idx === undefined) break;
     dropped.unshift(sent[idx]!);
     sent = sent.filter((_, i) => i !== idx);
   }
