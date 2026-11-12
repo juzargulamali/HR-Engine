@@ -8,13 +8,16 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
-### 2026-11-12 | Release: PR #91 (invite and password links) merged; real-inbox test pending | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `0b72962`; **no application code, no migration, no SQL run**
+### 2026-11-12 | Release: PR #91 (invite and password links) merged; Production Resend invite verified by the owner; Dawood's sign-in pending | docs only, branch `claude/admiring-cray-uky379` restarted from `main` `0b72962`; **no application code, no migration, no SQL run**
 
 * **Merged (checked on GitHub):** PR #91 merged into `main` with merge commit `0b72962d5faa4b55d83a23d7fcfb7e76457d7396`, pinned to head `0bee73284685d630c9376010dfc74d5276e81b09`, at the owner's request. Before merging Claude confirmed the head was unchanged.
 * **Required CI on the exact head (read on GitHub by Claude):** `lint-typecheck-test` passed and `rls-policies` passed on `0bee732`.
 * **Hosted database:** no migration and no SQL in this change.
-* **Real-inbox test: pending.** The owner asked for the merge before it and will run it in Production after deployment: Invite, Resend invite for an account that never set a password, Send password reset from People & Access, and Forgot password from the sign-in page, with the administrator's emails opened in a different browser. No Preview test was run.
-* **Production:** not verified. Claude cannot read Vercel, the hosted Auth users or the Auth logs.
+* **Production, Resend invite (owner-reported, 2026-11-12):** verified by the owner with a test alias after deployment. The email arrived, the link opened Set password, and the owner could set a password and sign in. The merge was made at the owner's request before this test.
+* **Email templates (owner-reported, 2026-11-12):** the owner updated and tested the Invite user and Reset password templates in Supabase. The Reset password template is shared by resent invites and password resets. This was done by the owner in Supabase; it is not part of PR #91 and Claude did not see the templates.
+* **Not reported individually:** a first Invite, Send password reset from People & Access and Forgot password from the sign-in page, beyond the statement that the two templates were tested.
+* **Dawood's own sign-in: pending** until he confirms it. His account, employee record and role grants were not changed by this work.
+* **No further code or settings changes are needed** (owner's statement). Claude cannot read Vercel, the hosted Auth users or the Auth logs. *(History: the first version of this entry, commit `675d5f2`, said the real-inbox test was pending and Production was not verified.)*
 * **Docs corrected:** the status line of `modules/people-access-invites-and-password-links.md` and the README. The dated entry below is history and is left as written.
 
 ### 2026-11-12 | Invite and password links: Resend invite, Send password reset and Forgot password links can be completed by the person they are sent to | branch `claude/invite-recovery-links` from `main` `c6fdc84` (not merged); **app only: no migration, no SQL, no change to Supabase Auth settings**
