@@ -72,7 +72,7 @@ export function PersonDetail({ data, tab, params }: { data: PeopleAccessData; ta
               <JobPanel
                 employeeId={data.employee.id} personName={p.name} companyName={data.jobView.companyName} jobTitle={data.employee.jobTitle}
                 departmentId={data.employee.departmentId} departmentName={data.jobView.departmentName} managerId={data.employee.managerId} managerName={data.jobView.managerName}
-                canEdit={data.canEditJob} departments={data.jobView.departments} managers={data.jobView.managers}
+                canEdit={data.canEditJob} departments={data.jobView.departments} departmentsLoaded={data.jobView.departmentsLoaded} managers={data.jobView.managers}
               />
             </Panel>
           ) : null}
