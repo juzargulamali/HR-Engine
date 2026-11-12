@@ -280,3 +280,19 @@ Sales reports are read-only pages of figures with their definitions. If a card c
 Each company's Sales settings (reference code, currency, response target, working calendar, duplicate window, owner e-mail, approval policy and the estimate VAT choices) are kept on one page, for people who manage Sales settings or are founders.
 
 1. Open Settings in Sales (under Manage in the menu).
+
+## Flag an enquiry for Operations planning
+- id: sales-operations-planning
+- area: sales
+- status: published
+- keywords: flag for operations planning; operations planning; tentative dates; dates are tentative; tell operations about a job; provisional project manager; question from operations; answer operations; remove from operations planning; dismantling date
+- links: Enquiries -> /sales/opportunities
+- screens: /sales/opportunities/[id]
+
+The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. You are not sent a notice: look at From Operations on the enquiry.
+
+1. Open the enquiry. On Overview find Operations planning and press Flag for Operations planning.
+2. Fill Expected decision date, Dismantling date, Expected teams, Still to confirm and Note for Operations. Leave Dates are tentative ticked until the client confirms.
+3. Press Flag for Operations planning. Use Edit planning details to change it later.
+4. Read From Operations. If there is a question, write Your answer and press Send answer to Operations.
+5. Remove from Operations planning hides the enquiry from Operations again.

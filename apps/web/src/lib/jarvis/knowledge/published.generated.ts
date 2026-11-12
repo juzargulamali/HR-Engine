@@ -172,7 +172,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "book equipment",
       "return equipment"
     ],
-    "summary": "Inventory is where equipment is requested, sent out and received back. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.",
+    "summary": "Inventory is where equipment is requested, sent out and received back. On Today a request reads ready to send in part while any line is still to reserve, buy or rent; those lines are counted apart and never as reserved. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.",
     "steps": [
       "Open Today in Inventory for the warehouse's jobs.",
       "Open Requests to prepare, send out and receive back equipment.",
@@ -329,6 +329,36 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "people-operations-manager-access",
+    "area": "people",
+    "title": "Make someone an Operations Manager, or stop it",
+    "keywords": [
+      "operations manager access",
+      "make someone operations manager",
+      "who can open operations",
+      "remove operations manager",
+      "take away operations access",
+      "operations manager profile"
+    ],
+    "summary": "Operations Manager is given per company, inside a person's Projects access, by a Projects founder or someone who manages Projects access. It opens Operations for that company, lets the person assign Project Managers, read every project of the company and use its project chats. It gives nothing in Sales, Finance, HR or the warehouse, and they cannot manage a project or its tasks.",
+    "steps": [
+      "Open People & Access, find the person and open their Projects access; check Access for company.",
+      "Under Working profile choose Operations Manager.",
+      "Read Review before saving, then press Save changes. They see Operations on their next page.",
+      "To stop it, choose another profile such as Project directory viewer, review and press Save changes.",
+      "It ends on their next page: Operations and the company's project chats close for them."
+    ],
+    "links": [
+      {
+        "label": "People & Access",
+        "href": "/people-access"
+      }
+    ],
+    "screens": [
+      "/people-access"
+    ]
+  },
+  {
     "id": "projects-where",
     "area": "projects",
     "title": "Projects and tasks",
@@ -459,12 +489,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "reply to the team",
       "discussion moved to chat"
     ],
-    "summary": "Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it and can read and reply from any page with the Chat button; people who are not on the team do not see it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.",
+    "summary": "Each project has one group in Chat, named by the project's reference and name. It replaces the Discussion tab: the earlier messages are in the group. Everyone on the project's team is in it, and so are the company's Operations Managers, shown with Operations beside their name; nobody else sees it. Type @ to mention a team member: they see a red marker on the Chat button. A finished project's conversation can be read but not added to. Comments about one task stay on that task.",
     "steps": [
       "Press the Chat button at the corner of any page and choose the project under Projects.",
       "Or open the project and press Chat in its header.",
       "Write your message; type @ and choose a name to mention someone.",
-      "An old Discussion link opens the same group."
+      "An old Discussion link opens the same group. An archived project's group is under Archived."
     ],
     "links": [
       {
@@ -531,7 +561,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open Projects & Tasks, then Projects.",
       "Type in the search box to find a project by name, reference or Project Manager.",
-      "Use Show to switch between Ongoing and Completed and archived, and Kind, Status or Company to narrow the list. Press Clear to remove the filters.",
+      "Use Show to switch between Ongoing and Completed and archived, and Kind, Status, Company or Event edition to narrow the list. Press Clear to remove the filters.",
       "Click a column heading such as Key dates or Status to sort, or choose Board to see the ongoing projects by status.",
       "Click a project to open it. All projects on the project brings you back to the same list."
     ],
@@ -1173,12 +1203,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "choose a PM",
       "handover submitted by sales"
     ],
-    "summary": "When Sales submits a handover, a founder, or someone a founder gave PM assignment to, names the Project Manager. Those handovers are listed under Waiting for a Project Manager to be named, the longest wait first. Only people with Projects access in that company can be chosen. The person you name is told, and then accepts the handover or asks Sales a question. You can change the Project Manager until the handover is accepted.",
+    "summary": "When Sales submits a handover, a founder, an Operations Manager, or someone a founder gave PM assignment to, names the Project Manager. Those handovers are listed under Waiting for a Project Manager to be named, the longest wait first. Only people with Projects access in that company can be chosen. The person you name is told, and then accepts the handover or asks Sales a question. You can change the Project Manager until the handover is accepted.",
     "steps": [
       "Open Handovers under Projects, or open the handover from My Day.",
       "Read the brief: agreed scope, site and dates, equipment, dependencies and risks.",
       "Choose a person under Project Manager and press Assign Project Manager.",
-      "To name someone else later, choose them and press Change Project Manager.",
+      "To name someone else later, press Change Project Manager. On a live project it is under People & access and asks for a reason; both Project Managers are told.",
       "If the person is not in the list, a founder gives them Projects access first."
     ],
     "links": [
@@ -1208,7 +1238,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "substitute",
       "still out"
     ],
-    "summary": "The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Other team members can read the tab but not change it.",
+    "summary": "The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Each request has a Readiness line: Reserved, Partly ready, Short, Dispatched and so on. Others can read the tab but not change it.",
     "steps": [
       "Open the project, then Equipment. Open the draft, or press New equipment request and Create draft.",
       "Under Planning dates set at least a start and an end, then press Save the dates.",
@@ -1288,10 +1318,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "start to finish",
       "whose turn"
     ],
-    "summary": "A won job passes from Sales to a founder, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.",
+    "summary": "A won job passes from Sales to a founder or Operations Manager, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder or Operations Manager names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.",
     "steps": [
       "Sales: confirm the enquiry as won, then prepare and submit the handover.",
-      "Founder: open Handovers and press Assign Project Manager.",
+      "Founder or Operations Manager: open Handovers and press Assign Project Manager.",
       "Project Manager: press Accept handover, add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.",
       "Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.",
       "Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list."
@@ -1416,6 +1446,137 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/projects/[id]/closeout"
+    ]
+  },
+  {
+    "id": "operations-upcoming-work",
+    "area": "projects",
+    "title": "Operations: Upcoming Work",
+    "keywords": [
+      "upcoming work",
+      "flagged enquiries",
+      "operations planning",
+      "provisional project manager",
+      "capacity conflict",
+      "ask sales to confirm",
+      "next step with",
+      "tentative job",
+      "plan a job before it is won"
+    ],
+    "summary": "Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged for one company, with dates, place, event, expected teams and equipment, and who has the next step. It never shows prices, quotes or Sales notes. Tentative jobs are planned here; nothing is booked until the enquiry is won and its handover is accepted. An enquiry leaves the list when its project exists or Sales removes the flag.",
+    "steps": [
+      "Open Operations, then Upcoming Work. Choose the company if you have more than one.",
+      "Use the search, Stage and Next step with to narrow the list.",
+      "Press Plan on an enquiry. Choose a Provisional Project Manager, set Operational risk, tick Capacity conflict if it clashes, or write under Ask Sales to confirm.",
+      "Press Save planning. Sales reads it on the enquiry; no separate notice is sent.",
+      "Once the handover is submitted, press Assign a Project Manager."
+    ],
+    "links": [
+      {
+        "label": "Upcoming Work",
+        "href": "/operations/upcoming"
+      },
+      {
+        "label": "Overview",
+        "href": "/operations"
+      }
+    ],
+    "screens": [
+      "/operations/upcoming"
+    ]
+  },
+  {
+    "id": "operations-overview-decisions",
+    "area": "projects",
+    "title": "Operations Overview: what needs you first",
+    "keywords": [
+      "operations overview",
+      "needs my decision",
+      "handover stalled",
+      "installation at risk",
+      "blocker not resolved",
+      "upcoming delivery",
+      "team and warehouse pressure",
+      "most relevant issue"
+    ],
+    "summary": "The Overview is for Operations Managers. Needs my decision lists recorded situations: a handover with no Project Manager, a handover waiting three days or more, a blocker, an installation at risk, an equipment booking to review, reservations not released. Each names who it is with and opens the screen where that person acts. Below are Coming up from Sales, Upcoming delivery and Team and warehouse pressure. Operations changes no task, booking or stock.",
+    "steps": [
+      "Open Operations, then Overview. Choose the company if you have more than one.",
+      "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager.",
+      "On the handover choose a person under Project Manager and press Assign Project Manager. They accept it; you cannot accept for them.",
+      "For other items press the button on the item and speak to the person named under With.",
+      "Under Upcoming delivery read Most relevant issue, and use Open project chat to ask the team."
+    ],
+    "links": [
+      {
+        "label": "Overview",
+        "href": "/operations"
+      },
+      {
+        "label": "Handovers",
+        "href": "/projects/handovers"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
+    "id": "projects-equipment-booking-review",
+    "area": "projects",
+    "title": "After a date change: mark as reviewed",
+    "keywords": [
+      "project date changed",
+      "installation date brought forward",
+      "mark as reviewed",
+      "date change review",
+      "reviewed after a date change"
+    ],
+    "summary": "When a project's installation or event dates change after its list was sent to the warehouse, Review equipment booking appears on the project's Equipment tab, on its Work page and, for the warehouse, on the same list in Inventory. It shows what the date was and is, and who changed it. Nothing is moved for you: the warehouse changes the dates itself, where clashes are checked. If the date is changed back, the review closes by itself.",
+    "steps": [
+      "Project Manager: open the project, then Equipment, and read Review equipment booking.",
+      "Agree with the warehouse whether the dates must move.",
+      "Warehouse: press the Open request link in the review and change the planning dates there if needed.",
+      "Project Manager or warehouse: add a note if useful and press Mark as reviewed.",
+      "Mark as reviewed only records that someone looked. It moves nothing."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/equipment"
+    ]
+  },
+  {
+    "id": "projects-chat-archived",
+    "area": "projects",
+    "title": "Archived conversations in Chat",
+    "keywords": [
+      "archived chats",
+      "archived project chat",
+      "old project conversation",
+      "where did the project chat go",
+      "chat missing after archive",
+      "archived section in chat"
+    ],
+    "summary": "When a project is archived, its group moves in Chat to a closed section called Archived, below Sales and Projects, with the number of groups beside it. Nothing is lost: the messages can be read but not added to, and unread messages still count on the heading. A completed project that is not archived stays under Projects. If the project is restored, its group returns to Projects.",
+    "steps": [
+      "Press the Chat button at the corner of any page.",
+      "Scroll to Archived at the bottom of the list and press it to open the section.",
+      "Choose the project to read its conversation.",
+      "Or type the project's name or reference in the search box, if you have one: it finds archived groups too."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects"
     ]
   },
   {
@@ -2133,6 +2294,40 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/sales/settings"
+    ]
+  },
+  {
+    "id": "sales-operations-planning",
+    "area": "sales",
+    "title": "Flag an enquiry for Operations planning",
+    "keywords": [
+      "flag for operations planning",
+      "operations planning",
+      "tentative dates",
+      "dates are tentative",
+      "tell operations about a job",
+      "provisional project manager",
+      "question from operations",
+      "answer operations",
+      "remove from operations planning",
+      "dismantling date"
+    ],
+    "summary": "The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. You are not sent a notice: look at From Operations on the enquiry.",
+    "steps": [
+      "Open the enquiry. On Overview find Operations planning and press Flag for Operations planning.",
+      "Fill Expected decision date, Dismantling date, Expected teams, Still to confirm and Note for Operations. Leave Dates are tentative ticked until the client confirms.",
+      "Press Flag for Operations planning. Use Edit planning details to change it later.",
+      "Read From Operations. If there is a question, write Your answer and press Send answer to Operations.",
+      "Remove from Operations planning hides the enquiry from Operations again."
+    ],
+    "links": [
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      }
+    ],
+    "screens": [
+      "/sales/opportunities/[id]"
     ]
   }
 ];
