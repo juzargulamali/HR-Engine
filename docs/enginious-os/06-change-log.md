@@ -8,6 +8,16 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-12 | Departments: the database enforces the employee's company and unique active names | same branch and draft PR #88 (not merged); **one additive migration `20270103000100_departments_company_integrity.sql`, install-order row 31, not applied by Claude; no hosted SQL**
+
+* **What:** two rules the app already applied are now database rules. (1) An employee's department must belong to the employee's company (trigger on `employees`, on insert and on a change of department or company; a new assignment to a removed department is refused; a department with employees cannot be moved to another company). (2) One active department per name per company, ignoring capitals and extra spaces (unique index; a blank name is refused).
+* **Existing data is checked first and never changed:** the migration stops before installing anything if any employee record points at another company's department, any active name is used twice in a company, or any active name is blank, and says how many. `dept_integrity_00_preflight_readonly.sql` lists them. Hosted: zero active departments for every company (owner-reported), so no name conflict is possible there; cross-company references were not reported (`Unverified`).
+* **App:** `addDepartment` turns the database's duplicate refusal into "This company already has a department called "<name>". Someone added it a moment ago. Reload the page and choose it in the list."; `updateJobDetails` turns the database's cross-company refusal into "Choose a department of this employee's company." (`apps/web/src/lib/actions/peopleAccess.ts`). The app works before and after the migration.
+* **Unchanged:** who may add departments and edit employees; clearing a department; moving within a company; unrelated employee edits.
+* **Tests (local):** new `packages/rls-tests/test/departments-integrity.rls.test.ts` (8, real PostgreSQL, including the direct update as HR Admin and three simultaneous creates); `lib/actions/peopleAccess.test.ts` (2 added). The full database suite result is in the PR.
+* **Docs:** `modules/people-access-job-and-department.md` section 4a; 03; install-order row 31; README.
+* **Not verified:** nothing on hosted, nothing signed in.
+
 ### 2026-11-12 | People & Access: Add department on Job & department | branch `claude/admiring-cray-uky379` from `main` `402f39a`; **app only: no migration, no SQL, no change to permissions, no hosted data change**
 
 * **Why:** the Department list on People & Access, Job & department was empty. The owner's read-only query on hosted returned zero active departments for every company (owner-reported), and no screen or action in the app created one, although the database has always allowed an HR Admin of the company to do so (`departments_write`, `supabase/migrations/20260922000000_phase0_foundations.sql`).

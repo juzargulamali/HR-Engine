@@ -2,7 +2,7 @@
 
 **Scope.** This reference covers one tab of People & Access, written when it was changed on 2026-11-12 (Add department). The rest of People & Access (the people list, Account, HR roles, Module access, company settings, invitations) has no per-control reference yet; see `docs/people-access-design.md` (an older design input, not authority) and 02 and 03 of the Map.
 
-**Status (2026-11-12).** Branch `claude/admiring-cray-uky379`, built from `main` at `402f39a`. App only: **no migration, no SQL, no change to permissions**. It uses the `departments` table and its two rules exactly as they are. Not merged at the time of writing. Nothing was seen signed in by Claude.
+**Status (2026-11-12).** Branch `claude/admiring-cray-uky379`, built from `main` at `402f39a`, draft PR #88, not merged. Two parts. (1) Add department: app only. (2) Database enforcement: **one additive migration, `supabase/migrations/20270103000100_departments_company_integrity.sql` (install-order row 31), not applied anywhere by Claude; hosted not applied at the time of writing.** No change to who may add departments or edit employees. Nothing was seen signed in by Claude.
 
 Sources, read at the branch head:
 
@@ -50,9 +50,28 @@ Facts (JP): **Company**, **Job title**, **Department**, **Reporting manager**; "
 **Limits, stated plainly.**
 
 * There is no rename, no remove and no parent department on this screen. A misspelt department stays until one of those is built.
-* The duplicate check is made by the app before the insert. The table has no unique rule, so two people adding the same name in the same second could both succeed. `Unverified` whether this has ever happened on hosted.
-* The same-company check on assignment is made by `updateJobDetails`. The database rule checks who may edit the employee (HR Admin of the employee's company); it does not itself compare the department's company with the employee's.
+* Until migration `20270103000100` is applied to a database, only the app makes the duplicate-name check and the same-company check (the two bullets that stood here before said so). Section 4a describes the database rules once it is applied.
 * Departments here are HR departments of a company. The "department" teams of a project in Projects & Tasks are a separate record and are not affected.
+
+## 4a. Database enforcement (migration `20270103000100_departments_company_integrity.sql`, install-order row 31)
+
+The migration changes and deletes no data and no permission. If existing data already breaks a rule it **stops before installing anything** and says how many rows are concerned (employee records pointing at another company's department; active names used twice in a company; blank active names). The preflight pack lists them so a person decides what to do with each.
+
+| Rule | How | What a refusal says |
+|---|---|---|
+| An employee's department belongs to the employee's company | Trigger `trg_employees_department_company` on `employees` (insert, or a change of `department_id` or `company_id`); function `employees_department_company_check` | "The department belongs to another company. Choose a department of this employee's company." The app shows "Choose a department of this employee's company." |
+| A new assignment cannot be to a removed department | Same trigger. A person already in a department that is removed later keeps it, and their other details can still be edited | "The department has been removed. Choose a department of this employee's company." |
+| A department with employees cannot be moved to another company | Trigger `trg_departments_company_move` on `departments` | "This department has employees of its present company. Move them first." |
+| One active department per name per company | Unique index `uq_departments_company_name_active` on `(company_id, department_name_key(name))` where not removed. `department_name_key` trims, collapses runs of spaces and lower-cases. A removed department's name is free again; another company may use the same name | Database: duplicate key. The app (`addDepartment`) shows: "This company already has a department called "<name>". Someone added it a moment ago. Reload the page and choose it in the list." |
+| A department name is not blank | Check constraint `departments_name_not_blank` | The app refuses a blank name first |
+
+Clearing the department (setting none) and moving a person between departments of their own company are unaffected. An edit that changes neither the department nor the company is never checked.
+
+**Owner packs** (`supabase/manual-sql`): `dept_integrity_00_preflight_readonly.sql` (read-only; rows 2 to 4 must be `0 - OK`; three commented list queries show any conflicts), `dept_integrity_20_verify_readonly.sql` (read-only; 8 rows, all `OK`), `dept_integrity_90_rollback.sql` (changes the database: removes the two triggers, their functions, the index and the blank-name rule; deletes no data).
+
+**Order.** Apply after row 30. It depends only on the foundation tables, but timestamp order is install order. The app in this PR works before and after the migration: before, only the app's checks apply.
+
+**Hosted, as far as is known.** The owner's read-only query of 2026-11-12 returned zero active departments for every company, so there can be no duplicate active name and no blank active name there. Whether any employee record points at a removed department of another company was not reported: preflight row 2 answers it. `Unverified` by Claude.
 
 ## 5. Empty and failed states
 
@@ -75,6 +94,7 @@ Before 2026-11-12 a failed read was indistinguishable from an empty company (the
 | `apps/web/src/lib/actions/peopleAccess.test.ts` ("addDepartment", 5 tests) | Trimmed name into the employee's own company; the company never comes from the form; blank and duplicate names refused, other companies and removed departments not duplicates; another company's HR Admin, a person without the role and an unreadable employee refused; nothing added when the check read fails; a database refusal reported |
 | `apps/web/src/components/people-access/job-panel.test.tsx` (5 tests) | Empty company message; failed load message with no list and the department posted back unchanged; a new department offered and selected at once; a refusal shown; no controls for someone who cannot edit |
 | `apps/web/src/lib/people-access/data.test.ts` ("tells a company with no departments apart...") | The two states come from the read, not from the list being empty |
+| `packages/rls-tests/test/departments-integrity.rls.test.ts` (8 tests, real PostgreSQL) | Before the migration the database accepts a cross-company department and a duplicate name; the preflight counts them and the migration stops, installing nothing and changing no data; on clean data it installs (twice) and the verify pack is all `OK`; **a direct update as HR Admin is refused for another company's department, while the same company, a move within the company and clearing all work**; a new employee, a removed department and moving an employee or a department between companies are covered; names are unique whatever the capitals and spaces; three creates of the same name at once keep exactly one; who may add departments is unchanged; rollback deletes nothing and re-applying restores the rules |
 | `packages/rls-tests/test/phase0.rls.test.ts` (2 tests, real PostgreSQL) | An HR Admin adds a department, gives it to an employee of the same company and reads both back in a new session; the same HR Admin cannot add one for another company or change that company's employee; people without the role cannot add one |
 
 **Not verified:** nothing signed in, in Preview or Production. The three states were seen on a temporary page with fictional data (not committed). The local-stack browser flow `apps/web/os-shell-checks/people-access-flow.mjs` was not run and has no step for Add department.
