@@ -33,6 +33,23 @@ returns boolean language sql stable security definer set search_path = public as
       and ('founder' = any (g.capabilities) or p_capability = any (g.capabilities)));
 $fn$;
 
+create or replace function proj_can_view_details(p_project_id uuid)
+returns boolean language sql stable security definer set search_path = public as $fn$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and (proj_is_founder(pr.company_id) or proj_is_active_member(pr.id)));
+$fn$;
+create or replace function proj_can_view_summary(p_project_id uuid)
+returns boolean language sql stable security definer set search_path = public as $fn$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id
+      and (proj_is_founder(pr.company_id)
+           or proj_is_active_member(pr.id)
+           or (proj_has_access(pr.company_id) and pr.status in ('planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold'))
+           or proj_sales_linked(pr.id)));
+$fn$;
+
 -- Chat, as installed by 20261230000100.
 create or replace function chat_is_member(p_user uuid, p_group uuid)
 returns boolean language sql stable security definer set search_path = public as $fn$
@@ -101,6 +118,7 @@ drop trigger if exists trg_proj_details_edition on proj_project_details;
 drop trigger if exists trg_proj_handover_edition on proj_handovers;
 drop function if exists ops_overview(uuid);
 drop function if exists proj_equipment_readiness(uuid);
+drop function if exists inv_project_release_pending(uuid);
 drop function if exists inv_request_state(uuid);
 drop function if exists proj_resolve_equipment_review(uuid, text);
 drop function if exists proj_details_dates_changed();

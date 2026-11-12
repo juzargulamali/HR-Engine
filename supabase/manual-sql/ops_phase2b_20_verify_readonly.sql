@@ -19,7 +19,7 @@ select item, result from (
                 and not exists (select 1 from pg_proc p, aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) a where p.oid = to_regprocedure(f.sig) and a.grantee = 0)) = 13 then 'OK' else 'FAIL - missing or privileges differ' end
   union all select 6, 'the internal helpers are NOT callable by signed-in users, anon or public',
          case when exists (select 1 from (values ('public.ops_require(uuid)'), ('public.ops_notify_managers(uuid, text, jsonb, text)'), ('public.ops_edition_snapshot(uuid)'), ('public.chat_is_ops(uuid, uuid)'),
-                ('public.chat_is_member(uuid, uuid)'), ('public.inv_request_state(uuid)'), ('public.proj_closeout_evidence_base(uuid)'), ('public.proj_handover_edition()'), ('public.proj_details_edition()'),
+                ('public.chat_is_member(uuid, uuid)'), ('public.inv_request_state(uuid)'), ('public.inv_project_release_pending(uuid)'), ('public.proj_closeout_evidence_base(uuid)'), ('public.proj_handover_edition()'), ('public.proj_details_edition()'),
                 ('public.proj_details_dates_changed()')) f(sig)
               where to_regprocedure(f.sig) is null or has_function_privilege('authenticated', f.sig, 'execute') or has_function_privilege('anon', f.sig, 'execute')) then 'FAIL - callable or missing' else 'OK' end
   union all select 7, 'Upcoming Work names no commercial field (value, currency, budget, payment terms, brief, scope, exclusions, risks, evidence)',
@@ -40,7 +40,12 @@ select item, result from (
   union all select 13, 'Chat: the Operations path needs the capability itself on the project''s company',
          case when (select prosrc from pg_proc where oid = to_regprocedure('public.chat_is_ops(uuid, uuid)')) like '%''operations'' = any (g.capabilities)%'
                    and (select prosrc from pg_proc where oid = to_regprocedure('public.chat_is_ops(uuid, uuid)')) not like '%founder%' then 'OK' else 'CHANGED' end
-  union all select 14, 'INFO enquiries flagged for Operations: ' || (select count(*) from crm_opportunities where ops_flagged_at is not null)::text
+  union all select 14, 'an Operations Manager reads the projects of their companies (details and summary); restricted files and the commercial record keep their own rule',
+         case when (select prosrc from pg_proc where oid = to_regprocedure('public.proj_can_view_details(uuid)')) like '%proj_has_capability(pr.company_id, ''operations'')%'
+                   and (select prosrc from pg_proc where oid = to_regprocedure('public.proj_can_view_summary(uuid)')) like '%proj_has_capability(pr.company_id, ''operations'')%'
+                   and exists (select 1 from pg_policies where tablename = 'proj_files' and qual like '%restricted AND proj_can_manage%')
+                   and exists (select 1 from pg_policies where tablename = 'proj_scope_change_commercial' and qual like '%view_commercial%') then 'OK' else 'CHANGED' end
+  union all select 15, 'INFO enquiries flagged for Operations: ' || (select count(*) from crm_opportunities where ops_flagged_at is not null)::text
                        || '; projects with an event edition: ' || (select count(*) from proj_project_details where event_edition_id is not null)::text
                        || '; open equipment reviews: ' || (select count(*) from proj_equipment_reviews where resolved_at is null)::text, 'INFO'
 ) x order by ord;

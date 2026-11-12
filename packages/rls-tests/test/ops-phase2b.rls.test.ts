@@ -108,7 +108,7 @@ describe("Operations (Phase 2B)", () => {
     await expect(q(null, `select ops_upcoming_work(null)`)).rejects.toThrow();
     expect((await upcoming(U.founder)).map((r) => r.reference)).toEqual(["UAE-O-2027-0007"]);
     // the Operations Managers of the company were told; the flag is in the enquiry's history
-    expect(await admin(`select type from notifications where user_id = '${U.ops}' and type = 'ops_enquiry_flagged'`)).toHaveLength(1);
+    expect(await admin(`select type from notifications where user_id = '${U.ops}' and type = 'project_ops_enquiry_flagged'`)).toHaveLength(1);
     expect(await admin(`select 1 from crm_opportunity_events where opportunity_id = '${OPP}' and reason = 'Flagged for Operations planning'`)).toHaveLength(1);
     await admin(`update crm_opportunities set stage = 'lost', lost_reason = 'x', closed_at = now() where id = '${OPP_QUIET}'`);
     await expect(call(U.sales, `crm_set_ops_planning('${OPP_QUIET}', true, '{}'::jsonb, null)`)).rejects.toThrow(/lost enquiry/);
@@ -130,10 +130,11 @@ describe("Operations (Phase 2B)", () => {
     await expect(call(U.salesB, `crm_ops_planning('${OPP}')`)).rejects.toThrow(/not found/i);
     expect(await q(U.member, `select 1 from ops_enquiry_planning`)).toEqual([]);
     expect(await q(U.sales, `select 1 from ops_enquiry_planning`)).toHaveLength(1);
-    expect(await admin(`select 1 from notifications where user_id = '${U.sales}' and type = 'ops_planning_update'`)).toHaveLength(1);
+    expect(await admin(`select 1 from crm_opportunity_events where opportunity_id = '${OPP}' and reason like 'Operations: provisional Project Manager named: pm%'`)).toHaveLength(1);   // Sales reads it in the enquiry's history
+    expect((await rows(U.ops, `select type from proj_my_notifications(50, false)`)).map((r) => r.type)).toContain("project_ops_enquiry_flagged");   // and Operations in Project notices
     await call(U.sales, `crm_set_ops_planning('${OPP}', true, ${j({ answer: "Yes, from the 25th at 08:00" })}, null)`);
     expect((await upcoming(U.ops))[0]!.planning).toMatchObject({ answer: "Yes, from the 25th at 08:00" });
-    expect(await admin(`select 1 from notifications where user_id = '${U.ops}' and type = 'ops_sales_answered'`)).toHaveLength(1);
+    expect(await admin(`select 1 from notifications where user_id = '${U.ops}' and type = 'project_ops_sales_answered'`)).toHaveLength(1);
     // direct writes to either side are not possible
     await db.asUserCommit(U.ops, async (query) => { await query(`update ops_enquiry_planning set risk = 'low'`).catch(() => undefined); }).catch(() => undefined);
     await db.asUserCommit(U.ops, async (query) => { await query(`update crm_opportunities set ops_note = 'x'`).catch(() => undefined); }).catch(() => undefined);
@@ -180,6 +181,7 @@ describe("Operations (Phase 2B)", () => {
     expect(await rows(U.pm, `select project_id, label from proj_project_editions()`)).toEqual([{ project_id: PROJECT, label: "Fictional Auto Expo · 2027 · Dubai" }]);
     expect((await rows(U.pm, `select project_id from proj_projects_for_edition('${EDITION}')`)).map((r) => r.project_id)).toEqual([PROJECT]);
     for (const who of [U.salesB, U.opsB, U.wh]) expect(await rows(who, `select project_id from proj_projects_for_edition('${EDITION}')`), who).toEqual([]);
+    expect((await overview(U.ops)).projects[0].chat_group_id).toBeNull();                  // no conversation yet
     // an internal project and a project accepted from a handover with no edition stay unlinked
     await admin(`insert into proj_projects (id, company_id, reference, name, kind, status, pm_user_id, created_by) values ('${CO.b}', '${CO.b}', 'KSA-P-1', 'Fictional internal job', 'internal', 'in_progress', '${U.opsB}', '${U.opsB}')`);
     await admin(`insert into proj_project_details (project_id, site_timezone) values ('${CO.b}', 'Asia/Riyadh')`);
@@ -217,8 +219,20 @@ describe("Operations (Phase 2B)", () => {
       expect((await rows(who, `select gid from chat_my_groups()`)).map((r) => r.gid), who).not.toContain(GROUP);
       await expect(call(who, `chat_post('${GROUP}', 'x')`), who).rejects.toThrow(/not a member/);
     }
-    // Chat access opens no project record: the Operations Manager still reads no task, file or member row of the project directly
-    for (const t of ["proj_tasks", "proj_files", "proj_project_members", "proj_feedback"]) expect(await q(U.ops, `select 1 from ${t} where project_id = '${PROJECT}'`), t).toEqual([]);
+    // Chat membership itself opens no record. What the Operations Manager reads of the project comes from the Operations permission: the project in full, read only.
+    await admin(`insert into proj_tasks (project_id, title, assignee_id, created_by) values ('${PROJECT}', 'Build the wall', '${U.member}', '${U.pm}');
+      insert into proj_files (project_id, kind, label, url, restricted, uploaded_by) values ('${PROJECT}', 'link', 'Open drawing', 'https://example.invalid/a', false, '${U.pm}'), ('${PROJECT}', 'link', 'Client confirmation', 'https://example.invalid/b', true, '${U.pm}')`);
+    expect(await q(U.ops, `select 1 from proj_tasks where project_id = '${PROJECT}'`)).toHaveLength(1);
+    expect((await q<Row>(U.ops, `select label from proj_files where project_id = '${PROJECT}'`)).map((r) => r.label)).toEqual(["Open drawing"]);   // a restricted file stays with whoever manages the project
+    expect(await q(U.ops, `select 1 from proj_scope_change_commercial`)).toEqual([]);
+    expect((await q<{ v: boolean }>(U.ops, `select proj_can_manage('${PROJECT}') v`))[0]!.v).toBe(false);
+    const task = (await admin<{ id: string }>(`select id from proj_tasks where project_id = '${PROJECT}'`))[0]!.id;
+    await expect(call(U.ops, `proj_create_task('${PROJECT}', ${j({ title: "x", assignee_id: U.member })})`)).rejects.toThrow();
+    await expect(call(U.ops, `proj_set_task_status('${task}', 'done')`)).rejects.toThrow();
+    await expect(call(U.ops, `proj_update_project('${PROJECT}', ${j({ install_start: "2027-02-20" })}, null)`)).rejects.toThrow();
+    await expect(call(U.ops, `proj_complete_project('${PROJECT}', '{}'::jsonb)`)).rejects.toThrow();
+    // the other company's Operations Manager, Sales and the warehouse read none of it
+    for (const who of [U.opsB, U.sales, U.wh]) expect(await q(who, `select 1 from proj_tasks where project_id = '${PROJECT}'`), who).toEqual([]);
     // revoked: the group is gone on the next read, and posting is refused
     await call(U.founder, `proj_grant_access('${U.nobody}', '${CO.a}', '{operations}'::text[], null)`);
     expect((await rows(U.nobody, `select gid from chat_my_groups()`)).map((r) => r.gid)).toContain(GROUP);
@@ -290,9 +304,15 @@ describe("Operations (Phase 2B)", () => {
     expect(done.release_failed).toBeNull();
     const ov = await overview(U.ops);
     expect(ov.projects.map((p: Row) => [p.status, p.equipment.find((r: Row) => r.id === REQ)?.units_out])).toEqual([["completed", 5]]);   // still listed: delivery complete, equipment still out
+    // a failed release is reported only while something is still left to release
     await admin(`insert into inv_import_log (company_id, project_id, outcome, detail) values ('${CO.a}', '${PROJECT}', 'failed', 'Releasing equipment at project completed failed: boom')`);
+    await admin(`update inv_requests set status = 'cancelled', cancelled_at = now() where project_id = '${PROJECT}' and status in ('draft', 'submitted')`);
+    expect((await call<Row>(U.wh, `proj_equipment_readiness('${PROJECT}')`)).release_failed).toBeNull();
+    const spare = (await admin<{ id: string }>(`insert into inv_reservations (company_id, request_line_id, item_id, location_id, qty, reserved_during, made_by) values ('${CO.a}', '${LINE_OK}', '${LED}', '${LOC}', 1, tstzrange('2027-02-25 08:00+00', '2027-03-08 08:00+00'), '${U.wh}') returning id`))[0]!.id;
     expect((await call<Row>(U.wh, `proj_equipment_readiness('${PROJECT}')`)).release_failed).toMatchObject({ detail: "Releasing equipment at project completed failed: boom" });
     expect((await overview(U.ops)).projects[0].release_failed).toBe(true);
+    await admin(`update inv_reservations set status = 'released', released_at = now() where id = '${spare}'`);          // the warehouse releases it by hand
+    expect((await call<Row>(U.wh, `proj_equipment_readiness('${PROJECT}')`)).release_failed).toBeNull();
     // the warehouse records the return: nothing is out, and the finished project leaves the Overview once the failed release is the only thing left to see
     await admin(`update inv_reservations set returned_qty = dispatched_qty where request_line_id in ('${LINE_OK}', '${LINE_BUY}')`);
     expect((await call<Row>(U.pm, `proj_equipment_readiness('${PROJECT}')`)).requests.find((r: Row) => r.id === REQ)).toMatchObject({ state: "returned", units_out: 0, return_overdue: false });

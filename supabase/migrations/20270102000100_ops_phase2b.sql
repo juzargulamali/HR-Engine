@@ -3,8 +3,9 @@
 -- WHAT IT ADDS
 --   1. OPERATIONS MANAGER: a new Projects capability 'operations', given per company through the existing Projects grant (People & Access, proj_grant_access,
 --      proj_revoke_access, the existing audit trigger). It lets its holder: read the Operations reads below for that company, assign or reassign Project Managers
---      through the existing handover functions (it implies 'assign_pm'), and read and post in that company's project Chat groups. It gives NO Sales, Finance, HR or
---      Warehouse right, and no task or delivery write: those stay with their own grants and with the Project Manager. A founder holds every capability, so a founder
+--      through the existing handover functions (it implies 'assign_pm'), read that company's projects in full without joining them (proj_can_view_details), and
+--      read and post in that company's project Chat groups. It gives NO Sales, Finance, HR or Warehouse right, and no task or delivery write: those stay with
+--      their own grants and with the Project Manager. A founder holds every capability, so a founder
 --      also sees Operations; Chat access needs the capability itself (explicit), not the founder shortcut.
 --   2. SALES -> OPERATIONS PLANNING: eight planning fields on an enquiry that SALES owns (flag, expected decision date, whether dates are tentative, dismantling date,
 --      expected teams, what Sales still has to confirm, a note written for Operations), and one row per flagged enquiry that OPERATIONS owns (provisional Project
@@ -42,6 +43,27 @@ returns boolean language sql stable security definer set search_path = public as
     where g.user_id = auth.uid() and g.company_id = p_company_id and g.revoked_at is null
       and ('founder' = any (g.capabilities) or p_capability = any (g.capabilities)
            or (p_capability = 'assign_pm' and 'operations' = any (g.capabilities))));
+$$;
+
+-- An Operations Manager READS the projects of their companies in full, as a founder does, without being on each project: the directory row, the plan, tasks,
+-- milestones, people, site dates and equipment. Reading only: every write still asks for membership, management or its own capability, restricted files stay with
+-- whoever manages the project, and the commercial record of a scope change stays with 'view_commercial'.
+create or replace function proj_can_view_details(p_project_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and (proj_is_founder(pr.company_id) or proj_is_active_member(pr.id) or proj_has_capability(pr.company_id, 'operations')));
+$$;
+create or replace function proj_can_view_summary(p_project_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id
+      and (proj_is_founder(pr.company_id)
+           or proj_is_active_member(pr.id)
+           or proj_has_capability(pr.company_id, 'operations')
+           or (proj_has_access(pr.company_id) and pr.status in ('planning', 'in_progress', 'ready_for_installation', 'on_site', 'on_hold'))
+           or proj_sales_linked(pr.id)));
 $$;
 
 -- The companies the caller is Operations Manager of (founder included).
@@ -103,7 +125,8 @@ create policy ops_enquiry_planning_select on ops_enquiry_planning for select
 revoke all on table ops_enquiry_planning from anon, authenticated, public;
 grant select on table ops_enquiry_planning to authenticated;
 
--- People told about an Operations event of one company: its Operations Managers (the capability itself), never the caller.
+-- People told about an Operations event of one company: its Operations Managers (the capability itself), never the caller. The types start with "project_" so
+-- that they appear in the existing Project notices list (proj_my_notifications), which every Operations Manager has.
 create or replace function ops_notify_managers(p_company_id uuid, p_type text, p_payload jsonb, p_dedupe text)
 returns void language plpgsql security definer set search_path = public as $$
 begin
@@ -142,11 +165,11 @@ begin
   if f ? 'answer' and nullif(btrim(f ->> 'answer'), '') is not null then
     update ops_enquiry_planning set answer = left(btrim(f ->> 'answer'), 1000), answered_by = auth.uid(), answered_at = now()
       where opportunity_id = v.id and question is not null;
-    perform ops_notify_managers(v.company_id, 'ops_sales_answered', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_answer:' || v.id::text);
+    perform ops_notify_managers(v.company_id, 'project_ops_sales_answered', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_answer:' || v.id::text);
   end if;
   if coalesce(p_flag, false) and not v_was then
     perform crm_log_event(v.id, v.company_id, 'details_changed', null, null, 'Flagged for Operations planning');
-    perform ops_notify_managers(v.company_id, 'ops_enquiry_flagged', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_flag:' || v.id::text);
+    perform ops_notify_managers(v.company_id, 'project_ops_enquiry_flagged', jsonb_build_object('opportunity_id', v.id, 'reference', v.reference), 'ops_flag:' || v.id::text);
   elsif not coalesce(p_flag, false) and v_was then
     perform crm_log_event(v.id, v.company_id, 'details_changed', null, null, 'Removed from Operations planning');
   end if;
@@ -192,10 +215,7 @@ begin
   if f ? 'question' and nullif(btrim(f ->> 'question'), '') is not null then v_what := v_what || 'asked Sales to confirm details'::text; end if;
   if cardinality(v_what) > 0 then
     perform crm_log_event(o.id, o.company_id, 'details_changed', null, null, 'Operations: ' || array_to_string(v_what, '; '));
-    if o.owner_id <> auth.uid() and exists (select 1 from profiles where id = o.owner_id and is_active) then
-      insert into notifications (user_id, type, payload) values (o.owner_id, 'ops_planning_update',
-        jsonb_build_object('opportunity_id', o.id, 'reference', o.reference, 'what', array_to_string(v_what, '; '), 'dedupe_key', 'ops_plan:' || o.id::text || ':' || to_char(now(), 'YYYYMMDDHH24MI')));
-    end if;
+    -- Sales reads this on the enquiry (the "From Operations" block and the history line above). No notice is sent: Sales has no notice list of its own.
   end if;
 end;
 $$;
@@ -497,6 +517,14 @@ begin
 end;
 $$;
 
+-- Is there still something the completion release should have dealt with: a request left in draft or submitted, or stock reserved and never dispatched?
+create or replace function inv_project_release_pending(p_project_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from inv_requests q where q.project_id = p_project_id and q.status in ('draft', 'submitted'))
+      or exists (select 1 from inv_requests q join inv_request_lines l on l.request_id = q.id join inv_reservations x on x.request_line_id = l.id
+                 where q.project_id = p_project_id and q.status <> 'cancelled' and x.status = 'active' and x.qty > x.dispatched_qty);
+$$;
+
 -- Readiness of ONE project's equipment for the people who run it, Operations and the warehouse. "release_failed" is the latest failed release of unused
 -- reservations at completion (the project still completed); the warehouse releases those lines on the request.
 create or replace function proj_equipment_readiness(p_project_id uuid)
@@ -514,9 +542,10 @@ begin
     'reviews', coalesce((select jsonb_agg(jsonb_build_object('id', v.id, 'request_id', v.request_id, 'request_code', q.code, 'field', v.field, 'old_date', v.old_date, 'new_date', v.new_date,
                            'changed_at', v.changed_at, 'changed_by', case when v.changed_by is null then null else proj_display_name(v.changed_by) end) order by v.changed_at, v.id)
                          from proj_equipment_reviews v join inv_requests q on q.id = v.request_id where v.project_id = pr.id and v.resolved_at is null), '[]'::jsonb),
+    -- Reported only while something is still left to release: once the warehouse has released or cancelled it by hand, the old log line no longer raises it.
     'release_failed', (select jsonb_build_object('at', g.created_at, 'detail', left(g.detail, 300)) from inv_import_log g
                        where g.project_id = pr.id and g.outcome = 'failed' and g.detail like 'Releasing equipment%'
-                         and pr.status in ('completed', 'archived') order by g.created_at desc limit 1));
+                         and pr.status in ('completed', 'archived') and inv_project_release_pending(pr.id) order by g.created_at desc limit 1));
 end;
 $$;
 
@@ -539,6 +568,7 @@ begin
     'projects', coalesce((
       select jsonb_agg(jsonb_build_object(
           'id', p.id, 'reference', p.reference, 'name', p.name, 'kind', p.kind, 'status', p.status, 'pm_id', p.pm_user_id, 'pm', proj_display_name(p.pm_user_id),
+          'chat_group_id', (select g.id from chat_groups g where g.project_id = p.id),
           'venue', d.location, 'install_start', d.install_start, 'event_start', d.event_start, 'event_end', d.event_end, 'edition', d.edition_snapshot ->> 'label',
           'tasks_open', (select count(*) from proj_tasks t where t.project_id = p.id and t.status in ('todo', 'in_progress', 'ready_for_review')),
           'tasks_overdue', (select count(*) from proj_tasks t where t.project_id = p.id and t.status in ('todo', 'in_progress') and t.due_date < current_date),
@@ -556,7 +586,8 @@ begin
           'plan_unreleased', (select count(*) from proj_dp_lines l join proj_dp_items i on i.id = l.item_id where i.project_id = p.id and l.removed_at is null and i.removed_at is null and l.released_at is null),
           'equipment', coalesce((select jsonb_agg(inv_request_state(q.id) order by q.created_at, q.id) from inv_requests q where q.project_id = p.id and q.status <> 'cancelled'), '[]'::jsonb),
           'equipment_reviews', (select count(*) from proj_equipment_reviews v where v.project_id = p.id and v.resolved_at is null),
-          'release_failed', exists (select 1 from inv_import_log g where g.project_id = p.id and g.outcome = 'failed' and g.detail like 'Releasing equipment%' and p.status in ('completed', 'archived')))
+          'release_failed', (p.status in ('completed', 'archived') and inv_project_release_pending(p.id)
+                             and exists (select 1 from inv_import_log g where g.project_id = p.id and g.outcome = 'failed' and g.detail like 'Releasing equipment%')))
         order by coalesce(d.install_start, d.event_start, p.start_date) nulls last, p.reference)
       from proj_projects p left join proj_project_details d on d.project_id = p.id
       where p.company_id = p_company_id
@@ -565,7 +596,7 @@ begin
              or exists (select 1 from inv_requests q join inv_request_lines l on l.request_id = q.id join inv_reservations x on x.request_line_id = l.id
                         where q.project_id = p.id and x.dispatched_qty > x.returned_qty)
              or exists (select 1 from proj_equipment_reviews v where v.project_id = p.id and v.resolved_at is null)
-             or exists (select 1 from inv_import_log g where g.project_id = p.id and g.outcome = 'failed' and g.detail like 'Releasing equipment%'))), '[]'::jsonb),
+             or (inv_project_release_pending(p.id) and exists (select 1 from inv_import_log g where g.project_id = p.id and g.outcome = 'failed' and g.detail like 'Releasing equipment%')))), '[]'::jsonb),
     -- The same person on two live projects whose recorded delivery windows (installation start to event end) overlap. Only where both windows are recorded.
     'overlaps', coalesce((
       select jsonb_agg(jsonb_build_object('user_id', o.user_id, 'person', proj_display_name(o.user_id), 'a', o.a_ref, 'a_id', o.a_id, 'b', o.b_ref, 'b_id', o.b_id, 'from', o.o_from, 'to', o.o_to)
@@ -614,7 +645,7 @@ revoke all on function
   ops_company_ids(), ops_require(uuid), ops_notify_managers(uuid, text, jsonb, text), crm_set_ops_planning(uuid, boolean, jsonb, integer), ops_set_enquiry_planning(uuid, jsonb),
   ops_edition_snapshot(uuid), ops_upcoming_work(uuid), crm_ops_planning(uuid), proj_handover_edition(), proj_details_edition(), proj_project_editions(),
   proj_projects_for_edition(uuid), chat_is_ops(uuid, uuid), chat_is_member(uuid, uuid), chat_project_group(uuid), chat_my_groups(), proj_details_dates_changed(),
-  proj_resolve_equipment_review(uuid, text), inv_request_state(uuid), proj_equipment_readiness(uuid), ops_overview(uuid), proj_closeout_evidence_base(uuid),
+  proj_resolve_equipment_review(uuid, text), inv_request_state(uuid), inv_project_release_pending(uuid), proj_equipment_readiness(uuid), ops_overview(uuid), proj_closeout_evidence_base(uuid),
   proj_closeout_evidence(uuid)
   from public, anon, authenticated;
 grant execute on function
