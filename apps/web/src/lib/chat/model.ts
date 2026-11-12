@@ -16,6 +16,14 @@ export interface ChatGroup {
   viaOperations?: boolean;
 }
 
+/**
+ * Whether the database could let this person into a project's chat without their being on its team: they hold the Operations Manager right itself for the project's
+ * company. This mirrors chat_is_ops exactly: a founder does NOT pass through it (a founder who is not on the project is not a member of its chat). It only decides
+ * whether the database is asked; the database still decides who gets in.
+ */
+export const holdsOperationsRight = (grants: readonly { companyId: string; capabilities: readonly string[] }[], companyId: string): boolean =>
+  grants.some((g) => g.companyId === companyId && g.capabilities.includes("operations"));
+
 /** The address parameter that opens one group in the Chat panel from any page (old Discussion links and the project's "Open chat" shortcut use it). */
 export const CHAT_PARAM = "chat";
 /** The event a page fires to open one group in the panel without changing the address. */

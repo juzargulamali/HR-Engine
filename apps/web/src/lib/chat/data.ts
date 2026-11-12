@@ -11,12 +11,15 @@ export function chatNotInstalled(error: { code?: string; message?: string } | nu
 
 export type ChatGroupsResult = { state: "ok"; groups: ChatGroup[] } | { state: "error" };
 
+/** The one read of the person's groups in a request: the list, the unread counts and the "are project groups installed" answer below all come from it. */
+const readMyGroups = cache(async () => (await createClient()).rpc("chat_my_groups"));
+
 /**
  * The signed-in person's Chat groups with unread counts, from the database function that checks membership itself. An empty list means "no eligible group" (the button is hidden);
  * a missing migration also reads as no groups; any other failure is `error` (the button keeps what it last showed).
  */
 export async function loadChatGroups(): Promise<ChatGroupsResult> {
-  const { data, error } = await (await createClient()).rpc("chat_my_groups");
+  const { data, error } = await readMyGroups();
   if (error) return chatNotInstalled(error) ? { state: "ok", groups: [] } : { state: "error" };
   return {
     state: "ok",
@@ -29,10 +32,16 @@ export async function loadChatGroups(): Promise<ChatGroupsResult> {
 export type ProjectChat = { state: "ready"; groupId: string } | { state: "not_member" } | { state: "not_installed" } | { state: "error" };
 
 /**
- * The Chat group of one project for the signed-in person. `ready` only for someone actively enrolled in the project (the database function decides and refuses everyone else);
- * `not_installed` when the project-groups migration is not applied to this database, in which case the old Discussion tab is still the conversation.
+ * The Chat group of one project for the signed-in person. `ready` only for someone the database lets in: a person actively enrolled in the project, or an Operations Manager of
+ * its company (chat_project_group decides and refuses everyone else). `not_installed` when the project-groups migration is not applied to this database, in which case the old
+ * Discussion tab is still the conversation.
+ *
+ * `mayBeMember` is what the page already knows about the person's standing (on the project's team, or Operations Manager of its company). When it is false the database is NOT
+ * asked: it would only refuse, and every refusal is recorded by the database as an error ("You are not a member of this group"). The answer is the same `not_member` it would
+ * have given. When it is true the database is asked and still decides, so nothing here can let anyone in.
  */
-export async function loadProjectChat(projectId: string): Promise<ProjectChat> {
+export async function loadProjectChat(projectId: string, mayBeMember = true): Promise<ProjectChat> {
+  if (!mayBeMember) return (await projectChatInstalled()) ? { state: "not_member" } : { state: "not_installed" };
   const { data, error } = await (await createClient()).rpc("chat_project_group", { p_project: projectId });
   if (error) {
     if (chatNotInstalled(error)) return { state: "not_installed" };
@@ -41,11 +50,20 @@ export async function loadProjectChat(projectId: string): Promise<ProjectChat> {
   return typeof data === "string" ? { state: "ready", groupId: data } : { state: "error" };
 }
 
-const NO_PROJECT = "00000000-0000-0000-0000-000000000000";
-/** Whether this database has project groups (migration 20261230000100). Asked once per request: the function refuses an unknown project, which proves it exists. */
+/**
+ * Whether this database has project groups (migration 20261230000100). Asked once per request, and answered without a refused call: it looks at what the person's own group
+ * list returns (a row from that migration carries the group's kind), and only when the list is empty asks for that one column, which a database without the migration does not
+ * have. Until 2026-11-12 this called chat_project_group for a project that does not exist and read the refusal as "it exists"; that refusal was recorded by the database as an
+ * error on every page that showed unread project chat counts.
+ */
 export const projectChatInstalled = cache(async (): Promise<boolean> => {
-  const { error } = await (await createClient()).rpc("chat_project_group", { p_project: NO_PROJECT });
-  return !chatNotInstalled(error);
+  const { data, error } = await readMyGroups();
+  // A failure that is not "missing" counts as installed, as before: the list read then reports the failure, and nothing falls back to the old Discussion's counts.
+  if (error) return !chatNotInstalled(error);
+  const first = (data ?? [])[0] as Record<string, unknown> | undefined;
+  if (first) return "gkind" in first;
+  const probe = await (await createClient()).rpc("chat_my_groups").select("gkind").limit(1);
+  return !probe.error;
 });
 
 /**

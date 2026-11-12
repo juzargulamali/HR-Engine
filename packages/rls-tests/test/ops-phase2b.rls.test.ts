@@ -325,6 +325,28 @@ describe("Operations (Phase 2B)", () => {
     await expect(call(U.nobody, `chat_post('${GROUP}', 'x')`)).rejects.toThrow(/not a member/);
   });
 
+  it("'You are not a member of this group': what raises it, and that the app's checks for a member and a non-member no longer do", async () => {
+    const refused = /You are not a member of this group/;
+    const member = (await admin<Row>(`select user_id from proj_project_members m where project_id = '${PROJECT}' and removed_at is null and chat_is_project_member(m.user_id, '${PROJECT}') limit 1`))[0]!.user_id as string;
+    expect((await admin<Row>(`select chat_is_project_member('${U.founder}', '${PROJECT}') or chat_is_ops('${U.founder}', '${PROJECT}') as v`))[0]!.v).toBe(false);
+    // 1. The old "are project groups installed" probe asked for a project that does not exist. The function refuses that for everyone, member or not: one recorded error per page.
+    for (const u of [member, U.ops, U.founder]) await expect(call(u, `chat_project_group('00000000-0000-0000-0000-000000000000')`)).rejects.toThrow(refused);
+    // The replacement asks for one column of the caller's own list. Nobody is refused, with or without a group.
+    for (const u of [member, U.ops, U.founder, U.nobody]) expect(Array.isArray(await rows(u, `select gkind from chat_my_groups() limit 1`))).toBe(true);
+    // 2. A project page asked for the project's group for anyone who could open the project. A member and an Operations Manager get it; a founder who is not on the team is refused.
+    expect(await call<string>(member, `chat_project_group('${PROJECT}')`)).toBe(GROUP);
+    expect(await call<string>(U.ops, `chat_project_group('${PROJECT}')`)).toBe(GROUP);
+    await expect(call(U.founder, `chat_project_group('${PROJECT}')`)).rejects.toThrow(refused);
+    // The page now knows this without asking: the founder is not on the team and does not hold the Operations right itself, and the group is not in their own list.
+    expect((await rows(U.founder, `select gid from chat_my_groups()`)).map((r) => r.gid)).not.toContain(GROUP);
+    // 3. The rules are unchanged: every read and write of the group still refuses the non-member, and still serves the member.
+    for (const expr of [`chat_messages('${GROUP}')`, `chat_group_members('${GROUP}')`, `chat_mark_read('${GROUP}', 1)`, `chat_post('${GROUP}', 'hello')`]) {
+      await expect(rows(U.founder, `select ${expr}`)).rejects.toThrow(refused);
+      await expect(rows(U.salesB, `select ${expr}`)).rejects.toThrow(refused);
+    }
+    expect((await call<Row>(member, `chat_messages('${GROUP}')`)).messages).toBeDefined();
+  });
+
   it("a committed date change while a request is with the warehouse records a review with the old and new date, and changes no reservation", async () => {
     REQ = (await admin<{ id: string }>(`insert into inv_requests (company_id, code, kind, project_id, requested_by, status, timezone, needed_from, needed_until, expected_return_at)
       values ('${CO.a}', 'UAE-R-90001', 'project', '${PROJECT}', '${U.pm}', 'submitted', 'Asia/Dubai', '2027-02-25 08:00+00', '2027-03-08 08:00+00', '2027-03-08 08:00+00') returning id`))[0]!.id;
