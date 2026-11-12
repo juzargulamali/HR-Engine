@@ -220,6 +220,41 @@ describe("Phase 0 row-level security", () => {
         ),
       ).rejects.toThrow(/row-level security/);
     });
+    it("People & Access journey: an HR Admin adds a department, gives it to an employee of the same company, and it is still there on the next read", async () => {
+      const created = await db.asUserCommit(USER_HR_ADMIN, (query) =>
+        query("insert into departments (company_id, name) values ($1, 'Site Operations') returning id, name", [COMPANY_HQ]),
+      );
+      const dept = created.rows[0].id as string;
+      const saved = await db.asUserCommit(USER_HR_ADMIN, (query) =>
+        query("update employees set department_id = $1 where id = $2 returning id", [dept, EMPLOYEE_REPORT]),
+      );
+      expect(saved.rows).toHaveLength(1);
+      // a fresh session ("after reload"): the department is listed for the company and is on the employee
+      const listed = await db.asUser(USER_HR_ADMIN, (query) =>
+        query("select name from departments where company_id = $1 and deleted_at is null and id = $2", [COMPANY_HQ, dept]),
+      );
+      expect(listed.rows).toEqual([{ name: "Site Operations" }]);
+      const employee = await db.asUser(USER_HR_ADMIN, (query) => query("select department_id from employees where id = $1", [EMPLOYEE_REPORT]));
+      expect(employee.rows).toEqual([{ department_id: dept }]);
+    });
+
+    it("an HR Admin of one company cannot add a department for another company or change the department of its employee; people without the role cannot add one at all", async () => {
+      await expect(
+        db.asUser(USER_HR_ADMIN, (query) => query("insert into departments (company_id, name) values ($1, 'Not Mine')", [COMPANY_KSA])),
+      ).rejects.toThrow(/row-level security/);
+      const dept = (await db.asUser(USER_HR_ADMIN, (query) => query("select id from departments where company_id = $1 limit 1", [COMPANY_HQ]))).rows[0].id as string;
+      const other = await db.asUser(USER_HR_ADMIN, (query) =>
+        query("update employees set department_id = $1 where id = $2 returning id", [dept, EMPLOYEE_KSA]),
+      );
+      expect(other.rows).toEqual([]);                                                              // the KSA employee is not theirs to edit
+      const unchanged = await db.seed(`select department_id from employees where id = '${EMPLOYEE_KSA}'`);
+      expect(unchanged.rows).toEqual([{ department_id: null }]);
+      for (const user of [USER_MANAGER, USER_REPORT, USER_FINANCE, USER_STRANGER, USER_KSA_EMPLOYEE]) {
+        await expect(
+          db.asUser(user, (query) => query("insert into departments (company_id, name) values ($1, 'No Role')", [COMPANY_HQ])),
+        ).rejects.toThrow(/row-level security/);
+      }
+    });
   });
 
   describe("user_roles", () => {

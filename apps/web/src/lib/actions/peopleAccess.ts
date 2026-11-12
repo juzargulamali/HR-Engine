@@ -149,9 +149,54 @@ export async function updateJobDetails(_prev: ActionState, fd: FormData): Promis
   const patch = { job_title: d.jobTitle || null, department_id: d.departmentId ?? null, manager_id: d.managerId ?? null };
   if (patch.job_title === employee.job_title && patch.department_id === employee.department_id && patch.manager_id === employee.manager_id) return { error: null };
   const { data: updated, error } = await supabase.from("employees").update(patch).eq("id", employee.id).select("id");
+  // The database refuses a department of another company, or one that has been removed, whatever this action checked above.
+  // (The trigger's sentence in the usual case; the composite foreign key's refusal when two changes raced.)
+  if (error && (error.code === "23514" || /belongs to another company|has been removed|employees_department_company_fkey/i.test(error.message ?? ""))) return { error: "Choose a department of this employee's company." };
   if (error) return { error: error.message };
   if (!updated || updated.length === 0) return { error: "The change was not saved: you are not allowed to edit this employee record." };
   revalidatePath("/people-access");
   revalidatePath(`/employees/${employee.id}`);
   return { error: null };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Add a department: the existing departments table, the existing permission (HR Admin of the company)
+// ---------------------------------------------------------------------------------------------------------------
+
+const departmentSchema = z.object({
+  employeeId: uuid,
+  name: z.string().trim().min(1, "Enter the department's name.").max(80, "Keep the department's name under 80 characters."),
+});
+
+/**
+ * Adds one department to the company of the employee being edited, so it can be chosen in Job & department. The company is read from the employee
+ * record on the server and is never taken from the form, so the action can only add to the company of an employee the caller may edit; the table's own
+ * rule (departments_write: HR Admin of that company, or a System Administrator) decides again on the insert. A name already used in that company,
+ * whatever its capitals or the spaces around it, is refused. Nothing is assigned here: the person chooses the department and saves the job details.
+ * Returns the new department's id so the form can offer it at once.
+ */
+export async function addDepartment(_prev: ActionState & { id?: string; name?: string }, fd: FormData): Promise<ActionState & { id?: string; name?: string }> {
+  const p = departmentSchema.safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: p.error.issues[0]?.message ?? "Check the form and try again." };
+  const name = p.data.name.replace(/\s+/g, " ").trim();
+  const session = await getCurrentSession();
+  if (!session) return { error: "Sign in again to continue." };
+  const supabase = await createClient();
+
+  const { data: employee } = await supabase.from("employees").select("id, company_id").eq("id", p.data.employeeId).is("deleted_at", null).maybeSingle();
+  if (!employee) return { error: "You cannot see this employee record." };
+  if (!canEditJobDetails(session.grants, employee.company_id)) return { error: "Only an HR Admin of this employee's company can add a department." };
+
+  const existing = await supabase.from("departments").select("id, name").eq("company_id", employee.company_id).is("deleted_at", null);
+  if (existing.error) return { error: "The company's departments could not be checked, so nothing was added. Try again in a moment." };
+  // Compared as the database compares them: runs of white space as one space, ends trimmed, capitals ignored.
+  const key = (v: string) => v.replace(/\s+/g, " ").trim().toLowerCase();
+  if ((existing.data ?? []).some((d) => key(d.name) === key(name))) return { error: `This company already has a department called "${name}". Choose it in the list.` };
+
+  const { data: created, error } = await supabase.from("departments").insert({ company_id: employee.company_id, name }).select("id, name").maybeSingle();
+  // The database has the last word on the name too: if someone else added the same name between the check above and this insert, its unique rule refuses the second one.
+  if (error && (error.code === "23505" || /uq_departments_company_name_active|duplicate key/i.test(error.message ?? ""))) return { error: `This company already has a department called "${name}". Someone added it a moment ago. Reload the page and choose it in the list.` };
+  if (error || !created) return { error: "The department was not added: you are not allowed to add departments for this company." };
+  revalidatePath("/people-access");
+  return { error: null, id: created.id, name: created.name };
 }
