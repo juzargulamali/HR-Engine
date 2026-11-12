@@ -6,6 +6,8 @@ Related references: stage moves, hold, resume and reopen: [`sales-pipeline-and-s
 
 **Later change: Sales employee launch (2026-11-11, Sales employee launch, branch `claude/admiring-cray-uky379`; no migration; not seen signed-in).** Sections 2 (the reads, search, quick filters), 3 (event dates from the edition), 4 (the guide under the header), 4.1 (dates and Create event or edition) and 4.3 (the timeline and its two views) are updated below and were re-read against the code for the changed parts only; the rest of this reference was not re-read.
 
+**Later change: Projects & Tasks Phase 2B (2026-11-12, branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude; not seen signed in).** The Overview tab gains the **Operations planning** panel: new section 4.6 and the Overview row of the tab table in section 4. Only those parts were written against the code; the rest of this reference was not re-read.
+
 ## 1. Who sees what
 
 * Access is a company-scoped Sales grant (`crm_company_grants`), never an HR role: `getCrmContext` (`apps/web/src/lib/crm/context.ts`), the shell `apps/web/src/app/(app)/sales/layout.tsx`. No grant: an access notice (no data). Grants unreadable: "Sales & CRM could not load" (`ctx.loadFailed`), never "no access".
@@ -137,7 +139,7 @@ Tabs (`detail-tabs.tsx`, accessible tablist; `?tab=` selects the first tab: `ove
 
 | Tab | Shows | Reference |
 |---|---|---|
-| Overview | Brief; Who is involved (agency, end client, contacts with Add contact / Change role / Edit contact details / Remove); Follow-ups; "Where it stands" (commercial confirmation, equipment availability, commercial approval); Key facts (value, budget as stated, source, owner, created and by whom, first response, in this stage since, next action) | this file 4.2 to 4.4; `sales-followups.md` |
+| Overview | Brief; Who is involved (agency, end client, contacts with Add contact / Change role / Edit contact details / Remove); Follow-ups; **Operations planning** (Phase 2B, section 4.6); "Where it stands" (commercial confirmation, equipment availability, commercial approval); Key facts (value, budget as stated, source, owner, created and by whom, first response, in this stage since, next action) | this file 4.2 to 4.4; `sales-followups.md` |
 | Scope & dates | Scope, Exclusions, Risks, Technologies and quantities; Dates and place; Money and terms (budget note, payment terms, waiting on); Equipment availability; Edit details button | 4.1 |
 | Activity & history | Log an activity form, closure history, Timeline (activities and changes together, newest first) | 4.3 |
 | Proposals & files | Proposal versions and Files | `sales-proposals-and-zoho.md`; 4.4 |
@@ -211,6 +213,29 @@ Tests: `apps/web/src/lib/actions/crmFiles.test.ts`, `upload-cleanup.test.ts` (`a
 ### 4.5 Assign owner (`assign-owner.tsx`)
 
 Dialog: New owner (people with Sales access to the company), Reason (kept in the history). `assignOwner` -> `crm_assign_owner`: needs `assign_owner` (founder implies it); refused on Won / Lost ("A closed opportunity cannot be reassigned"); the new owner must hold an active grant; open follow-ups that belonged to the previous owner move to the new owner (`assigned_to`); event `owner_changed`; the reassignment bumps `version`. It does not change the account owner. Catalogue: `sales.enquiry.assign_owner`.
+
+### 4.6 Operations planning (Overview tab; `ops-planning-panel.tsx`, `ops-planning-forms.tsx`, `lib/actions/crmOps.ts`, `lib/crm/ops-planning.ts`, `ops-planning-data.ts`)
+
+Added by Projects & Tasks Phase 2B (2026-11-12; branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100_ops_phase2b.sql` not applied by Claude, hosted `Unverified`; code read only, not seen signed in). The full per-control reference, with every label and message, is [`operations.md`](./operations.md) section 7; this section is the Sales summary.
+
+**Where.** Left column of the Overview tab, after Follow-ups. It loads on its own ("Loading the Operations planning details…") so it never holds up the tab.
+
+**What it is for.** Sales tells Operations about a job early, so that Operations can plan before the enquiry is won. Operations sees the enquiry in Operations > Upcoming Work **only while it is flagged**, and only these: reference, title, stage, owner name, the planning fields below, location, installation and event dates, technologies with quantities, the linked event edition and the handover state. **Never** value, currency, budget note, payment terms, the brief, scope, exclusions, risks, estimates, proposals, files or activity notes (`ops_upcoming_work`).
+
+| Control | Shown when | Who | What it does | Catalogue |
+|---|---|---|---|---|
+| **Flag for Operations planning** | Not flagged, not Lost | Owner or founder | Dialog: Expected decision date, Dismantling date, **Dates are tentative** (on by default), Expected teams, Still to confirm, Note for Operations. Saves the fields, flags the enquiry, writes "Flagged for Operations planning" to the timeline and notifies the company's Operations Managers | `sales.ops.set_planning` |
+| **Edit planning details** | Flagged, not Lost | Owner or founder | The same dialog; the flag date is kept; no notice | `sales.ops.set_planning` |
+| **Remove from Operations planning** | Flagged (Lost included) | Owner or founder | Asks first; clears the flag; the details and what Operations recorded are kept; timeline "Removed from Operations planning" | `sales.ops.remove` |
+| Facts: Flagged on, Expected decision date, Dates, Dismantling date, Expected teams, Still to confirm, Note for Operations | Flagged | Any Sales grant | Read only. **Dates** reads "Dates are tentative", "Dates confirmed" or, once Won, "Confirmed: this enquiry is won" whatever the tick says | |
+| Block **From Operations**: Provisional Project Manager ("Provisional. No project, crew or stock is booked by this."), Risk, Capacity conflict, Question from Operations | Flagged | Any Sales grant (`crm_ops_planning`) | Read only. "Operations has not recorded anything for this enquiry yet." when empty | |
+| **Send answer to Operations** / **Replace the answer** | A question exists, not Lost | Owner or founder | Stores the answer and notifies the Operations Managers | `sales.ops.answer_question` |
+
+**Tentative** is Sales' statement that the client has not confirmed the dates. It changes only the word Operations reads; nothing is booked or reserved in any state, and a provisional Project Manager named by Operations is a note only.
+
+**Failed read.** "What Operations recorded could not be loaded. This does not mean Operations has recorded nothing. Reload the page to try again." and no answer box. **Stale page.** "This enquiry was changed by someone else. Reload the page to see the latest version, then make your change again." **Database without the migration.** "Operations planning is not available yet, so nothing was saved. ..."
+
+**Sales gets no notice from Operations.** What Operations records appears in this panel and as a timeline line ("Operations: provisional Project Manager named: ...; capacity conflict flagged; asked Sales to confirm details"). Tests: `ops-planning-panel.test.tsx` (18), `lib/actions/crmOps.test.ts` (11).
 
 ## 5. Side panel (`?open=<id>` on Follow-ups and Enquiries; `apps/web/src/app/(app)/sales/_panel/`)
 

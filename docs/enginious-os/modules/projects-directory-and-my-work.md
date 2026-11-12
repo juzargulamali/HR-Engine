@@ -8,7 +8,7 @@ Words used below (all enforced in the database; the screens only hide what would
 
 * **Projects access** = an active row in `proj_company_grants` for a company (`apps/web/src/lib/projects/context.ts`, `getProjectsContext`).
 * **Sales-linked** = an active row in `proj_sales_links` for the person, while their Sales access for that company is active (`proj_sales_linked`, `supabase/migrations/20261120000100_proj_core_tables.sql`).
-* **Member** = actively enrolled in the project and still eligible (`proj_is_active_member`, same file).
+* **Member** = actively enrolled in the project and still eligible (`proj_is_active_member`, same file). **Phase 2B (branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude):** once that migration is applied, an **Operations Manager** of the project's company (Projects capability `operations`) also reads the project's details without being enrolled, and manages nothing (`proj_can_view_details`, `canViewProjectDetails`; [`operations.md`](./operations.md) section 2). In the directory such a person opens every project of that company in full, finished ones included (`proj_can_view_summary` also returns true for them).
 * **Founder** = holds `founder` for the project's company (`proj_is_founder`, `20261120000000_proj_access_audit.sql`).
 * **Manager** = founder, the Project Manager, or a person holding unexpired temporary project leadership (`proj_can_manage` and `proj_is_pm`, `20261120000100_proj_core_tables.sql`; app mirror `canManageProject`, `packages/domain/src/permissions/proj.ts`).
 * **Assigner** = holds `assign_pm` (a founder holds every right: `proj_has_capability`).
@@ -100,6 +100,17 @@ Opens for a row the person sees only at summary level (and for any directory row
 | Close (button "Close details", Escape, or Back) | Always | | | Returns to the list exactly as it was (`open` removed) | | `side-panel.tsx` | `side-panel.test.tsx` |
 
 **Phone and desktop.** Below the `md` width the table becomes one card per project: the heading row is hidden from view, the name is the card title and each other cell shows its label before its value (`listTable`, `components/workspace/list-table.ts`). No column is dropped. The board scrolls sideways (lanes are fixed width); every card has the "Move to…" select, so no dragging is needed on a phone. The side panel covers the whole screen on a phone and is a right-hand column from the `lg` width up. Dialogs are centred boxes at most the screen width less a margin (`components/ui/modal.tsx`), not bottom sheets.
+
+### 3.3 Phase 2B: the event edition in the directory
+
+Added on branch `claude/projects-phase-2b-operations` (2026-11-12; not merged; migration `20270102000100_ops_phase2b.sql` not applied by Claude, hosted `Unverified`; code read only, not seen signed in). Full reference: [`operations.md`](./operations.md) section 8.1. Coverage index row 251.
+
+| Control | When it appears | Who | Behaviour | If it fails | Source |
+|---|---|---|---|---|---|
+| Line "Event edition: <label>" under the project name | The project has an edition (the copy taken at its handover) | Everyone who sees the row | Read only. Projects accepted before the migration, and internal projects, have none | See the filter row | `apps/web/src/app/(app)/projects/page.tsx`, `apps/web/src/lib/projects/data.ts` (`loadProjectEditions`); `proj_project_editions` returns only projects the caller may see in the directory |
+| Filter **Event edition** ("All editions", then each edition once, the latest show first, then by name) | At least one project in the list has an edition | Everyone on the page | `?edition=<edition id>`; counts as a filter for the chips and **Clear**; a value that is not one of the offered editions is ignored | The editions read failed: "Event editions could not be loaded just now, so no project shows its edition and the edition filter is not offered. Everything else is shown." A database without the migration: no line and no filter, nothing said | `apps/web/src/lib/projects/directory.ts` (`editionChoices`, `filterByEdition`); `directory.test.ts` |
+
+**Who sees which projects (Phase 2B).** An Operations Manager of a company sees every project of that company in the directory, finished ones included, and opens each in full (details level), without being enrolled.
 
 ## 4. "Change status" dialog (board and Manage project)
 
@@ -361,7 +372,7 @@ Unit and component tests (under `apps/web/src`): `lib/projects/directory.test.ts
 | 2. Menu entries My Work, Projects, Calendar, New internal project (search only), Handovers | panel | Sidebar and phone menu drawer, group "Projects & Tasks" | Projects access; Sales-linked people get "Projects" only | Reach the module | 2 | Documented |
 | 3. Projects directory, table | screen | Menu > Projects, `/projects` | Projects access, or Sales-linked | Find a project; see what needs the person | 3 | Documented |
 | 4. "Needs you" strip | panel | Top of `/projects` | Projects access with something waiting | Handovers, reviews, overdue tasks, unread chat | 3 | Documented |
-| 5. Directory search and filters (Show, Kind, Status, Company), chips, Clear | filter | Toolbar on `/projects` | Everyone on the page (Company only with more than one) | Narrow the list | 3 | Documented |
+| 5. Directory search and filters (Show, Kind, Status, Company; **Phase 2B:** Event edition, coverage index row 251), chips, Clear | filter | Toolbar on `/projects` | Everyone on the page (Company only with more than one) | Narrow the list | 3 | Documented |
 | 6. Directory sort headings | filter | Table headings on `/projects` | Everyone on the page | Order the list | 3 | Documented |
 | 7. Next milestone column | panel | Table on `/projects`, Show "Ongoing" | Members and founders (others see "Members only") | The next dated open milestone | 3 | Documented |
 | 8. Unread chat badge on a project row or card | panel | `/projects` table and board | Enrolled members | Unread messages of that project's chat | 3 | Unverified: a failed unread read shows no badge and no message |

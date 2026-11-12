@@ -20,7 +20,7 @@ One row is a **deliverable in a zone** (for example Entrance: Interactive LED we
 
 | Action | Who | Enforced by |
 |---|---|---|
-| Read the whole plan, every section | Anyone who can read the project's details: active members, and founders of the company | `proj_can_view_details` in the six `proj_dp_*` select policies and in `proj_dp_plan` |
+| Read the whole plan, every section | Anyone who can read the project's details: active members, and founders of the company (and, once migration `20270102000100` of Phase 2B is applied, the company's Operations Managers, who can then also raise a correction because `proj_dp_raise_correction` asks only for that; [`operations.md`](./operations.md) section 2.3) | `proj_can_view_details` in the six `proj_dp_*` select policies and in `proj_dp_plan` |
 | Add, edit, remove a deliverable row | Whoever manages the project (Project Manager, temporary leader, founder) | `proj_can_manage` in `proj_dp_save_item`, `proj_dp_remove_item` |
 | Add, edit, remove a breakdown line | The manager; and the person the line's **section** was delegated to, while they are an active member | `proj_dp_can_edit_section` in `proj_dp_save_line`, `proj_dp_remove_line` |
 | Delegate a section | The manager; the delegate must be an active member | `proj_dp_delegate` |

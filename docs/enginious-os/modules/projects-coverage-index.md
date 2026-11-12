@@ -12,11 +12,12 @@ Reference files (all under `docs/enginious-os/modules/`):
 * **L** [`projects-delivery-plan.md`](./projects-delivery-plan.md): the Delivery Plan (Phase 2, part 1; merged in PR #84, `e12c22f`; migration `20261231000100` applied on hosted, owner-reported): deliverables by zone, breakdown, release, corrections, proposals, Excel import and export.
 * **R** [`projects-closeout-report.md`](./projects-closeout-report.md): the Project Closeout Report (Phase 2, part 2; merged in PR #84, `e12c22f`; migration `20270101000100` applied on hosted, owner-reported): evidence snapshot, Review data to be sent, the AI or facts-only draft, checks, approval, PDF.
 * **C** [`app-chat.md`](./app-chat.md) section 9: the project's Chat group (membership, the end of the Discussion tab, old Discussion links).
+* **O** [`operations.md`](./operations.md): Operations (Phase 2B; branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude, hosted `Unverified`): the Operations Manager, Overview, Upcoming Work, the event edition on projects, equipment readiness and booking review, the Operations path into project Chat and the Archived section.
 * [`projects-action-catalogue.md`](./projects-action-catalogue.md): every action that changes data. [`projects-phase1-changes.md`](./projects-phase1-changes.md): what Phase 1 changed, per workflow (who can act, what it does, where the user goes next), the Phase 2 boundary and the verification gaps.
 
-Who can see: **Member** = actively enrolled in the project and still eligible (`proj_is_active_member`); **Manager** = Project Manager, temporary leader or founder of the project's company (`proj_can_manage`); **Head** = head of a department team; **Assigner** = holds `assign_pm`. Capabilities are in `packages/domain/src` (Projects permissions) and `docs/enginious-os/03-roles-access-and-approvals.md`. The database enforces each rule; the screens only hide what would be refused.
+Who can see: **Member** = actively enrolled in the project and still eligible (`proj_is_active_member`); **Operations Manager** = holds the Projects capability `operations` for the project's company (Phase 2B): reads the project in full without being enrolled, manages nothing (`operations.md` section 2; where a row below says "Member (details view)" or "Readers of the project's details", an Operations Manager is included once migration `20270102000100` is applied); **Manager** = Project Manager, temporary leader or founder of the project's company (`proj_can_manage`); **Head** = head of a department team; **Assigner** = holds `assign_pm`. Capabilities are in `packages/domain/src` (Projects permissions) and `docs/enginious-os/03-roles-access-and-approvals.md`. The database enforces each rule; the screens only hide what would be refused.
 
-**Planned, not built (Phase 2):** the Operations Manager dashboard, structured event-edition links on the handover and project, calendar integration, equipment booking review after a delivery-date change, the Inventory readiness calculation. None has a row below. (The Delivery Plan, Phase 2 part 1, is section 7; the Project Closeout Report, part 2, is section 8.)
+**Planned, not built (Phase 2):** calendar integration. It has no row below. (The Delivery Plan, Phase 2 part 1, is section 7; the Project Closeout Report, part 2, is section 8; Operations, Phase 2B, with the event edition on the handover and project, the equipment booking review after a date change and the readiness statement, is section 9. Phase 2B is on a branch: not merged, its migration not applied by Claude.)
 
 
 ## 1. Module shell, directory, My Work, cross-project calendar, the project frame and lifecycle (D)
@@ -295,7 +296,43 @@ Who can see: **Member** = actively enrolled in the project and still eligible (`
 | 235 | Approved versions | panel | Bottom of the screen | Manager | Each fixed version, readable in place | R 5.5 | Documented |
 | 236 | Download PDF | download | On an approved version; `/projects/[id]/closeout/[reportId]/pdf` | Manager | The approved report as a PDF marked internal | R 5.5 | Documented |
 
+## 9. Operations (O) (Phase 2B; branch `claude/projects-phase-2b-operations`, not merged; code read only, nothing seen signed in)
+
+### 9.1 The Operations screens
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 237 | Operations (menu module with Overview and Upcoming Work) | panel | Sidebar, **Operations**, directly before Projects & Tasks; on a phone, **More**, then the menu drawer | Operations Manager or Projects founder of at least one company | Entry to the two screens | O 3.1 | Documented |
+| 238 | Operations shell states (not installed, could not load, "You are not an Operations Manager", no longer an Operations Manager) | panel | `/operations`, `/operations/upcoming` | As the state says | Never show a refusal or a failed read as empty | O 3.2, 4, 5.3 | Documented |
+| 239 | Company chooser | filter | Both screens, `?company=<id>` | Operations Manager of two or more companies | One company at a time | O 3.3 | Documented |
+| 240 | Operations Overview | screen | **Operations > Overview**; `/operations` | Operations Manager or founder of the company (`ops_require`) | What needs a decision, what is coming from Sales, upcoming delivery, pressure | O 4, 5.1 | Documented |
+| 241 | Needs my decision (N) | panel | Overview, first panel | Same | Six recorded situations with their owner, date and the screen to act on | O 4.1 | Documented |
+| 242 | Coming up from Sales, **Open Upcoming Work** | panel | Overview, second panel | Same | The first six flagged enquiries and who has the next step | O 4.2 | Documented |
+| 243 | Upcoming delivery (project card, **Open project chat**, equipment lines, Most relevant issue) | panel | Overview, third panel | Same | Projects by next recorded date; finished ones while equipment is out | O 4.3 | Documented |
+| 244 | Team and warehouse pressure | panel | Overview, fourth panel | Same | Overlaps, overdue reviews, shortages, partial dispatch, overdue returns | O 4.4 | Documented |
+| 245 | Upcoming Work | screen | **Operations > Upcoming Work**; `/operations/upcoming` | Operations Manager or founder of the company | The enquiries Sales flagged, through the allowlisted read | O 5.2, 6 | Documented |
+| 246 | Upcoming Work search and filters (**Stage**, **Next step with**), Clear | filter | Toolbar; `?q=`, `?stage=`, `?next=` | Same | Narrow the flagged enquiries | O 6.1 | Documented |
+| 247 | Flagged enquiry card (what Sales recorded, what Operations recorded, Next step) | panel | Upcoming Work | Same | One flagged enquiry, with no commercial data | O 6.2, 6.3 | Documented |
+| 248 | **Plan** (dialog "Plan <reference>": provisional Project Manager, risk, capacity conflict, Ask Sales to confirm) | dialog | On a flagged enquiry card | Same; saved by the Operations Manager or founder of the enquiry's company | Record Operations' planning note; books nothing | O 6.4 | Documented |
+| 249 | **Assign a Project Manager** / **Open the handover** | link | On a flagged enquiry card with a handover; on Needs my decision | Same | Opens the handover at `/projects/handovers?handover=<id>` (rows 167, 172) | O 6.2, 8 | Documented |
+
+### 9.2 Changes on existing Projects screens
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 250 | Event edition on the project details card, **Open event in Sales** | panel | Project, Work, details card | Readers of the project's details; the link only for someone who can read the edition in Sales | The edition the project was handed over with (a copy) | O 8.1; W (Phase 2B note) | Documented |
+| 251 | Event edition line and **Event edition** filter in the directory | filter | `/projects`, toolbar; `?edition=<id>` | Everyone who sees the row; the filter only when a visible project has an edition | Find the projects of one edition | O 8.1; D (Phase 2B note) | Documented |
+| 252 | Event edition on the handover brief | panel | On every handover shown in full | Reader of the row | The edition as submitted | O 8.1; H 1.1 (Phase 2B note) | Documented |
+| 253 | Readiness line on each equipment request | panel | Project, Equipment, request rows | Readers of the tab | Reserved, Partly ready, Short, Partly dispatched, Dispatched, Still out, Returned, with counts | O 9.1; H 2.1 (Phase 2B note) | Documented |
+| 254 | Review equipment booking, **Open request <code> to change its dates**, **Mark as reviewed** | form | Project, Equipment, top (`#equipment-review`); also on a finished project | Readers of the tab read; Manager or Warehouse mark as reviewed | Say that a committed date changed after equipment was requested; record that someone looked | O 9.2 | Documented |
+| 255 | Delivery complete · equipment still out | panel | Project, Equipment and Work, on a completed or archived project with units out | Readers | What is out per request and when it is expected back | O 9.3 | Documented |
+| 256 | Releasing unused reservations failed when the project finished | panel | Project, Equipment, finished project, while something is left to release | Readers | Say that the release failed and that the warehouse releases by hand | O 9.4 | Documented |
+| 257 | Equipment readiness in the delivery summary; **Review equipment booking** line in What needs doing | panel | Project, Work | Manager (delivery summary); readers (What needs doing) | The same readiness and review, where the Project Manager starts | O 9.1, 9.2; W 3 (Phase 2B note) | Documented |
+| 258 | Chat: **Archived (N)** section | panel | Chat panel, below Sales and Projects | Anyone with an archived project's group | Keep archived projects' conversations out of the way without dropping their unread counts | O 10; C app-chat.md 10 | Documented |
+| 259 | Chat: project groups through Operations (tag **Operations**, the note at the top of the thread) | panel | Chat panel; **Open project chat** on the Overview | Holders of the `operations` capability itself for the project's company | Read and post in the company's project chats without joining the project | O 10; C app-chat.md 10 | Documented |
+| 260 | Project notices: Review equipment booking, Sales flagged an enquiry, Sales answered your question | panel | Project notices (My Work, My Day) | The receiver | Tell the Project Manager and the Operations Managers | O 11 | Documented |
+
 ## Totals
 
-236 entries: 207 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8.
+260 entries: 231 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8, O 24 (section 9: 13 Operations screens, rows 237 to 249, and 11 changes on existing Projects screens, rows 250 to 260; all 24 are `Documented` from the code, none was seen signed in).
 

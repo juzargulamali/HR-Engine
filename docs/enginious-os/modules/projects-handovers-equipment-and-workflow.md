@@ -12,7 +12,7 @@ Roles used below (the database decides every one; the screens only hide what wou
 
 * **Assigner**: holds a Projects grant with `founder` or `assign_pm` for the handover's company (`proj_has_capability`, `mig/20261120000000_proj_access_audit.sql`).
 * **Named Project Manager**: `proj_handovers.pm_user_id` is the signed-in person.
-* **Member**: can view the project's details: active member, or a Projects founder of the project's company (`proj_can_view_details`, core tables; mirrored as `view.level === "details"` in `web/lib/projects/data.ts`).
+* **Member**: can view the project's details: active member, or a Projects founder of the project's company (`proj_can_view_details`, core tables; mirrored as `view.level === "details"` in `web/lib/projects/data.ts`). **Phase 2B (branch `claude/projects-phase-2b-operations`, not merged; migration `20270102000100` not applied by Claude):** once that migration is applied, an **Operations Manager** of the project's company (Projects capability `operations`) also reads the project's details without being enrolled, and manages nothing (`proj_can_view_details`, `canViewProjectDetails`; [`operations.md`](./operations.md) section 2).
 * **Manager**: the Project Manager, an acting Project Manager whose end date has not passed, or a Projects founder of the project's company (`proj_can_manage`, `proj_is_pm`, core tables; mirrored as `view.canManage` = `canManageProject`, `packages/domain/src/permissions/proj.ts`).
 * **Warehouse**: holds the Inventory `warehouse` capability or is an Inventory founder for the project's company (`inv_has_capability`, `inv_is_founder`). Working at one location is a further check (`inv_can_operate`).
 
@@ -135,7 +135,7 @@ In-app `notifications` rows written by `proj_notify` (handover functions). No e-
 | The equipment function answered "not found" for this person | "You do not have access to this project's equipment." |
 | The request list could not be read | "Could not load the equipment requests of this project. ..." |
 | Inventory switched off for the company | "Inventory is switched off for <company>. What is already recorded is shown, but nothing new can be requested until a founder switches it on." |
-| Project finished | "This project is <status>. Its equipment list is read-only; unused reservations were released when it finished." |
+| Project finished | "This project is <status>. Its equipment list is read-only; unused reservations were released when it finished." **Phase 2B:** the second half is shown only when the readiness read succeeded and reports no failed release; otherwise the sentence ends at "read-only." and, when a release failed and something is still left, the red notice of section 2.8 follows |
 | Notes could not be read | "Could not load the dispatch and return notes of this project. Whether a note is waiting for acknowledgement is not known right now. This is a problem loading the information, not an empty list. Try again" (`NotesLoadError`, `web/components/inventory/notes/notes-section.tsx`) |
 | Loading | A skeleton (`page/[id]/equipment/loading.tsx`) |
 
@@ -257,6 +257,20 @@ A unit recorded as missing stays in the list as "Recorded as missing ... not ret
 **Completion does not return equipment.** `proj_complete_project` (`mig/20261120000500_proj_feedback_plans_files_completion.sql`) sets the project to `completed`. The trigger `inv_proj_projects_release` (function `inv_proj_after_status`, planning functions) then cancels the project's requests that are Draft or Waiting for the warehouse and releases the unused reservations of those Being prepared, with the reason "Project completed" (or "Project archived"). Dispatched equipment stays outstanding, and this tab says so: "The project is completed but equipment is still out. Completing a project does not return it." A failure in that trigger is logged to `inv_import_log` and never blocks the completion. Returns are recorded only by the warehouse (`inv_return_from_project`, reached from Inventory; `inv_get_project(p_project_id, false)` in that function is read as allowing a finished project, `Unverified`: the helper's body was not read).
 
 ---
+
+### 2.8 Phase 2B: readiness, Review equipment booking, equipment out after completion, the edition on the brief
+
+Added on branch `claude/projects-phase-2b-operations` (2026-11-12; not merged; migration `20270102000100_ops_phase2b.sql` not applied by Claude, hosted `Unverified`; code read only, not seen signed in). Per-control reference with every label: [`operations.md`](./operations.md) sections 8.1 and 9. Coverage rows 252 to 257 and action 109 are in the index and catalogue (their section 9 and 11), not repeated in the tables at the end of this file.
+
+| What | Where | Who | Behaviour | Source |
+|---|---|---|---|---|
+| **Event edition** on the handover brief | Handovers, every brief shown in full (section 1.1) | Reader of the row | One fact with the edition's label, shown only when the handover holds an edition. The handover takes the enquiry's edition while Sales prepares it and again when it is submitted; from then on it is a copy. The project takes that copy when the handover is accepted | `web/components/projects/handover-brief.tsx`; triggers `trg_proj_handover_edition`, `trg_proj_details_edition` |
+| **Readiness** on each request row | Equipment tab | Readers of the tab | "Readiness: <state> · <counts>": Not sent to the warehouse yet, Reserved, Partly ready, Short, Partly dispatched, Dispatched, Still out, Returned. A line to buy or rent is short, never reserved. A failed read: "Equipment readiness could not be loaded. Reload to try again; the requests below are still shown." | `page/[id]/equipment/page.tsx`; `web/components/projects/equipment-readiness.tsx`; `proj_equipment_readiness`, `inv_request_state` |
+| Panel **Review equipment booking** | Equipment tab, top; also on a finished project | Readers read; Manager or Warehouse press **Mark as reviewed** | Appears after the project's installation start, event start or event end changed while a request was Waiting for the warehouse, Being prepared or All dispatched. Per request and date: was, now, who, when, and **Open request <code> to change its dates**. "The booking has not been changed. The warehouse changes it on the request, where conflicts are checked." **Mark as reviewed** (optional note) records that someone looked and changes no booking | same; `web/components/projects/equipment-review-form.tsx`; `web/lib/actions/projectsEquipmentReview.ts`; `proj_resolve_equipment_review`; trigger `trg_proj_details_dates_changed` |
+| Notice **Delivery complete · equipment still out** | Equipment tab and Work page of a completed or archived project with units out | Readers | Per request: units out, expected back, overdue. "Completing a project does not return equipment: it stays outstanding until the warehouse records its return." | `stillOutAfterDelivery`, `StillOutNotice` |
+| Notice "Releasing unused reservations failed when the project finished." | Equipment tab of a finished project, while a request is still in draft or submitted or an active reservation has stock not dispatched | Readers | States when it failed and "Ask the warehouse to release the unused lines on the request." with links to the requests. **No automatic recovery and no retry:** the warehouse releases by hand; the notice clears once nothing is left | `ReleaseFailedNotice`; `inv_project_release_pending` |
+
+**Who reads the Equipment tab now.** Besides members, founders and the warehouse (section 2.1), an Operations Manager of the company reads it (details level). They get no button that changes anything, and cannot mark a review as reviewed.
 
 ## 3. The project's Budget tab (`/projects/[id]/budget`)
 
