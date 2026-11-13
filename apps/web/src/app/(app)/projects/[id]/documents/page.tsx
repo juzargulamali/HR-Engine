@@ -11,16 +11,15 @@ import { Fact, Muted, Panel } from "@/components/projects/parts";
 import { formatFileSize } from "@/components/sales/format";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
+import { filePurposeLabel } from "@/lib/projects/file-purposes";
 import { formatDate, formatDateTime, todayIso } from "@/lib/projects/format";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
-import { AddFileForms, FILE_PURPOSES, OpenFileButton, RemoveFileButton } from "./file-forms";
+import { AddFileForms, OpenFileButton, RemoveFileButton } from "./file-forms";
 import { IssueTimelineForm, RecordAcceptedForm, RecordSentForm } from "./plan-forms";
 import { PlanTable } from "./plan-table";
 
 export const metadata = { title: "Documents" };
-
-const purposeLabel = (id: string) => FILE_PURPOSES.find((p) => p.id === id)?.label.replace(" (Project Manager)", "") ?? id;
 
 function Fact3({ label, recorded, children }: { label: string; recorded: boolean; children?: React.ReactNode }) {
   return (
@@ -75,7 +74,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
                     </TableCell>
                     <TableCell>
                       <div className="flex flex-wrap gap-1">
-                        <Badge variant="outline" className="whitespace-nowrap">{purposeLabel(f.purpose)}</Badge>
+                        <Badge variant="outline" className="whitespace-nowrap">{filePurposeLabel(f.purpose)}</Badge>
                         {f.restricted ? <Badge variant="outline" className="whitespace-nowrap border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]">Restricted</Badge> : null}
                       </div>
                     </TableCell>

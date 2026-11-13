@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { FILE_PURPOSES } from "@/lib/projects/file-purposes";
 import { CRM_ALLOWED_FILE_SUMMARY, validateCrmFileMeta } from "@enginious-hr/domain";
 import { addProjectLink, finalizeProjectUpload, getProjectFileUrl, prepareProjectUpload, removeProjectFile } from "@/lib/actions/projectsFiles";
 import { createClient } from "@/lib/supabase/client";
@@ -14,12 +15,6 @@ import { cn } from "@/lib/utils";
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.webp,.docx,.xlsx,.pptx,.txt,.csv";
 
-export const FILE_PURPOSES = [
-  { id: "document", label: "Document" },
-  { id: "feedback_evidence", label: "Feedback evidence" },
-  { id: "completion_evidence", label: "Completion evidence (Project Manager)" },
-  { id: "other", label: "Other" },
-] as const;
 
 function PurposeSelect({ id, isManager, disabled }: { id: string; isManager: boolean; disabled?: boolean }) {
   return (
