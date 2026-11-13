@@ -56,7 +56,7 @@ export function UpcomingCard({ r, people }: { r: UpcomingRow; people: { id: stri
       </dl>
 
       <details className="mt-3 border-t pt-2">
-        <summary className="cursor-pointer text-[13px] font-medium text-accent">More: teams, equipment, what Sales still has to confirm, risk and questions</summary>
+        <summary className="cursor-pointer text-[13px] font-medium text-accent">More details</summary>
         <dl className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
           <Fact label="Sales owner">{r.owner}</Fact>
           <Fact label="Event edition">{r.edition?.label ?? <Unknown>Not linked to an event</Unknown>}</Fact>

@@ -66,15 +66,15 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      <Alert role="note">Nothing here approves scope, price or a deadline by itself: not a chat message, not an attachment, not feedback being recorded. A scope change is approved only by someone with scope approval, with a reason, on this page.</Alert>
+      <Alert role="note">Nothing here approves scope, price or a deadline by itself. Only someone with scope approval can approve a scope change, with a reason, on this page; chat, attachments and recorded feedback approve nothing.</Alert>
 
       <Panel
         title="Client feedback"
-        description="What the client asked for, who is responsible and how it was resolved. A correction fixes something against what was agreed; a proposed change needs a scope decision below."
+        hint="What the client asked for, who is responsible and how it was resolved. A correction fixes something against what was agreed; a proposed change needs a scope decision below."
         actions={view.canManage && !finished ? <RecordFeedbackForm projectId={id} today={today} milestones={milestones} deliverables={deliverables} tasks={tasks} people={people} /> : null}
       >
         {feedback.length === 0 ? (
-          <EmptyState dense title="No client feedback recorded" description={view.canManage ? "Record feedback when the client asks for a correction or a change, so it has a person responsible and a decision." : "The Project Manager records client feedback here."} />
+          <EmptyState dense title="No client feedback recorded" description={view.canManage ? undefined : "The Project Manager records client feedback here."} />
         ) : (
           <ul className="space-y-3">
             {feedback.map((f) => {
@@ -112,7 +112,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
       <Panel
         title="Scope"
-        description="The original agreed scope is kept exactly as it was handed over. Approved changes replace the current scope; the original and every decision stay on record."
+        hint="The original agreed scope is kept exactly as it was handed over. Approved changes replace the current scope; the original and every decision stay on record."
         actions={view.canManage && !finished ? <ProposeScopeChangeForm projectId={id} currentScope={view.details?.scope ?? null} feedback={feedback.filter((f) => f.kind === "proposed_change" && !f.scope_change_id).map((f) => ({ id: f.id, label: `${formatDate(f.received_on)}: ${f.request_text.slice(0, 60)}` }))} /> : null}
       >
         <div className="grid gap-4 lg:grid-cols-2">
@@ -136,7 +136,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
       <Panel title="Scope change proposals" description={seeCommercial ? "You have commercial access, so the cost effect of each proposal is shown." : "Cost effects are recorded in a restricted area and are visible only to people with commercial access."}>
         {changes.length === 0 ? (
-          <EmptyState dense title="No scope changes proposed" description="When the client asks for something outside the agreed scope, the Project Manager proposes a change here so it can be decided." />
+          <EmptyState dense title="No scope changes proposed" description="The Project Manager proposes changes here." />
         ) : (
           <ul className="space-y-3">
             {changes.map((c) => {

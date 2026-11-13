@@ -4,6 +4,7 @@ import { OsBadge } from "@/components/os/pills";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Muted } from "@/components/projects/parts";
 import { AssignReviewerDialog, DecideDialog, ExpectedOutputDialog, LinkFeedbackDialog, OpenOutputButton, RerouteDialog, SubmitVersionDialog } from "@/components/projects/deliverables/output-forms";
 import {
@@ -37,7 +38,7 @@ function VersionBody({ v, row, tz, linkFeedback }: { v: OutputVersion; row: Pick
       <Times v={v} tz={tz} />
       <p className="text-[13px]"><FileLine f={v.file} /></p>
       {v.snapshot ? <p className="text-[13px]"><span className="text-muted-foreground">Snapshot: </span><FileLine f={v.snapshot} /></p> : null}
-      {v.mutable_link ? <p className="text-[13px] text-[hsl(var(--os-amber))]" data-testid="output-mutable-note">This is a link to a document that can change after approval. The approval is of what it showed when it was submitted; use a snapshot or a version-specific link to retrieve that exact material.</p> : null}
+      {v.mutable_link ? <p className="text-[13px] text-[hsl(var(--os-amber))]" data-testid="output-mutable-note">⚠ This link can change after approval: the approval is of what it showed when it was submitted. Use a snapshot or a version-specific link to keep that exact material.</p> : null}
       {v.note ? <p className="whitespace-pre-wrap break-words text-[13px]"><span className="text-muted-foreground">Submitter&apos;s note: </span>{v.note}</p> : null}
       {v.decision_note ? <p className="whitespace-pre-wrap break-words text-[13px]"><span className="text-muted-foreground">Reviewer&apos;s feedback: </span>{v.decision_note}</p> : null}
       {v.feedback.length > 0 ? <ul className="space-y-0.5 text-[13px]" data-testid="output-feedback">{v.feedback.map((f) => <li key={f.id} className="break-words"><span className="text-muted-foreground">Client feedback ({f.source}, {f.status.replace("_", " ")}): </span>{f.text}</li>)}</ul> : null}
@@ -108,7 +109,10 @@ export function RegisterView({ projectId, register, filter, rows, isReviewer, fe
   return (
     <div className="space-y-4" data-testid="deliverables-register">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <p className="max-w-3xl text-sm text-muted-foreground">Every task with an expected output, from the same records as the task panel. Times are shown in the project&apos;s time zone and always name it. Open and Download follow each file&apos;s own access: a restricted file shows as restricted to anyone but the Project Manager.</p>
+        <p className="text-sm font-medium">Task outputs and their reviews<InfoHint label="the deliverables register" className="ml-1" testId="register-help">
+          <p>Every task with an expected output, from the same records as the task panel.</p>
+          <p className="mt-1.5">Times are shown in the project&apos;s time zone and always name it. Open and Download follow each file&apos;s own access: a restricted file shows as restricted to anyone but the Project Manager.</p>
+        </InfoHint></p>
         <a href={`/api/projects/${projectId}/deliverables/export`} className={buttonVariants({ variant: "outline", size: "sm" })} data-testid="deliverables-export"><Download className="h-4 w-4" aria-hidden /> Export register (CSV)</a>
       </div>
       <nav aria-label="Filter deliverables" className="flex flex-wrap items-center gap-1 rounded-lg border border-border p-1 w-fit">

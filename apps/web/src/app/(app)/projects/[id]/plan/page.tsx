@@ -18,7 +18,9 @@ import { DependencyForm } from "../timeline/_components/dependency-form";
 import { DialogButton } from "../timeline/_components/dialog";
 import { bookablePeople, canBookPerson, sortPlanItems } from "../timeline/timeline-helpers";
 import { PlanSwitch } from "./_controls";
+import { InfoHint } from "@/components/ui/info-hint";
 import { SiteSchedulePanel, SiteTimelineStrip } from "@/components/projects/site/site-views";
+import type { SiteBriefing } from "@/lib/projects/phase2/model";
 import { loadSiteSchedule } from "@/lib/projects/phase2/data";
 import { memberOptions } from "@/lib/projects/data";
 import { BookingCard, ConflictList, DependencyRow, PlanSection } from "./_sections";
@@ -102,13 +104,16 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       </div>
     );
   }
-  const [siteRes, reqR, techR] = plan === "site"
+  const [siteRes, reqR, techR, briefR] = plan === "site"
     ? await Promise.all([
       loadSiteSchedule(id), supabase.from("inv_requests").select("id, code, status").eq("project_id", id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(50),
       // People who can be assigned on site: the project's members and the company's active employees who are not on it (site-only). Project Managers only.
       canEditPlan ? supabase.rpc("proj_site_technician_candidates", { p_project_id: id }) : Promise.resolve({ data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }),
+      // What each activity's briefing is missing, and the venue / date / readiness it effectively has (the activity's own, else the project's records). A failed read just hides the extras.
+      supabase.rpc("proj_site_briefing", { p_project_id: id }),
     ])
-    : [null, { data: [] as { id: string; code: string; status: string }[] }, { data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }];
+    : [null, { data: [] as { id: string; code: string; status: string }[] }, { data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }, { data: null, error: null }];
+  const briefings = Object.fromEntries(((briefR.data ?? []) as unknown as SiteBriefing[]).map((b) => [b.id, b]));
   const crewChoices = (techR.data ?? []).length > 0 ? (techR.data ?? []).map((t) => ({ id: t.user_id, name: t.name, siteOnly: !t.is_member })) : memberOptions(view);
   const milestones = milestoneR.data ?? [];
   const milestoneTitle = (mid: string | null) => milestones.find((m) => m.id === mid)?.title ?? null;
@@ -138,11 +143,10 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       {intro}
       {plan === "site" && siteRes?.state === "ok" ? (
         <>
-          {mode === "timeline" ? <Panel title="Site timeline" description="Setup, show and dismantling run by run, and the shipments that supply them, on one calendar. Names stay in view while it scrolls; exact dates are on every row."><SiteTimelineStrip schedule={siteRes.data} today={todayIso()} /></Panel> : null}
-          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={crewChoices} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
+          {mode === "timeline" ? <Panel title="Site timeline" hint="Setup, show and dismantling run by run, and the shipments that supply them, on one calendar. Names stay in view while it scrolls; exact dates are on every row."><SiteTimelineStrip schedule={siteRes.data} today={todayIso()} /></Panel> : null}
+          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={crewChoices} briefings={briefings} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
           <details className="os-card px-4 py-3" data-testid="site-all-items">
-            <summary className="cursor-pointer text-sm font-semibold">All site timeline items (client-facing, milestone and status)</summary>
-            <p className="mb-3 mt-1 text-[13px] text-muted-foreground">The same items as the Site schedule above, with the fields that are not part of it: whether an item is offered to a client timeline, its milestone and its status.</p>
+            <summary className="cursor-pointer text-sm font-semibold">All site timeline items (client-facing, milestone and status) <InfoHint label="All site timeline items">The same items as the Site schedule above, with the fields that are not part of it: whether an item is offered to a client timeline, its milestone and its status.</InfoHint></summary>
       {planSection}
           </details>
         </>
@@ -159,10 +163,10 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
         <>
           <Panel
             title="Dependencies on others"
-            description="Things outside the team that have to happen first: structure ready, power and network, access, the standbuilder's work."
+            hint="Things outside the team that have to happen first: structure ready, power and network, access, the standbuilder's work."
             actions={canEditPlan ? <DialogButton label="Add dependency" title="Add a dependency" variant="default"><DependencyForm projectId={id} siteTimezone={siteTz} milestones={milestones} /></DialogButton> : null}
           >
-            <Muted className="mb-3">Recorded for the team only; nothing is sent to anyone. Times are site time ({siteTz.replace(/_/g, " ")}).</Muted>
+            <Muted className="mb-3">Team only; nothing is sent to anyone. Times are site time ({siteTz.replace(/_/g, " ")}).</Muted>
             {deps.length === 0 ? (
               <EmptyState dense title="No dependencies recorded" description={canEditPlan ? "Add what you are waiting for, who is responsible and when it is expected." : "The Project Manager records what the project is waiting for."} />
             ) : (
@@ -178,11 +182,11 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
           <Panel
             id="bookings"
             title="Site bookings"
-            description="A person reserved at a site, in the site's own time, with preparation and travel allowances."
+            hint="A person reserved at a site, in the site's own time, with preparation and travel allowances. Several assignments in one day are never a conflict: only physical site bookings are compared, across every project, including each booking's preparation and travel time."
             actions={canBookAny ? <DialogButton label="Add booking" title="Book someone on site" variant="default"><BookingForm projectId={id} siteTimezone={siteTz} people={people} siteItems={siteItems} /></DialogButton> : null}
           >
             <Muted className="mb-3">
-              Several assignments in one day are never a conflict. Only physical site bookings are compared, across every project, including each booking&apos;s preparation and travel time. A booking is tentative until confirmed, and confirming one that overlaps another needs authority and a reason.
+              A booking is tentative until confirmed. ⚠ Confirming one that overlaps another needs authority and a reason.
               {!view.canManage && view.headOfTeamIds.length > 0 ? " As a team lead you can book the people of your own team." : ""}
             </Muted>
             {bookings.length === 0 ? (

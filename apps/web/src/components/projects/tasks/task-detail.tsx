@@ -1,4 +1,5 @@
 import { TaskOutputSection } from "@/components/projects/deliverables/output-views";
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { OsPill } from "@/components/os/pills";
@@ -57,12 +58,12 @@ export function TaskDetailBody({ data, view, taskHref, focusVersionId }: { data:
         focusVersionId={focusVersionId}
         flags={{ canDefine: data.leader, canSubmit: data.role !== null, viewerIsAssignee: task.assignee_id === data.viewerId, canReview: data.leader && task.assignee_id !== data.viewerId, readOnly: data.readOnly }}
       />
-      {data.output.state === "unavailable" ? <Muted>The expected output could not be read just now. The rest of the task is unaffected; reload to try again.</Muted> : null}
+      {data.output.state === "unavailable" ? <Muted>⚠ The expected output could not be read just now. The rest of the task is unaffected; reload to try again.</Muted> : null}
 
       {data.planLink ? (
         <p className="text-sm" data-testid="task-plan-link">
           From the Project Plan: <Link href={`/projects/${view.project.id}/delivery?open=${data.planLink.itemKey}#dp-${data.planLink.lineKey}`} className="font-medium underline underline-offset-2">{data.planLink.itemKey} {data.planLink.itemTitle}</Link>
-          <span className="text-muted-foreground"> · {data.planLink.lineKey}. Status, owner and dates here are what the plan shows.</span>
+          <span className="text-muted-foreground"> · {data.planLink.lineKey}</span><InfoHint label="the plan link" className="ml-1">Status, owner and dates here are what the plan shows.</InfoHint>
         </p>
       ) : null}
       {task.description ? <p className="whitespace-pre-wrap text-sm">{task.description}</p> : <Muted>No description.</Muted>}
@@ -94,7 +95,7 @@ export function TaskDetailBody({ data, view, taskHref, focusVersionId }: { data:
           milestones={data.milestones}
         />
       </div>
-      <Panel title={`Comments (${data.comments.length})`} description="About this task only. The project's conversation is in Chat; formal changes are in History.">
+      <Panel title={`Comments (${data.comments.length})`} hint="About this task only. The project's conversation is in Chat; formal changes are in History.">
         {data.comments.length === 0 ? (
           <Muted className="mb-4">No comments yet.</Muted>
         ) : (
@@ -128,14 +129,14 @@ export function TaskDetailBody({ data, view, taskHref, focusVersionId }: { data:
         <p className="mt-3 text-sm"><Link href={`/projects/${view.project.id}/documents`} className="underline underline-offset-4">Project files and client documents</Link></p>
       </Panel>
 
-      <Panel title="Dependencies" description="Information, never automation: a changed date does not move anyone else's work.">
+      <Panel title="Dependencies" hint="Information, never automation: a changed date does not move anyone else's work.">
         <div className="grid gap-4 sm:grid-cols-2">
           <DependencyList heading="Depends on" ids={data.dependsOn} tasksById={data.tasksById} empty="Does not depend on another task." link={asLink} />
           <DependencyList heading="Waiting on this one" ids={data.blocks} tasksById={data.tasksById} empty="No task depends on this one." link={asLink} />
         </div>
       </Panel>
 
-      <Panel title="History" description="Reassignments, date changes with their reasons, status changes and blockers. Nothing here can be edited.">
+      <Panel title="History" hint="Reassignments, date changes with their reasons, status changes and blockers. Nothing here can be edited.">
         {data.events.length === 0 ? (
           <Muted>No history yet.</Muted>
         ) : (

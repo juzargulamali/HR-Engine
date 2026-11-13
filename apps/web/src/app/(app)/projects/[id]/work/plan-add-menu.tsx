@@ -26,7 +26,7 @@ export function PlanAddMenu({ projectId, teams, milestones }: { projectId: strin
       <Modal open={open === "milestone"} onClose={close} title="New milestone">
         <MilestoneForm projectId={projectId} onDone={close} />
       </Modal>
-      <Modal open={open === "deliverable"} onClose={close} title="New work package" description="A work package is a piece of work assigned to one project team, whose head then distributes the tasks.">
+      <Modal open={open === "deliverable"} onClose={close} title="New work package" help="A work package is a piece of work assigned to one project team, whose head then distributes the tasks.">
         <DeliverableForm projectId={projectId} teams={teams} milestones={milestones} leaderOnly onDone={close} />
       </Modal>
     </>

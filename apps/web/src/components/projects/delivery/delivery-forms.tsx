@@ -6,6 +6,7 @@ import {
   savePlanLine, seedPlanScope,
 } from "@/lib/actions/projectsDeliveryPlan";
 import { ActionForm, Field } from "@/components/sales/action-form";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Modal } from "@/components/sales/modal";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,8 +23,8 @@ export interface Option { id: string; name: string }
 export type Done = { error: string | null; notice?: string | null };
 
 /** A dialog whose form may answer with a notice (a proposal was sent, or the row already existed): the notice stays on screen until the person closes it. */
-export function FormDialog({ label, title, description, variant = "outline", size = "sm", children, testId, dialogSize }: {
-  label: string; title: string; description?: string; variant?: "default" | "outline" | "secondary" | "ghost" | "destructive"; size?: "default" | "sm"; testId?: string; dialogSize?: "default" | "wide" | "xl";
+export function FormDialog({ label, title, description, help, variant = "outline", size = "sm", children, testId, dialogSize }: {
+  label: string; title: string; /** A short line the person must read (a consequence, who acts next). */ description?: string; /** The longer, optional explanation: behind an ⓘ beside the title. */ help?: React.ReactNode; variant?: "default" | "outline" | "secondary" | "ghost" | "destructive"; size?: "default" | "sm"; testId?: string; dialogSize?: "default" | "wide" | "xl";
   children: (done: (s: Done) => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -32,7 +33,7 @@ export function FormDialog({ label, title, description, variant = "outline", siz
   return (
     <>
       <Button type="button" variant={variant} size={size} onClick={() => setOpen(true)} data-testid={testId}>{label}</Button>
-      <Modal open={open} onClose={close} title={title} description={description} size={dialogSize}>
+      <Modal open={open} onClose={close} title={title} description={description} help={help} size={dialogSize}>
         {notice ? (
           <div className="space-y-3">
             <Alert role="status">{notice}</Alert>
@@ -51,7 +52,7 @@ export interface DeliverableValues { id: string; version: number; zone: string; 
 export function DeliverableDialog({ projectId, item, members, images }: { projectId: string; item?: DeliverableValues; members: Option[]; images: Option[] }) {
   return (
     <FormDialog label={item ? "Edit" : "Add technology / activation"} variant={item ? "outline" : "default"} title={item ? "Edit technology / activation" : "Add technology / activation"} testId={item ? undefined : "dp-add-deliverable"}
-      description="One row is one technology or activation to deliver, for example Kids photobooth, or Entrance: Interactive LED welcome wall. A zone is optional. Add only the requirements it needs afterwards.">
+      help="One row is one technology or activation to deliver, for example Kids photobooth, or Entrance: Interactive LED welcome wall. A zone is optional. Add only the requirements it needs afterwards.">
       {(done) => (
         <ActionForm action={saveDeliverable} submitLabel={item ? (item.released ? "Propose change" : "Save") : "Add to the plan"} onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
@@ -59,22 +60,22 @@ export function DeliverableDialog({ projectId, item, members, images }: { projec
           {item?.released ? <Alert role="status">{RELEASED_NOTE}</Alert> : null}
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Technology / activation" htmlFor="dp-title"><Input id="dp-title" name="title" required maxLength={200} defaultValue={item?.title ?? ""} /></Field>
-            <Field label="Zone (optional)" htmlFor="dp-zone" hint="Where it is: Entrance, Lounge, Stage. Leave empty when the project has no zones."><Input id="dp-zone" name="zone" maxLength={120} defaultValue={item?.zone ?? ""} /></Field>
+            <Field label="Zone (optional)" htmlFor="dp-zone" help="Where it is: Entrance, Lounge, Stage. Leave empty when the project has no zones."><Input id="dp-zone" name="zone" maxLength={120} defaultValue={item?.zone ?? ""} /></Field>
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Quantity" htmlFor="dp-qty" hint="How many of this technology."><Input id="dp-qty" name="qty" type="number" min="0.001" step="any" defaultValue={item?.qty ?? ""} /></Field>
+            <Field label="Quantity" htmlFor="dp-qty"><Input id="dp-qty" name="qty" type="number" min="0.001" step="any" defaultValue={item?.qty ?? ""} /></Field>
             <Field label="Ready by" htmlFor="dp-needed"><Input id="dp-needed" name="neededBy" type="date" defaultValue={item?.needed_by ?? ""} /></Field>
           </div>
           <Field label="Specifications (optional)" htmlFor="dp-specs"><Textarea id="dp-specs" name="specs" rows={3} maxLength={4000} defaultValue={item?.specs ?? ""} /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Accountable owner" htmlFor="dp-owner" hint="One person. Requirements with nobody named go to this person at release.">
+            <Field label="Accountable owner" htmlFor="dp-owner" hint="Requirements with nobody named go to this person at release.">
               <Select id="dp-owner" name="ownerId" defaultValue={item?.owner_id ?? ""}>
                 <option value="">Not chosen yet</option>
                 {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
               </Select>
             </Field>
           </div>
-          <Field label="Reference image (optional)" htmlFor="dp-image" hint="An image already added to Files & client plan. Nothing is fetched from the internet.">
+          <Field label="Reference image (optional)" htmlFor="dp-image" help="An image already added to Files & client plan. Nothing is fetched from the internet.">
             <Select id="dp-image" name="imageFileId" defaultValue={item?.image_file_id ?? ""}>
               <option value="">None</option>
               {images.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
@@ -100,10 +101,10 @@ const KIND_CHOICES: Record<string, string[]> = {
 const NAME_LABEL: Record<string, string> = { hardware: "Item", content: "Deliverable", apps: "App name", engineering: "What is needed", site: "What is needed" };
 
 /** A small labelled field whose value is one key of the line's details (the database keeps only the keys of the section). */
-function DetailInput({ k, label, hint, type = "text", defaultValue, options, placeholder }: { k: keyof DpDetail & string; label: string; hint?: string; type?: "text" | "number" | "date"; defaultValue?: string | number; options?: string[]; placeholder?: string }) {
+function DetailInput({ k, label, hint, help, type = "text", defaultValue, options, placeholder }: { k: keyof DpDetail & string; label: string; hint?: string; help?: React.ReactNode; type?: "text" | "number" | "date"; defaultValue?: string | number; options?: string[]; placeholder?: string }) {
   const id = `dd-${k}`;
   return (
-    <Field label={label} htmlFor={id} hint={hint}>
+    <Field label={label} htmlFor={id} hint={hint} help={help}>
       {options ? (
         <Select id={id} name={`d_${k}`} defaultValue={defaultValue === undefined ? "" : String(defaultValue)}>
           <option value="">Not set</option>
@@ -130,7 +131,8 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
   const kinds = KIND_CHOICES[section === "installation" || section === "testing" ? "site" : section === "programming" ? "apps" : section];
   return (
     <FormDialog label={line ? "Edit" : "Add requirement"} title={line ? "Edit requirement" : "Add a requirement"}
-      description="Enter each requirement once. A work requirement becomes one task at release; hardware matched to Inventory becomes one line on the draft equipment request. Neither exists until the Project Manager releases it.">
+      description="Nothing exists until the Project Manager releases it."
+      help="Enter each requirement once. A work requirement becomes one task at release; hardware matched to Inventory becomes one line on the draft equipment request.">
       {(done) => (
         <ActionForm action={savePlanLine} submitLabel={line ? (line.released ? "Propose change" : "Save") : "Add requirement"} onDone={(s) => done(s as Done)} disabled={!!line?.booked}>
           <input type="hidden" name="projectId" value={projectId} />
@@ -151,9 +153,9 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
             <>
               <div className="grid gap-3 sm:grid-cols-2">
                 <Field label="Quantity" htmlFor="dl-qty"><Input id="dl-qty" name="qty" type="number" min="0.001" step="any" defaultValue={line?.qty ?? ""} /></Field>
-                <Field label="Needed by" htmlFor="dl-needed" hint="Empty = the activation's ready-by date."><Input id="dl-needed" name="neededBy" type="date" defaultValue={line?.needed_by ?? ""} /></Field>
+                <Field label="Needed by" htmlFor="dl-needed" help="Empty means the activation's ready-by date."><Input id="dl-needed" name="neededBy" type="date" defaultValue={line?.needed_by ?? ""} /></Field>
               </div>
-              <Field label="Specification" htmlFor="dl-notes" hint="Size, model, finish. Without one the line shows Specification pending."><Textarea id="dl-notes" name="notes" rows={2} maxLength={2000} defaultValue={line?.notes ?? ""} /></Field>
+              <Field label="Specification" htmlFor="dl-notes" help="Size, model, finish. Without one the line shows Specification pending."><Textarea id="dl-notes" name="notes" rows={2} maxLength={2000} defaultValue={line?.notes ?? ""} /></Field>
               <Field label="How is it supplied?" htmlFor="dl-route" hint={locked ? "Released to Warehouse: changed on the Equipment tab." : undefined}>
                 <Select id="dl-route" name="supplyRoute" value={route} disabled={locked} onChange={(e) => setRoute(e.target.value as SupplyRoute)}>
                   {SUPPLY_ROUTES.map((r) => <option key={r} value={r}>{SUPPLY_ROUTE_LABELS[r]}</option>)}
@@ -161,7 +163,8 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
               </Field>
               {route === "inventory" ? (
                 <Field label="Stock item" htmlFor="dl-stock"
-                  hint={stockFailed ? "Could not load the stock list. Save the line as it is and match it later; it waits, and the rest of the plan is not held up." : "Search the catalogue. If it is not there, save it as a manual line: it stays visible as Needs stock match, and the rest is released. Match it later and release again to add it once."}>
+                  hint={stockFailed ? "⚠ Could not load the stock list. Save the line as it is and match it later; it waits, and the rest of the plan is not held up." : undefined}
+                  help="Search the catalogue. If it is not there, save it as a manual line: it stays visible as Needs stock match, and the rest is released. Match it later and release again to add it once.">
                   <Select id="dl-stock" name="invItemId" defaultValue={line?.inv_item_id ?? ""}>
                     <option value="">Not in Inventory yet: manual line</option>
                     {stock.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -169,7 +172,7 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
                 </Field>
               ) : (
                 <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Owner" htmlFor="dl-assignee" hint="Who is responsible for getting it."><Select id="dl-assignee" name="assigneeId" defaultValue={line?.assignee_id ?? ""}><option value="">Nobody yet</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
+                  <Field label="Owner" htmlFor="dl-assignee"><Select id="dl-assignee" name="assigneeId" defaultValue={line?.assignee_id ?? ""}><option value="">Nobody yet</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
                   <DetailInput k="expected_date" label="Expected on" type="date" defaultValue={d.expected_date} />
                   <DetailInput k="source" label={route === "client" ? "Supplied by" : "Supplier"} defaultValue={d.source} />
                 </div>
@@ -194,24 +197,24 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
                       <DetailInput k="purpose" label="Purpose" defaultValue={d.purpose} />
                       <DetailInput k="app_count" label="Number of apps" type="number" defaultValue={d.app_count} />
                       <DetailInput k="platform" label="Platform" placeholder="Android tablet, Windows, web" defaultValue={d.platform} />
-                      <DetailInput k="device_count" label="Number of devices" type="number" hint="One app on six screens is one app and six devices." defaultValue={d.device_count} />
+                      <DetailInput k="device_count" label="Number of devices" type="number" help="One app on six screens is one app and six devices." defaultValue={d.device_count} />
                     </>
                   ) : null}
                   {section === "engineering" || section === "site" ? <DetailInput k="kind" label="Kind" options={kinds} defaultValue={d.kind} /> : null}
                 </div>
               ) : null}
               <div className="grid gap-3 sm:grid-cols-3">
-                <Field label="Owner" htmlFor="dl-assignee" hint="Gets the task at release. Empty = the accountable owner.">
+                <Field label="Owner" htmlFor="dl-assignee" hint="Gets the task at release. Empty means the accountable owner.">
                   <Select id="dl-assignee" name="assigneeId" defaultValue={line?.assignee_id ?? ""}>
                     <option value="">The accountable owner</option>
                     {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
                   </Select>
                 </Field>
                 <Field label="Planned start" htmlFor="dl-start"><Input id="dl-start" name="startDate" type="date" defaultValue={line?.start_date ?? ""} /></Field>
-                <Field label="Due" htmlFor="dl-needed" hint="Empty = the activation's date."><Input id="dl-needed" name="neededBy" type="date" defaultValue={line?.needed_by ?? ""} /></Field>
+                <Field label="Due" htmlFor="dl-needed" help="Empty means the activation's date."><Input id="dl-needed" name="neededBy" type="date" defaultValue={line?.needed_by ?? ""} /></Field>
               </div>
               {milestones.length > 0 ? (
-                <Field label="Milestone" htmlFor="dl-ms" hint="The task counts toward this milestone's “N of M complete”.">
+                <Field label="Milestone" htmlFor="dl-ms" help="The task counts toward this milestone's “N of M complete”.">
                   <Select id="dl-ms" name="milestoneId" defaultValue={line?.milestone_id ?? ""}>
                     <option value="">None</option>
                     {milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -220,7 +223,7 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
               ) : null}
               {others.length > 0 ? (
                 <fieldset className="space-y-1">
-                  <legend className="text-[13px] font-medium text-muted-foreground">Waits for</legend>
+                  <legend className="flex items-center gap-1 text-[13px] font-medium text-muted-foreground">Waits for<InfoHint label="Waits for">Becomes a task dependency at release. A late predecessor shows against this line.</InfoHint></legend>
                   <input type="hidden" name="dependsOnPresent" value="1" />
                   <div className="max-h-36 space-y-1 overflow-y-auto rounded-md border border-border p-2">
                     {others.map((o) => (
@@ -230,7 +233,7 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
                       </label>
                     ))}
                   </div>
-                  <p className="text-[13px] text-muted-foreground">Becomes a task dependency at release. A late predecessor shows against this line.</p>
+                  
                 </fieldset>
               ) : null}
               <Field label="Notes" htmlFor="dl-notes"><Textarea id="dl-notes" name="notes" rows={2} maxLength={2000} defaultValue={line?.notes ?? ""} /></Field>
@@ -264,13 +267,14 @@ export function SequenceDialog({ projectId, itemId, section, members, milestones
   const defaultOwner = `Use activation owner${activationOwner ? ` (${activationOwner})` : " (none set yet)"}`;
   return (
     <FormDialog label="Start from a sequence" title="Add a sequence of requirements" dialogSize="xl"
-      description={`Each step waits for the one before it. Name each step, add or remove steps, and give each its own owner and dates. Section: ${DP_SECTION_LABELS[section]}. Nothing is released until the Project Manager releases it.`}>
+      description={`${DP_SECTION_LABELS[section]}. Nothing is released until the Project Manager releases it.`}
+      help="Each step waits for the one before it. Name each step, add or remove steps, and give each its own owner and dates. An empty owner means the technology's accountable owner at release.">
       {(done) => (
         <ActionForm action={addPlanSequence} submitLabel="Add the steps" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="itemId" value={itemId} />
           <input type="hidden" name="section" value={section} />
-          <p className="text-[13px] text-muted-foreground" data-testid="seq-hint">Nothing is filled in for you. Work that already exists as a task (see the Work page) is tracked there: add only requirements that are not tasks yet. Empty steps are ignored.</p>
+          <p className="text-[13px] text-muted-foreground" data-testid="seq-hint">Add only requirements that are not tasks yet: work that already exists as a task is tracked on the Work page. Empty steps are ignored.</p>
           <ol className="space-y-3">
             {steps.map((st, n) => (
               <li key={st.id} className="space-y-3 rounded-md border border-border p-3" data-testid={`seq-step-${n}`}>
@@ -318,7 +322,7 @@ export function SequenceDialog({ projectId, itemId, section, members, milestones
 export function SeedScopeDialog({ projectId, names }: { projectId: string; names: string[] }) {
   return (
     <FormDialog label={`Bring in accepted technologies (${names.length})`} variant="default" size="default" testId="dp-seed-scope" title="Bring the accepted scope into the plan"
-      description="Each technology from the accepted handover becomes one row with its quantity. Rows already in the plan, or brought in and removed earlier, are left alone, so doing this again never duplicates or overwrites anything.">
+      help="Each technology from the accepted handover becomes one row with its quantity. Rows already in the plan, or brought in and removed earlier, are left alone, so doing this again never duplicates or overwrites anything.">
       {(done) => (
         <ActionForm action={seedPlanScope} submitLabel="Add to the plan" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
@@ -366,7 +370,7 @@ export function ReleaseDialog({ projectId, itemId, label, preview }: { projectId
   const external = preview.external ?? 0;
   return (
     <FormDialog label={label} variant={itemId ? "outline" : "default"} title={itemId ? "Release this technology / activation" : "Release the plan"} testId={itemId ? undefined : "dp-release"}
-      description="Release gives the work to the teams. It can be repeated safely: a line that was already released is never created twice.">
+      help="It can be repeated safely: a line that was already released is never created twice.">
       {(done) => (
         <ActionForm action={releaseDeliveryPlan} submitLabel={nothing ? "Nothing to release" : "Release"} pendingLabel="Releasing…" onDone={(s) => done(s as Done)} disabled={nothing}>
           <input type="hidden" name="projectId" value={projectId} />
@@ -404,7 +408,7 @@ export function CorrectionDialog({ projectId, targetType, targetId, about, label
   projectId: string; targetType: "deliverable" | "line" | "task" | "scope"; targetId?: string; about: string; label?: string; variant?: "ghost" | "outline";
 }) {
   return (
-    <FormDialog label={label} variant={variant} title="Raise a correction" description={`About: ${about}. It is sent to the relevant lead and the Project Manager is told. It changes nothing by itself; you will see the decision on the Delivery plan.`}>
+    <FormDialog label={label} variant={variant} title="Raise a correction" description={`About: ${about}. It changes nothing by itself.`} help="It is sent to the relevant lead and the Project Manager is told. You will see the decision on the Project Plan.">
       {(done) => (
         <ActionForm action={raisePlanCorrection} submitLabel="Send correction" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />

@@ -40,7 +40,7 @@ function AddCategory({ view }: { view: PbxBudgetView }) {
   const [label, setLabel] = useState("");
   return (
     <form className="flex flex-wrap items-end gap-2" onSubmit={(e) => { e.preventDefault(); a.run(() => addBudgetCategory({ projectId: view.project.id, companyId: view.project.company_id, label }), () => setLabel(""), "Category added.") }}>
-      <Field label="Add an expense category for this company" htmlFor="pbx-newcat" hint="The six standard categories are always there. Add another only when it will be used again."><Input id="pbx-newcat" value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} /></Field>
+      <Field label="Add an expense category for this company" htmlFor="pbx-newcat" help="The six standard categories are always there. Add another only when it will be used again."><Input id="pbx-newcat" value={label} maxLength={60} onChange={(e) => setLabel(e.target.value)} /></Field>
       <Button type="submit" variant="outline" disabled={a.pending || label.trim().length < 2}>{a.pending ? "Adding…" : "Add category"}</Button>
       <div className="basis-full"><ActionMessage error={a.error} notice={a.notice} /></div>
     </form>
@@ -52,7 +52,7 @@ export function RatesPanel({ view }: { view: PbxBudgetView }) {
   if (!view.viewer.is_finance) return null;
   const currency = view.budget?.currency ?? view.default_currency ?? "AED";
   return (
-    <Panel title={`Company rates and categories (${view.project.company_name ?? "this company"}, ${currency})`} description="Used to fill in new budget lines. A rate you set for one currency is never applied to another.">
+    <Panel title={`Company rates and categories (${view.project.company_name ?? "this company"}, ${currency})`} hint="Used to fill in new budget lines. A rate you set for one currency is never applied to another.">
       <div className="space-y-4">
         {RATE_KEYS.map((k) => <RateRow key={`${k}:${currency}`} view={view} rateKey={k} />)}
         <AddCategory view={view} />

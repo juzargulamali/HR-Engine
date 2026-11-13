@@ -61,6 +61,7 @@ await step("PM: accepts the handover and lands on the Project Plan (with a way b
   PRJ = page.url().match(/projects\/([0-9a-f-]{36})\//)[1];
   await page.waitForLoadState("networkidle");
   await seen(/Project Plan/);
+  await page.getByTestId("dp-welcome").waitFor({ timeout: 10000 }).catch(() => undefined);                 // drawn just after the redirect settles
   if (!(await page.getByTestId("dp-welcome").isVisible())) throw new Error("no welcome note after acceptance");
   if (!(await page.getByRole("link", { name: "Work overview" }).first().isVisible())) throw new Error("no link to the Work overview");
   if (db("select count(*) from proj_projects where crm_opportunity_id is not null") !== "1") throw new Error("not exactly one client project");
@@ -79,7 +80,8 @@ await step("the summary at the top is honest about an empty plan, and the brief 
   await expectText(/Nothing in the plan yet/);
   await expectText(/Next step: bring in the accepted technologies/i);
   await expectText(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
-  await expectText(/manual step/);
+  await page.getByTestId("dp-seed-help").hover();                                               // the long explanation is behind the ⓘ
+  if (!/manual step/.test(await page.getByTestId("info-hint-popover").innerText())) throw new Error("the ⓘ does not explain the manual step");     // the popover is drawn outside <main>
   if (!(await page.getByTestId("dp-scope-pending").isVisible())) throw new Error("the scope step is not visible");
   const brief = (await page.getByTestId("dp-brief").textContent()) ?? "";
   if (!/six tablets/.test(brief)) throw new Error("the handover brief is not shown beside the plan");

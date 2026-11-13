@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { CloseoutWorkspace } from "@/components/projects/closeout/closeout-workspace";
 import { Muted, PageHeader } from "@/components/projects/parts";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Alert } from "@/components/ui/alert";
 import { LoadError } from "@/components/workspace/states";
 import { evidenceItems } from "@/lib/projects/closeout/evidence";
@@ -25,7 +26,7 @@ export default async function CloseoutPage({ params }: { params: Promise<{ id: s
   if (!ctx) return null;
   const view = await loadProjectView(ctx, id);
   if (!view) notFound();
-  const header = <PageHeader title="Closeout report" description="An internal report for the company, written from this project's records. You review what is used, edit the draft and approve a version before it can be downloaded." />;
+  const header = <PageHeader title="Closeout report" description="Approve a version before it can be downloaded." />;
   if (!view.canManage) {
     return <div className="space-y-5">{header}<Alert role="status" data-testid="closeout-denied">The closeout report is prepared by the Project Manager, someone holding temporary project leadership, or a founder. The Project Manager is {view.pmName}.</Alert></div>;
   }
@@ -47,7 +48,7 @@ export default async function CloseoutPage({ params }: { params: Promise<{ id: s
   return (
     <div className="space-y-5">
       {header}
-      <Muted>{view.project.name} ({view.project.reference}). Status: {view.project.status.replace(/_/g, " ")}. The report is internal: sending anything to the client is a separate step that this screen does not do.</Muted>
+      <Muted>{view.project.name} ({view.project.reference}). Status: {view.project.status.replace(/_/g, " ")}. The report is internal: nothing is sent to the client from here.<InfoHint label="the closeout report" className="ml-1">An internal report for the company, written from this project&apos;s records. You review what is used, edit the draft and approve a version before it can be downloaded. Sending anything to the client is a separate step that this screen does not do.</InfoHint></Muted>
       <CloseoutWorkspace projectId={id} items={items} team={ev.snapshot.team.map((m) => ({ name: m.name }))} missing={ev.snapshot.missing ?? []}
         defaultInclude={items.filter((x) => x.optional?.defaultOn).map((x) => x.optional!.key)}
         draft={draft ? toView(draft) : null} approved={reports.filter((r) => r.status === "approved").map(toView)} provider={providerAvailability()} />

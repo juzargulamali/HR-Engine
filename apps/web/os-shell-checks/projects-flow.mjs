@@ -42,7 +42,7 @@ const openMenu = async (button) => { await page.locator("main").getByRole("butto
 const menuItems = async (button) => { await openMenu(button); const t = (await page.locator("main").getByRole("menu").first().locator("[role=menuitem]").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim()); await page.keyboard.press("Escape"); return t; };
 const pick = async (button, item) => { await openMenu(button); await page.locator("main").getByRole("menuitem", { name: item }).first().click(); };
 // The Milestones & deliverables section is collapsed once milestones exist.
-const openMilestones = async () => { const d = page.locator("details#milestones"); if (!(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); };
+const openMilestones = async () => { for (const sel of ["details#milestones", "details#work-packages"]) { const d = page.locator(sel); if ((await d.count()) && !(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); } };   // work packages are their own collapsed section
 const taskRow = (title) => page.locator("main tbody tr", { hasText: title }).first();
 // Add task (Quick Add): what, who, when; "more" fills the optional details first.
 const addTask = async (t, { assignee, due, more, dbl = false } = {}) => {

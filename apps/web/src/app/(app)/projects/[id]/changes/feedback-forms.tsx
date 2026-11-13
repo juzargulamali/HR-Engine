@@ -16,14 +16,15 @@ export function RecordFeedbackForm({ projectId, today, milestones, deliverables,
   const [type, setType] = useState("project");
   const options = type === "milestone" ? milestones : type === "deliverable" ? deliverables : type === "task" ? tasks : [];
   return (
-    <DialogForm triggerLabel="Record feedback" triggerVariant="default" title="Record client feedback" description="Write down what the client said, who said it and what it relates to. Recording it changes nothing else." action={recordFeedback} submitLabel="Save feedback" resetOnSuccess>
+    <DialogForm triggerLabel="Record feedback" triggerVariant="default" title="Record client feedback" description="Recording feedback changes nothing else."
+      help="Write down what the client said, who said it and what it relates to." action={recordFeedback} submitLabel="Save feedback" resetOnSuccess>
       <input type="hidden" name="projectId" value={projectId} />
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Who gave it, and how" htmlFor="fb-source"><Input id="fb-source" name="source" required placeholder="e.g. Client PM, call on 12 Mar" /></Field>
         <Field label="Received on" htmlFor="fb-date"><Input id="fb-date" name="receivedOn" type="date" required defaultValue={today} /></Field>
       </div>
       <Field label="What was asked" htmlFor="fb-text"><Textarea id="fb-text" name="requestText" rows={3} required maxLength={4000} /></Field>
-      <Field label="Kind" htmlFor="fb-kind" hint="A correction fixes something against what was agreed. A proposed change asks for something new and needs a scope decision.">
+      <Field label="Kind" htmlFor="fb-kind" help="A correction fixes something against what was agreed. A proposed change asks for something new and needs a scope decision.">
         <Select id="fb-kind" name="kind" required defaultValue="">
           <option value="" disabled>Choose…</option>
           <option value="in_scope_correction">Correction to what was agreed</option>
@@ -76,7 +77,7 @@ export function UpdateFeedbackForm({ projectId, feedbackId, version, status, res
       <Field label={needsResolution ? "How it was resolved, declined or deferred (required)" : "Resolution (when there is one)"} htmlFor={`fbr-${feedbackId}`}>
         <Textarea id={`fbr-${feedbackId}`} name="resolution" rows={3} required={needsResolution} defaultValue={resolution ?? ""} />
       </Field>
-      <Field label="Evidence (where it is recorded)" htmlFor={`fbe-${feedbackId}`} hint="For example the e-mail date and subject, or the name of a file in Documents. Nothing here is checked or sent.">
+      <Field label="Evidence (where it is recorded)" htmlFor={`fbe-${feedbackId}`} hint="Nothing here is checked or sent." help="For example the e-mail date and subject, or the name of a file in Documents.">
         <Input id={`fbe-${feedbackId}`} name="evidenceNote" defaultValue={evidenceNote ?? ""} />
       </Field>
       {canReassign ? (
@@ -97,7 +98,7 @@ export function ProposeScopeChangeForm({ projectId, currentScope, feedback }: { 
       <input type="hidden" name="projectId" value={projectId} />
       <Field label="Title" htmlFor="sc-title"><Input id="sc-title" name="title" required maxLength={200} placeholder="e.g. Add a second projector" /></Field>
       <Field label="Proposed scope (the whole scope as it would read)" htmlFor="sc-scope"><Textarea id="sc-scope" name="proposedScope" rows={6} required defaultValue={currentScope ?? ""} /></Field>
-      <Field label="Effect on dates (in words)" htmlFor="sc-dates" hint="For example “two extra days of installation”. No date moves when a change is approved: you decide that on the plan."><Textarea id="sc-dates" name="effectOnDates" rows={2} /></Field>
+      <Field label="Effect on dates (in words)" htmlFor="sc-dates" hint="No date moves when a change is approved." help="For example “two extra days of installation”. You decide any date change on the plan."><Textarea id="sc-dates" name="effectOnDates" rows={2} /></Field>
       {feedback.length > 0 ? (
         <Field label="Arose from this feedback (optional)" htmlFor="sc-fb"><Select id="sc-fb" name="feedbackId" defaultValue=""><option value="">None</option>{feedback.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}</Select></Field>
       ) : null}

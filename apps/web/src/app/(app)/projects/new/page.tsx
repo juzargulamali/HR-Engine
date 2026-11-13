@@ -1,7 +1,8 @@
 import { holdsAssignPm, isProjFounder } from "@enginious-hr/domain";
 import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
-import { Muted, PageHeader, Panel } from "@/components/projects/parts";
+import { Panel } from "@/components/projects/parts";
+import { PageTitle } from "@/components/projects/page-title";
 import { getProjectsContext } from "@/lib/projects/context";
 import { NewProjectForm } from "./new-project-form";
 
@@ -19,15 +20,17 @@ export default async function NewInternalProjectPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="New internal project" description="For work with no client or Sales opportunity: office and showroom technology, new technology development, marketing, maintenance and improvements. No purchase order, no Sales value, no handover." />
+      <PageTitle title="New internal project" hint={<>
+        <p>For work with no client or Sales opportunity: office and showroom technology, new technology development, marketing, maintenance and improvements. No purchase order, no Sales value, no handover.</p>
+        <p className="mt-1.5">Client projects are not created here: they start when a Project Manager accepts a Sales handover. The same short form is on the Projects page (New internal project).</p>
+      </>} />
       {companies.length === 0 ? (
         <Alert role="status">Only a founder, or someone a founder gave Project Manager assignment to, can create an internal project. <AskForAccess module="projects" to="create it or to give you that right" /></Alert>
       ) : (
-        <Panel title="Project details" description="You choose who is accountable. They become the Project Manager and can then add people and plan the work.">
+        <Panel title="Project details" description="The person you choose becomes the Project Manager." hint="They can then add people and plan the work.">
           <NewProjectForm companies={companies} />
         </Panel>
       )}
-      <Muted>Client projects are not created here: they start when a Project Manager accepts a Sales handover. The same short form is on the Projects page (New internal project).</Muted>
     </div>
   );
 }

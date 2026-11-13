@@ -234,7 +234,9 @@ describe("Project Plan screen", () => {
       const pending = screen.getByTestId("dp-scope-pending").textContent ?? "";
       expect(pending).toMatch(/Next step: bring in the accepted technologies/);
       expect(pending).toMatch(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
-      expect(pending).toMatch(/manual step: accepting a handover does not add anything to the plan by itself/);
+      expect(pending).not.toMatch(/manual step/);                                                                                 // the long explanation is behind the ⓘ, not in the card
+      fireEvent.pointerEnter(within(screen.getByTestId("dp-scope-pending")).getByTestId("dp-seed-help"), { pointerType: "mouse" });
+      expect(screen.getByRole("tooltip").textContent).toMatch(/manual step: accepting a handover does not add anything to the plan by itself/);
       expect(screen.getByTestId("plan-summary").compareDocumentPosition(screen.getByTestId("dp-scope-pending")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();   // shown above the summary, first thing on the page
       expect(screen.getByTestId("dp-seed-scope").textContent).toBe("Bring in accepted technologies (2)");
       cleanup();
@@ -280,7 +282,9 @@ describe("Project Plan screen", () => {
       dialog = screen.getByRole("dialog");
       expect(within(dialog).getByLabelText("Number of devices")).toBeTruthy();
       expect(within(dialog).getByLabelText("Platform")).toBeTruthy();
-      expect(within(dialog).getByText(/One app on six screens is one app and six devices/)).toBeTruthy();
+      expect(within(dialog).queryByText(/One app on six screens is one app and six devices/)).toBeNull();                         // the example is behind the ⓘ beside the label
+      fireEvent.pointerEnter(within(dialog).getByTestId("info-hint-number-of-devices"), { pointerType: "mouse" });
+      expect(screen.getByRole("tooltip").textContent).toMatch(/One app on six screens is one app and six devices/);
       expect(within(dialog).queryByLabelText("Resolution")).toBeNull();
     });
   });

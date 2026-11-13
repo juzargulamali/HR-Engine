@@ -4,11 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { OsStatCard } from "@/components/os/stat-card";
 import { Muted, Panel } from "@/components/projects/parts";
+import { InfoHint } from "@/components/ui/info-hint";
 import { CompanyTabs, ReadState, Unknown } from "@/components/operations/parts";
 import { CountBar, HealthBadge, KindMark, ReadinessBar } from "@/components/operations/visuals";
 import type { OpsResult } from "@/lib/operations/data";
 import {
-  AT_RISK_WINDOW_DAYS, datesWord, DECISION_WORDS, decisions, deliveryByWeek, EQUIPMENT_ISSUE_WORDS, equipmentIssues, eventLine, HEALTH_ORDER, HEALTH_WORDS, healthCounts, installationsWithin, isFinished,
+  AT_RISK_WINDOW_DAYS, STALLED_DAYS, datesWord, DECISION_WORDS, decisions, deliveryByWeek, EQUIPMENT_ISSUE_WORDS, equipmentIssues, eventLine, HEALTH_ORDER, HEALTH_WORDS, healthCounts, installationsWithin, isFinished,
   nextUnresolved, pressure, projectHealth, readiness, timeline, TIMELINE_DAYS, unitsOut, type Overview, type OverviewProject, type UpcomingRow,
 } from "@/lib/operations/model";
 import { dateRangeText, dateText } from "@/lib/projects/format";
@@ -56,8 +57,9 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
       </ul>
 
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,58fr)_minmax(0,42fr)] xl:items-start">
-        <Panel id="decisions" className="order-1 scroll-mt-20" title={`Needs my decision (${items.length})`} description="Who it is with, since when, why, and one place to act.">
-          {items.length === 0 ? <Muted>Nothing recorded needs a decision right now: every submitted handover has a Project Manager, no listed blocker is waiting, and no installation in the next {AT_RISK_WINDOW_DAYS} days has a recorded problem.</Muted> : (
+        <Panel id="decisions" className="order-1 scroll-mt-20" title={`Needs my decision (${items.length})`}
+          hint={<><p>Each row says who it is with, since when and why, and gives one place to act.</p><p className="mt-1.5">What lands here: a submitted handover with no Project Manager or stalled for {STALLED_DAYS}+ days, an output waiting for Operations review, a blocker nobody has resolved, an installation in the next {AT_RISK_WINDOW_DAYS} days with a recorded problem, an equipment booking to review, and reservations that were not released.</p></>}>
+          {items.length === 0 ? <Muted>Nothing recorded needs a decision right now.</Muted> : (
             <ul className="divide-y" data-testid="ops-decisions">
               {items.map((d) => (
                 <li key={d.key} className="flex flex-wrap items-start gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0" data-testid={`ops-decision-${d.kind}`}>
@@ -76,7 +78,8 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
           )}
         </Panel>
 
-        <Panel id="installations" className="order-2 scroll-mt-20 xl:col-start-1" title={`Next installations (${soon.length})`} description={`Starting within ${AT_RISK_WINDOW_DAYS} days, with the Project Manager, the label and how much equipment is ready.`}>
+        <Panel id="installations" className="order-2 scroll-mt-20 xl:col-start-1" title={`Next installations (${soon.length})`}
+          hint={<p>Live projects whose installation or show starts within {AT_RISK_WINDOW_DAYS} days, with the Project Manager, the health label and how much of the equipment request is reserved or sent.</p>}>
           {soon.length === 0 ? <Muted>No live project has a recorded installation or show start in the next {AT_RISK_WINDOW_DAYS} days.</Muted> : (
             <ul className="divide-y" data-testid="ops-installations">
               {soon.map((p) => { const h = projectHealth(p, today); const r = readiness(p); return (
@@ -97,8 +100,9 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
           )}
         </Panel>
 
-        <Panel className="order-3 xl:col-start-2 xl:row-span-2 xl:row-start-1" title={`Delivery timeline, next ${TIMELINE_DAYS} days`} description="Installation, show and dismantling dates in date order. Enquiries without a project yet are marked tentative until Sales confirms the dates or wins the enquiry.">
-          {up.state !== "ok" ? <p role="status" className="mb-2 text-[13px] text-[hsl(var(--os-amber))]">{up.state === "error" ? "Enquiry dates could not be loaded, so only project dates are shown." : "Enquiry dates are not shown."}</p> : null}
+        <Panel className="order-3 xl:col-start-2 xl:row-span-2 xl:row-start-1" title={`Delivery timeline, next ${TIMELINE_DAYS} days`}
+          hint={<><p>Installation, show and dismantling dates in date order. Enquiries without a project yet are marked tentative until Sales confirms the dates or wins the enquiry.</p><p className="mt-1.5">A project has no dismantling date of its own, so dismantling appears only where Sales recorded it on an enquiry.</p></>}>
+          {up.state !== "ok" ? <p role="status" className="mb-2 text-[13px] text-[hsl(var(--os-amber))]">⚠ {up.state === "error" ? "Enquiry dates could not be loaded, so only project dates are shown." : "Enquiry dates are not shown."}</p> : null}
           {entries.length === 0 ? <Muted>No installation, show or dismantling date is recorded in the next {TIMELINE_DAYS} days.</Muted> : (
             <ol className="space-y-0" data-testid="ops-timeline">
               {entries.map((e, i) => { const newDay = i === 0 || entries[i - 1]!.date !== e.date; return (
@@ -113,12 +117,11 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
               ); })}
             </ol>
           )}
-          <Muted className="mt-3">A project has no dismantling date of its own, so dismantling appears only where Sales recorded it on an enquiry.</Muted>
         </Panel>
       </div>
 
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-2 xl:items-start">
-        <Panel title="Upcoming delivery by week" description="Live projects by the week their installation (or show) starts. The number is the count of the projects listed under it.">
+        <Panel title="Upcoming delivery by week" hint={<p>Live projects by the week their installation (or show) starts. The number is the count of the projects listed under it.</p>}>
           {weeks.every((w) => w.projects.length === 0) ? <Muted>No live project in this company.</Muted> : (
             <ul className="space-y-3" data-testid="ops-weeks">
               {weeks.map((w) => (
@@ -140,8 +143,9 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
           )}
         </Panel>
 
-        <Panel id="equipment" className="scroll-mt-20" title={`Equipment issues (${issues.length})`} description="Recorded by the warehouse or raised by a date change. Operations reads them; the owner named on each line acts.">
-          {issues.length === 0 ? <Muted>No shortage, overdue return, partial dispatch, booking to review or unreleased reservation is recorded.</Muted> : (
+        <Panel id="equipment" className="scroll-mt-20" title={`Equipment issues (${issues.length})`}
+          hint={<><p>Recorded by the warehouse or raised by a date change. Operations reads them; the owner named on each line acts.</p><p className="mt-1.5">Listed: a shortage, an overdue return, a partial dispatch, a booking to review after a date change, or reservations that were not released.</p></>}>
+          {issues.length === 0 ? <Muted>No equipment issue is recorded.</Muted> : (
             <ul className="divide-y" data-testid="ops-equipment">
               {issues.map((x) => (
                 <li key={x.key} className="py-2.5 first:pt-0 last:pb-0" data-testid={`ops-equipment-${x.kind}`}>
@@ -154,7 +158,13 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
         </Panel>
       </div>
 
-      <Panel id="health" className="scroll-mt-20" title="Project health" description="A label read from records, with the evidence behind it. It is not a score and says nothing about a person's performance.">
+      <Panel id="health" className="scroll-mt-20" title="Project health"
+        hint={<><p>A label read from records, with the evidence behind it. It is not a score and says nothing about a person&apos;s performance.</p><p className="mt-1.5 font-medium">How the label is decided</p><ul className="mt-2 list-disc space-y-1 pl-4">
+            <li><span className="font-medium text-foreground">{HEALTH_WORDS.at_risk}:</span> the installation (or show) starts within {AT_RISK_WINDOW_DAYS} days or is under way and a shortage, an unsent equipment request, a blocked or overdue task, an overdue milestone or an unreleased Delivery Plan line is recorded; or unused reservations were not released at completion; or equipment is past its return date.</li>
+            <li><span className="font-medium text-foreground">{HEALTH_WORDS.needs_attention}:</span> a blocked task, no Project Manager, a blocker with nobody named to unblock it, a recorded shortage, a booking to review, an overdue task or milestone, or a finished project with equipment still out.</li>
+            <li><span className="font-medium text-foreground">{HEALTH_WORDS.not_enough_info}:</span> none of those, and neither an installation nor a show date is recorded.</li>
+            <li><span className="font-medium text-foreground">{HEALTH_WORDS.on_track}:</span> dates are recorded and none of the above is recorded.</li>
+          </ul></>}>
         <ul className="mb-3 flex flex-wrap gap-x-4 gap-y-2" aria-label="Projects by label" data-testid="ops-health-counts">
           {HEALTH_ORDER.map((k) => <li key={k} className="flex items-center gap-1.5 text-sm"><HealthBadge health={k} /><span className="font-semibold tabular-nums">{counts[k]}</span></li>)}
         </ul>
@@ -163,19 +173,10 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
             {live.map(({ p, h }) => <HealthCard key={p.id} p={p} health={h} chatHref={p.chat_group_id ? `${self}&chat=${p.chat_group_id}` : null} />)}
           </ul>
         )}
-        <details className="mt-3 text-[13px] text-muted-foreground">
-          <summary className="cursor-pointer font-medium text-foreground">How the label is decided</summary>
-          <ul className="mt-2 list-disc space-y-1 pl-5">
-            <li><span className="font-medium text-foreground">{HEALTH_WORDS.at_risk}:</span> the installation (or show) starts within {AT_RISK_WINDOW_DAYS} days or is under way and a shortage, an unsent equipment request, a blocked or overdue task, an overdue milestone or an unreleased Delivery Plan line is recorded; or unused reservations were not released at completion; or equipment is past its return date.</li>
-            <li><span className="font-medium text-foreground">{HEALTH_WORDS.needs_attention}:</span> a blocked task, no Project Manager, a blocker with nobody named to unblock it, a recorded shortage, a booking to review, an overdue task or milestone, or a finished project with equipment still out.</li>
-            <li><span className="font-medium text-foreground">{HEALTH_WORDS.not_enough_info}:</span> none of those, and neither an installation nor a show date is recorded.</li>
-            <li><span className="font-medium text-foreground">{HEALTH_WORDS.on_track}:</span> dates are recorded and none of the above is recorded.</li>
-          </ul>
-        </details>
       </Panel>
 
       <div className="flex flex-col gap-4 xl:grid xl:grid-cols-2 xl:items-start">
-        <Panel title="Coming up from Sales" description="Enquiries Sales flagged for planning. No prices or commercial documents are shown." actions={<Link href={upcomingHref} className={buttonVariants({ variant: "outline", size: "sm" })}>Open Upcoming Work</Link>}>
+        <Panel title="Coming up from Sales" hint={<p>Enquiries Sales flagged for planning. No prices or commercial documents are shown.</p>} actions={<Link href={upcomingHref} className={buttonVariants({ variant: "outline", size: "sm" })}>Open Upcoming Work</Link>}>
           {up.state !== "ok" ? <ReadState result={up} what="Upcoming Work" retryHref={self} /> : up.data.length === 0 ? <Muted>No enquiry is flagged for Operations planning.</Muted> : (
             <ul className="divide-y" data-testid="ops-coming">
               {up.data.slice(0, 5).map((r) => { const dates = datesWord(r); const ev = eventLine(r); return (
@@ -190,13 +191,14 @@ export function OverviewView({ header, companies, company, ov, up, today }: {
           {up.state === "ok" && up.data.length > 5 ? <Muted className="mt-2">{up.data.length - 5} more in Upcoming Work.</Muted> : null}
         </Panel>
 
-        <Panel title={`Team pressure (${overlaps.length})`} description="People on two projects whose dates overlap, and reviews past the task's date. Only what is recorded; it is not a capacity figure.">
-          {overlaps.length === 0 ? <Muted>Nothing recorded. An overlap shows only when both projects have their dates and people recorded.</Muted> : (
+        <Panel title={`Team pressure (${overlaps.length})`}
+          hint={<><p>People on two projects whose dates overlap, and reviews past the task&apos;s date. Only what is recorded; it is not a capacity figure.</p><p className="mt-1.5">An overlap shows only when both projects have their dates and people recorded.</p></>}>
+          {overlaps.length === 0 ? <Muted>Nothing recorded.</Muted> : (
             <ul className="space-y-1.5 text-[13px]" data-testid="ops-pressure">{overlaps.map((x) => <li key={x.key}><Link href={x.href} className="underline-offset-4 hover:underline">{x.text}</Link></li>)}</ul>
           )}
         </Panel>
       </div>
-      <Muted>Read {dateText(o.taken_at.slice(0, 10))}. Operations reads these records; it does not change tasks, bookings or stock. Each link opens the screen where the responsible person acts.</Muted>
+      <Muted>Read {dateText(o.taken_at.slice(0, 10))}. <InfoHint label="what Operations can change" className="ml-0.5">Operations reads these records; it does not change tasks, bookings or stock. Each link opens the screen where the responsible person acts.</InfoHint></Muted>
     </div>
   );
 }

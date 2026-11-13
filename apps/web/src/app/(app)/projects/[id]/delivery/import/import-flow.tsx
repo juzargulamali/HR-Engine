@@ -7,6 +7,7 @@ import { Alert } from "@/components/ui/alert";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
+import { InfoHint } from "@/components/ui/info-hint";
 import { OsBadge } from "@/components/os/pills";
 import { cn } from "@/lib/utils";
 import { PROPOSED_NOTE, effectiveStatus, willPropose, type PreviewRow, type Resolutions, type RowStatus } from "@/lib/projects/delivery-plan/excel/plan";
@@ -135,9 +136,9 @@ export function ImportFlow({ projectId, canManage }: { projectId: string; canMan
 
       {step === "upload" ? (
         <Card>
-          <CardHeader><CardTitle>1. Upload a workbook</CardTitle></CardHeader>
+          <CardHeader><CardTitle className="flex items-center gap-1">1. Upload a workbook<InfoHint label="the workbook format" testId="import-help"><p>One row per deliverable on the Deliverables sheet. The Breakdown sheet is optional. Leave the ID empty for a new row.</p><p className="mt-1.5">Limits: 1000 deliverable rows and 2000 breakdown rows.</p></InfoHint></CardTitle></CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-sm text-muted-foreground">One row per deliverable on the Deliverables sheet. The Breakdown sheet is optional. Leave the ID empty for a new row. Excel .xlsx only, up to 4 MB, 1000 deliverable rows and 2000 breakdown rows.</p>
+            <p className="text-sm text-muted-foreground">Excel .xlsx only, up to 4 MB.</p>
             {canManage ? null : <p className="text-sm text-muted-foreground">You can import Breakdown lines of the sections delegated to you. Deliverables and other sections are for the Project Manager.</p>}
             <a href={`${base}/template`} className={cn(buttonVariants({ variant: "outline" }))}><Download className="h-4 w-4" aria-hidden /> Download template</a>
             <div className="space-y-1.5">

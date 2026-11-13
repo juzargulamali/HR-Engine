@@ -6,6 +6,7 @@ import { Download } from "lucide-react";
 import { approveCloseout, discardCloseoutDraft, generateCloseout, saveCloseoutEdits } from "@/lib/actions/projectsCloseout";
 import { ActionForm } from "@/components/sales/action-form";
 import { Muted, Panel } from "@/components/projects/parts";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -42,8 +43,8 @@ export function CloseoutWorkspace({ projectId, items, team, missing, defaultIncl
         <Review projectId={projectId} items={items} team={team} missing={missing} initial={draft ? draft.include : defaultInclude} hasDraft={!!draft} provider={provider} onDone={done}
           onCancel={draft ? () => setReviewing(false) : undefined} />
       )}
-      <Panel title="Approved versions" description="An approved version is fixed: it keeps the evidence it was written from, so later changes to the project do not rewrite it.">
-        {approved.length === 0 ? <Muted>No version has been approved yet. A report can be downloaded once it is approved.</Muted> : (
+      <Panel title="Approved versions" hint="An approved version is fixed: it keeps the evidence it was written from, so later changes to the project do not rewrite it.">
+        {approved.length === 0 ? <Muted>No version approved yet. Approve one to download it.</Muted> : (
           <ul className="space-y-3" data-testid="closeout-approved">
             {approved.map((r) => (
               <li key={r.id} className="rounded-md border p-3">
@@ -77,7 +78,7 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
   const toggle = (key: string) => setInclude((prev) => { const next = new Set(prev); if (next.has(key)) next.delete(key); else next.add(key); return next; });
   const hidden = <><input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="include" value={JSON.stringify(selection.include)} /><input type="hidden" name="reviewedHash" value={summary.hash} /></>;
   return (
-    <Panel title="Review data to be sent" description="This is what the report would be written from. Check it, remove any optional text you do not want to include, then choose how to write the draft.">
+    <Panel title="Review data to be sent" hint="This is what the report would be written from. Check it, remove any optional text you do not want to include, then choose how to write the draft.">
       <div className="space-y-5" data-testid="closeout-review">
         {missing.length > 0 ? <Alert variant="destructive" role="alert" data-testid="closeout-missing"><strong>Some records could not be read.</strong> The report will say so where it matters: {missing.join("; ")}.</Alert> : null}
         <section>
@@ -88,13 +89,12 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
           <Muted className="mt-2">Never included: prices, costs, margins, budgets, payroll, project chat, task comments, files and attachments, contact details.</Muted>
         </section>
         <section>
-          <h3 className="text-sm font-semibold">Team members named</h3>
+          <h3 className="text-sm font-semibold">Team members named<InfoHint label="team members named" className="ml-1">Names and project roles only, with what the records show each person owned. No contact or employee details, and no judgement of effort or performance.</InfoHint></h3>
           <p className="mt-1 text-[13px]" data-testid="closeout-team">{summary.teamNames.length > 0 ? summary.teamNames.join(", ") : "Nobody"}</p>
-          <Muted className="mt-1">Names and project roles only, with what the records show each person owned. No contact or employee details, and no judgement of effort or performance.</Muted>
         </section>
         <section>
-          <h3 className="text-sm font-semibold">Optional text ({summary.optional.filter((o) => o.selected).length} of {summary.optional.length} included)</h3>
-          <Muted className="mt-1">Text that people wrote: scope wording, exclusions, reasons for decisions, written effects on dates, the client&apos;s words, our response and notes. <strong>None of it is included unless you tick it.</strong> The recorded facts (who, when, status, dates and counts) are included without it.</Muted>
+          <h3 className="text-sm font-semibold">Optional text ({summary.optional.filter((o) => o.selected).length} of {summary.optional.length} included)<InfoHint label="optional text" className="ml-1">Text that people wrote: scope wording, exclusions, reasons for decisions, written effects on dates, the client&apos;s words, our response and notes. The recorded facts (who, when, status, dates and counts) are included without it.</InfoHint></h3>
+          <Muted className="mt-1"><strong>None of it is included unless you tick it.</strong></Muted>
           {summary.optional.length === 0 ? <Muted className="mt-2">There is no optional text on this project.</Muted> : (
             <ul className="mt-2 space-y-2" data-testid="closeout-optional">
               {summary.optional.map((o) => (
@@ -117,10 +117,9 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
         {summary.dropped.length > 0 ? <Alert role="status">This project has more records than one report can take. {summary.dropped.length} line{summary.dropped.length === 1 ? " is" : "s are"} left out to keep the size bounded (optional text and the longest lists first). The status, sign-off and equipment lines are always kept.</Alert> : null}
         <details>
           <summary className="cursor-pointer text-[13px] font-medium text-accent" data-testid="closeout-exact-toggle">Show the exact evidence that would be sent ({summary.lines} lines, {summary.chars.toLocaleString("en-GB")} characters)</summary>
-          <Muted className="mt-2">This is the whole of it, line for line, with your current ticks. It changes as you tick and untick.</Muted>
           <pre className="mt-2 max-h-96 overflow-auto whitespace-pre-wrap rounded-md border p-2 text-[12px]" data-testid="closeout-lines">{summary.text}</pre>
         </details>
-        {hasDraft ? <Alert role="status">Writing the draft again replaces the current draft, including your edits. Approved versions are not affected.</Alert> : null}
+        {hasDraft ? <Alert role="status">⚠ Writing the draft again replaces the current draft, including your edits. Approved versions are not affected.</Alert> : null}
         <div className="rounded-md border border-[hsl(var(--os-amber)/0.5)] bg-[hsl(var(--os-amber)/0.08)] p-3 text-[13px]" data-testid="closeout-anthropic-note">
           <strong>Generating sends the reviewed content above to Anthropic</strong>, the AI provider Enginious OS uses, to write the narrative. Nothing else is sent. The result is an internal draft
           for you to edit: nothing is sent to the client, the project is not completed, and no work or stock changes.
@@ -145,8 +144,8 @@ function Review({ projectId, items, team, missing, initial, hasDraft, provider, 
 function KeyFacts({ report }: { report: ReportView }) {
   return (
     <div data-testid="closeout-facts">
-      <h3 className="text-sm font-semibold">Recorded facts</h3>
-      <Muted>From the project&apos;s records as they were on {formatDateTime(report.snapshotAt)}. Completion, client sign-off and equipment return are stated here from the records only. They are not written by the AI model and cannot be edited. Where the narrative below differs, these stand.</Muted>
+      <h3 className="text-sm font-semibold">Recorded facts<InfoHint label="recorded facts" className="ml-1">Completion, client sign-off and equipment return are stated here from the records only. They are not written by the AI model and cannot be edited. Where the narrative below differs, these stand.</InfoHint></h3>
+      <Muted>From the project&apos;s records as they were on {formatDateTime(report.snapshotAt)}.</Muted>
       <dl className="mt-2 grid gap-x-6 gap-y-1 text-[13px] sm:grid-cols-2">
         {report.facts.map((f) => (
           <div key={f.label} className="flex gap-2">
@@ -208,13 +207,12 @@ function DraftEditor({ projectId, draft, onNotice, onReview }: { projectId: stri
   const empty = sections.every((s) => s.paragraphs.every((p) => !p.text.trim()));
   return (
     <Panel title={`Draft, version ${draft.versionNo}`}
-      description={draft.generation === "generated" ? "Written by the AI model from the content you reviewed. It is a draft: check it against the sources, edit it, then approve it." : "A facts-only draft: the recorded lines themselves. Nothing was sent to the AI provider. Edit it, then approve it."}
+      description={draft.generation === "generated" ? "Written by the AI model. Check it against the sources, edit it, then approve it." : "Facts-only draft: nothing was sent to the AI provider. Edit it, then approve it."}
       actions={<Badge variant="outline">Internal draft</Badge>}>
       <div className="space-y-5" data-testid="closeout-draft">
         <KeyFacts report={draft} />
         <div>
-          <h3 className="text-sm font-semibold">Narrative</h3>
-          <Muted>{draft.generation === "generated" ? "Written by the AI model and edited by you." : "The recorded lines, for you to edit."} It is checked for statements about sign-off, completion, equipment return and quotations that the records do not support, but the checks are word patterns and cannot catch every wording: read it against the Recorded facts.</Muted>
+          <h3 className="text-sm font-semibold">Narrative<InfoHint label="narrative" className="ml-1">{draft.generation === "generated" ? "Written by the AI model and edited by you." : "The recorded lines, for you to edit."} It is checked for statements about sign-off, completion, equipment return and quotations that the records do not support, but the checks are word patterns and cannot catch every wording: read it against the Recorded facts.</InfoHint></h3>
         </div>
         {blocking > 0 ? <Alert variant="destructive" role="alert" data-testid="closeout-blocking">{blocking} statement{blocking === 1 ? "" : "s"} contradict{blocking === 1 ? "s" : ""} the project&apos;s records. Change {blocking === 1 ? "it" : "them"} and save before approving.</Alert> : null}
         {sections.map((s) => (

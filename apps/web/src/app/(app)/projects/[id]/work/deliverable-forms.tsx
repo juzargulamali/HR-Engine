@@ -55,14 +55,14 @@ export function DeliverableForm({ projectId, deliverable, teams, milestones, lea
       <Field label="Description (optional)" htmlFor="dl-desc"><Textarea id="dl-desc" name="description" rows={3} defaultValue={deliverable?.description ?? ""} /></Field>
       <Field label="Due date" htmlFor="dl-due"><Input id="dl-due" name="dueDate" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
       {dateChanged ? (
-        <Field label="Why is the date changing?" htmlFor="dl-reason" hint="Kept with the date history."><Input id="dl-reason" name="reason" required maxLength={300} /></Field>
+        <Field label="Why is the date changing?" htmlFor="dl-reason" help="Kept with the date history."><Input id="dl-reason" name="reason" required maxLength={300} /></Field>
       ) : null}
     </ActionForm>
   );
 }
 
 export function AddDeliverableButton({ projectId, teams, milestones }: { projectId: string; teams: PickOption[]; milestones: PickOption[] }) {
-  return <DialogButton label="Add work package" title="New work package" description="A work package is a piece of work assigned to one project team, whose head then distributes the tasks." variant="default">{(close) => <DeliverableForm projectId={projectId} teams={teams} milestones={milestones} leaderOnly onDone={close} />}</DialogButton>;
+  return <DialogButton label="Add work package" title="New work package" help="A work package is a piece of work assigned to one project team, whose head then distributes the tasks." variant="default">{(close) => <DeliverableForm projectId={projectId} teams={teams} milestones={milestones} leaderOnly onDone={close} />}</DialogButton>;
 }
 
 export function EditDeliverableButton({ projectId, deliverable, teams, milestones, isManager }: { projectId: string; deliverable: DeliverableFormValues; teams: PickOption[]; milestones: PickOption[]; isManager: boolean }) {

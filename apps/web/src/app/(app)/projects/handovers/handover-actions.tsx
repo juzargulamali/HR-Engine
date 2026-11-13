@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { acceptHandover, assignHandoverPm, requestHandoverClarification } from "@/lib/actions/projectsCore";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionForm, Field } from "@/components/sales/action-form";
@@ -11,7 +12,7 @@ export function AssignPmForm({ handoverId, people, current }: { handoverId: stri
   return (
     <ActionForm action={assignHandoverPm} submitLabel={current ? "Change Project Manager" : "Assign Project Manager"}>
       <input type="hidden" name="handoverId" value={handoverId} />
-      <Field label="Project Manager" htmlFor={`pm-${handoverId}`} hint="Only people with Projects access in this company can be chosen. They then accept the handover or ask Sales to clarify.">
+      <Field label="Project Manager" htmlFor={`pm-${handoverId}`} help="Only people with Projects access in this company can be chosen. They then accept the handover or ask Sales to clarify.">
         <Select id={`pm-${handoverId}`} name="pmUserId" defaultValue={current ?? ""} required>
           <option value="" disabled>Choose a person…</option>
           {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -29,8 +30,13 @@ export function HandoverDecision({ handoverId }: { handoverId: string }) {
   const [asking, setAsking] = useState(false);
   return (
     <div className="rounded-md border border-primary/50 bg-primary/5 p-3" data-testid="handover-decision">
-      <p className="text-sm font-medium">Your decision as Project Manager</p>
-      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Project Plan. There you press Bring in accepted technologies (a manual step: nothing is added to the plan automatically) and break the scope into work. The brief is then kept as it was agreed: later changes in Sales do not overwrite it.</p>
+      <p className="flex items-center gap-1 text-sm font-medium">Your decision as Project Manager
+        <InfoHint label="your decision">
+          <p>After accepting, open the Project Plan and press Bring in accepted technologies. That is a manual step: nothing is added to the plan automatically. Then break the scope into work.</p>
+          <p className="mt-1.5">The brief is kept as it was agreed: later changes in Sales do not overwrite it.</p>
+        </InfoHint>
+      </p>
+      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Project Plan.</p>
       {asking ? (
         <div className="mt-3">
           <ActionForm action={requestHandoverClarification} submitLabel="Send question to Sales" variant="outline" secondary={<button type="button" onClick={() => setAsking(false)} className="text-sm underline underline-offset-2">Cancel</button>}>

@@ -253,6 +253,8 @@ describe("tooltip", () => {
     show(thirty());
     expect(bar("a").getAttribute("draggable")).toBeNull();
     expect(bar("a").getAttribute("aria-label")).toMatch(/Read only/);
-    expect(screen.getByTestId("plan-timeline").textContent).toMatch(/Bars are read-only: change a date on the task or in the Breakdown/);
+    expect(screen.getByTestId("plan-timeline").textContent).not.toMatch(/Bars are read-only/);                                    // the legend is behind one ⓘ beside the Day / Week control
+    fireEvent.pointerEnter(screen.getByTestId("tl-help"), { pointerType: "mouse" });
+    expect(screen.getByRole("tooltip").textContent).toMatch(/Bars are read-only: change a date on the task or in the Breakdown/);
   });
 });

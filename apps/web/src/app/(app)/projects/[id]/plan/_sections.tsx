@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BookingStateBadge } from "@/components/projects/badges";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Muted, Panel } from "@/components/projects/parts";
 import { dateText } from "@/lib/projects/format";
 import type { ProjExternalDependencyRow, ProjPlanItemRow, ProjSiteBookingRow } from "@/types/projects";
@@ -108,16 +109,16 @@ export function PlanSection({ plan, items, canEdit, projectId, siteTz, milestone
   return (
     <Panel
       title={PLAN_LABELS[plan]}
-      description={plan === "delivery" ? "The creative and technical build, from moodboard to full test." : "What happens on site, from access to dismantling."}
+      hint={plan === "delivery" ? "The creative and technical build, from moodboard to full test." : "What happens on site, from access to dismantling."}
       actions={canEdit ? <DialogButton label="Add item" title={`Add to the ${PLAN_LABELS[plan].toLowerCase()}`} variant="default"><PlanItemForm projectId={projectId} plan={plan} siteTimezone={siteTz} milestones={milestones} /></DialogButton> : null}
     >
       {items.length === 0 ? (
         <div className="space-y-4">
-          <EmptyState dense title={`No ${PLAN_LABELS[plan].toLowerCase()} yet`} description={canEdit ? "Start from the suggested stages or add your own. The suggestion is only a starting point: edit or delete anything." : "The Project Manager plans this."} />
+          <EmptyState dense title={`No ${PLAN_LABELS[plan].toLowerCase()} yet`} description={canEdit ? "Start from the suggested stages or add your own." : "The Project Manager plans this."} />
           {canEdit ? (
             <div className="rounded-lg border border-border p-3">
               <p className="mb-2 text-sm font-medium">Use the suggested timeline</p>
-              <Muted className="mb-3">Suggested stages (editable, never mandatory, nothing client-visible): {suggestion}.</Muted>
+              <Muted className="mb-3">Suggested stages: {suggestion}.<InfoHint label="the suggested stages" className="ml-1">Editable, never mandatory, nothing client-visible. Edit or delete anything after creating them.</InfoHint></Muted>
               <TemplateForm projectId={projectId} plan={plan} defaultBase={defaultBase} label="Create suggested stages" />
             </div>
           ) : null}

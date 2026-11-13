@@ -8,6 +8,7 @@ import { Alert } from "@/components/ui/alert";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { BudgetActionResult } from "@/lib/actions/projectBudget";
+import { InfoHint } from "@/components/ui/info-hint";
 
 /** Money as words and digits in the budget's own currency ("AED 1,470.00"). The database already rounded it; this only formats. */
 export const money = (amount: number | string | null | undefined, currency: string): string => {
@@ -91,10 +92,10 @@ export function ActionMessage({ error, notice }: { error: string | null; notice?
   return null;
 }
 
-export function Field({ label, htmlFor, hint, children, className }: { label: string; htmlFor?: string; hint?: string; children: React.ReactNode; className?: string }) {
+export function Field({ label, htmlFor, hint, help, children, className }: { label: string; htmlFor?: string; hint?: string; /** Optional explanation, example or calculation rule: behind an ⓘ beside the label. */ help?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <div className={cn("min-w-0 space-y-1", className)}>
-      <Label htmlFor={htmlFor} className="text-sm">{label}</Label>
+      <span className="flex items-center gap-1"><Label htmlFor={htmlFor} className="text-sm">{label}</Label>{help ? <InfoHint label={label}>{help}</InfoHint> : null}</span>
       {children}
       {hint ? <p className="text-[13px] text-muted-foreground">{hint}</p> : null}
     </div>

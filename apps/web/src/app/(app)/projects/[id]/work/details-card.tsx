@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Info } from "lucide-react";
 import { OsCollapsible } from "@/components/os/collapsible";
 import { Fact } from "@/components/projects/parts";
@@ -18,7 +19,7 @@ function EditionFact({ edition, link }: { edition: ProjEditionSnapshot; link: st
       <span className="block font-medium" data-testid="edition-label">{edition.label ?? edition.event_name ?? "Edition without a name"}</span>
       <span className="block">Venue: {place || "Not recorded"}</span>
       <span className="block">Published show dates: {edition.start_date || edition.end_date ? dateRangeText(edition.start_date, edition.end_date) : "Not recorded"}</span>
-      <span className="mt-1 block text-[13px] text-muted-foreground">{EDITION_NOTE}</span>
+      <span className="mt-1 block text-[13px] text-muted-foreground">Published dates, as copied at handover<InfoHint label="the published dates" className="ml-1">{EDITION_NOTE}</InfoHint></span>
       {link === "error" ? <span className="mt-1 block text-[13px] text-muted-foreground">Could not check whether you can open this event in Sales. Reload to try again.</span>
         : link !== "none" ? <Link href={link} className="mt-1 inline-block font-medium text-accent underline-offset-4 hover:underline" data-testid="edition-sales-link">Open event in Sales</Link> : null}
     </Fact>
@@ -64,7 +65,7 @@ export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, e
 
       <OsCollapsible title={internal ? "Scope" : "Agreed scope"} label={internal ? "Scope" : "Agreed scope"}>
         <h2 className="mb-1 hidden font-heading text-base font-semibold xl:block">{internal ? "Scope" : "Agreed scope"}</h2>
-        {internal ? null : <p className="mb-3 text-[13px] text-muted-foreground">As handed over from Sales. It changes only through a recorded scope change (Manage project, Feedback &amp; changes), which keeps the original.</p>}
+        {internal ? null : <p className="mb-3 text-[13px] text-muted-foreground">As handed over from Sales<InfoHint label="the agreed scope" className="ml-1">It changes only through a recorded scope change (Manage project, Feedback &amp; changes), which keeps the original.</InfoHint></p>}
         <div className="space-y-4">
           <div>
             <h3 className="text-sm font-medium">Scope of work</h3>

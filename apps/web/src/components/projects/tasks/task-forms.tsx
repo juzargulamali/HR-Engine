@@ -1,6 +1,7 @@
 "use client";
 
 import { useId, useRef, useState } from "react";
+import { InfoHint } from "@/components/ui/info-hint";
 import { blockProjectTask, commentOnTask, previewTaskDateChange, reassignProjectTask, setProjectTaskStatus, unblockProjectTask, updateProjectTask } from "@/lib/actions/projectsDelivery";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
@@ -27,7 +28,7 @@ export function StatusMoveForm({ projectId, taskId, version, move, taskTitle, on
       <input type="hidden" name="expectedVersion" value={version} />
       {taskTitle ? <p className="text-sm text-muted-foreground">Task: <span className="font-medium text-foreground">{taskTitle}</span></p> : null}
       {move.needsNote ? (
-        <Field label="Reason (required)" htmlFor={`${id}-note`} hint="It is kept in the task history."><Textarea id={`${id}-note`} name="note" rows={3} required /></Field>
+        <Field label="Reason (required)" htmlFor={`${id}-note`} help="It is kept in the task history."><Textarea id={`${id}-note`} name="note" rows={3} required /></Field>
       ) : (
         <p className="text-sm">{move.to === "ready_for_review" ? "This tells the reviewer the work is ready. You cannot complete reviewed work yourself." : move.to === "done" ? "This accepts the work and completes the task." : "Confirm this change."}</p>
       )}
@@ -45,7 +46,7 @@ export function BlockForm({ projectId, taskId, members, defaultOwner, onDone }: 
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="taskId" value={taskId} />
       <Field label="What is blocking it" htmlFor="bl-reason"><Textarea id="bl-reason" name="reason" rows={3} required autoFocus /></Field>
-      <Field label="Who is responsible for unblocking it" htmlFor="bl-owner" hint="They are told. Change it if someone else can clear it. The task cannot be completed until the blocker is cleared.">
+      <Field label="Who is responsible for unblocking it" htmlFor="bl-owner" hint="The task cannot be completed until the blocker is cleared." help="They are told. Change it if someone else can clear it.">
         <Select id="bl-owner" name="unblockOwner" defaultValue={defaultOwner} required>
           {defaultOwner === "" ? <option value="" disabled>Choose a person</option> : null}
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
@@ -70,8 +71,7 @@ export function ReassignForm({ projectId, taskId, currentAssignee, options, onDo
     <ActionForm action={reassignProjectTask} submitLabel="Reassign" onDone={onDone}>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="taskId" value={taskId} />
-      <p className="text-sm text-muted-foreground">One person stays accountable. The change is kept in the history and the new assignee is told.</p>
-      <Field label="New assignee" htmlFor="ra-to">
+      <Field label="New assignee" htmlFor="ra-to" hint="The new assignee is told." help="One person stays accountable. The change is kept in the history.">
         <Select id="ra-to" name="assigneeId" defaultValue={currentAssignee} required>{options.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
       </Field>
       <Field label="Note (optional)" htmlFor="ra-note"><Input id="ra-note" name="note" maxLength={300} /></Field>
@@ -108,11 +108,11 @@ export function DueDateForm({ projectId, taskId, version, currentDue, startDate,
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="taskId" value={taskId} />
       <input type="hidden" name="expectedVersion" value={version} />
-      <Field label="Due date" htmlFor={`${id}-due`} hint={badRange ? "The due date cannot be before the start date." : "A plain date: it never moves with a time zone."}>
+      <Field label="Due date" htmlFor={`${id}-due`} hint={badRange ? "The due date cannot be before the start date." : undefined} help="A plain date: it never moves with a time zone.">
         <Input id={`${id}-due`} name="dueDate" type="date" value={due} min={startDate ?? undefined} onChange={(e) => void onChange(e.target.value)} aria-invalid={badRange} />
       </Field>
       {!unchanged ? (
-        <Field label="Why is the date changing?" htmlFor={`${id}-why`} hint="Kept in the task history with the old and new date.">
+        <Field label="Why is the date changing?" htmlFor={`${id}-why`} help="Kept in the task history with the old and new date.">
           <Input id={`${id}-why`} name="reason" required maxLength={300} />
         </Field>
       ) : null}
@@ -190,7 +190,7 @@ export function EditTaskForm({ projectId, task, leader, otherTasks, collaborator
         </Field>
       </div>
       {dateChanged ? (
-        <Field label="Why is the date changing?" htmlFor="et-reason" hint="Kept in the task history with the old and new date.">
+        <Field label="Why is the date changing?" htmlFor="et-reason" help="Kept in the task history with the old and new date.">
           <Input id="et-reason" name="reason" required maxLength={300} />
         </Field>
       ) : null}
@@ -214,16 +214,16 @@ export function EditTaskForm({ projectId, task, leader, otherTasks, collaborator
           </div>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" name="requiresReview" defaultChecked={task.requires_review} className="mt-1 h-4 w-4" />
-            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">A team lead or the Project Manager (not the assignee) accepts it as done.</span></span>
+            <span className="font-medium">Needs review<InfoHint label="needs review" className="ml-1">A team lead or the Project Manager (not the assignee) accepts it as done.</InfoHint></span>
           </label>
         </>
       ) : null}
-      <Field label="Depends on" htmlFor="et-deps" hint="Hold Ctrl or Cmd to pick several. A loop between tasks is refused.">
+      <Field label="Depends on" htmlFor="et-deps" help="Hold Ctrl or Cmd to pick several. A loop between tasks is refused.">
         <select id="et-deps" name="dependsOn" multiple size={Math.min(5, Math.max(2, otherTasks.length))} defaultValue={task.dependsOn} className="w-full rounded-md border border-input bg-field px-3 py-1 text-sm">
           {otherTasks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
         </select>
       </Field>
-      <Field label="Collaborators" htmlFor="et-collab" hint="Helpers; the assignee stays the one accountable person.">
+      <Field label="Collaborators" htmlFor="et-collab" help="Helpers; the assignee stays the one accountable person.">
         <select id="et-collab" name="collaboratorIds" multiple size={Math.min(5, Math.max(2, collaboratorOptions.length))} defaultValue={task.collaborators} className="w-full rounded-md border border-input bg-field px-3 py-1 text-sm">
           {collaboratorOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
         </select>
@@ -238,7 +238,7 @@ export function CommentForm({ projectId, taskId }: { projectId: string; taskId: 
     <ActionForm action={commentOnTask} submitLabel="Add comment" resetOnSuccess>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="taskId" value={taskId} />
-      <Field label="Add a comment" htmlFor={`${id}-body`} hint="Comments stay on this task. They never change its status or dates.">
+      <Field label="Add a comment" htmlFor={`${id}-body`} help="Comments stay on this task. They never change its status or dates.">
         <Textarea id={`${id}-body`} name="body" rows={3} required maxLength={4000} />
       </Field>
     </ActionForm>

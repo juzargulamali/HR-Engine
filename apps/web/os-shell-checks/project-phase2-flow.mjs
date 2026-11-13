@@ -65,7 +65,7 @@ await step("v1 is submitted from the screen (a link); the attachment time is sho
   await page.goto(taskUrl(STORY), { waitUntil: "networkidle" });
   const t = (await page.getByTestId("task-output").innerText()).replace(/\s+/g, " ");
   if (!/Version 1 Awaiting review/.test(t) || !/Attached: .* Asia\/Dubai by Cara Assignee/.test(t)) throw new Error(`v1 text: ${t.slice(0, 260)}`);
-  if (!/link to a document that can change after approval/.test(t)) throw new Error("the mutable link is not called out");
+  if (!/link can change after approval/.test(t)) throw new Error("the mutable link is not called out");
   if (!/Not reviewed yet/.test(t)) throw new Error("approval time should not exist yet");
   await page.getByRole("button", { name: /send for review/i }).first().click().catch(() => {});
   await until(() => db(`select status from proj_tasks where id='${STORY}'`) === "ready_for_review", 8000).catch(() => asDb(2, `select proj_set_task_status('${STORY}', 'ready_for_review')`));
@@ -225,7 +225,7 @@ await step("an overseas shipment that arrives after its setup is flagged, with e
   const id1 = db(`select id from proj_plan_items where project_id='${PRJ}' and title='Setup (run 1)'`);
   await page.getByTestId("site-add-shipment").click(); await dialog().waitFor();
   await dialog().getByLabel("Name").fill("Equipment from Mumbai"); await dialog().getByLabel("Supports this setup").selectOption(id1);
-  await dialog().getByLabel("Equipment request").selectOption(REQ);
+  await dialog().getByLabel("Equipment request", { exact: true }).selectOption(REQ);
   await dialog().getByLabel("Departs", { exact: true }).fill("2027-11-09T08:00"); await dialog().getByLabel("Departs: time zone").selectOption("Asia/Kolkata");
   await dialog().getByLabel("Expected arrival", { exact: true }).fill("2027-11-11T15:00"); await dialog().getByLabel("Expected arrival: time zone").selectOption("Asia/Dubai");
   await dialog().getByLabel("Carrier").fill("Fictional Freight");

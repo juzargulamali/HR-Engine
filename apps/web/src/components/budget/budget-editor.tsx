@@ -126,7 +126,7 @@ export function BudgetEditor({ view, version }: { view: PbxBudgetView; version: 
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Field label="Expense period starts" htmlFor="pbx-ps"><Input id="pbx-ps" type="date" value={periodStart} onChange={(e) => { setPeriodStart(e.target.value); touch(); }} /></Field>
-        <Field label="Expense period ends" htmlFor="pbx-pe" hint="Changing this does not change the project's own dates."><Input id="pbx-pe" type="date" value={periodEnd} min={periodStart || undefined} onChange={(e) => { setPeriodEnd(e.target.value); touch(); }} /></Field>
+        <Field label="Expense period ends" htmlFor="pbx-pe" help="Changing this does not change the project's own dates."><Input id="pbx-pe" type="date" value={periodEnd} min={periodStart || undefined} onChange={(e) => { setPeriodEnd(e.target.value); touch(); }} /></Field>
         <div className="sm:col-span-2">
           <fieldset className="space-y-1">
             <legend className="text-sm font-medium">People this budget covers</legend>
@@ -232,7 +232,7 @@ function RowFields({ row, currency, total, petrol, meal, disabled, onChange, onR
           const label = f === "people" || f === "days" ? FIELD_LABEL[f] : f === "qty" ? QTY_LABELS[row.basis] ?? "Quantity" : f === "rate" ? RATE_LABELS[row.basis] : "Total amount";
           return (
             <Field key={f} label={f === "rate" || f === "fixed" ? `${label} (${currency})` : label} htmlFor={`${id}-${f}`}
-              hint={f === "days" && span !== null && row.days === "" ? undefined : f === "fixed" ? "Covers the whole period; it is never multiplied by days." : undefined}>
+              help={f === "fixed" ? "Covers the whole period; it is never multiplied by days." : undefined}>
               <Input id={`${id}-${f}`} inputMode="decimal" value={row[f]} disabled={disabled} onChange={(e) => onChange({ [f]: cleanDecimal(e.target.value) } as Partial<DraftRow>)} />
             </Field>
           );

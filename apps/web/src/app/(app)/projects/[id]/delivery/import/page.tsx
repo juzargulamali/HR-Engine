@@ -24,7 +24,7 @@ export default async function DeliveryPlanImportPage({ params }: { params: Promi
     <div className="space-y-2">
       <Link href={back} className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-3")}><ArrowLeft className="h-4 w-4" aria-hidden /> Back to the Delivery plan</Link>
       <h2 className="text-lg font-semibold">Import Excel</h2>
-      <p className="text-muted-foreground">Fill the Delivery plan from a workbook: upload it, check the preview, then confirm. Nothing is saved until you confirm.</p>
+      <p className="text-muted-foreground">Nothing is saved until you confirm.</p>
     </div>
   );
   const say = (body: React.ReactNode, variant?: "warning" | "destructive") => <div className="space-y-6">{head}<Alert variant={variant} role="status">{body}</Alert></div>;

@@ -217,7 +217,7 @@ await step("one installation: a project member and a site-only technician assign
   asDb(4, `select proj_add_member('${PRJ}', '${U}2', null)`);
   await as("mgr"); await page.goto(`${BASE}/projects/${PRJ}/plan?plan=site&mode=list`, { waitUntil: "networkidle" });
   await page.getByTestId(`site-crew-${ACT}`).first().click(); await dialog().waitFor();
-  if (!/site-only/.test(await dialog().getByTestId("crew-site-only-note").innerText())) throw new Error("the site-only note is missing");
+  if (!/site-only/i.test(await dialog().getByTestId("crew-site-only-note").innerText())) throw new Error("the site-only note is missing");
   const sel = dialog().getByLabel("Crew 1 person");
   await sel.selectOption(`${U}2`);
   await dialog().getByRole("button", { name: "Add a person" }).click();

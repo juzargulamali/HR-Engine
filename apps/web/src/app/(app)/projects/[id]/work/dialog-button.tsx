@@ -6,11 +6,13 @@ import { Modal } from "@/components/sales/modal";
 
 /** A button that opens a dialog. The content is a function so a form can close the dialog after a successful save. */
 export function DialogButton({
-  label, title, description, variant = "outline", size = "sm", children,
+  label, title, description, help, variant = "outline", size = "sm", children,
 }: {
   label: string;
   title: string;
   description?: string;
+  /** Longer optional explanation, behind an ⓘ beside the dialog title. */
+  help?: React.ReactNode;
   variant?: "default" | "outline" | "secondary" | "ghost" | "destructive";
   size?: "default" | "sm";
   children: (close: () => void) => React.ReactNode;
@@ -19,7 +21,7 @@ export function DialogButton({
   return (
     <>
       <Button type="button" variant={variant} size={size} onClick={() => setOpen(true)}>{label}</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title={title} description={description}>
+      <Modal open={open} onClose={() => setOpen(false)} title={title} description={description} help={help}>
         {children(() => setOpen(false))}
       </Modal>
     </>

@@ -8,6 +8,7 @@ import { finalizeProjectUpload, getProjectFileUrl, prepareProjectUpload } from "
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,12 +19,12 @@ import { FormDialog, type Done } from "@/components/projects/delivery/delivery-f
 export function ExpectedOutputDialog({ projectId, taskId, taskVersion, current }: { projectId: string; taskId: string; taskVersion: number; current: { label: string; qty: number | null; required: boolean } | null }) {
   return (
     <FormDialog label={current ? "Edit expected output" : "Set expected output"} title="Expected output" testId="output-expected-open"
-      description="What this task must produce, for example one moodboard, three videos, an app build or an installation checklist. When it is required, the task cannot be sent for review or completed without it.">
+      help="What this task must produce, for example one moodboard, three videos, an app build or an installation checklist.">
       {(done) => (
         <ActionForm action={saveTaskOutput} submitLabel="Save" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="taskId" value={taskId} /><input type="hidden" name="expectedVersion" value={taskVersion} />
           <div className="grid gap-3 sm:grid-cols-[minmax(0,2fr)_7rem]">
-            <Field label="What it is" htmlFor="eo-label" hint="Leave empty to remove the expected output (not possible once a version was submitted)."><Input id="eo-label" name="label" maxLength={200} defaultValue={current?.label ?? ""} placeholder="Storyboard" /></Field>
+            <Field label="What it is" htmlFor="eo-label" help="Leave empty to remove the expected output (not possible once a version was submitted)."><Input id="eo-label" name="label" maxLength={200} defaultValue={current?.label ?? ""} placeholder="Storyboard" /></Field>
             <Field label="How many" htmlFor="eo-qty"><Input id="eo-qty" name="qty" type="number" min={1} max={999} step={1} defaultValue={current?.qty ?? ""} placeholder="1" /></Field>
           </div>
           <label className="flex items-start gap-2 text-sm"><input type="checkbox" name="required" defaultChecked={current?.required ?? false} className="mt-0.5 h-4 w-4" /> <span><span className="font-medium">Required.</span> The server refuses to send the task for review, or to complete it, without this output.</span></label>
@@ -43,7 +44,7 @@ type Phase = "idle" | "checking" | "uploading" | "verifying" | "saving";
 export function SubmitVersionDialog({ projectId, taskId, label, expected, nextNo, files }: { projectId: string; taskId: string; label: string; expected: number; nextNo: number; files: Choice[] | null }) {
   return (
     <FormDialog label={nextNo === 1 ? "Submit output" : `Submit version ${nextNo}`} variant="default" title={`Submit version ${nextNo}: ${label}`} testId="output-submit-open"
-      description="Attach the material for review. A new version never changes an earlier one: each version keeps its own time, submitter and review.">
+      help="Attach the material for review. A new version never changes an earlier one: each version keeps its own time, submitter and review.">
       {(done) => <SubmitForm projectId={projectId} taskId={taskId} expected={expected} nextNo={nextNo} files={files} done={done} />}
     </FormDialog>
   );
@@ -107,21 +108,21 @@ function SubmitForm({ projectId, taskId, expected, nextNo, files, done }: { proj
       <div role="tablist" aria-label="How to attach it" className="flex flex-wrap gap-1 rounded-lg border border-border p-1">
         {tabs.map((t) => <button key={t.key} type="button" role="tab" aria-selected={mode === t.key} onClick={() => setMode(t.key)} className={`min-h-9 rounded-md px-3 text-sm font-medium ${mode === t.key ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{t.label}</button>)}
       </div>
-      {mode === "upload" ? <Field label="File" htmlFor="ov-file" hint={`${CRM_ALLOWED_FILE_SUMMARY}. It is stored privately and checked before it can be opened.`}><Input id="ov-file" name="file" type="file" disabled={busy} /></Field> : null}
+      {mode === "upload" ? <Field label="File" htmlFor="ov-file" hint={`${CRM_ALLOWED_FILE_SUMMARY}.`} help="It is stored privately and checked before it can be opened."><Input id="ov-file" name="file" type="file" disabled={busy} /></Field> : null}
       {mode === "existing" ? (
         files === null ? <Alert variant="warning" role="status">The project&apos;s files could not be loaded just now. Upload a file or add a link instead.</Alert>
           : files.length === 0 ? <p className="text-sm text-muted-foreground">There are no project files you can use yet. Upload one or add a link.</p>
-          : <Field label="Project file or link" htmlFor="ov-existing" hint="Only files you may open are listed. Choosing one never gives anyone else access to it."><Select id="ov-existing" value={vals.fileId} onChange={(e) => set({ fileId: e.target.value })}><option value="">Choose…</option>{files.map((f) => <option key={f.id} value={f.id}>{f.kind === "link" ? "Link: " : ""}{f.name}</option>)}</Select></Field>
+          : <Field label="Project file or link" htmlFor="ov-existing" help="Only files you may open are listed. Choosing one never gives anyone else access to it."><Select id="ov-existing" value={vals.fileId} onChange={(e) => set({ fileId: e.target.value })}><option value="">Choose…</option>{files.map((f) => <option key={f.id} value={f.id}>{f.kind === "link" ? "Link: " : ""}{f.name}</option>)}</Select></Field>
       ) : null}
       {mode === "link" ? (
         <div className="space-y-3">
           <Field label="Link (https://)" htmlFor="ov-url"><Input id="ov-url" value={vals.url} onChange={(e) => set({ url: e.target.value })} inputMode="url" placeholder="https://" maxLength={1000} /></Field>
           <Field label="Name for the link (optional)" htmlFor="ov-linklabel"><Input id="ov-linklabel" value={vals.linkLabel} onChange={(e) => set({ linkLabel: e.target.value })} maxLength={200} /></Field>
-          <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={vals.mutable} onChange={(e) => set({ mutable: e.target.checked })} className="mt-0.5 h-4 w-4" /><span>This link points to a document that can change after it is approved (a shared deck, a design file). Untick it only for a version-specific link.</span></label>
+          <div className="flex items-start gap-1.5 text-sm"><label className="flex items-start gap-2"><input type="checkbox" checked={vals.mutable} onChange={(e) => set({ mutable: e.target.checked })} className="mt-0.5 h-4 w-4" /><span>This link points to a document that can change after it is approved.</span></label><InfoHint label="links that can change">A shared deck or a design file can change after approval. Untick this only for a version-specific link; otherwise add a snapshot file below so the team can retrieve exactly what was approved.</InfoHint></div>
         </div>
       ) : null}
       {mode === "link" || (mode === "existing" && files?.find((f) => f.id === vals.fileId)?.kind === "link") ? (
-        <Field label="Snapshot of the exact material (optional)" htmlFor="ov-snap" hint="A stored file of what the link showed when submitted, so the team can retrieve exactly what was approved.">
+        <Field label="Snapshot of the exact material (optional)" htmlFor="ov-snap" help="A stored file of what the link showed when submitted, so the team can retrieve exactly what was approved.">
           <Select id="ov-snap" value={vals.snapshotFileId} onChange={(e) => set({ snapshotFileId: e.target.value })}><option value="">No snapshot</option>{(files ?? []).filter((f) => f.kind === "file").map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</Select>
         </Field>
       ) : null}
@@ -140,7 +141,8 @@ export function DecideDialog({ projectId, versionId, versionNo, label }: { proje
   const [decision, setDecision] = useState<"approved" | "changes_requested">("approved");
   return (
     <FormDialog label="Review" variant="default" title={`Review version ${versionNo}: ${label}`} testId="output-review-open"
-      description={`Your decision applies to version ${versionNo} only. If a newer version is submitted meanwhile, you will be told and nothing is approved by mistake.`}>
+      description={`Your decision applies to version ${versionNo} only.`}
+      help="If a newer version is submitted while you review, you will be told and nothing is approved by mistake.">
       {(done) => (
         <ActionForm action={decideTaskOutput} submitLabel={decision === "approved" ? "Approve this version" : "Request changes"} variant={decision === "approved" ? "default" : "outline"} onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
@@ -168,7 +170,7 @@ export function OpenOutputButton({ fileId, kind, url, label = "Open" }: { fileId
 export function LinkFeedbackDialog({ projectId, versionId, feedback, activations }: { projectId: string; versionId: string; feedback: { id: string; name: string }[]; activations: { id: string; name: string }[] }) {
   if (feedback.length === 0) return null;
   return (
-    <FormDialog label="Link client feedback" variant="ghost" title="Link client feedback to this version" description="Shows the feedback beside this version and in its history. It changes no scope, date or booking: those still go through Feedback & changes.">
+    <FormDialog label="Link client feedback" variant="ghost" title="Link client feedback to this version" description="It changes no scope, date or booking." help="Shows the feedback beside this version and in its history. Scope, date and booking changes still go through Feedback & changes.">
       {(done) => (
         <ActionForm action={linkFeedbackToOutput} submitLabel="Link" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
@@ -184,11 +186,12 @@ export function LinkFeedbackDialog({ projectId, versionId, feedback, activations
 export function RerouteDialog({ projectId, versionId, versionNo, restricted }: { projectId: string; versionId: string; versionNo: number; restricted: boolean }) {
   return (
     <FormDialog label="Send to Operations review" title={`Send version ${versionNo} to Operations`} testId="output-reroute"
-      description="This version was submitted by the Project Manager, so an Operations Manager reviews it, not the team. Nothing is uploaded again, and earlier decisions on this task stay as they are.">
+      description="An Operations Manager reviews it, not the team. Nothing is uploaded again."
+      help="This version was submitted by the Project Manager. Earlier decisions on this task stay as they are.">
       {(done) => (
         <ActionForm action={rerouteOutputReview} submitLabel="Send to Operations" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
-          {restricted ? <p className="text-[13px] text-[hsl(var(--os-amber))]" data-testid="output-reroute-restricted">The file is restricted and Operations cannot open restricted files. Make it unrestricted in Files &amp; client plan first, then send it.</p> : null}
+          {restricted ? <p className="text-[13px] text-[hsl(var(--os-amber))]" data-testid="output-reroute-restricted">⚠ The file is restricted and Operations cannot open restricted files. Make it unrestricted in Files &amp; client plan first, then send it.</p> : null}
         </ActionForm>
       )}
     </FormDialog>
@@ -199,7 +202,8 @@ export function RerouteDialog({ projectId, versionId, versionNo, restricted }: {
 export function AssignReviewerDialog({ projectId, versionId, versionNo, current, eligible }: { projectId: string; versionId: string; versionNo: number; current: string; eligible: { id: string; name: string }[] }) {
   return (
     <FormDialog label={current ? "Reassign reviewer" : "Assign reviewer"} title={`Operations reviewer for version ${versionNo}`} testId="output-assign-reviewer"
-      description="Only an Operations Manager of this company can review a version the Project Manager submitted, and never the person who submitted it or the person the task is assigned to. Leaving it unassigned keeps it in the Operations queue for any of them.">
+      description="Only an Operations Manager of this company can review it, never the person who submitted it or the person the task is assigned to."
+      help="Leaving it unassigned keeps it in the Operations queue for any eligible Operations Manager.">
       {(done) => (
         <ActionForm action={assignOutputReviewer} submitLabel="Save" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
@@ -209,7 +213,7 @@ export function AssignReviewerDialog({ projectId, versionId, versionNo, current,
               {eligible.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
             </Select>
           </Field>
-          {eligible.length === 0 ? <p className="text-[13px] text-muted-foreground">Nobody is eligible yet. Someone with access to People &amp; Access can give the Operations role to another person.</p> : null}
+          {eligible.length === 0 ? <p className="text-[13px] text-[hsl(var(--os-amber))]">⚠ Nobody is eligible yet. Someone with access to People &amp; Access can give the Operations role to another person.</p> : null}
         </ActionForm>
       )}
     </FormDialog>

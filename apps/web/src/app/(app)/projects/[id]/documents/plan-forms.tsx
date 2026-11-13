@@ -10,14 +10,15 @@ export function IssueTimelineForm({ projectId, reference, hasIssued }: { project
   return (
     <DialogForm
       triggerLabel={hasIssued ? "Issue a new version" : "Issue this timeline"} triggerVariant="default" title="Issue the client timeline"
-      description="This freezes what is shown in the preview as a numbered version. It does not send anything to the client. Issuing the same content again returns the version that already exists."
+      description="This freezes the preview as a numbered version. It does not send anything to the client."
+      help="Issuing the same content again returns the version that already exists."
       action={issueClientTimeline} submitLabel="Issue version"
     >
       <input type="hidden" name="projectId" value={projectId} />
-      <Field label="Reference shown to the client (optional)" htmlFor="it-ref" hint={`Left empty it uses the project reference, ${reference}. Use a reference that is safe to show the client; never a price or PO number.`}>
+      <Field label="Reference shown to the client (optional)" htmlFor="it-ref" help={`Left empty it uses the project reference, ${reference}. Use a reference that is safe to show the client; never a price or PO number.`}>
         <Input id="it-ref" name="clientReference" maxLength={100} />
       </Field>
-      <Field label="Note for the record (optional)" htmlFor="it-note" hint="Kept with the version; not printed on the PDF."><Textarea id="it-note" name="note" rows={2} /></Field>
+      <Field label="Note for the record (optional)" htmlFor="it-note" help="Kept with the version; not printed on the PDF."><Textarea id="it-note" name="note" rows={2} /></Field>
     </DialogForm>
   );
 }
@@ -34,7 +35,8 @@ export function RecordSentForm({ projectId, planId, version }: { projectId: stri
 
 export function RecordAcceptedForm({ projectId, planId, version, today }: { projectId: string; planId: string; version: number; today: string }) {
   return (
-    <DialogForm triggerLabel="Record client acceptance" title={`Record that the client accepted version ${version}`} description="Acceptance is a fact someone at the client told you. It is recorded separately from issuing and from sending." action={recordTimelineAccepted} submitLabel="Record acceptance">
+    <DialogForm triggerLabel="Record client acceptance" title={`Record that the client accepted version ${version}`} description="Recorded separately from issuing and from sending."
+      help="Acceptance is a fact someone at the client told you; the app does not contact the client." action={recordTimelineAccepted} submitLabel="Record acceptance">
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="planId" value={planId} />
       <div className="grid gap-3 sm:grid-cols-2">

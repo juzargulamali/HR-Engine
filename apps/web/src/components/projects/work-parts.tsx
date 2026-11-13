@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { InfoHint } from "@/components/ui/info-hint";
 import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Flag, Hourglass, MapPin, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dateText } from "@/lib/projects/format";
@@ -109,7 +110,7 @@ export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { 
   if (needsYou.length === 0 && waiting.length === 0) {
     return (
       <section aria-label="What needs doing" className="os-card px-4 py-3" data-testid="work-attention">
-        <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span> <span className="text-muted-foreground">No blocker, review, overdue task or equipment decision is recorded for this project.</span></p>
+        <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span><InfoHint label="what needs you" className="ml-1">No blocker, review, overdue task or equipment decision is recorded for this project.</InfoHint></p>
       </section>
     );
   }
@@ -163,8 +164,7 @@ export function ProjectPlanEntry({ projectId, canManage }: { projectId: string; 
   return (
     <section aria-label="Project Plan" className="os-card flex flex-wrap items-center justify-between gap-3 border-primary/40 px-4 py-3 sm:px-5" data-testid="project-plan-entry">
       <div className="min-w-0">
-        <h2 className="font-heading text-base font-semibold">Project Plan</h2>
-        <p className="text-sm text-muted-foreground">{canManage ? "Break each technology into what it needs, assign and schedule it, release it, and see what holds up delivery." : "See what each technology needs, who does it and by when."} Tasks you update here show in the plan, and the other way round.</p>
+        <h2 className="font-heading text-base font-semibold">Project Plan<InfoHint label="the Project Plan" className="ml-1">{canManage ? "Break each technology into what it needs, assign and schedule it, release it, and see what holds up delivery." : "See what each technology needs, who does it and by when."} Tasks you update here show in the plan, and the other way round.</InfoHint></h2>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/projects/${projectId}/delivery`} className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open the Project Plan</Link>
@@ -204,7 +204,8 @@ export function RecentActivity({ lines, failed, historyHref }: { lines: readonly
 }
 
 /** Direct ways into the parts of the project the work depends on, each with the fact that makes it relevant. Only the ones given are shown. */
-export function WorkShortcuts({ items }: { items: readonly { href: string; label: string; note: string }[] }) {
+/** `note` is a fact that makes the link relevant (stays visible); `hint` is a static description (behind the ⓘ). */
+export function WorkShortcuts({ items }: { items: readonly { href: string; label: string; note?: string; hint?: string }[] }) {
   if (items.length === 0) return null;
   return (
     <nav aria-label="Go to" className="os-card p-4" data-testid="work-shortcuts">
@@ -213,7 +214,8 @@ export function WorkShortcuts({ items }: { items: readonly { href: string; label
         {items.map((i) => (
           <li key={i.href} className="text-sm">
             <Link href={i.href} className="font-medium text-accent underline-offset-4 hover:underline">{i.label}</Link>
-            <span className="block text-[13px] text-muted-foreground">{i.note}</span>
+            {i.hint ? <InfoHint label={i.label} className="ml-1">{i.hint}</InfoHint> : null}
+            {i.note ? <span className="block text-[13px] text-muted-foreground">{i.note}</span> : null}
           </li>
         ))}
       </ul>

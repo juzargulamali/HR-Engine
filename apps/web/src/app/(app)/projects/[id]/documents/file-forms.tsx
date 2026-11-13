@@ -46,7 +46,7 @@ export function AddFileForms({ projectId, isManager }: { projectId: string; isMa
       ) : (
         <ActionForm action={addProjectLink} submitLabel="Add link" resetOnSuccess>
           <input type="hidden" name="projectId" value={projectId} />
-          <Field label="Link" htmlFor="pl-url" hint="Must start with https://. A link is only as private as its own sharing settings, which you control, not this system.">
+          <Field label="Link" htmlFor="pl-url" hint="Must start with https://." help="A link is only as private as its own sharing settings, which you control, not this system.">
             <Input id="pl-url" name="url" type="url" inputMode="url" required placeholder="https://" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
@@ -102,7 +102,7 @@ function UploadFileForm({ projectId, isManager }: { projectId: string; isManager
   const busy = phase !== "idle";
   return (
     <form onSubmit={onSubmit} className="space-y-4">
-      <Field label="File" htmlFor="pu-file" hint={`${CRM_ALLOWED_FILE_SUMMARY}; executables and macro-enabled files are refused. The file is stored privately and is only available after it has been checked.`}>
+      <Field label="File" htmlFor="pu-file" hint={`${CRM_ALLOWED_FILE_SUMMARY}.`} help="Executables and macro-enabled files are refused. The file is stored privately and is only available after it has been checked.">
         <Input id="pu-file" name="file" type="file" required accept={ACCEPT} disabled={busy} />
       </Field>
       <div className="grid gap-3 sm:grid-cols-2">

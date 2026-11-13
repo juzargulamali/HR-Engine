@@ -63,7 +63,7 @@ export default async function CompletePage({ params }: { params: Promise<{ id: s
         title="Complete project"
         description={project.kind === "client" ? "Completing a client project needs the client's confirmation and a decision on everything still open." : "Completing an internal project needs a decision on everything still open and the owner's note."}
       />
-      <Panel title={`${project.name} (${project.reference})`} description="This is recorded in the project's history. A founder can reopen a completed project with a reason; the completion record stays.">
+      <Panel title={`${project.name} (${project.reference})`} description="Completion is recorded in the project's history." hint="A founder can reopen a completed project with a reason; the completion record stays. The database checks all of this again when you complete the project, and tells you in words if anything is missing.">
         <CompleteClient
           projectId={id}
           projectKind={project.kind}
@@ -74,7 +74,6 @@ export default async function CompletePage({ params }: { params: Promise<{ id: s
           today={todayIso()}
         />
       </Panel>
-      <Muted>The database checks all of this again when you complete the project, and tells you in words if anything is missing.</Muted>
       <Muted>
         Preparing the internal closeout report is separate from completing the project and can be done before or after: <Link href={`/projects/${id}/closeout`} className="text-accent underline-offset-4 hover:underline" data-testid="closeout-entry">Generate closeout report</Link>.
       </Muted>

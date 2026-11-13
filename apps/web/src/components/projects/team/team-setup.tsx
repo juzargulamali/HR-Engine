@@ -7,6 +7,7 @@ import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,7 @@ export function TeamSetupDialog({ projectId, teams, leads, label, variant = "def
 }) {
   return (
     <FormDialog label={label} variant={variant} size="default" testId={testId} dialogSize="wide" title={teams.length === 0 ? "Set up your project team" : "Manage project team"}
-      description="Choose the teams this project needs. These are teams inside this project, not HR departments. You can save before every lead is known.">
+      help="These are teams inside this project, not HR departments. You can save before every lead is known.">
       {(done) => <TeamSetupForm projectId={projectId} teams={teams} leads={leads} done={done} />}
     </FormDialog>
   );
@@ -104,7 +105,7 @@ function TeamSetupForm({ projectId, teams, leads, done }: { projectId: string; t
       {working.length > 0 || existing.length > 0 ? (
         <fieldset className="space-y-2" data-testid="ts-leads">
           <legend className="text-sm font-medium">Team leads</legend>
-          <p className="text-[13px] text-muted-foreground">A lead is optional now. A team without one is saved and shown as Lead needed. Only people with Projects access in this company can lead a team.</p>
+          <p className="text-[13px] text-muted-foreground">A team without a lead is saved as Lead needed.<InfoHint label="team leads" className="ml-1">A lead is optional now. Only people with Projects access in this company can lead a team.</InfoHint></p>
           <ul className="space-y-2">
             {existing.map((t) => (
               <li key={t.id} className="grid items-center gap-2 sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]" data-testid={`ts-existing-${key(t.name).replace(/[^a-z0-9]+/g, "-")}`}>
@@ -132,7 +133,7 @@ function TeamSetupForm({ projectId, teams, leads, done }: { projectId: string; t
           <label className="mt-1 flex items-start gap-2 text-sm"><input type="checkbox" name="confirmAccess" className="mt-0.5 h-4 w-4" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} data-testid="ts-confirm" /> <span>Add {additions.length === 1 ? "this person" : "these people"} to the project</span></label>
         </Alert>
       ) : null}
-      {rows.length === 0 ? <p className="text-[13px] text-muted-foreground">Choose a team, add a custom one, or pick a lead for a team that needs one.</p> : null}
+      {rows.length === 0 ? <p className="text-[13px] text-muted-foreground">Choose a team to continue.</p> : null}
     </ActionForm>
   );
 }
@@ -167,7 +168,7 @@ export function TeamPanel({ projectId, teams, leads, counts, canManage }: { proj
     <section aria-label={first ? "Set up your project team" : "Project team"} className={`os-card flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 ${first ? "border-l-4 border-l-[hsl(var(--accent))]" : "px-4 py-3"}`} data-testid={first ? "team-setup-card" : "team-summary-card"}>
       <div className="min-w-0 flex-1 basis-72 space-y-1.5">
         <h2 className={first ? "font-heading text-lg font-semibold" : "font-heading text-base font-semibold"}>{first ? "Set up your project team" : "Project team"}</h2>
-        {first ? <p className="text-sm text-muted-foreground">Start here: choose the teams this project needs (Content, Programming, Engineering, Site / Installation, or your own) and who leads each. You can save before every lead is known.</p> : <TeamSummary teams={teams} counts={counts} />}
+        {first ? <p className="text-sm text-muted-foreground">Choose the teams this project needs and who leads each.<InfoHint label="project teams" className="ml-1">Presets: Content, Programming, Engineering and Site / Installation, or add your own. These are teams inside this project, not HR departments. You can save before every lead is known.</InfoHint></p> : <TeamSummary teams={teams} counts={counts} />}
         {state === "lead_needed" ? <p className="text-[13px] text-muted-foreground" data-testid="team-lead-needed-note">Lead needed: {leadNeeded(teams).join(", ")}.{canManage ? " Choose one under Manage team." : " The Project Manager can choose one."}</p> : null}
       </div>
       {canManage

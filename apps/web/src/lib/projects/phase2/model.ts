@@ -150,9 +150,42 @@ export interface SiteActivity {
   /** Brief for everyone assigned: instructions, and hardware / content / app readiness (hardware also shows Inventory's own state elsewhere). */
   crew_instructions?: string | null; ready?: ActivityReadiness;
 }
-export type ReadyLevel = "unknown" | "not_ready" | "ready";
+/** What the Project Manager can enter by hand. "Not recorded" (stored as unknown) lets linked records speak; "Not applicable" is a statement that this area does not apply. */
+export type ReadyLevel = "unknown" | "not_ready" | "ready" | "not_applicable";
 export interface ActivityReadiness { hardware: ReadyLevel; content: ReadyLevel; app: ReadyLevel; note: string | null }
-export const READY_LABELS: Record<ReadyLevel, string> = { unknown: "Not known", not_ready: "Not ready", ready: "Ready" };
+export const READY_LABELS: Record<ReadyLevel, string> = { unknown: "Not recorded", not_ready: "Not ready", ready: "Ready", not_applicable: "Not applicable" };
+
+/** What a reader is shown after the database joins the hand-entered value with the Project Plan: Not applicable and Not recorded are different things. */
+export type EffectiveState = "ready" | "not_ready" | "not_applicable" | "not_recorded";
+export interface EffectiveReady { state: EffectiveState; source: "pm" | "plan" | null; detail?: string | null }
+export interface EffectiveReadiness { hardware: EffectiveReady; content: EffectiveReady; app: EffectiveReady; note?: string | null }
+export const EFFECTIVE_LABELS: Record<EffectiveState, string> = { ready: "Ready", not_ready: "Not ready", not_applicable: "Not applicable", not_recorded: "Not recorded" };
+export const effectiveTone = (s: EffectiveState): "green" | "amber" | "quiet" => (s === "ready" ? "green" : s === "not_ready" ? "amber" : "quiet");
+/** "Not ready (1 of 2 ready, from the Project Plan)", "Not applicable (set by hand)", "Not recorded". */
+export function effectiveReadyText(r: EffectiveReady): string {
+  const bits = [r.detail ? r.detail.charAt(0).toLowerCase() + r.detail.slice(1) : null, r.source === "plan" ? "from the Project Plan" : r.source === "pm" ? "set by hand" : null].filter(Boolean);
+  return `${EFFECTIVE_LABELS[r.state]}${bits.length > 0 ? ` (${bits.join(", ")})` : ""}`;
+}
+/** The venue and date an activity effectively has: its own, else the project's recorded venue / committed date when the link is unambiguous. */
+export interface ActivityEffective {
+  venue: string | null; venue_source: "activity" | "project" | null; start_date: string | null; end_date: string | null; date_source: "activity" | "project" | null;
+  choice_pending: boolean; project_start: string | null; project_end: string | null;
+}
+export type BriefingGap = "venue" | "date" | "choose_run" | "call_time" | "readiness";
+/** The Project Manager's view of what is missing from one activity's briefing, beside Assign crew (proj_site_briefing). */
+export interface SiteBriefing {
+  id: string; effective: ActivityEffective; ready: EffectiveReadiness; crew_total: number; call_missing: number;
+  candidates: { id: string; title: string; run_label: string | null }[]; gaps: BriefingGap[];
+}
+export function gapText(g: BriefingGap, b: SiteBriefing, kind: string): string {
+  switch (g) {
+    case "venue": return "No venue (add it on the activity, or on the project)";
+    case "date": return "No date yet";
+    case "choose_run": return `The project's ${kind.toLowerCase()} date is ${b.effective.project_start ?? "recorded"}: choose which run it belongs to`;
+    case "call_time": return `${b.call_missing} of ${b.crew_total} without a call time`;
+    case "readiness": return `Readiness not recorded: ${(["hardware", "content", "app"] as const).filter((k) => b.ready[k].state === "not_recorded").join(", ")}`;
+  }
+}
 export interface SiteCrew { user_id: string; name: string | null; role: CrewRole; call_at?: string | null; call_tz?: string | null; instructions?: string | null; site_only?: boolean; overlaps?: number }
 /** "Cara (site-only)": a person assigned to this activity who is not on the project and sees only their own assignment. */
 export const crewName = (c: Pick<SiteCrew, "name" | "site_only">) => `${c.name ?? "Someone"}${c.site_only ? " (site-only)" : ""}`;

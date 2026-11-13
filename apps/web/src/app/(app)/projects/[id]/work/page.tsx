@@ -47,7 +47,7 @@ import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
 import { WorkOverviewAreas } from "@/components/projects/work-overview";
 import { WorkSummary } from "@/components/projects/work-summary";
-import { milestoneSummary, outputSummary } from "@/lib/projects/work-summary";
+import { milestoneSummary, outputLines, outputSummary } from "@/lib/projects/work-summary";
 import { loadRegister } from "@/lib/projects/phase2/data";
 import { TeamPanel, type LeadOption, type TeamWithLead } from "@/components/projects/team/team-setup";
 import { loadWorkOverview } from "@/lib/projects/phase2/data";
@@ -194,9 +194,9 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   // ---- Direct entry points, each shown only with the fact that makes it relevant.
   const openDeps = (depRes.data ?? []).filter((d) => d.confirmation !== "confirmed");
   const shortcuts = [
-    ...(outdatedRes.data === true ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "The issued client timeline is out of date." }] : view.project.kind === "client" ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "Project files and the client-facing plan." }] : []),
-    { href: `/projects/${id}/delivery`, label: "Delivery plan", note: "Deliverables by zone, their breakdown, and what has been released to the teams." },
-    { href: `/projects/${id}/plan`, label: "Timeline", note: nextMilestone ? `Next milestone: ${nextMilestone.title}, ${dateText(nextMilestone.due_date)}.` : "Dates, activities and milestones." },
+    ...(outdatedRes.data === true ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", note: "The issued client timeline is out of date." }] : view.project.kind === "client" ? [{ href: `/projects/${id}/documents`, label: "Files & client plan", hint: "Project files and the client-facing plan." }] : []),
+    { href: `/projects/${id}/delivery`, label: "Delivery plan", hint: "Deliverables by zone, their breakdown, and what has been released to the teams." },
+    { href: `/projects/${id}/plan`, label: "Timeline", ...(nextMilestone ? { note: `Next milestone: ${nextMilestone.title}, ${dateText(nextMilestone.due_date)}.` } : { hint: "Dates, activities and milestones." }) },
     ...(depRes.error ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: "Could not load the dependencies just now. Open the site plan to see them." }] : []),
     ...(openDeps.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: `${openDeps.length} not confirmed yet (waiting on another party).` }] : []),
     ...(upcomingBookings.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list#bookings`, label: "Site bookings", note: `${upcomingBookings.length} upcoming.` }] : []),
@@ -297,6 +297,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const [overviewRes, registerRes] = await Promise.all([loadWorkOverview(id), loadRegister(id)]);
   const msSummary = milestoneSummary(ms, today);
   const outSummary = outputSummary(registerRes.state === "ok" ? registerRes.data : null);
+  const outLines = outputLines(registerRes.state === "ok" ? registerRes.data : null, id);
   const overview = overviewRes.state === "ok" ? overviewRes.data : null;
 
   return (
@@ -323,7 +324,8 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         <Alert role="status">This project was completed and then reopened. The earlier completion record is kept on the <Link href={`/projects/${id}/history`} className="font-medium underline">History</Link> page.</Alert>
       ) : null}
 
-      <WorkSummary projectId={id} milestones={msSummary} milestonesHref={`${withParams(basePath, current, { ms: "1" })}#milestones`} outputs={outSummary} outputsFailed={registerRes.state === "error"} canManage={canManage} />
+      <WorkSummary projectId={id} milestones={msSummary} milestonesHref={`${withParams(basePath, current, { ms: "1" })}#milestones`} outputs={outSummary} outputLines={outLines.lines} outputsMore={outLines.more} outputsFailed={registerRes.state === "error"} canManage={canManage}
+        addMilestone={canManage ? <AddMilestoneButton projectId={id} /> : undefined} />
       {overview ? <WorkOverviewAreas projectId={id} overview={overview} /> : overviewRes.state === "error" ? <Alert variant="warning" role="status" data-testid="overview-load-error">Could not load the overview (next on site, what needs attention and recent changes). The tasks below are unaffected; reload to try again.</Alert> : null}
 
       {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
@@ -377,7 +379,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
           </section>
 
           {queue.length > 0 ? (
-            <Panel title={`Waiting for your review (${queue.length})`} description="Tasks sent for review that you may accept or send back. You never review your own work.">
+            <Panel title={`Waiting for your review (${queue.length})`} hint="Tasks sent for review that you may accept or send back. You never review your own work.">
               <ul className="divide-y divide-border">
                 {queue.map((t) => (
                   <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
@@ -414,17 +416,18 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         </aside>
       </div>
 
-      {/* ---- Milestones and deliverables ---- */}
+      {/* ---- Milestones: drawn only when there are some (the summary card above carries Add milestone when there are none) ---- */}
+      {ms.length > 0 || current.ms === "1" ? (
       <details id="milestones" open={openMilestones} className="os-card group">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-[14px] px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="text-sm font-semibold">Milestones &amp; work packages <span className="font-normal text-muted-foreground">({ms.length} milestone{ms.length === 1 ? "" : "s"}, {dls.length} work package{dls.length === 1 ? "" : "s"})</span></span>
+          <span className="text-sm font-semibold">Milestones <span className="font-normal text-muted-foreground">({ms.length})</span></span>
           <span className="text-sm text-muted-foreground">{progress ? progress.basis : "No required milestone set yet"}</span>
         </summary>
         <div className="space-y-5 border-t border-border p-4">
           <Panel
             id="milestone-list"
             title="Milestones"
-            description={progress ? `Progress: ${progress.basis}. Optional milestones and cancelled or deferred ones are not counted.` : "Progress is shown only from accepted required milestones. No required milestone is set yet."}
+            hint={`Progress is counted from accepted required milestones only; optional, cancelled and deferred ones are not counted.${progress ? "" : " No required milestone is set yet."}`}
             actions={canManage ? <AddMilestoneButton projectId={id} /> : undefined}
           >
             {progress ? (
@@ -436,7 +439,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
               </div>
             ) : null}
             {ms.length === 0 ? (
-              <EmptyState icon={CalendarCheck} dense title="No milestones yet" description={view.canManage ? "Add the points the Project Manager accepts as the project moves: first draft, final render, installation done." : "The Project Manager adds the milestones the project is accepted against."} />
+              <EmptyState icon={CalendarCheck} dense title="No milestones yet" description={view.canManage ? undefined : "The Project Manager adds the milestones the project is accepted against."} />
             ) : (
               <ul className="divide-y divide-border">
                 {ms.map((m) => {
@@ -470,14 +473,26 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
             )}
           </Panel>
 
+        </div>
+      </details>
+      ) : null}
+
+      {/* ---- Work packages (the older team-level deliverables): not part of the default overview. Drawn only when some exist, collapsed, with every package and link kept. ---- */}
+      {dls.length > 0 ? (
+        <details id="work-packages" className="os-card group" data-testid="work-packages-disclosure">
+          <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-[14px] px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            <span className="text-sm font-semibold">Work packages <span className="font-normal text-muted-foreground">({dls.length})</span></span>
+            <span className="text-sm text-muted-foreground">Team-level pieces of work, kept as they were</span>
+          </summary>
+          <div className="space-y-5 border-t border-border p-4">
           <Panel
             id="deliverables"
             title="Work packages"
-            description="Pieces of work the PM gives to a project team (the older team-level deliverables). The team lead distributes the tasks and accepts the work package. Task outputs, the files and links people hand in, are in Project Plan > Deliverables."
+            hint="Pieces of work the PM gives to a project team (the older team-level deliverables). The team lead distributes the tasks and accepts the work package. Task outputs, the files and links people hand in, are in Project Plan > Deliverables."
             actions={canManage ? <AddDeliverableButton projectId={id} teams={teamOptions} milestones={milestoneOptions} /> : undefined}
           >
             {dls.length === 0 ? (
-              <EmptyState icon={ListChecks} dense title="No work packages yet" description={view.canManage ? (view.teams.length === 0 ? "Add a project team on the People page first, then give it a work package." : "Add a work package and choose the project team responsible for it.") : "The Project Manager assigns work packages to departments."} />
+              <EmptyState icon={ListChecks} dense title="No work packages yet" description={view.canManage ? (view.teams.length === 0 ? "Add a project team on the People page first, then give it a work package." : undefined) : "The Project Manager assigns work packages to departments."} />
             ) : (
               <div className="space-y-5">
                 {groupDeliverables(ms, dls).map((g) => (
@@ -516,11 +531,12 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
               </div>
             )}
           </Panel>
-        </div>
-      </details>
+          </div>
+        </details>
+      ) : null}
 
       {completion ? (
-        <Panel title="Completion" description="Recorded when the project was completed. Read-only.">
+        <Panel title="Completion" hint="Recorded when the project was completed. Read-only.">
           <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Fact label="Completed">{formatDateTime(completion.completed_at)} by {view.nameOf(completion.completed_by)}</Fact>
             <Fact label="Evidence">{COMPLETION_EVIDENCE_TYPES.find((e) => e.id === completion.evidence_type)?.label ?? "Internal completion note"}</Fact>

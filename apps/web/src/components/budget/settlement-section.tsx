@@ -47,7 +47,7 @@ function Receipts({ view }: { view: PbxBudgetView }) {
   const canEdit = view.viewer.is_finance && b.settlement_status === "open";
   const tone = b.receipts_status === "received" ? "green" : b.receipts_status === "exception" ? "amber" : "neutral";
   return (
-    <Panel title="Physical receipts" description="Receipts are handed to Finance outside this application. Finance records here whether they arrived; the page keeps who recorded it and when. Nothing is uploaded.">
+    <Panel title="Physical receipts" hint="Receipts are handed to Finance outside this application. Finance records here whether they arrived; the page keeps who recorded it and when. Nothing is uploaded.">
       <div className="space-y-3">
         <p className="flex flex-wrap items-center gap-2 text-sm">
           <OsBadge tone={tone} dot>{RECEIPT_LABELS[b.receipts_status]}</OsBadge>
@@ -201,7 +201,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
   const approvedActual = s.has_approved_actuals ? s.approved_actual_total : null;
   return (
     <div className="space-y-4">
-      <p className="text-[13px] text-muted-foreground">These figures are the project&apos;s expenses only. They are not revenue, margin or profitability.</p>
+      <p className="text-[13px] text-muted-foreground">Project expenses only, not revenue or margin.</p>
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <Figure label="Approved budget" value={money(s.approved_budget, currency)} />
         <Figure label="Approved final expenses" value={approvedActual === null ? "Not approved yet" : money(approvedActual, currency)} hint={approvedActual === null ? "Settlement starts once Finance approves the final expenses." : undefined} />
@@ -218,7 +218,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
       </div>
 
       {s.per_person.length > 0 ? (
-        <Panel title="By person" description="Each person's advance and reimbursement balance is worked out separately: one person's unspent advance never covers another person's expenses.">
+        <Panel title="By person" hint="Each person's advance and reimbursement balance is worked out separately: one person's unspent advance never covers another person's expenses.">
           <Table stack>
             <TableHeader>
               <TableRow><TableHead>Person</TableHead><TableHead className="text-right">Advance given</TableHead><TableHead className="text-right">Spent from it</TableHead><TableHead className="text-right">Returned</TableHead><TableHead className="text-right">Still to return</TableHead><TableHead className="text-right">Owed to them</TableHead><TableHead className="text-right">Paid to them</TableHead><TableHead className="text-right">Still owed</TableHead></TableRow>
@@ -245,7 +245,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
       <Receipts view={view} />
 
       {view.viewer.is_finance && open && s.has_approved_actuals ? (
-        <Panel title="Record money returned or a reimbursement paid" description="Partial amounts are allowed; the balance stays visible until it reaches zero. Finance entries are declarations of what was handed over; one that involves you yourself is flagged as such, and nothing is paid or checked against a bank from here.">
+        <Panel title="Record money returned or a reimbursement paid" hint="Partial amounts are allowed; the balance stays visible until it reaches zero. Finance entries are declarations of what was handed over; one that involves you yourself is flagged as such.">
           <RecordPayment view={view} />
         </Panel>
       ) : null}
@@ -277,7 +277,7 @@ export function SettlementSection({ view }: { view: PbxBudgetView }) {
         )}
       </Panel>
 
-      <Panel title="Close settlement" description="Closing needs approved final expenses, a reconciled advance and reimbursement balance, and Finance's confirmation about the receipts (or an approved exception with a reason).">
+      <Panel title="Close settlement" hint="Closing needs approved final expenses, a reconciled advance and reimbursement balance, and Finance's confirmation about the receipts (or an approved exception with a reason).">
         <CloseControls view={view} />
       </Panel>
     </div>

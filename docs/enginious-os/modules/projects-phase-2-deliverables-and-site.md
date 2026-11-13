@@ -93,7 +93,25 @@ Compact **Milestones** and **Task outputs** summary with links; older department
 
 ### 11.6 Tests
 
-`proj-phase2-teams-crew-ops.rls.test.ts` (16) with the reworked `proj-phase2-deliverables-site.rls.test.ts` (31 of 31 together); `apps/web/src/lib/projects/teams/model.test.ts`, `lib/projects/work-summary.test.ts`, `components/projects/delivery/plan-timeline.test.tsx`, `lib/projects/delivery-plan/insights.test.ts`; browser flows `project-phase2b-flow.mjs` (17), `project-work-schedule-flow.mjs` (12), `project-work-files-shortcut-flow.mjs` (3), local stack only. Hosted use and signed-in behaviour are unverified by Claude.
+`proj-phase2-teams-crew-ops.rls.test.ts` (18) with the reworked `proj-phase2-deliverables-site.rls.test.ts` (33 of 33 together); `apps/web/src/lib/projects/teams/model.test.ts`, `lib/projects/work-summary.test.ts`, `components/projects/delivery/plan-timeline.test.tsx`, `lib/projects/delivery-plan/insights.test.ts`; browser flows `project-phase2b-flow.mjs` (17), `project-work-schedule-flow.mjs` (12), `project-work-files-shortcut-flow.mjs` (3), local stack only. Hosted use and signed-in behaviour are unverified by Claude.
+
+## 12. Follow-up 2: crew card and briefing, Files & client plan, one help control (draft PR; migration `20270108000100`, not applied by Claude)
+
+### 12.1 Files & client plan
+
+The page read `FILE_PURPOSES` from a `"use client"` module, so it threw (`find is not a function`) for any project with a file or link: "This page couldn't load" (hosted reference 177030816; the hosted log entry was not read, the error was reproduced locally). The purposes now live in the plain module `lib/projects/file-purposes.ts` (`FILE_PURPOSES`, `filePurposeLabel`). File permissions (restricted files are Project Manager only) and client timeline issuing are unchanged. Guard: `app/(app)/projects/client-boundary.test.ts`; browser check `project-work-files-shortcut-flow.mjs` with real file rows and an issued timeline.
+
+### 12.2 The crew card and the briefing
+
+* **Sources.** Venue: the activity's own location, else `proj_project_details.location` (labelled "the project's venue"). Date: the activity's own date or window, else the project's `install_start` (a Setup) or `event_start` to `event_end` (a Show), **only when exactly one activity of that kind exists** (labelled "from the project dates"); with several runs nothing is guessed. Call time: `proj_site_crew.call_at`, personal and explicit. Readiness: `proj_plan_items.ready_*` set by the Project Manager, else derived from Project Plan lines (`proj_dp_lines` of section hardware, content or apps: a task that is done, or an Inventory request that is reserved, dispatched, still out or returned), shown as counts ("1 of 2 ready, from the Project Plan"). **Not applicable** (set by the Project Manager, or the plan has lines but none of that kind) and **Not recorded** (nothing anywhere) are different states.
+* **Project Manager.** `proj_site_briefing` returns, per open activity, the effective venue, date and readiness and the gaps: venue, date, choose a run, call times, readiness. They appear as **Still missing from the briefing** beside **Assign crew**, each with its own fix: **This run** (`proj_apply_project_dates`: copies the project date to that activity only, logged "Taken from the project dates"), **Set call times** / **Crew** with **Use the activity start** (only when the activity has a time window), **Set readiness** (the Brief dialog; Not recorded lets the Project Plan speak), **Add the venue**, **Add the date**.
+* **Technician.** `proj_my_site_assignments()` still returns only their own assignment; it adds the effective venue and date and the readiness states and counts (never a task, file or person name).
+* **Partial.** The Work overview "Next on site" card still shows only the activity's own venue.
+* Packs `proj_phase2_crew_briefing_*` (preflight, verify with 6 rows, rollback that stops while a readiness is Not applicable); tests `proj-phase2-crew-briefing.rls.test.ts` (7), `lib/projects/site-briefing.test.ts`, browser flow `project-crew-briefing-flow.mjs`.
+
+### 12.3 The ⓘ help control and the copy pass
+
+`components/ui/info-hint.tsx` (hover, keyboard focus, tap; Escape, outside tap and focus-away close; portal popover above cards and sticky headers, kept inside the screen). `Panel hint=`, `FormDialog help=`, `Modal help=` and `Field help=` place it beside a heading or label; related help shares one icon. Optional explanations, examples and calculation rules sit behind it; ⚠ marks real warnings; errors, blockers, required inputs, who acts next and the consequences of submitting, approving or publishing stay visible. Covered: every Projects & Tasks screen in the Site schedule, Work, Project Plan, Work schedule, Deliverables, Equipment, Budget, Manage team, Feedback & changes, Files & client plan, History and Closeout, plus the Projects list, My Work, Calendar and Handovers; Operations Overview, Upcoming Work and the decision, review and planning panels. Left as they were: the Inventory request forms (shared with Inventory), the Sales-side Operations planning panel. Test: `components/ui/info-hint.test.tsx` (8).
 
 ## Coverage rows
 
@@ -132,6 +150,12 @@ Compact **Milestones** and **Task outputs** summary with links; older department
 | 298 | My site assignments card | panel | My Day | Anyone with a site assignment | The next assignments with a link to the page | S 11.2 | Documented |
 | 299 | Feedback linked to a removed activation | list | Feedback & changes | Readers of the project | The feedback stays readable and says **Activation removed** (no broken link) | S 11.5 | Documented |
 | 300 | Files & client plan shortcut | link | Work page shortcuts; Manage menu | People who can read the project's details | Open the same project's `/documents` page | S 11.5 | Unverified: the reported hosted problem was not reproduced locally; if it persists send the URL and role |
+| 301 | Still missing from the briefing | list | Site schedule, beside Assign crew | Project Manager | Per activity: no venue, no date, choose which run, crew without a call time, readiness not recorded; each with its fix | S 12.2 | Documented |
+| 302 | This run (use the project date) | dialog | Site schedule, an undated run when several runs share a kind | Project Manager | Copies the project's installation or event date to that activity only | S 12.2 | Documented |
+| 303 | Use the activity start | button | Crew dialog, beside a call time | Project Manager | Fills the person's call time from the activity's start (only when it has a time window); the call time stays personal | S 12.2 | Documented |
+| 304 | Crew card: venue, date and readiness | panel | My site assignments, My Day card, Site schedule | Anyone assigned; the Project Manager | The effective venue (labelled), the effective date (labelled), Hardware / Content / App readiness with Not applicable and Not recorded in different words; counts only | S 12.2 | Documented |
+| 305 | The ⓘ help control | control | Beside headings and field labels across Projects & Tasks and Operations | Everyone | Opens on hover, keyboard focus and tap; Escape or a tap elsewhere closes it | S 12.3 | Documented |
+| 306 | Files & client plan page | screen | `/projects/[id]/documents` | People who can read the project's details | Files and links (restricted ones for the Project Manager only), the client timeline and its issued versions | S 12.1 | Documented |
 
 ## Actions
 

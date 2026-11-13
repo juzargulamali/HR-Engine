@@ -62,11 +62,12 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
     <div className="space-y-5">
       <Panel
         title="Members"
-        description="Everyone here can read the project's workspace and its chat group. Access ends the moment someone is removed."
+        description="Members can read the project's workspace and chat group."
+        hint="Access ends the moment someone is removed."
         actions={canAssignPm && live ? <ReassignPmButton projectId={id} candidates={pmCandidates} currentId={project.pm_user_id} /> : undefined}
       >
         {people.length === 0 ? (
-          <EmptyState dense title="No members" description="The Project Manager is always a member. Add the people who work on this project." />
+          <EmptyState dense title="No members" />
         ) : (
           <Table stack>
             <TableHeader>
@@ -116,11 +117,12 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
 
       <Panel
         title="Project teams"
-        description="Each project team has a lead who manages the team's work packages and tasks. They are teams inside this project, not HR departments. A team can be saved before its lead is known; it shows Lead needed until one is chosen."
+        description="Teams inside this project, not HR departments. A team shows Lead needed until a lead is chosen."
+        hint="Each project team has a lead who manages the team's work packages and tasks. A team can be saved before its lead is known."
         actions={canEdit ? <TeamButton projectId={id} members={headOptions} /> : undefined}
       >
         {teams.length === 0 ? (
-          <EmptyState dense title="No project teams yet" description={canEdit ? "Add one for each department that delivers part of this project, such as Programming or Content." : "The Project Manager adds project teams when departments deliver part of the project."} />
+          <EmptyState dense title="No project teams yet" description={canEdit ? undefined : "The Project Manager adds project teams when departments deliver part of the project."} />
         ) : (
           <Table stack>
             <TableHeader><TableRow><TableHead>Team</TableHead><TableHead>Head</TableHead><TableHead>People</TableHead>{canEdit ? <TableHead>Actions</TableHead> : null}</TableRow></TableHeader>
@@ -139,7 +141,7 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
       </Panel>
 
       {isRealPm && live ? (
-        <Panel title="Temporary project leadership" description="Hand the Project Manager's project powers to a member while the PM is away. It carries project powers only: nothing in HR changes.">
+        <Panel title="Temporary project leadership" description="Project powers only: nothing in HR changes." hint="Hand the Project Manager's project powers to a member while the PM is away. A temporary leader cannot change who the Project Manager is or appoint other leaders.">
           {actingNow.length > 0 ? (
             <ul className="mb-4 divide-y divide-border">
               {actingNow.map((p) => (
@@ -151,14 +153,13 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
             </ul>
           ) : null}
           <ActingPmForm projectId={id} members={memberOptions.filter((m) => m.id !== project.pm_user_id && !actingNow.some((a) => a.user_id === m.id && isActingCurrent(a, today)))} />
-          <Muted className="mt-3">A temporary leader cannot change who the Project Manager is or appoint other leaders.</Muted>
         </Panel>
       ) : null}
 
       {showSales ? (
-        <Panel title="Sales relationship" description="The Sales people linked to this project. A link alone gives them the project summary and handover status, nothing else.">
+        <Panel title="Sales relationship" description="A link alone gives them the project summary and handover status, nothing else." hint="These links are recorded once, at handover. A later change of owner in Sales &amp; CRM does not alter them. To let a Sales person take part, add them as a member above.">
           {links.length === 0 ? (
-            <EmptyState dense title="No Sales people are linked" description="The Sales owner and the person who prepared the handover are linked when the Project Manager accepts the handover." />
+            <EmptyState dense title="No Sales people are linked" />
           ) : (
             <ul className="divide-y divide-border">
               {links.map((l) => (
@@ -172,7 +173,6 @@ export default async function ProjectPeoplePage({ params }: { params: Promise<{ 
               ))}
             </ul>
           )}
-          <Muted className="mt-3">These links are recorded once, at handover. A later change of owner in Sales &amp; CRM does not alter them. To let a Sales person take part, add them as a member above.</Muted>
           {(holdsAssignPm(ctx.grants, project.company_id)) && live ? (
             <div className="mt-4 border-t border-border pt-4">
               <h3 className="mb-3 text-sm font-semibold">Link another Sales person</h3>

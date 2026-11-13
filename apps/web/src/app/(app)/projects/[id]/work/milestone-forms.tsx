@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { InfoHint } from "@/components/ui/info-hint";
 import { saveMilestone, setMilestoneStatus } from "@/lib/actions/projectsDelivery";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Input } from "@/components/ui/input";
@@ -34,13 +35,13 @@ export function MilestoneForm({ projectId, milestone, onDone }: { projectId: str
       <Field label="Description (optional)" htmlFor="ms-desc"><Textarea id="ms-desc" name="description" rows={3} defaultValue={milestone?.description ?? ""} /></Field>
       <Field label="Due date" htmlFor="ms-due"><Input id="ms-due" name="dueDate" type="date" value={due} onChange={(e) => setDue(e.target.value)} /></Field>
       {dateChanged ? (
-        <Field label="Why is the date changing?" htmlFor="ms-reason" hint="Kept with the date history. Nothing else is rescheduled automatically.">
+        <Field label="Why is the date changing?" htmlFor="ms-reason" help="Kept with the date history. Nothing else is rescheduled automatically.">
           <Input id="ms-reason" name="reason" required maxLength={300} />
         </Field>
       ) : null}
       <label className="flex items-start gap-2 text-sm">
         <input type="checkbox" name="isRequired" defaultChecked={milestone?.is_required ?? true} className="mt-1 h-4 w-4" />
-        <span><span className="font-medium">Required</span><span className="block text-muted-foreground">Only required milestones count toward the stated progress.</span></span>
+        <span className="font-medium">Required<InfoHint label="required milestones" className="ml-1">Only required milestones count toward the stated progress.</InfoHint></span>
       </label>
       <label className="flex items-start gap-2 text-sm">
         <input type="checkbox" name="clientFacing" defaultChecked={milestone?.client_facing ?? false} className="mt-1 h-4 w-4" />

@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { OsBadge } from "@/components/os/pills";
 import { Muted, Panel } from "@/components/projects/parts";
-import { ActivityDialog, CrewDialog, QuickAddActivitiesDialog, ReadinessDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
+import { ActivityDialog, ApplyProjectDateDialog, CrewDialog, QuickAddActivitiesDialog, ReadinessDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
 import type { Option } from "@/components/projects/delivery/delivery-forms";
 import { barPosition, timelineScale, type TimelineScale } from "@/lib/projects/delivery-plan/insights";
 import { cn } from "@/lib/utils";
 import {
   ACTIVITY_KIND_LABELS, activityDays, activityWhen, CREW_ROLE_LABELS, crewName, formatAt, legText, MISSING_LABELS, READY_LABELS, requestStateText, runGroups, shortDay, siteRange, dateOnly,
-  type SiteActivity, type SiteSchedule, type SiteShipment,
+  gapText, effectiveReadyText, EFFECTIVE_LABELS, type SiteActivity, type SiteBriefing, type SiteSchedule, type SiteShipment,
 } from "@/lib/projects/phase2/model";
 import { dateText } from "@/lib/projects/format";
 
@@ -17,7 +17,7 @@ const weekday = (iso: string) => WEEKDAYS[new Date(`${iso}T00:00:00Z`).getUTCDay
 
 const StateBadge = ({ state }: { state: "tentative" | "confirmed" }) => <OsBadge tone={state === "confirmed" ? "green" : "amber"}>{state === "confirmed" ? "Confirmed" : "Tentative"}</OsBadge>;
 
-function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActivity; projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[] }) {
+function ActivityRow({ a, projectId, schedule, canEdit, members, briefing }: { a: SiteActivity; projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[]; briefing?: SiteBriefing }) {
   const crewByRole = a.crew.reduce<Record<string, string[]>>((o, c) => { (o[c.role] ??= []).push(crewName(c)); return o; }, {});
   const overlapNames = a.crew.filter((c) => (c.overlaps ?? 0) > 0).map((c) => c.name ?? "Someone");
   const calls = a.crew.filter((c) => c.call_at);
@@ -27,11 +27,12 @@ function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActi
         <div className="min-w-0 flex-1 basis-64">
           <p className="break-words text-sm"><span className="font-medium">{a.title}</span> <span className="text-[13px] text-muted-foreground">{a.kind ? ACTIVITY_KIND_LABELS[a.kind] : "Activity"}</span></p>
           <p className="break-words text-[13px] font-medium" data-testid={`site-when-${a.id}`}>{activityWhen(a, schedule.tz)}</p>
-          <p className="break-words text-[13px] text-muted-foreground">{a.location ?? "No location"} · Owner {a.owner_name ?? "not named"}</p>
+          {briefing && !a.start_date && !a.starts_at && briefing.effective.start_date && briefing.effective.date_source === "project" ? <p className="break-words text-[13px]" data-testid={`site-project-date-${a.id}`}>{dateText(briefing.effective.start_date)}{briefing.effective.end_date && briefing.effective.end_date !== briefing.effective.start_date ? ` to ${dateText(briefing.effective.end_date)}` : ""} <span className="text-muted-foreground">(from the project dates; the time is not set)</span></p> : null}
+          <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-venue-${a.id}`}>{a.location ?? (briefing?.effective.venue ? `${briefing.effective.venue} (the project's venue)` : "No venue")} · Owner {a.owner_name ?? "not named"}</p>
           {a.crew.length > 0 ? <p className="break-words text-[13px]" data-testid={`site-crew-text-${a.id}`}>{Object.entries(crewByRole).map(([r, n]) => `${CREW_ROLE_LABELS[r as keyof typeof CREW_ROLE_LABELS]}: ${n.join(", ")}`).join(" · ")}</p> : null}
           {calls.length > 0 ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-calls-${a.id}`}>Call times: {calls.map((c) => `${c.name ?? "Someone"} ${formatAt(c.call_at!, c.call_tz ?? a.tz ?? schedule.tz)}`).join(" · ")}</p> : null}
           {overlapNames.length > 0 ? <p className="break-words text-[13px] font-medium text-[hsl(var(--os-red))]" role="status" data-testid={`site-crew-overlap-${a.id}`}>Already booked at this time: {overlapNames.join(", ")}. Another confirmed activity or booking overlaps.</p> : null}
-          {a.ready && (a.ready.hardware !== "unknown" || a.ready.content !== "unknown" || a.ready.app !== "unknown" || a.ready.note) ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-ready-${a.id}`}>Ready: hardware {READY_LABELS[a.ready.hardware].toLowerCase()}, content {READY_LABELS[a.ready.content].toLowerCase()}, app {READY_LABELS[a.ready.app].toLowerCase()}{a.ready.note ? ` · ${a.ready.note}` : ""}</p> : null}
+          {briefing ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-ready-${a.id}`}>Ready: {(["hardware", "content", "app"] as const).map((k) => `${k} ${EFFECTIVE_LABELS[briefing.ready[k].state].toLowerCase()}${briefing.ready[k].detail ? ` (${briefing.ready[k].detail})` : ""}`).join(", ")}{briefing.ready.note ? `. ${briefing.ready.note}` : ""}</p> : null}
           {a.notes ? <p className="break-words text-[13px] text-muted-foreground">{a.notes}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
@@ -39,6 +40,22 @@ function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActi
           {canEdit ? <><CrewDialog projectId={projectId} activity={a} members={members} /><ReadinessDialog projectId={projectId} activity={a} /><ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} /></> : null}
         </div>
       </div>
+      {canEdit && briefing && briefing.gaps.length > 0 ? (
+        <div className="space-y-1 rounded-md border border-border/70 bg-muted/30 px-2.5 py-1.5 text-[13px]" data-testid={`site-briefing-gaps-${a.id}`}>
+          <p className="font-medium">Still missing from the briefing</p>
+          <ul className="space-y-0.5">
+            {briefing.gaps.map((g) => (
+              <li key={g} className="flex flex-wrap items-center gap-x-2" data-testid={`site-gap-${g}-${a.id}`}>
+                <span className="text-[hsl(var(--os-amber))]">{gapText(g, briefing, a.kind ? ACTIVITY_KIND_LABELS[a.kind] : "activity")}</span>
+                {g === "choose_run" ? <ApplyProjectDateDialog projectId={projectId} activity={a} projectStart={briefing.effective.project_start} projectEnd={briefing.effective.project_end} /> : null}
+                {g === "call_time" ? <CrewDialog projectId={projectId} activity={a} members={members} label="Set call times" /> : null}
+                {g === "readiness" ? <ReadinessDialog projectId={projectId} activity={a} label="Set readiness" /> : null}
+                {g === "venue" || g === "date" ? <ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} label={g === "venue" ? "Add the venue" : "Add the date"} triggerVariant="ghost" /> : null}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       {a.missing.length > 0 ? (
         <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[13px]" data-testid={`site-missing-${a.id}`}>
           {a.missing.map((m) => (
@@ -80,7 +97,7 @@ function ShipmentRow({ s, projectId, schedule, canEdit, activities, requests }: 
 }
 
 /** The Site schedule: what happens on site (separate runs of setup, show and dismantling), who works each, and the shipments, drawn from the same records the Work overview reads. */
-export function SiteSchedulePanel({ projectId, schedule, canEdit, members, requests }: { projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[]; requests: { id: string; name: string }[] }) {
+export function SiteSchedulePanel({ projectId, schedule, canEdit, members, requests, briefings }: { projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[]; requests: { id: string; name: string }[]; briefings?: Record<string, SiteBriefing> }) {
   const acts = schedule.activities.filter((a) => a.status !== "cancelled");
   const activityChoices = acts.map((a) => ({ id: a.id, name: a.title }));
   const firstSetup = acts.find((a) => a.kind === "setup" && (a.start_date || a.starts_at));
@@ -88,19 +105,18 @@ export function SiteSchedulePanel({ projectId, schedule, canEdit, members, reque
   const differs = !!firstSetupDay && !!schedule.committed.install_start && firstSetupDay !== schedule.committed.install_start;
   return (
     <div id="site-schedule" className="space-y-4" data-testid="site-schedule">
-      <Panel title="Site schedule" description="What happens on site and when equipment ships: setup, show and dismantling, run by run, with each run's crew and the shipments that supply it."
+      <Panel title="Site schedule" hint={<span data-testid="site-vs-plan">This is the <strong>Site schedule</strong>: where the team is and when equipment arrives, run by run, with each run&apos;s crew and the shipments that supply it. The <strong>work schedule</strong> (tasks, requirements and milestones) is under <Link href={`/projects/${projectId}/delivery?view=timeline`} className="underline underline-offset-2">Project Plan, Work schedule</Link>. Equipment stays installed only while an activity says so: two runs are two separate records.</span>}
         actions={canEdit ? <><ActivityDialog projectId={projectId} members={members} tz={schedule.tz} triggerVariant="default" /><QuickAddActivitiesDialog projectId={projectId} members={members} /><ShipmentDialog projectId={projectId} activities={activityChoices} requests={requests} tz={schedule.tz} /></> : undefined}>
-        <p className="mb-3 text-[13px] text-muted-foreground" data-testid="site-vs-plan">This is the <strong>Site schedule</strong>: where the team is and when equipment arrives. The <strong>work schedule</strong> (tasks, requirements and milestones) is under <Link href={`/projects/${projectId}/delivery?view=timeline`} className="underline underline-offset-2">Project Plan, Timeline</Link>. Equipment stays installed only while an activity says so: two runs are two separate records.</p>
-        {differs ? <p className="mb-3 rounded-md border border-border px-3 py-2 text-[13px]" data-testid="site-committed-note">The first setup here starts {shortDay(firstSetupDay!)}, but the project&apos;s committed installation date is {dateText(schedule.committed.install_start)}. Changing the committed date is done on the project (Manage project), where equipment bookings are reviewed.</p> : null}
-        {acts.length === 0 ? <Muted>No site activities yet. {canEdit ? "Add the setup, the show and the dismantling, or use Quick add for several at once. A date is enough: the time and the crew can follow." : "The Project Manager adds them."}</Muted> : runGroups(acts).map((g) => (
+        {differs ? <p className="mb-3 rounded-md border border-border px-3 py-2 text-[13px]" data-testid="site-committed-note">⚠ The first setup here starts {shortDay(firstSetupDay!)}, but the project&apos;s committed installation date is {dateText(schedule.committed.install_start)}. Changing the committed date is done on the project (Manage project), where equipment bookings are reviewed.</p> : null}
+        {acts.length === 0 ? <Muted>No site activities yet. {canEdit ? "Add the setup, the show and the dismantling, or use Quick add." : "The Project Manager adds them."}</Muted> : runGroups(acts).map((g) => (
           <section key={g.run} aria-label={g.run} className="mb-3 last:mb-0" data-testid={`site-run-${g.run}`}>
             <h4 className="border-b border-border pb-1 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{g.run}</h4>
-            <ul className="divide-y divide-border/70">{g.activities.map((a) => <ActivityRow key={a.id} a={a} projectId={projectId} schedule={schedule} canEdit={canEdit} members={members} />)}</ul>
+            <ul className="divide-y divide-border/70">{g.activities.map((a) => <ActivityRow key={a.id} a={a} projectId={projectId} schedule={schedule} canEdit={canEdit} members={members} briefing={briefings?.[a.id]} />)}</ul>
           </section>
         ))}
       </Panel>
-      <Panel title={`Shipments (${schedule.shipments.length})`} description="Departure, expected arrival and return, each in its own time zone. Reservation, dispatch and return state is read from Inventory.">
-        {schedule.shipments.length === 0 ? <Muted>No shipments recorded. {canEdit ? "Add one when equipment travels to site, especially from overseas." : ""}</Muted> : <ul className="divide-y divide-border/70">{schedule.shipments.map((s) => <ShipmentRow key={s.id} s={s} projectId={projectId} schedule={schedule} canEdit={canEdit} activities={activityChoices} requests={requests} />)}</ul>}
+      <Panel title={`Shipments (${schedule.shipments.length})`} hint="Departure, expected arrival and return, each in its own time zone. Reservation, dispatch and return state is read from Inventory, never typed here.">
+        {schedule.shipments.length === 0 ? <Muted>No shipments recorded.{canEdit ? " Add one when equipment travels to site." : ""}</Muted> : <ul className="divide-y divide-border/70">{schedule.shipments.map((s) => <ShipmentRow key={s.id} s={s} projectId={projectId} schedule={schedule} canEdit={canEdit} activities={activityChoices} requests={requests} />)}</ul>}
       </Panel>
     </div>
   );

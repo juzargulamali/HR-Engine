@@ -7,6 +7,7 @@ import { OsBadge } from "@/components/os/pills";
 import { Button } from "@/components/ui/button";
 import { Muted } from "@/components/projects/parts";
 import { barPosition, dayIndex, formatSpan, timelineScale, todayScrollTarget, type TimelineMode, type TimelineModel, type TimelineRow, type TimelineScale, type Tone } from "@/lib/projects/delivery-plan/insights";
+import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 
 const BAR: Record<Tone, string> = {
@@ -174,7 +175,14 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
     <div className="min-w-0 max-w-full space-y-3" data-testid="plan-timeline" data-mode={scale?.mode ?? "none"} data-user-mode={userMode ?? "auto"}>
       {!scale ? <Muted>None of this work has a start or due date yet, so there is nothing to draw across. It is listed below.</Muted> : (
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div role="group" aria-label="Schedule scale" className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5">{modeButton("day", "Day")}{modeButton("week", "Week")}</div>
+          <div className="flex items-center gap-1.5">
+            <div role="group" aria-label="Schedule scale" className="inline-flex items-center gap-0.5 rounded-md border border-border p-0.5">{modeButton("day", "Day")}{modeButton("week", "Week")}</div>
+            <InfoHint label="reading the Work schedule" testId="tl-help">
+              <p>{scale.mode === "day" ? "Every day is a column; the shaded column marked Today is today. " : "Labels are weekly and alternate weeks are shaded; each row states its exact dates. The shaded column marked Today is today. "}A bar is a range, an outlined marker is a single recorded date (a due date or a start date).</p>
+              <p className="mt-1.5">Dates come from the task once a requirement is released, and from the plan before; a requirement without a due date of its own shows its activation&apos;s.</p>
+              <p className="mt-1.5">Bars are read-only: change a date on the task or in the Breakdown; it follows the task&apos;s own approval rules.</p>
+            </InfoHint>
+          </div>
           <Button type="button" variant="outline" size="sm" onClick={jumpToToday} disabled={todayIdx < 0} data-testid="tl-today-jump"
             title={todayIdx < 0 ? "Today is outside this schedule" : "Scroll to today"}><CalendarCheck className="h-4 w-4" aria-hidden /> Today</Button>
         </div>
@@ -265,16 +273,12 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
       {model.unscheduled.length > 0 ? (
         <section aria-label="Unscheduled work" data-testid="tl-unscheduled" className="rounded-md border border-dashed border-border p-3">
           <h3 className="text-sm font-semibold">Unscheduled ({model.unscheduled.length})</h3>
-          <p className="text-[13px] text-muted-foreground">No start or due date, on the requirement or its activation. Give each a date in the Breakdown.</p>
+          <p className="text-[13px] text-muted-foreground">No start or due date. Give each a date in the Breakdown.</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-sm">
             {model.unscheduled.map((r) => <li key={r.key}><Link href={`/projects/${projectId}/delivery?open=${r.itemKey}#${r.anchor}`} className="underline-offset-2 hover:underline">{r.label}</Link> <span className="text-muted-foreground">{r.sub}</span></li>)}
           </ul>
         </section>
       ) : null}
-      <p className="text-[13px] text-muted-foreground">
-        {scale?.mode === "day" ? "Every day is a column; the shaded column marked Today is today. " : scale ? "Labels are weekly and alternate weeks are shaded; each row states its exact dates. The shaded column marked Today is today. " : ""}
-        A bar is a range, an outlined marker is a single recorded date (a due date or a start date). Dates come from the task once a requirement is released, and from the plan before; a requirement without a due date of its own shows its activation&apos;s. Bars are read-only: change a date on the task or in the Breakdown.
-      </p>
     </div>
   );
 }

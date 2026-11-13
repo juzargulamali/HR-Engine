@@ -22,7 +22,8 @@ describe("the event edition on the project details card", () => {
     expect(screen.getByTestId("edition-label").textContent).toBe("Fictional Expo · 2027 · Dubai");
     expect(container.textContent).toContain("Venue: Expo Centre, Dubai");
     expect(container.textContent).toContain("Published show dates: 1 Mar 2027 to 5 Mar 2027");
-    expect(container.textContent).toContain("These are the dates the organiser published when the handover was submitted. Later changes to the event in Sales do not change this project.");
+    expect(container.textContent).toContain("Published dates, as copied at handover");
+    expect(screen.getByTestId("info-hint-the-published-dates")).toBeTruthy();       // the longer note is behind the ⓘ
     // the project's own delivery dates are still their own facts
     expect(container.textContent).toContain("2 Mar 2027 to 4 Mar 2027");
     expect(screen.getByRole("link", { name: "Open event in Sales" }).getAttribute("href")).toBe("/sales/events/ev1?edition=e1");

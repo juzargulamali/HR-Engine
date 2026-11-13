@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { InfoHint } from "@/components/ui/info-hint";
 import { createProjectTask } from "@/lib/actions/projectsDelivery";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Input } from "@/components/ui/input";
@@ -47,7 +48,7 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
         <Field label="Description (optional)" htmlFor="qt-desc"><Textarea id="qt-desc" name="description" rows={3} /></Field>
         <div className="grid gap-3 sm:grid-cols-2">
           {options.teams.length > 0 ? (
-            <Field label="Project team" htmlFor="qt-team" hint="Leave as automatic unless the task belongs to a project team.">
+            <Field label="Project team" htmlFor="qt-team" help="Leave as automatic unless the task belongs to a project team.">
               <Select id="qt-team" value={teamOverride} onChange={(e) => setTeamOverride(e.target.value)}>
                 <option value="">Automatic</option>
                 {options.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -74,18 +75,18 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
         {options.canRequireReview ? (
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" name="requiresReview" className="mt-1 h-4 w-4" />
-            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">The assignee sends it for review; a team lead or the Project Manager accepts it. Without this, the owner completes it.</span></span>
+            <span className="font-medium">Needs review<InfoHint label="needs review" className="ml-1">The assignee sends it for review; a team lead or the Project Manager accepts it. Without this, the owner completes it.</InfoHint></span>
           </label>
         ) : null}
         {tasks.length > 0 ? (
-          <Field label="Depends on (optional)" htmlFor="qt-deps" hint="Hold Ctrl or Cmd to pick several. A dependency never moves anyone's dates.">
+          <Field label="Depends on (optional)" htmlFor="qt-deps" help="Hold Ctrl or Cmd to pick several. A dependency never moves anyone's dates.">
             <select id="qt-deps" name="dependsOn" multiple size={Math.min(5, tasks.length)} className="w-full rounded-md border border-input bg-field px-3 py-1 text-sm">
               {tasks.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </select>
           </Field>
         ) : null}
         {collaborators.length > 0 ? (
-          <Field label="Collaborators (optional)" htmlFor="qt-collab" hint="One person is accountable (the assignee). Collaborators help.">
+          <Field label="Collaborators (optional)" htmlFor="qt-collab" help="One person is accountable (the assignee). Collaborators help.">
             <select id="qt-collab" name="collaboratorIds" multiple size={Math.min(5, collaborators.length)} className="w-full rounded-md border border-input bg-field px-3 py-1 text-sm">
               {collaborators.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
@@ -98,7 +99,7 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
 
 export function QuickAddTask(props: { projectId: string; options: NewTaskOptions; choices: QuickAssignee[]; milestones: PickOption[]; tasks: PickOption[]; collaborators: PickOption[]; defaultAssignee: string }) {
   return (
-    <QuickAdd label="Add task" title="Add task" description="Three fields are enough. Add more details only if you need them.">
+    <QuickAdd label="Add task" title="Add task">
       {({ close }) => <QuickTaskForm {...props} onDone={close} />}
     </QuickAdd>
   );

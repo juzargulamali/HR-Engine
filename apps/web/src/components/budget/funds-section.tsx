@@ -54,13 +54,12 @@ function RecordFunding({ view }: { view: PbxBudgetView }) {
         </Field>
         <Field label="Date" htmlFor="pbx-fd"><Input id="pbx-fd" type="date" value={date} onChange={(e) => setDate(e.target.value)} required /></Field>
         <Field label={`Amount (${currency})`} htmlFor="pbx-fa"><Input id="pbx-fa" inputMode="decimal" value={amount} onChange={(e) => setAmount(cleanDecimal(e.target.value))} required /></Field>
-        <Field label="How was it provided?" htmlFor="pbx-fm">
+        <Field label="How was it provided?" htmlFor="pbx-fm" help="A Pluto allocation or card limit is spending power, not a cash advance. It is never counted as money owed back.">
           <Select id="pbx-fm" value={method} onChange={(e) => setMethod(e.target.value as FundingMethod)}>
             {FUNDING_METHODS.map((m) => <option key={m} value={m}>{FUNDING_METHOD_LABELS[m]}</option>)}
           </Select>
         </Field>
       </div>
-      {method === "pluto" ? <p className="text-sm text-muted-foreground">A Pluto allocation or card limit is spending power, not a cash advance. It is never counted as money owed back.</p> : null}
       {method === "other" ? (
         <Field label="Is this money the person must account for and return if unspent?" htmlFor="pbx-fo" hint="Choose &ldquo;Yes&rdquo; for money handed over like a cash advance; &ldquo;No&rdquo; for a company card or similar.">
           <Select id="pbx-fo" value={otherIsAdvance} onChange={(e) => setOtherIsAdvance(e.target.value as "yes" | "no" | "")} required>
@@ -126,14 +125,14 @@ export function FundsSection({ view }: { view: PbxBudgetView }) {
       ) : null}
 
       {canRecord ? (
-        <Panel title="Record funding" description="One entry per payment or allocation. These are declarations of what Finance handed over, not independent verification; an entry that involves you yourself is flagged. A recorded entry is never edited: if it was wrong, reverse it with a reason and record the correct one.">
+        <Panel title="Record funding" description="A recorded entry is never edited: reverse it with a reason and record the correct one." hint="One entry per payment or allocation. Entries are declarations of what Finance handed over, not independent verification; an entry that involves you yourself is flagged.">
           {approved ? <RecordFunding view={view} /> : <Alert role="status" className="text-sm">Approve the budget before recording funds.</Alert>}
         </Panel>
       ) : null}
 
-      <Panel title="Funding entries">
+      <Panel title="Funding entries" hint="Many projects are paid for personally and reimbursed afterwards; that is settled on the Settlement tab.">
         {entries.length === 0 ? (
-          <Muted>No funds recorded. Many projects are paid for personally and reimbursed afterwards; that is settled on the Settlement tab.</Muted>
+          <Muted>No funds recorded.</Muted>
         ) : (
           <Table stack>
             <TableHeader>

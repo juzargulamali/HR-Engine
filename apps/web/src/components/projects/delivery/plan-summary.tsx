@@ -62,7 +62,7 @@ export function MilestonePanel({ projectId, milestones }: { projectId: string; m
   if (rows.length === 0) return null;
   const word = (p: MilestoneProgress) => (p.confirmed ? "Confirmed" : p.ready ? "All tasks complete: ready to confirm" : p.total === 0 ? "No tasks linked yet" : "Not ready");
   return (
-    <Panel title="Milestones" description="Each milestone counts the tasks linked to it. Complete tasks make it ready; confirming the milestone is a separate step on the Work page.">
+    <Panel title="Milestones" hint="Each milestone counts the tasks linked to it. Complete tasks make it ready; confirming the milestone is a separate step on the Work page.">
       <ul className="divide-y divide-border" data-testid="plan-milestones">
         {rows.map(({ m, p }) => (
           <li key={m.id} className="space-y-1.5 py-2.5" data-testid={`milestone-${m.title}`}>

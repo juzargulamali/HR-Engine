@@ -2,6 +2,8 @@
 
 Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (every screen, numbered) and [action catalogue](./projects-action-catalogue.md) (every action that changes data). The two tables at the end of this file are their source.
 
+Copy note (Phase 2 follow-up 2, 2026-11-14): explanatory text on Manage team (People), Feedback & changes, History, Complete project and the Manage dialogs moved behind one shared ⓘ beside the heading or field (member-access and team-lead explanations, correction-versus-change guidance, evidence and date-effect examples, the history and audit-trail notes, the kind-by-kind completion explanations); ⚠ marks real warnings and load failures; "Lead needed", the explicit access notice before saving a team, approval consequences, "Completing marks nothing Done. Every item below needs a decision and a reason" and the blockers stay on the page. Panel descriptions, dialog descriptions and field hints quoted below that are optional explanations now read inside the ⓘ popover. "Department team" is now "Project team" and "Team lead" (follow-up 1).
+
 Status: written against the Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, merged as PR #82 (merge `30c7895adc75f834a60b00ed3bca7015b1654282`, 2026-11-11); code read only, nothing run (no app, no database, no test, no hosted project). Every claim cites the file it was read from. Anything that code reading could not confirm is marked `Unverified`. No hosted fact is stated here. Index: [`projects-phase1-changes.md`](./projects-phase1-changes.md) (rows 11, 13, 14, 15). Chat membership: [`app-chat.md`](./app-chat.md) section 9.
 
 Short names used for sources:
@@ -175,7 +177,7 @@ What the database enforces behind those sentences, for the actions in this file:
 * **Reach:** Manage project > **Feedback & changes**. URL `/projects/[id]/changes`. Page title "Feedback & changes" (`P/[id]/changes/page.tsx`). Notifications about scope proposals and decisions link here (`apps/web/src/lib/projects/notification-text.ts`).
 * **Who can see it:** details level only. Enforced by the page redirect and by the select policies `proj_can_view_details(project_id)` on `proj_feedback` and `proj_scope_changes` (`M500`). The cost effect table `proj_scope_change_commercial` is readable only with `view_commercial` (`M500`), and the page reads it only for a commercial reader.
 * **Purpose:** record what the client asked for, give it a person and an outcome, and move anything outside the agreed scope through a recorded proposal and decision.
-* **First line on the page:** "Nothing here approves scope, price or a deadline by itself: not a chat message, not an attachment, not feedback being recorded. A scope change is approved only by someone with scope approval, with a reason, on this page."
+* **First line on the page:** "Nothing here approves scope, price or a deadline by itself. Only someone with scope approval can approve a scope change, with a reason, on this page; chat, attachments and recorded feedback approve nothing."
 * On a finished project every button on this page is hidden; the lists stay readable.
 
 ### 2.1 Panel "Client feedback"

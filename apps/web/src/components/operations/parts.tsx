@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
+import { InfoHint } from "@/components/ui/info-hint";
 import { LoadError } from "@/components/workspace/states";
 import type { OpsResult } from "@/lib/operations/data";
 import { cn } from "@/lib/utils";
@@ -25,3 +26,13 @@ export function ReadState({ result, what, retryHref }: { result: Exclude<OpsResu
 }
 
 export const Unknown = ({ children = "Not recorded" }: { children?: React.ReactNode }) => <span className="text-muted-foreground">{children}</span>;
+
+/** The page heading of an Operations screen with its optional explanation behind a shared ⓘ beside the title (instead of a paragraph under it). */
+export function OpsHeader({ title, subtitle, help }: { title: string; subtitle?: string; help?: React.ReactNode }) {
+  return (
+    <div className="min-w-0">
+      <h1 className="text-2xl font-semibold">{title}{help ? <InfoHint label={title.toLowerCase()} className="ml-1.5">{help}</InfoHint> : null}</h1>
+      {subtitle ? <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{subtitle}</p> : null}
+    </div>
+  );
+}

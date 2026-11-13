@@ -1067,7 +1067,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "outdated timeline",
       "out of date"
     ],
-    "summary": "Files & client plan holds the project's files and links and the client timeline. Anyone on the project can add and open files and links, and remove what they added; the Project Manager can remove any. The client timeline shows only what was ticked for the client. Issuing freezes a numbered version and sends nothing; sent and accepted are recorded separately by the Project Manager. If the plan changes later, the latest version is marked Outdated until a new one is issued.",
+    "summary": "Files & client plan holds the project's files and links and the client timeline. Anyone on the project can add and open files and links, and remove what they added; the Project Manager can remove any, and alone sees files marked Restricted. The client timeline shows only what was ticked for the client. Issuing freezes a numbered version and sends nothing; sent and accepted are recorded separately by the Project Manager. If the plan changes later, the latest version is marked Outdated until a new one is issued.",
     "steps": [
       "Open the project, press Manage project and choose Files & client plan.",
       "To add a file choose Upload a file, pick the file, choose What is it and press Upload file. For a link choose Add a link and press Add link.",
@@ -1674,7 +1674,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open Operations, then Overview, and scroll to Project health.",
       "Read the reasons under the label. Each one opens the screen where it is dealt with.",
-      "Press How the label is decided to read the rules.",
+      "Open the ⓘ beside Project health to read how the label is decided.",
       "The label follows the records. To change it, speak to the Project Manager or the warehouse named on the item."
     ],
     "links": [
@@ -1930,7 +1930,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "On the Site schedule press Assign crew on a run and add people as installation, standby, backup or dismantling.",
       "Press Add shipment, enter each leg with its own time zone, and say which installation it supports.",
       "If the shipment is linked to an equipment request, its reservation, dispatch and return state comes from Inventory. Change that in Inventory, not here.",
-      "A red warning means the shipment arrives after the installation starts."
+      "A red warning means the shipment arrives after the installation starts.",
+      "Under each run, Still missing from the briefing lists what the crew still lacks (see the crew card topic)."
     ],
     "links": [
       {
@@ -1940,6 +1941,79 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/projects/[id]/plan"
+    ]
+  },
+  {
+    "id": "projects-crew-card-briefing",
+    "area": "projects",
+    "title": "Make the crew card complete: venue, date, call time and readiness",
+    "keywords": [
+      "crew card",
+      "call time",
+      "use the activity start",
+      "project date",
+      "which run",
+      "hardware ready",
+      "not applicable",
+      "not recorded",
+      "my site assignment is empty",
+      "venue missing",
+      "briefing"
+    ],
+    "summary": "The crew card says where, when and what is ready, from the project's own records, so nothing is typed twice. The venue is the activity's own, else the project's, and says so. The date is the activity's own, else the project's installation or event date, only when the project has exactly one activity of that kind; with several runs nothing is guessed. A call time is personal: until the Project Manager sets it, the card says Not set yet.",
+    "steps": [
+      "Project Manager: open Project Plan, Site and read Still missing from the briefing under each run.",
+      "If it says to choose which run a project date belongs to, press This run on the right one. Only that run gets the date.",
+      "Press Crew (or Set call times), and beside a person's call time press Use the activity start. It needs a start time on the activity.",
+      "Press Brief to set Hardware, Content and App by hand. Leave Not recorded to use the Project Plan; choose Not applicable when it does not apply.",
+      "Anyone assigned opens My site assignments to read their card. Not applicable and Not recorded mean different things."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      },
+      {
+        "label": "My site assignments",
+        "href": "/site-assignments"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan",
+      "/site-assignments"
+    ]
+  },
+  {
+    "id": "projects-help-buttons",
+    "area": "projects",
+    "title": "The ⓘ help buttons",
+    "keywords": [
+      "info button",
+      "help icon",
+      "ⓘ",
+      "explanation",
+      "where did the explanation go",
+      "hover help",
+      "more about"
+    ],
+    "summary": "Longer explanations, examples and rules sit behind a small ⓘ next to the heading or field they explain. Warnings, errors, what blocks you, who acts next and what submitting, approving or publishing will do stay on the page.",
+    "steps": [
+      "Move the pointer over the ⓘ, or tab to it, or tap it on a phone.",
+      "Read the note. Press Escape, move away or tap elsewhere to close it."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      },
+      {
+        "label": "Operations",
+        "href": "/operations"
+      }
+    ],
+    "screens": [
+      "/projects",
+      "/operations"
     ]
   },
   {
@@ -2123,11 +2197,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "activation removed",
       "feedback link"
     ],
-    "summary": "A project's Work page lists a short summary of Milestones and Task outputs with links; the output counts open Deliverables filtered to missing, awaiting review, changes requested or approved. The older team-level deliverables are now Work packages: work the Project Manager gives to a project team. Feedback linked to an activation that was removed stays readable and says Activation removed. The Files & client plan link on Work opens the project's files and client plan.",
+    "summary": "Work lists the real task outputs with their review state and a link to each version, and shows milestone progress: accepted of total, next, overdue. With no milestones the Project Manager sees a small Add milestone button; tasks never need one. The older team-level deliverables are now Work packages, in a collapsed section that appears only when some exist. Feedback linked to a removed activation says Activation removed.",
     "steps": [
       "Open the project's Work page and read Milestones and Task outputs.",
       "Press a count to open the matching Deliverables list.",
-      "Open Work packages to see what each team was given."
+      "Open the collapsed Work packages section, when it is there, to see what each team was given."
     ],
     "links": [
       {

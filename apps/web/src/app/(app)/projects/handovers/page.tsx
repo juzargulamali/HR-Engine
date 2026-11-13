@@ -7,7 +7,8 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { HandoverBrief } from "@/components/projects/handover-brief";
 import { HandoverProcess } from "@/components/projects/handover-process";
 import { HandoverStatusBadge } from "@/components/projects/badges";
-import { Muted, PageHeader, Panel } from "@/components/projects/parts";
+import { PageHeader, Muted, Panel } from "@/components/projects/parts";
+import { PageTitle } from "@/components/projects/page-title";
 import { LoadError } from "@/components/workspace/states";
 import { formatDateTime } from "@/components/sales/format";
 import { getProjectsContext } from "@/lib/projects/context";
@@ -122,10 +123,11 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="Handovers"
-        description="Sales hands a won opportunity to delivery here, in one process: prepare brief, submit, assign PM, PM accepts, project created. A founder names the Project Manager, who accepts it (which creates the project) or asks Sales a question. The brief carries no prices, budgets or purchase-order details."
-      />
+      <PageTitle title="Handovers" hint={<>
+        <p>Sales hands a won opportunity to delivery here, in one process: prepare brief, submit, assign PM, PM accepts, project created.</p>
+        <p className="mt-1.5">A founder names the Project Manager, who accepts it (which creates the project) or asks Sales a question.</p>
+        <p className="mt-1.5">The brief carries no prices, budgets or purchase-order details.</p>
+      </>} />
 
       {staffFailed ? <LoadError what="the staff names" retryHref={BASE} note="Where a name reads “name could not load” the person is not unknown: the directory could not be read." /> : null}
 
@@ -167,13 +169,13 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
       ) : null}
 
       {notAsked(otherOpen).length > 0 ? (
-        <Panel title={`Open, waiting on someone else (${otherOpen.length})`} description="With the named Project Manager or back with Sales. Nothing for you to do; open a brief to read it.">
+        <Panel title={`Open, waiting on someone else (${otherOpen.length})`} description="Nothing for you to do." hint="These are with the named Project Manager or back with Sales. Open a brief to read it.">
           <ul className="divide-y divide-border">{notAsked(otherOpen).map(row)}</ul>
         </Panel>
       ) : null}
 
       {closedRes.error ? <LoadError what="the finished handovers" retryHref={withParams(BASE, sp)} note="Open handovers above are complete; only the accepted and withdrawn ones could not be read." /> : closedTotal && closedTotal > 0 ? (
-        <Panel title={`Accepted and withdrawn (${closedTotal})`} description="History, newest first. Open handovers are never listed here, so paging through history cannot hide one that is waiting.">
+        <Panel title={`Accepted and withdrawn (${closedTotal})`} hint="History, newest first. Open handovers are never listed here, so paging through history cannot hide one that is waiting.">
           {closed.length === 0 ? <Muted>No handover on this page.</Muted> : <ul className="divide-y divide-border">{closed.map(row)}</ul>}
           {pages > 1 ? (
             <nav aria-label="History pages" className="mt-3 flex flex-wrap items-center gap-3 text-sm">

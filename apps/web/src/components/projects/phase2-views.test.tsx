@@ -59,7 +59,7 @@ describe("task output section", () => {
     const { rerender } = render(<TaskOutputSection projectId="p1" task={{ id: "t1", version: 3, status: "done" }} row={row({ state: "approved", current: approved, versions: [approved], versions_count: 1 })} tz="Asia/Dubai" files={null} flags={{ ...flags, readOnly: true }} />);
     expect(screen.getAllByTestId("output-attached-at")[0]!.textContent).toBe("10 Nov 2027, 10:05 Asia/Dubai");
     expect(screen.getAllByTestId("output-approved-at")[0]!.textContent).toBe("12 Nov 2027, 12:30 Asia/Dubai");
-    expect(screen.getAllByTestId("output-mutable-note")[0]!.textContent).toMatch(/document that can change after approval/);
+    expect(screen.getAllByTestId("output-mutable-note")[0]!.textContent).toMatch(/link can change after approval/);
     expect(screen.queryByRole("button", { name: /Submit|Review|Edit expected/ })).toBeNull();
     const secret = ver({ file: { id: null, accessible: false, restricted: true } });
     rerender(<TaskOutputSection projectId="p1" task={{ id: "t1", version: 3, status: "in_progress" }} row={row({ state: "awaiting_review", current: secret, versions: [secret], versions_count: 1 })} tz={null} files={null} flags={flags} />);
@@ -122,6 +122,7 @@ describe("site schedule (RAF)", () => {
     expect(screen.getByTestId("site-when-a5").textContent).toBe("14–15 Nov (time to confirm)");
     expect(within(r2).getByText("Setup (run 2)")).toBeTruthy();
     expect(within(r1).queryByText("Setup (run 2)")).toBeNull();                                                      // run 2 is not drawn under run 1
+    fireEvent.pointerEnter(screen.getByTestId("info-hint-site-schedule"), { pointerType: "mouse" });                       // the explanation is behind the ⓘ beside the title
     expect(screen.getByTestId("site-vs-plan").textContent).toMatch(/Site schedule.*work schedule.*two runs are two separate records/);
     expect(screen.getByTestId("site-crew-text-a1").textContent).toBe("Installation: Fictional Cara");
     const miss = screen.getByTestId("site-missing-a4");

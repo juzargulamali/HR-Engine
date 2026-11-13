@@ -64,7 +64,7 @@ export function MemberActions({ projectId, person, teams, openTasks, others, can
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="userId" value={person.id} />
           {openTasks > 0 ? (
-            <Field label={`Who takes over their ${openTasks} open task${openTasks === 1 ? "" : "s"}?`} htmlFor={`rt-${person.id}`} hint="Open tasks are never left with someone who cannot see them.">
+            <Field label={`Who takes over their ${openTasks} open task${openTasks === 1 ? "" : "s"}?`} htmlFor={`rt-${person.id}`} help="Open tasks are never left with someone who cannot see them.">
               <Select id={`rt-${person.id}`} name="reassignTo" required defaultValue="">
                 <option value="" disabled>Choose a member</option>
                 {others.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}
@@ -86,7 +86,7 @@ export function TeamButton({ projectId, team, members }: { projectId: string; te
     <>
       <Button type="button" size="sm" variant={team ? "outline" : "default"} onClick={() => setOpen(true)}>{team ? "Edit" : "Add project team"}</Button>
       {team ? <Button type="button" size="sm" variant="outline" onClick={() => setRemoving(true)}>Remove</Button> : null}
-      <Modal open={open} onClose={() => setOpen(false)} title={team ? "Edit project team" : "Add project team"} description="A project team is a group inside this project with its own head, who manages the team's deliverables and tasks.">
+      <Modal open={open} onClose={() => setOpen(false)} title={team ? "Edit project team" : "Add project team"} help="A project team is a group inside this project with its own head, who manages the team's work packages and tasks.">
         <ActionForm action={saveProjectTeam} submitLabel="Save team" onDone={() => setOpen(false)} secondary={cancel(() => setOpen(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           {team ? <input type="hidden" name="teamId" value={team.id} /> : null}
@@ -148,7 +148,8 @@ export function ReassignPmButton({ projectId, candidates, currentId }: { project
   return (
     <>
       <Button type="button" variant="outline" onClick={() => setOpen(true)}>Change Project Manager</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Change Project Manager" description="The new Project Manager is added to the project; the previous one stays as an ordinary member. Both are told, the reason is kept in the project's history, and tasks and equipment bookings stay as they are.">
+      <Modal open={open} onClose={() => setOpen(false)} title="Change Project Manager" description="The new Project Manager is added to the project; the previous one stays as an ordinary member. Both are told."
+        help="The reason is kept in the project's history. Tasks and equipment bookings stay as they are.">
         <ActionForm action={assignProjectPm} submitLabel="Change Project Manager" onDone={() => setOpen(false)} secondary={cancel(() => setOpen(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           <Field label="New Project Manager" htmlFor="pm-new">
@@ -172,7 +173,7 @@ export function SalesLinkForm({ projectId, candidates }: { projectId: string; ca
     <ActionForm action={setSalesLink} submitLabel="Add Sales link" resetOnSuccess>
       <input type="hidden" name="projectId" value={projectId} />
       <input type="hidden" name="linked" value="true" />
-      <Field label="Sales person" htmlFor="sl-user" hint="The database accepts only people with Sales access in this company.">
+      <Field label="Sales person" htmlFor="sl-user" help="Only people with Sales access in this company can be chosen.">
         <Select id="sl-user" name="userId" required defaultValue=""><option value="" disabled>Choose a person</option>{candidates.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
       </Field>
     </ActionForm>

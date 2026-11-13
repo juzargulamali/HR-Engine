@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...(rest as Record<string, unknown>)}>{children}</a> }));
@@ -108,7 +108,11 @@ describe("Operations Overview", () => {
     expect(within(risky).getByRole("link", { name: /Installation starts 2027-02-26: equipment short on UAE-R-00002/ }).getAttribute("href")).toBe("/projects/p2/equipment");
     expect(within(screen.getByTestId("ops-project-UAE-P-2027-0001")).getByRole("link", { name: "Delivery complete, 3 units still out" }).getAttribute("href")).toBe("/projects/p1/equipment");
     expect(within(screen.getByTestId("ops-project-UAE-P-2027-0001")).getByRole("link", { name: "Project chat" }).getAttribute("href")).toBe("/operations?company=c1&chat=g1");
-    expect(screen.getByText("How the label is decided")).toBeTruthy();
+    // the rules live behind the ⓘ beside the heading (hover, focus or tap), not in the page
+    expect(screen.queryByText("How the label is decided")).toBeNull();
+    fireEvent.pointerEnter(screen.getByTestId("info-hint-project-health"), { pointerType: "mouse" });
+    expect(screen.getByRole("tooltip").textContent).toContain("How the label is decided");
+    expect(screen.getByRole("tooltip").textContent).toMatch(/not a score/);
     expect(document.body.textContent).not.toMatch(/score \d|\d+ ?%|performance score/i);
   });
 
@@ -151,7 +155,7 @@ describe("Operations Overview", () => {
     const sales = within(screen.getByTestId("ops-summary")).getByRole("link", { name: /Upcoming Sales work/ });
     expect(sales.textContent).toContain("—");                                                     // and its figure is not zero
     expect(sales.textContent).toContain("Could not be loaded");
-    expect(screen.getByText("Enquiry dates could not be loaded, so only project dates are shown.")).toBeTruthy();
+    expect(screen.getByText(/⚠ Enquiry dates could not be loaded, so only project dates are shown\./)).toBeTruthy();
   });
 
   it("offers a company chooser only to someone who is Operations Manager of more than one, and shows the one asked for", async () => {
@@ -187,7 +191,8 @@ describe("Upcoming Work", () => {
     expect(more.textContent).toMatch(/Expected teams\s*Engineering, Content/);
     expect(more.textContent).toMatch(/Expected equipment\s*LED wall x 1/);
     expect(more.textContent).toMatch(/Sales still to confirm\s*Power drop position/);
-    expect(document.body.textContent).toContain("Prices, quotes and Sales notes are never shown here.");
+    fireEvent.pointerEnter(screen.getByTestId("info-hint-what-is-shown-here"), { pointerType: "mouse" });
+    expect(screen.getByRole("tooltip").textContent).toContain("Prices, quotes and Sales notes are never shown here.");
     expect(card.textContent).not.toMatch(/AED|price|margin|quote|estimate|value/i);
     expect(within(card).queryByRole("link", { name: /Project Manager|handover/ })).toBeNull();     // nothing to assign before the handover exists
   });

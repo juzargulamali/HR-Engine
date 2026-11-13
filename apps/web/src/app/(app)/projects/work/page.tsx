@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { loadProjectUnread } from "@/lib/chat/data";
 import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert } from "lucide-react";
@@ -34,12 +35,12 @@ type SearchParams = Record<string, string | string[] | undefined>;
 const BASE = "/projects/work";
 
 const EMPTY: Record<MyWorkShow, { title: string; description: string }> = {
-  mine: { title: "No open tasks", description: "Tasks assigned to you, or shared with you as a collaborator, appear here. You can add your own task inside a project you are part of." },
-  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the project teams you lead appear here." },
-  overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed appear here." },
-  blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you as the person who can unblock them appear here, and blocked tasks with nobody named on a project you manage." },
-  waiting: { title: "Nothing of yours is in review", description: "Tasks you sent for review appear here until a reviewer accepts them or sends them back. There is nothing for you to do on them meanwhile." },
-  review: { title: "Nothing is waiting for your review", description: "Tasks sent for review that you lead as Project Manager, temporary leader, founder or team lead appear here. You never review your own work." },
+  mine: { title: "No open tasks", description: "You can add your own task inside a project you are part of." },
+  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the project teams you lead." },
+  overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed." },
+  blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you, and blocked tasks with nobody named on a project you manage." },
+  waiting: { title: "Nothing of yours is in review", description: "Nothing for you to do on tasks you sent for review until a reviewer accepts them or sends them back." },
+  review: { title: "Nothing is waiting for your review", description: "You never review your own work." },
 };
 
 /**
@@ -120,7 +121,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
 
   return (
     <div className="space-y-5">
-      <OsHero title="My Work" eyebrow="Projects" sub="Tasks assigned to you, work waiting for your review and blockers you can clear. Having several tasks on one day is normal and is never flagged." />
+      <OsHero title="My Work" eyebrow="Projects" />
 
       {/* Three different things, never mixed: work I must do, reviews I must give, blockers I can clear. Each card's number is the number of rows its list shows. */}
       <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3" aria-label="What needs you">
@@ -135,6 +136,10 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
             {label}<span className="tabular-nums text-foreground">{counts[key]}</span>
           </Link>
         ))}
+        <InfoHint label="My Work">
+          <p>Tasks assigned to you, work waiting for your review and blockers you can clear.</p>
+          <p className="mt-1.5">Having several tasks on one day is normal and is never flagged.</p>
+        </InfoHint>
       </nav>
 
       {!attention ? <LoadError what="your waiting handovers" retryHref={BASE} /> : null}
@@ -176,11 +181,11 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         {work.team.length >= 1000 && show === "team" ? <Muted>Showing the first 1,000 open tasks of your teams. Narrow the list with the search or the project filter.</Muted> : null}
       </div>
 
-      <Panel title="Project notices" description="Assignments, review requests, mentions and changes that need your attention. No message text is ever copied into a notice." actions={<MarkAllRead unread={unread} />}>
+      <Panel title="Project notices" hint={<><p>Assignments, review requests, mentions and changes that need your attention. No message text is ever copied into a notice.</p><p className="mt-1.5">You are told when you are added to a project, assigned a task, asked to review, mentioned, or when a deadline you depend on moves.</p></>} actions={<MarkAllRead unread={unread} />}>
         {noticeError ? (
           <LoadError what="your notices" retryHref={BASE} />
         ) : notifications.length === 0 ? (
-          <Muted>No notices yet. You are told when you are added to a project, assigned a task, asked to review, mentioned, or when a deadline you depend on moves.</Muted>
+          <Muted>No notices yet.</Muted>
         ) : (
           <ul className="divide-y divide-border">
             {notifications.map((n) => {

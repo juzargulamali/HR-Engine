@@ -171,13 +171,23 @@ export async function setSiteCrew(_prev: S, fd: FormData): Promise<S> {
 
 /** The crew's brief: hardware / content / app readiness and instructions every assigned person can read. */
 export async function setActivityReadiness(_prev: S, fd: FormData): Promise<S> {
-  const level = z.enum(["unknown", "not_ready", "ready"]);
+  const level = z.enum(["unknown", "not_ready", "ready", "not_applicable"]);
   const p = z.object({ projectId: uuid, itemId: uuid, hardware: level, content: level, app: level, note: optionalText, crewInstructions: optionalText }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const { data, error } = await (await createClient()).rpc("proj_set_activity_readiness", { p_item_id: p.data.itemId, p_fields: { hardware: p.data.hardware, content: p.data.content, app: p.data.app, note: p.data.note ?? "", crew_instructions: p.data.crewInstructions ?? "" } });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return { error: null, notice: (data as { unchanged?: boolean } | null)?.unchanged ? "Nothing changed." : "Readiness and instructions saved." };
+}
+
+/** Copy the project's recorded date onto an activity that has none: the Project Manager's choice when several runs make the link ambiguous. Nothing else changes. */
+export async function applyProjectDates(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_apply_project_dates", { p_item_id: p.data.itemId });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: (data as { unchanged?: boolean } | null)?.unchanged ? "That activity already has a date." : "The project date was used for this activity." };
 }
 
 /** Choose the project teams in one go, each with an optional lead. The database never duplicates a team or replaces a lead, and asks for explicit confirmation before it adds a lead to the project. */

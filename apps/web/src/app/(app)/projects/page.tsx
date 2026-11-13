@@ -5,6 +5,7 @@ import { listTable } from "@/components/workspace/list-table";
 import { FolderKanban } from "lucide-react";
 import { hasProjCapability, isProjFounder, projectStatusLabel, PROJECT_STATUSES } from "@enginious-hr/domain";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buttonVariants } from "@/components/ui/button";
 import { KindBadge, ProjectStatusBadge } from "@/components/projects/badges";
@@ -216,7 +217,9 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
       )}
 
       {!salesOnly && rows.some((r) => !canSeeProjectDetails(r, ctx.grants)) ? (
-        <Muted>Projects you are not part of show their summary only. Their plans, chat and files are for their members and founders.</Muted>
+        <p className="flex items-center gap-1 text-sm text-muted-foreground">Some projects show a summary only
+          <InfoHint label="summary-only projects">Projects you are not part of show their summary only. Their plans, chat and files are for their members and founders.</InfoHint>
+        </p>
       ) : null}
 
       {openRow ? (

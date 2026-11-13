@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Download } from "lucide-react";
 import { isFinishedProject, type IssuedPlanPayload } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -56,9 +57,10 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-6">
-      <Panel title="Files and links" description="Private to this project's members and founders. Files are checked before they become available, and every download re-checks that you still have access.">
+      <Panel title="Files and links" description="Private to this project's members and founders."
+        hint={<>Files are checked before they become available, and every download re-checks that you still have access. Restricted files are visible to the Project Manager only. Commercial documents belong in Sales &amp; CRM, not here.</>}>
         {files.length === 0 ? (
-          <EmptyState dense title="No files or links yet" description="Add the documents the team needs: briefs, drawings, confirmations. Commercial documents belong in Sales & CRM, not here." />
+          <EmptyState dense title="No files or links yet" description="Briefs, drawings and confirmations the team needs go here." />
         ) : (
           <Table stack>
             <TableHeader><TableRow><TableHead>Name</TableHead><TableHead>Kind</TableHead><TableHead>Added</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
@@ -103,7 +105,8 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
 
       <Panel
         title="Client timeline"
-        description="The timeline the client sees: only the milestones, activities and dependencies the Project Manager marked client-facing. Issued versions are frozen."
+        description="Issued versions are frozen."
+        hint={<>The timeline the client sees: only the milestones, activities and dependencies the Project Manager marked client-facing. Nothing is client-facing by default; mark items on their own pages. It never contains internal tasks, discussions, staff notes, commercial figures or confidential attachments.</>}
         actions={isClient && view.canManage && !finished ? <IssueTimelineForm projectId={id} reference={project.reference} hasIssued={plans.length > 0} /> : null}
       >
         {!isClient ? (
@@ -111,21 +114,21 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
         ) : (
           <div className="space-y-5">
             <Alert role="note">
-              Downloading or generating a PDF sends nothing to anyone. “Issued”, “sent to the client” and “client accepted” are three separate facts, each recorded by a person. The timeline never contains internal tasks, discussions, staff notes, commercial figures or confidential attachments.
+              Issuing or downloading a PDF sends nothing to the client. “Sent” and “accepted” are recorded by a person.
+              <InfoHint label="issued, sent and accepted" className="ml-1">“Issued”, “sent to the client” and “client accepted” are three separate facts, each recorded by a person. Generating or downloading the PDF never sends anything.</InfoHint>
             </Alert>
 
             {view.canManage ? (
               <div>
-                <h3 className="mb-2 text-sm font-semibold">What would be issued now</h3>
+                <h3 className="mb-2 text-sm font-semibold">What would be issued now<InfoHint label="what would be issued" className="ml-1">To change it, mark milestones, timeline activities and dependencies as client-facing on their own pages. Nothing is client-facing by default.</InfoHint></h3>
                 {preview ? <PlanTable payload={preview} /> : <Muted>The preview is not available.</Muted>}
-                <Muted className="mt-2">To change it, mark milestones, timeline activities and dependencies as client-facing on their own pages. Nothing is client-facing by default.</Muted>
               </div>
             ) : null}
 
             <div>
               <h3 className="mb-2 text-sm font-semibold">Issued versions</h3>
               {plans.length === 0 ? (
-                <EmptyState dense title="No version has been issued" description={view.canManage ? "When the client-facing items are right, issue the timeline to freeze it as version 1." : "The Project Manager issues the client timeline when it is ready."} />
+                <EmptyState dense title="No version has been issued" description={view.canManage ? "Issuing freezes the timeline as version 1." : "The Project Manager issues the client timeline when it is ready."} />
               ) : (
                 <ul className="space-y-4">
                   {plans.map((p) => {
@@ -141,7 +144,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
                             <Download className="h-3.5 w-3.5" aria-hidden /> Download PDF
                           </a>
                         </div>
-                        {isLatest && outdated ? <Alert variant="warning" role="status" className="mt-3">The client-facing plan has changed since this version was issued, so the client may be looking at an outdated timeline. {view.canManage && !finished ? "Issue a new version when the changes are final." : "The Project Manager can issue a new version."}</Alert> : null}
+                        {isLatest && outdated ? <Alert variant="warning" role="status" className="mt-3">⚠ The client-facing plan has changed since this version was issued, so the client may be looking at an outdated timeline. {view.canManage && !finished ? "Issue a new version when the changes are final." : "The Project Manager can issue a new version."}</Alert> : null}
                         <dl className="mt-3 grid gap-3 sm:grid-cols-3">
                           <Fact3 label="Issued" recorded>{formatDateTime(p.issued_at)} by {view.nameOf(p.issued_by)}</Fact3>
                           <Fact3 label="Sent to the client" recorded={Boolean(p.sent_at)}>{p.sent_at ? `${formatDateTime(p.sent_at)}: ${p.sent_note ?? ""}` : null}</Fact3>
@@ -168,7 +171,8 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
         )}
       </Panel>
       {view.canManage ? (
-        <Panel title="Closeout report" description="An internal report written from this project's records: scope and final delivery, team and ownership, decisions, client feedback, handover and open items. You review what is used, edit the draft and approve a version before it can be downloaded. It can be drafted before the project is closed.">
+        <Panel title="Closeout report" description="Needs your review and an approved version before it can be downloaded."
+          hint={<>An internal report written from this project&apos;s records: scope and final delivery, team and ownership, decisions, client feedback, handover and open items. You review what is used and edit the draft. It can be drafted before the project is closed.</>}>
           <Link href={`/projects/${id}/closeout`} className={buttonVariants({ variant: "outline", size: "sm" })} data-testid="closeout-entry">Generate closeout report</Link>
         </Panel>
       ) : null}

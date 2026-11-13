@@ -2,10 +2,11 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { isFinishedProject } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Panel, Muted } from "@/components/projects/parts";
+import { Panel } from "@/components/projects/parts";
 import { EquipmentReviewPanel, ReadinessLine, ReleaseFailedNotice, StillOutNotice } from "@/components/projects/equipment-readiness";
 import { NotesLoadError, NotesSection } from "@/components/inventory/notes/notes-section";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
@@ -162,8 +163,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          {heading}
-          <Muted className="mt-1 max-w-2xl">What this project needs from the warehouse, what has gone out and what has come back. Completing a project does not return equipment: anything still out stays outstanding until the warehouse records its return.</Muted>
+          <div className="flex items-center gap-1">{heading}<InfoHint label="Equipment">What this project needs from the warehouse, what has gone out and what has come back. Completing a project does not return equipment: anything still out stays outstanding until the warehouse records its return.</InfoHint></div>
         </div>
         {quickScope ? <RequestsQuickAdd scope={quickScope} label="New equipment request" /> : null}
       </div>
@@ -180,7 +180,6 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
 
       <Panel
         title="Equipment still out"
-        description="Dispatched to this project and not yet returned."
         actions={warehouse && stillOut > 0 ? <Link href={`/inventory/stock?action=return&project=${id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Record a return</Link> : undefined}
         className={stillOut > 0 ? "border-[hsl(var(--os-amber)/0.5)]" : undefined}
       >
@@ -217,7 +216,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       </Panel>
 
       {shortages.length > 0 ? (
-        <Panel title="Not covered yet" description="Lines the warehouse cannot cover for the request dates.">
+        <Panel title="Not covered yet" hint="Lines the warehouse cannot cover for the request dates.">
           <ul className="divide-y divide-border text-sm">
             {shortages.map((s, i) => (
               <li key={`${s.line_id}-${i}`} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-2">
@@ -230,7 +229,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       ) : null}
 
       {importable ? (
-        <Panel title="Sales handover" description="When the project was created from a Sales handover, its technologies are turned into a draft equipment request.">
+        <Panel title="Sales handover" hint={<>When the project was created from a Sales handover, its technologies are turned into a draft equipment request. Running the import again is safe: the same handover never creates a second request.</>}>
           <div className="space-y-2 text-sm">
             {handover ? <p>The equipment of the handover is in request <span className="font-mono">{handover.request.code}</span> below, marked <strong>Imported from the Sales handover</strong>. It is a draft until you submit it.</p> : <p>No handover request exists for this project yet.</p>}
             {lastImport ? (
@@ -239,7 +238,6 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
               </Alert>
             ) : null}
             <ImportHandoverButton projectId={id} label={handover ? "Run the import again" : "Import the handover equipment"} />
-            <Muted>Running it again is safe: the same handover never creates a second request.</Muted>
           </div>
         </Panel>
       ) : null}
@@ -247,7 +245,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       <section aria-label="Equipment requests" className="space-y-3">
         <h3 className="text-sm font-semibold">Requests ({models.length})</h3>
         {models.length === 0 ? (
-          <EmptyState title="No equipment requested for this project yet" description={canEditList ? "Start a request, then add the items or a technology template, set the dates and submit it to the warehouse." : "When the project manager or the warehouse prepares a request, it appears here."} />
+          <EmptyState title="No equipment requested for this project yet" description={canEditList ? "Start with New equipment request." : "The project manager or the warehouse prepares a request; it appears here."} />
         ) : (
           models.map((m) => {
             const r = m.request;
