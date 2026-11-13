@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activationReadiness, barPosition, hardwareState, lateDependency, lineSchedule, milestoneProgress, planSummary, ticksFor, timelineModel } from "./insights";
+import { activationReadiness, barPosition, formatSpan, hardwareState, lateDependency, lineSchedule, milestoneProgress, planSummary, timelineModel, timelineScale } from "./insights";
 import type { DeliveryPlan, DpItem, DpLine, DpMilestone } from "./model";
 
 // Fictional data only.
@@ -104,27 +104,73 @@ describe("milestoneProgress", () => {
 });
 
 describe("timeline", () => {
-  const p = plan([item({ owner_name: "Omar", lines: [
-    line({ id: "a", key: "L0001", description: "Moodboard", assignee_name: "Dina", start_date: "2027-04-01", needed_by: "2027-04-03" }),
-    line({ id: "b", key: "L0002", description: "Storyboard" }),
-    line({ id: "c", key: "L0003", section: "site", description: "Install", needed_by: "2027-05-02" }),
-  ] })]);
-  it("draws activations and lines from the plan, dates across, and lists unscheduled work instead of dropping it", () => {
+  const p = plan([item({ owner_name: "Omar", needed_by: "2027-05-10", lines: [
+    line({ id: "a", key: "L0001", description: "Moodboard", assignee_name: "Dina", start_date: "2027-04-14", needed_by: "2027-04-16" }),
+    line({ id: "b", key: "L0002", description: "Storyboard", start_date: "2027-04-17", needed_by: "2027-04-17" }),
+    line({ id: "c", key: "L0003", section: "apps", description: "Push Buttons", needed_by: "2027-04-20" }),
+    line({ id: "d", key: "L0004", description: "Crosses a month", start_date: "2027-04-29", needed_by: "2027-05-02" }),
+    line({ id: "e", key: "L0005", section: "hardware", description: "Draft hardware, activation date only" }),
+  ] }), item({ id: "i2", key: "D002", title: "Nothing dated", lines: [line({ id: "f", key: "L0006", description: "No dates anywhere" })] })]);
+  it("draws activations and lines from the plan; every row has a shape and exact dates; a draft with no due date of its own takes its activation's; unscheduled work is listed, not dropped", () => {
     const t = timelineModel(p, "2027-04-01");
-    expect(t.rows.map((r) => [r.kind, r.label])).toEqual([["activation", "Photobooth"], ["line", "Moodboard"], ["line", "Storyboard"], ["line", "Install"]]);
-    expect(t.range).toEqual({ start: "2027-04-01", end: "2027-05-02" });
-    expect(t.unscheduled.map((r) => r.label)).toEqual(["Storyboard"]);
-    expect(t.rows[0]).toMatchObject({ start: "2027-04-01", due: "2027-05-02", sub: "D001 · × 2" });
-    expect(timelineModel(plan([]), "2027-04-01")).toMatchObject({ rows: [], range: null, unscheduled: [] });
+    const by = Object.fromEntries(t.rows.map((r) => [r.label, r]));
+    expect(t.rows.filter((r) => r.kind === "activation").map((r) => r.label)).toEqual(["Photobooth", "Nothing dated"]);
+    expect(by["Moodboard"]).toMatchObject({ shape: "range", start: "2027-04-14", due: "2027-04-16", inherited: false });
+    expect(by["Storyboard"]).toMatchObject({ shape: "single" });
+    expect(by["Push Buttons"]).toMatchObject({ shape: "due", start: null, due: "2027-04-20" });
+    expect(by["Crosses a month"]).toMatchObject({ shape: "range" });
+    expect(by["Draft hardware, activation date only"]).toMatchObject({ shape: "due", due: "2027-05-10", inherited: true });
+    expect(by["No dates anywhere"]).toMatchObject({ shape: "none", unscheduled: true });
+    expect(t.unscheduled.map((r) => r.label)).toEqual(["No dates anywhere"]);
+    expect(t.range).toEqual({ start: "2027-04-14", end: "2027-05-10" });
+    expect(by["Photobooth"]).toMatchObject({ start: "2027-04-14", due: "2027-05-10" });
+    expect(timelineModel(plan([]), "2027-04-01")).toMatchObject({ rows: [], range: null, scale: null, unscheduled: [] });
   });
-  it("places bars across the range and keeps a single date visible", () => {
-    const range = { start: "2027-04-01", end: "2027-04-29" };
-    const whole = barPosition(range, "2027-04-01", "2027-04-29")!;
-    expect(whole.left).toBe(0); expect(Math.round(whole.width)).toBe(100);
-    const marker = barPosition(range, null, "2027-04-15")!;
-    expect(marker.width).toBeGreaterThan(1); expect(marker.left).toBeGreaterThan(40);
-    expect(barPosition(range, null, null)).toBeNull();
-    expect(ticksFor(range).map((x) => x.date)).toEqual(["2027-04-01", "2027-04-08", "2027-04-15", "2027-04-22", "2027-04-29"]);
+  it("a released requirement is drawn on its task's CURRENT dates, not the plan's", () => {
+    const released = plan([item({ lines: [line({ id: "r", key: "L0001", description: "Moodboard", start_date: "2027-04-14", needed_by: "2027-04-16", released_at: "x", task: task({ start_date: "2027-04-20", due_date: "2027-04-23" }) })] })]);
+    expect(timelineModel(released, "2027-04-01").rows[1]).toMatchObject({ start: "2027-04-20", due: "2027-04-23", shape: "range", inherited: false });
+  });
+  it("says each row's dates exactly: a range, one day, a range across a month, a due date only, a start only, none; the year only when it is not this year or the dates cross years", () => {
+    const t = "2027-04-01";
+    expect(formatSpan("2027-04-14", "2027-04-16", t)).toBe("14–16 Apr");
+    expect(formatSpan("2027-04-17", "2027-04-17", t)).toBe("17 Apr");
+    expect(formatSpan("2027-04-29", "2027-05-02", t)).toBe("29 Apr – 2 May");
+    expect(formatSpan(null, "2027-04-16", t)).toBe("Due 16 Apr");
+    expect(formatSpan("2027-04-14", null, t)).toBe("Starts 14 Apr");
+    expect(formatSpan(null, null, t)).toBe("No dates");
+    expect(formatSpan("2027-12-30", "2028-01-02", t)).toBe("30 Dec 2027 – 2 Jan 2028");
+    expect(formatSpan("2028-02-01", "2028-02-03", t)).toBe("1–3 Feb 2028");
+    expect(formatSpan(null, "2028-02-03", t)).toBe("Due 3 Feb 2028");
+  });
+  it("a short schedule gets a column for every day (at least a week) and bars aligned to those columns; first and last days are exact", () => {
+    const sc = timelineScale({ start: "2027-04-14", end: "2027-04-20" });
+    expect(sc.mode).toBe("day");
+    expect(sc.days).toEqual(["2027-04-14", "2027-04-15", "2027-04-16", "2027-04-17", "2027-04-18", "2027-04-19", "2027-04-20"]);
+    expect(sc.labels).toHaveLength(7);
+    const first = barPosition(sc, "2027-04-14", "2027-04-16")!;
+    expect(first.left).toBe(0); expect(first.width).toBeCloseTo((3 / 7) * 100, 6);                  // 14, 15, 16: three columns
+    const one = barPosition(sc, "2027-04-17", "2027-04-17")!;
+    expect(one.left).toBeCloseTo((3 / 7) * 100, 6); expect(one.width).toBeCloseTo((1 / 7) * 100, 6);   // exactly the 17th
+    const dueOnly = barPosition(sc, null, "2027-04-20")!;
+    expect(dueOnly.left).toBeCloseTo((6 / 7) * 100, 6); expect(dueOnly.width).toBeCloseTo((1 / 7) * 100, 6);
+    const last = barPosition(sc, "2027-04-19", "2027-04-20")!;
+    expect(last.left + last.width).toBeCloseTo(100, 6);                                             // the last scheduled day ends at the right edge
+    expect(barPosition(sc, null, null)).toBeNull();
+    expect(timelineScale({ start: "2027-04-14", end: "2027-04-14" }).days).toHaveLength(7);           // one date still gets a week of context
+  });
+  it("a range that crosses into the next month stays aligned, and a long schedule switches to weekly labels with a width that scrolls", () => {
+    const sc = timelineScale({ start: "2027-04-28", end: "2027-05-03" });
+    expect(sc.days).toHaveLength(7);
+    const cross = barPosition(sc, "2027-04-29", "2027-05-02")!;
+    expect(cross.left).toBeCloseTo((1 / 7) * 100, 6); expect(cross.width).toBeCloseTo((4 / 7) * 100, 6);
+    const long = timelineScale({ start: "2027-04-14", end: "2027-07-14" });
+    expect(long.mode).toBe("week");
+    expect(long.labels.map((l) => l.date).slice(0, 3)).toEqual(["2027-04-14", "2027-04-21", "2027-04-28"]);
+    expect(long.labels.every((l) => l.index % 7 === 0)).toBe(true);
+    expect(long.widthPx).toBeGreaterThan(1500);
+    const edge = timelineScale({ start: "2027-04-14", end: "2027-05-11" });                          // 28 days: still a column per day
+    expect(edge.mode).toBe("day"); expect(edge.days).toHaveLength(28);
+    expect(timelineScale({ start: "2027-04-14", end: "2027-05-12" }).mode).toBe("week");
   });
 });
 

@@ -160,15 +160,75 @@ export function milestoneProgress(m: DpMilestone): MilestoneProgress {
 // ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 export interface TimelineRow {
   key: string; kind: "activation" | "line"; label: string; sub: string; owner: string | null; status: string; tone: Tone;
-  start: string | null; due: string | null; /** No planned start or due date: shown in the "Unscheduled" list, never dropped. */ unscheduled: boolean;
+  /** The dates drawn and written: the linked task's current dates once released, else the plan's effective dates (a requirement with no due date of its own takes the activation's). */
+  start: string | null; due: string | null;
+  /** How the item is drawn: a range, one day, only a due date, only a start date, or not at all. */
+  shape: "range" | "single" | "due" | "start" | "none";
+  /** The due date is the activation's, not the requirement's own (said under the dates). */
+  inherited: boolean;
+  /** Neither a start nor a due date: shown as "No dates" and listed under the chart, never dropped. */
+  unscheduled: boolean;
   late: string | null; blocked: boolean; anchor: string; itemKey: string;
 }
-export interface TimelineModel { rows: TimelineRow[]; range: { start: string; end: string } | null; unscheduled: TimelineRow[]; ticks: { date: string; pct: number }[] }
+export interface TimelineScale {
+  /** `day`: a labelled column and a gridline for every day (short schedules). `week`: labels once a week, exact dates on every row (long schedules). */
+  mode: "day" | "week";
+  /** Every day of the visible range, first to last (at least a week, so one date still has context). */
+  days: string[];
+  /** Header labels: one per day in day mode, one per week in week mode. `index` is the day it sits on. */
+  labels: { date: string; index: number }[];
+  /** A comfortable width for the drawing area, so labels never collide; the screen scrolls sideways when it is wider than the space. */
+  widthPx: number;
+}
+export interface TimelineModel { rows: TimelineRow[]; range: { start: string; end: string } | null; scale: TimelineScale | null; unscheduled: TimelineRow[] }
 
 const dayStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const DAY = 86_400_000;
+/** Up to this many days a schedule gets a column for every day. */
+export const DAY_MODE_MAX_DAYS = 28;
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const part = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)), d: Number(iso.slice(8, 10)) });
 
-/** Rows for the Timeline from the SAME records as Breakdown: activations with their lines under them, dates from the task once released. */
+/**
+ * The dates of one row in words, exact, for reading without hovering: "14–16 Nov", "17 Nov" (one day), "28 Nov – 2 Dec" (across a month), "Due 16 Nov" (only a due date),
+ * "Starts 14 Nov" (only a start) and "No dates". The year appears only when it is not the current year, or when the dates cross into another.
+ */
+export function formatSpan(start: string | null, due: string | null, today: string): string {
+  const cur = Number(today.slice(0, 4));
+  const one = (iso: string, withYear: boolean) => { const x = part(iso); return `${x.d} ${MONTHS[x.m - 1]}${withYear ? ` ${x.y}` : ""}`; };
+  if (!start && !due) return "No dates";
+  if (start && !due) return `Starts ${one(start, part(start).y !== cur)}`;
+  if (!start && due) return `Due ${one(due, part(due).y !== cur)}`;
+  const a = part(start!), b = part(due!);
+  if (start === due) return one(start!, a.y !== cur);
+  const crossYear = a.y !== b.y;
+  if (!crossYear && a.m === b.m) return `${a.d}–${b.d} ${MONTHS[b.m - 1]}${a.y !== cur ? ` ${a.y}` : ""}`;
+  if (!crossYear) return `${one(start!, false)} – ${one(due!, a.y !== cur)}`;
+  return `${one(start!, true)} – ${one(due!, true)}`;
+}
+
+export function timelineScale(range: { start: string; end: string }): TimelineScale {
+  const s = d(range.start), e = Math.max(d(range.end), s + 6 * DAY);
+  const days: string[] = [];
+  for (let t = s; t <= e; t += DAY) days.push(dayStr(t));
+  const day = days.length <= DAY_MODE_MAX_DAYS;
+  const labels: TimelineScale["labels"] = day ? days.map((date, index) => ({ date, index })) : days.flatMap((date, index) => (index % 7 === 0 ? [{ date, index }] : []));
+  // 46px a day keeps "Mon / 14" readable; a long schedule gets about 18px a day, which still leaves a weekly label (about 125px) clear of the next.
+  return { mode: day ? "day" : "week", days, labels, widthPx: Math.max(day ? days.length * 46 : days.length * 18, 560) };
+}
+
+/** Where a bar sits, aligned to the day columns: left and width in percent of the drawing area. One day is exactly one column; only a due (or only a start) date is one column too. */
+export function barPosition(scale: TimelineScale, start: string | null, due: string | null): { left: number; width: number } | null {
+  const a = start ?? due, b = due ?? start;
+  if (!a || !b) return null;
+  const n = scale.days.length;
+  const idx = (iso: string) => Math.min(Math.max(scale.days.indexOf(iso) >= 0 ? scale.days.indexOf(iso) : Math.round((d(iso) - d(scale.days[0]!)) / DAY), 0), n - 1);
+  const from = idx(a), to = Math.max(idx(b), from);
+  return { left: (from / n) * 100, width: ((to - from + 1) / n) * 100 };
+}
+export const dayIndex = (scale: TimelineScale, iso: string): number => scale.days.indexOf(iso);
+
+/** Rows for the Timeline from the SAME records as Breakdown: activations with their lines under them, dates from the task once released, the plan's effective dates before. */
 export function timelineModel(plan: DeliveryPlan, today: string): TimelineModel {
   const rows: TimelineRow[] = [];
   for (const it of plan.items) {
@@ -177,47 +237,29 @@ export function timelineModel(plan: DeliveryPlan, today: string): TimelineModel 
       const prog = lineProgress(l);
       const hs = hardwareState(l);
       const att = lineAttention(it, l, today);
-      // A requirement with no start or due date of its own is unscheduled, even when its activation has a ready-by date: that date is a deadline, not a plan for this work.
-      const own = s.fromTask ? !!(s.start || s.due) : !!(l.start_date || l.needed_by);
+      const inherited = !s.fromTask && !l.needed_by && !!s.due;
+      const shape: TimelineRow["shape"] = s.start && s.due ? (s.start === s.due ? "single" : "range") : s.due ? "due" : s.start ? "start" : "none";
       return {
         key: l.id, kind: "line", label: l.description, sub: `${l.key}${s.owner ? ` · ${s.owner}` : " · no owner"}`, owner: s.owner,
-        status: hs ? hs.text : prog.text, tone: hs ? hs.tone : prog.tone, start: own ? s.start : null, due: own ? s.due : null, unscheduled: !own,
+        status: hs ? hs.text : prog.text, tone: hs ? hs.tone : prog.tone, start: s.start, due: s.due, shape, inherited, unscheduled: shape === "none",
         late: lateDependency(it, l), blocked: att.some((a) => a.kind === "blocker"), anchor: `dp-${l.key}`, itemKey: it.key,
       };
     });
     const dates = [...lineRows.flatMap((r) => [r.start, r.due]), it.needed_by].filter((x): x is string => !!x).sort();
     const r = readinessOf(it, today);
+    const start = dates[0] ?? null, due = dates.at(-1) ?? null;
     rows.push({
       key: it.id, kind: "activation", label: it.title, sub: `${it.key}${it.qty ? ` · × ${it.qty}` : ""}${it.zone ? ` · ${it.zone}` : ""}`, owner: it.owner_name, status: r.text, tone: r.tone,
-      start: dates[0] ?? null, due: dates.at(-1) ?? null, unscheduled: dates.length === 0, late: null, blocked: r.blockers > 0, anchor: `dp-${it.key}`, itemKey: it.key,
+      start, due, shape: !start ? "none" : start === due ? "single" : "range", inherited: false, unscheduled: dates.length === 0, late: null, blocked: r.blockers > 0, anchor: `dp-${it.key}`, itemKey: it.key,
     });
     rows.push(...lineRows);
   }
   const all = rows.flatMap((r) => [r.start, r.due]).filter((x): x is string => !!x).sort();
   const range = all.length === 0 ? null : { start: all[0]!, end: all.at(-1)! };
   const unscheduled = rows.filter((r) => r.kind === "line" && r.unscheduled);
-  return { rows, range, unscheduled, ticks: range ? ticksFor(range) : [] };
+  return { rows, range, scale: range ? timelineScale(range) : null, unscheduled };
 }
 const readinessOf = (it: DpItem, today: string) => activationReadiness(it, today);
-
-/** Weekly gridlines, as a percentage across the visible range (at least a week wide so a single day still has room). */
-export function ticksFor(range: { start: string; end: string }): { date: string; pct: number }[] {
-  const s = d(range.start), e = Math.max(d(range.end), s + 6 * DAY);
-  const span = e - s;
-  const out: { date: string; pct: number }[] = [];
-  for (let t = s; t <= e; t += 7 * DAY) out.push({ date: dayStr(t), pct: ((t - s) / span) * 100 });
-  return out;
-}
-
-/** Where a bar sits: left and width in percent across the range. A one-day or single-date item is drawn as a marker one day wide. */
-export function barPosition(range: { start: string; end: string }, start: string | null, due: string | null): { left: number; width: number } | null {
-  const a = start ?? due, b = due ?? start;
-  if (!a || !b) return null;
-  const s = d(range.start), e = Math.max(d(range.end), s + 6 * DAY);
-  const span = e - s + DAY;
-  const from = Math.max(d(a), s), to = Math.max(d(b), from);
-  return { left: ((from - s) / span) * 100, width: Math.max(((to - from + DAY) / span) * 100, 1.2) };
-}
 
 /** The structured details of a line as one short phrase for the row ("Animation × 4 · MP4 · 1080x1920 · Portrait", "1 app · Android tablet · 6 devices"). Empty when nothing is recorded. */
 export function detailText(l: Pick<DpLine, "section" | "detail">): string {

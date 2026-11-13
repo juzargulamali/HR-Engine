@@ -192,11 +192,37 @@ describe("Project Plan screen", () => {
       const tl = screen.getByTestId("plan-timeline");
       expect(within(tl).getAllByTestId("tl-row-activation")).toHaveLength(1);
       expect(within(tl).getAllByTestId("tl-row-line").map((r) => r.textContent).join("|")).toMatch(/Storyboard.*First draft/);
-      expect(within(screen.getByTestId("tl-unscheduled")).getByText("Ring light")).toBeTruthy();                              // no dates: listed, not dropped
+      expect(screen.getByTestId("tl-dates-c1").textContent).toBe("4–10 Apr");                                                 // exact dates on the row, readable without hovering
+      expect(screen.getByTestId("tl-dates-c2").textContent).toBe("8–14 Apr");
+      expect(screen.getByTestId("tl-dates-h1").textContent).toBe("Due 28 Apr (the activation's date)");                          // a draft with no due date of its own takes its activation's
+      expect(tl.getAttribute("data-mode")).toBe("day");                                                                       // 4 to 28 April is under four weeks: a column for every day
+      expect(within(screen.getByTestId("tl-header")).getByTestId("tl-col-2027-04-04").textContent).toMatch(/Sun.*4/);
+      expect(screen.getByTestId("tl-bar-c1").getAttribute("data-shape")).toBe("range");
+      expect(screen.getByTestId("tl-bar-h1").getAttribute("data-shape")).toBe("due");
       expect(within(tl).getByText(/Late: Storyboard is due/)).toBeTruthy();
       expect(screen.getByTestId("dp-view-timeline").getAttribute("aria-current")).toBe("page");
       expect(screen.getByTestId("dp-view-breakdown").getAttribute("href")).toBe("/projects/p1/delivery");
       expect(screen.queryByTestId("dp-line-L0012")).toBeNull();
+    });
+
+    it("a long schedule gets weekly labels but every row still states its exact dates; work with no dates says No dates and is listed", () => {
+      const long = r1({ items: [{ ...photobooth, needed_by: null, lines: [
+        line({ id: "x1", key: "L0030", description: "Early", assignee_name: "Fictional Cara", start_date: "2027-04-28", needed_by: "2027-05-02" }),
+        line({ id: "x2", key: "L0031", description: "Late", assignee_name: "Fictional Cara", needed_by: "2027-07-14" }),
+        line({ id: "x3", key: "L0032", description: "Undated", assignee_name: "Fictional Cara" }),
+      ] }], milestones: [] });
+      render1(long, { view: "timeline" });
+      const tl = screen.getByTestId("plan-timeline");
+      expect(tl.getAttribute("data-mode")).toBe("week");
+      const header = within(screen.getByTestId("tl-header"));
+      expect(header.getByTestId("tl-col-2027-04-28").textContent).toBe("28 Apr 2027");   // the first label carries the year
+      expect(header.getByTestId("tl-col-2027-05-05").textContent).toBe("5 May");
+      expect(header.queryByTestId("tl-col-2027-04-29")).toBeNull();                                  // weekly, not daily
+      expect(screen.getByTestId("tl-dates-x1").textContent).toBe("28 Apr – 2 May");                    // across a month, exact
+      expect(screen.getByTestId("tl-dates-x2").textContent).toBe("Due 14 Jul");
+      expect(screen.getByTestId("tl-dates-x3").textContent).toBe("No dates");
+      expect(screen.getByTestId("tl-nodates-x3")).toBeTruthy();
+      expect(within(screen.getByTestId("tl-unscheduled")).getByText("Undated")).toBeTruthy();
     });
 
     it("scope that exists only as a brief is shown beside the plan; accepted technologies not yet in the plan are offered once to the manager", () => {
