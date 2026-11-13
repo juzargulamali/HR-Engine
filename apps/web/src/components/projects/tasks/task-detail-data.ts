@@ -6,6 +6,8 @@ import type { ProjectsContext } from "@/lib/projects/context";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjTaskCommentRow, ProjTaskEventRow, ProjTaskRow } from "@/types/projects";
 import { buildTaskRow, type PickOption, type TaskRowData } from "./task-logic";
+import { loadProjectFileChoices, loadRegister } from "@/lib/projects/phase2/data";
+import type { RegisterRow } from "@/lib/projects/phase2/model";
 
 export interface TaskDetailData {
   task: ProjTaskRow;
@@ -34,6 +36,8 @@ export interface TaskDetailData {
   milestone: string | null;
   /** The Project Plan requirement this task was released from, so the task links back to its activation. Null when it was not released from the plan, or the plan could not be read (an optional link, never an error). */
   planLink: { itemKey: string; itemTitle: string; lineKey: string } | null;
+  /** The task's expected output and its versions (Phase 2). `row` is null when the task has none; `state` says when the read could not be made (the task never depends on it). */
+  output: { state: "ok" | "unavailable"; row: RegisterRow | null; tz: string | null; files: { id: string; name: string; kind: "file" | "link" }[] | null };
 }
 
 /**
@@ -80,6 +84,11 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     const { data: planItem } = await supabase.from("proj_dp_items").select("item_key, title").eq("id", planLine.item_id).maybeSingle();
     if (planItem) planLink = { itemKey: planItem.item_key, itemTitle: planItem.title, lineKey: planLine.line_key };
   }
+  // Expected output and versions: ONE database read, scoped to this reader; the project's files only when this person could submit.
+  const reg = await loadRegister(id, taskId);
+  const outputRow = reg.state === "ok" ? (reg.data.rows[0] ?? null) : null;
+  const mayAttach = !readOnly && role !== null && !!outputRow && isOpenTask(task.status);
+  const output: TaskDetailData["output"] = { state: reg.state === "ok" || reg.state === "not_installed" ? "ok" : "unavailable", row: outputRow, tz: reg.state === "ok" ? reg.data.tz : null, files: mayAttach ? await loadProjectFileChoices(id) : null };
   return {
     task, row, readOnly, viewerId: ctx.userId, role,
     leader: role === "manager" || role === "head",
@@ -102,5 +111,6 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     deliverable: (deliverables ?? []).find((d) => d.id === task.deliverable_id)?.title ?? null,
     milestone: (milestones ?? []).find((m) => m.id === task.milestone_id)?.title ?? null,
     planLink,
+    output,
   };
 }

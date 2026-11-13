@@ -45,6 +45,8 @@ import { AddMilestoneButton, EditMilestoneButton, MilestoneStatusButton } from "
 import { PlanAddMenu } from "./plan-add-menu";
 import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
+import { WorkOverviewAreas } from "@/components/projects/work-overview";
+import { loadWorkOverview } from "@/lib/projects/phase2/data";
 
 export const metadata = { title: "Work" };
 
@@ -280,6 +282,9 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       </div>
     );
 
+  const overviewRes = await loadWorkOverview(id);
+  const overview = overviewRes.state === "ok" ? overviewRes.data : null;
+
   return (
     <div className="space-y-4">
       <RememberList section={`tasks-${id}`} />
@@ -302,6 +307,8 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       {reopenedEarlier && !completion ? (
         <Alert role="status">This project was completed and then reopened. The earlier completion record is kept on the <Link href={`/projects/${id}/history`} className="font-medium underline">History</Link> page.</Alert>
       ) : null}
+
+      {overview ? <WorkOverviewAreas projectId={id} overview={overview} /> : overviewRes.state === "error" ? <Alert variant="warning" role="status" data-testid="overview-load-error">Could not load the overview (next on site, what needs attention and recent changes). The tasks below are unaffected; reload to try again.</Alert> : null}
 
       {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,72fr)_minmax(0,28fr)]">
@@ -373,7 +380,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         </div>
 
         <aside aria-label="Project support" className="min-w-0 space-y-4">
-          {view.canManage && !readOnly ? null : <NextOnSiteCard
+          {(view.canManage && !readOnly) || overview ? null : <NextOnSiteCard
             booking={nextBooking ? { id: nextBooking.id, location: nextBooking.location, startsAt: nextBooking.starts_at, endsAt: nextBooking.ends_at, state: nextBooking.state, who: view.nameOf(nextBooking.user_id) } : null}
             count={upcomingBookings.length}
             href={`/projects/${id}/plan?plan=site`}

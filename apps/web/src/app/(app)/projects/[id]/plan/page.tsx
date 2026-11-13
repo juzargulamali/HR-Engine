@@ -18,6 +18,9 @@ import { DependencyForm } from "../timeline/_components/dependency-form";
 import { DialogButton } from "../timeline/_components/dialog";
 import { bookablePeople, canBookPerson, sortPlanItems } from "../timeline/timeline-helpers";
 import { PlanSwitch } from "./_controls";
+import { SiteSchedulePanel, SiteTimelineStrip } from "@/components/projects/site/site-views";
+import { loadSiteSchedule } from "@/lib/projects/phase2/data";
+import { memberOptions } from "@/lib/projects/data";
 import { BookingCard, ConflictList, DependencyRow, PlanSection } from "./_sections";
 
 export const metadata = { title: "Plan" };
@@ -54,6 +57,7 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
   const intro = (
     <Muted>
       Plans, not commitments: nothing reaches the client unless an item is marked client-facing and a client timeline is issued from Files &amp; client plan. Changing a date never moves another date.
+      {plan === "site" ? " This page is the Site schedule (where the team is, crew and shipments)." : " This is the Delivery plan of the build; where the team is on site, with crew and shipments, is the Site plan."}
     </Muted>
   );
 
@@ -98,6 +102,9 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       </div>
     );
   }
+  const [siteRes, reqR] = plan === "site"
+    ? await Promise.all([loadSiteSchedule(id), supabase.from("inv_requests").select("id, code, status").eq("project_id", id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(50)])
+    : [null, { data: [] as { id: string; code: string; status: string }[] }];
   const milestones = milestoneR.data ?? [];
   const milestoneTitle = (mid: string | null) => milestones.find((m) => m.id === mid)?.title ?? null;
   const items = planR.data ?? [];
@@ -113,14 +120,35 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
   const siteItems = items.filter((i) => i.plan === "site" && i.status !== "cancelled").map((i) => ({ id: i.id, title: i.title }));
   const checkHref = (bookingId: string) => `${planHref(id, sp, { plan: "site", mode: "list", check: bookingId }, ["view", "date", "tz", "kind"])}#bookings`;
 
+  const planSection = (
+    <PlanSection
+      plan={plan} items={sortPlanItems(items.filter((i) => i.plan === plan))} canEdit={canEditPlan} projectId={id} siteTz={siteTz} milestones={milestones}
+      milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"}
+    />
+  );
+
   return (
     <div className="space-y-5">
       {switches}
       {intro}
-      <PlanSection
-        plan={plan} items={sortPlanItems(items.filter((i) => i.plan === plan))} canEdit={canEditPlan} projectId={id} siteTz={siteTz} milestones={milestones}
-        milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"}
-      />
+      {plan === "site" && siteRes?.state === "ok" ? (
+        <>
+          {mode === "timeline" ? <Panel title="Site timeline" description="Setup, show and dismantling run by run, and the shipments that supply them, on one calendar. Names stay in view while it scrolls; exact dates are on every row."><SiteTimelineStrip schedule={siteRes.data} today={todayIso()} /></Panel> : null}
+          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={memberOptions(view)} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
+          <details className="os-card px-4 py-3" data-testid="site-all-items">
+            <summary className="cursor-pointer text-sm font-semibold">All site timeline items (client-facing, milestone and status)</summary>
+            <p className="mb-3 mt-1 text-[13px] text-muted-foreground">The same items as the Site schedule above, with the fields that are not part of it: whether an item is offered to a client timeline, its milestone and its status.</p>
+      {planSection}
+          </details>
+        </>
+      ) : plan === "site" && siteRes?.state === "error" ? (
+        <>
+          <LoadError what="the site schedule" retryHref={planHref(id, sp, {})} />
+      {planSection}
+        </>
+      ) : (
+        planSection
+      )}
 
       {plan === "site" ? (
         <>

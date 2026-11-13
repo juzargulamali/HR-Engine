@@ -1,3 +1,4 @@
+import { TaskOutputSection } from "@/components/projects/deliverables/output-views";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { OsPill } from "@/components/os/pills";
@@ -49,6 +50,13 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
         {task.blocked_at ? <p className="mt-0.5 text-[13px] text-muted-foreground">Blocked since {formatDateTime(task.blocked_at)}.{data.canUnblock ? " You can clear the blocker under More." : ""}</p> : null}
         {main.length > 0 ? <div className="mt-2.5"><TaskPrimaryAction row={control} moves={main} /></div> : null}
       </section>
+
+      {/* The expected output sits right under the action the assignee takes: what is expected, what is missing, the current version and its review. */}
+      <TaskOutputSection
+        projectId={view.project.id} task={{ id: task.id, version: task.version, status: task.status }} row={data.output.row} tz={data.output.tz} files={data.output.files}
+        flags={{ canDefine: data.leader, canSubmit: data.role !== null, viewerIsAssignee: task.assignee_id === data.viewerId, canReview: data.leader && task.assignee_id !== data.viewerId, readOnly: data.readOnly }}
+      />
+      {data.output.state === "unavailable" ? <Muted>The expected output could not be read just now. The rest of the task is unaffected; reload to try again.</Muted> : null}
 
       {data.planLink ? (
         <p className="text-sm" data-testid="task-plan-link">

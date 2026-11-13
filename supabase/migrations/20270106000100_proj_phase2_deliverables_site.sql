@@ -334,7 +334,7 @@ begin
   select site_timezone into v_tz from proj_project_details where project_id = p_project_id;
   select coalesce(jsonb_agg(r.j order by r.act_key nulls last, r.due nulls last, r.title), '[]'::jsonb) into v_rows from (
     select t.title, t.due_date as due, act.item_key as act_key, jsonb_build_object(
-      'task_id', t.id, 'task_title', t.title, 'task_status', t.status, 'task_due', t.due_date, 'blocked', t.blocked_at is not null, 'requires_review', t.requires_review,
+      'task_id', t.id, 'task_title', t.title, 'task_status', t.status, 'task_due', t.due_date, 'blocked', t.blocked_at is not null, 'requires_review', t.requires_review, 'team_id', t.team_id,
       'assignee_id', t.assignee_id, 'assignee_name', proj_display_name(t.assignee_id),
       'output_label', t.output_label, 'output_qty', t.output_qty, 'output_required', t.output_required,
       'activation', case when act.id is null then null else jsonb_build_object('id', act.id, 'key', act.item_key, 'title', act.title) end,
