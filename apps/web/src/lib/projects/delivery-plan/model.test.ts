@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { byZone, canEditSection, describeChange, itemProgress, lineProgress, releasePreview, type DpItem, type DpLine } from "./model";
+import { byZone, canEditSection, describeChange, itemProgress, lineProgress, releasePreview, sectionFamily, type DpItem, type DpLine, type DpSection } from "./model";
 
 const line = (over: Partial<DpLine>): DpLine => ({ id: "l", key: "L0001", section: "content", description: "Welcome loop", qty: null, inv_item_id: null, assignee_id: null, assignee_name: null, needed_by: null, notes: null, released_at: null, version: 1, task: null, equipment: null, ...over });
 const item = (over: Partial<DpItem>): DpItem => ({ id: "i", key: "D001", zone: "Entrance", title: "LED wall", specs: null, owner_id: null, owner_name: null, needed_by: null, image_file_id: null, released_at: null, version: 1, sort_order: 0, lines: [], ...over });
@@ -48,7 +48,17 @@ describe("Delivery plan: screens", () => {
   it("says what a release will create and what will wait, before anything is created", () => {
     const p = releasePreview([item({ owner_id: "o", lines: [line({}), line({ section: "hardware", inv_item_id: "x" }), line({ key: "L0003", section: "hardware" }), line({ released_at: "x", task: task("todo") })] }),
       item({ lines: [line({ key: "L0009" }), line({ assignee_id: "a" })] })]);
-    expect(p).toEqual({ tasks: 2, equipment: 1, waiting: [{ key: "L0003", reason: "no stock item chosen" }, { key: "L0009", reason: "nobody named, and the deliverable has no accountable owner" }] });
+    expect(p).toEqual({ tasks: 2, equipment: 1, external: 0, waiting: [{ key: "L0003", reason: "needs a stock match" }, { key: "L0009", reason: "nobody named, and the deliverable has no accountable owner" }] });
+  });
+  it("counts hardware that is bought, rented or client supplied as followed in the plan, not requested", () => {
+    const p = releasePreview([item({ owner_id: "o", lines: [line({ section: "hardware", supply_route: "rent" }), line({ key: "L2", section: "hardware", supply_route: "client" }), line({ key: "L3", section: "hardware", inv_item_id: "x", supply_route: "inventory" })] })]);
+    expect(p).toEqual({ tasks: 0, equipment: 1, external: 2, waiting: [] });
+  });
+  it("a delegate of an earlier section keeps editing the matching current one, and nothing else", () => {
+    const plan = { can_manage: false, my_sections: ["programming", "installation"] as DpSection[] };
+    expect([sectionFamily("programming"), sectionFamily("testing"), sectionFamily("hardware")]).toEqual(["apps", "site", "hardware"]);
+    expect(["apps", "programming", "site", "testing", "installation", "content", "engineering", "hardware"].map((s) => canEditSection(plan, s as DpSection))).toEqual([true, true, true, true, true, false, false, false]);
+    expect(canEditSection({ can_manage: true, my_sections: [] }, "engineering")).toBe(true);
   });
   it("words a proposed change field by field, resolving people and saying when a value is not set", () => {
     expect(describeChange({ changes: { qty: { from: 3, to: "5" }, needed_by: { from: null, to: "2027-02-20" }, assignee_id: { from: "u1", to: "u2" } } }, (f, v) => (f === "assignee_id" ? `Person ${v}` : v)))

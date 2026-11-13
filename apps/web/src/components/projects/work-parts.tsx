@@ -158,6 +158,22 @@ export function DeliverySummary({ facts }: { facts: readonly SummaryFact[] }) {
   );
 }
 
+/** The prominent way into the Project Plan from the Work overview: where the Project Manager breaks each technology into requirements, assigns, schedules and releases. */
+export function ProjectPlanEntry({ projectId, canManage }: { projectId: string; canManage: boolean }) {
+  return (
+    <section aria-label="Project Plan" className="os-card flex flex-wrap items-center justify-between gap-3 border-primary/40 px-4 py-3 sm:px-5" data-testid="project-plan-entry">
+      <div className="min-w-0">
+        <h2 className="font-heading text-base font-semibold">Project Plan</h2>
+        <p className="text-sm text-muted-foreground">{canManage ? "Break each technology into what it needs, assign and schedule it, release it, and see what holds up delivery." : "See what each technology needs, who does it and by when."} Tasks you update here show in the plan, and the other way round.</p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Link href={`/projects/${projectId}/delivery`} className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open the Project Plan</Link>
+        <Link href={`/projects/${projectId}/delivery?view=timeline`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Timeline</Link>
+      </div>
+    </section>
+  );
+}
+
 export interface ActivityLine { key: string; subject: string; sentence: string; when: string; who: string; href: string }
 
 /**

@@ -85,7 +85,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
           <div className="space-y-5">
             {isMine(h) && h.status === "pm_assigned" ? <HandoverDecision handoverId={h.id} /> : null}
             {isMine(h) && h.status === "clarification_requested" ? <Alert variant="warning" role="status">You asked Sales a question (below). Sales has not resubmitted yet; you will be told when they do, and can then accept.</Alert> : null}
-            {h.status === "accepted" && h.project_id ? <Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link> : null}
+            {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link><Link href={`/projects/${h.project_id}/delivery`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the Project Plan</Link></> : null}
             <HandoverProcess status={h.status} />
             <dl className="grid gap-3 text-sm sm:grid-cols-3">
               <div><dt className="text-muted-foreground">Project Manager</dt><dd className="mt-0.5">{nameOf(h.pm_user_id)}{h.pm_assigned_at ? ` (named ${formatDateTime(h.pm_assigned_at)})` : ""}</dd></div>
@@ -111,7 +111,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <HandoverStatusBadge status={h.status} />
-        {h.status === "accepted" && h.project_id ? <Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link> : null}
+        {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link><Link href={`/projects/${h.project_id}/delivery`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the Project Plan</Link></> : null}
         <Link href={withParams(BASE, sp, { [HANDOVER_PARAM]: h.id })} scroll={false} className={buttonVariants({ variant: "ghost", size: "sm" })}>Open brief</Link>
       </div>
     </li>

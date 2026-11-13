@@ -30,7 +30,7 @@ export function HandoverDecision({ handoverId }: { handoverId: string }) {
   return (
     <div className="rounded-md border border-primary/50 bg-primary/5 p-3" data-testid="handover-decision">
       <p className="text-sm font-medium">Your decision as Project Manager</p>
-      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Work page. The brief is then kept as it was agreed: later changes in Sales do not overwrite it.</p>
+      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Project Plan. There you press Bring in accepted technologies (a manual step: nothing is added to the plan automatically) and break the scope into work. The brief is then kept as it was agreed: later changes in Sales do not overwrite it.</p>
       {asking ? (
         <div className="mt-3">
           <ActionForm action={requestHandoverClarification} submitLabel="Send question to Sales" variant="outline" secondary={<button type="button" onClick={() => setAsking(false)} className="text-sm underline underline-offset-2">Cancel</button>}>

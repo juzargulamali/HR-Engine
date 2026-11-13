@@ -84,7 +84,11 @@ const nameKey = (zone: string, title: string) => `${low(zone)}\u0001${low(title)
 const qtyText = (n: number) => String(Math.round(n * 1000) / 1000);
 const itemLabel = (zone: string, title: string) => (zone.trim() ? `${zone.trim()} / ${title.trim()}` : title.trim() || "(no name)");
 
-const SECTION_BY_WORD = new Map<string, DpSection>(DP_SECTIONS.flatMap((s) => [[s, s], [words(DP_SECTION_SHEET_NAMES[s]), s], [words(DP_SECTION_LABELS[s]), s], [words(DP_SECTION_LABELS[s]).replace(/\s*\/\s*/g, "/"), s]] as [string, DpSection][]));
+const SECTION_BY_WORD = new Map<string, DpSection>([
+  ...DP_SECTIONS.flatMap((s) => [[s, s], [words(DP_SECTION_SHEET_NAMES[s]), s], [words(DP_SECTION_LABELS[s]), s], [words(DP_SECTION_LABELS[s]).replace(/\s*\/\s*/g, "/"), s]] as [string, DpSection][]),
+  // Names a workbook made before Release 1 may carry.
+  ["content / ui / ux", "content"], ["content/ui/ux", "content"], ["engineering & integration", "engineering"], ["engineering and integration", "engineering"], ["site", "site"], ["site work", "site"],
+]);
 export const parseSection = (s: string): DpSection | null => SECTION_BY_WORD.get(words(s)) ?? SECTION_BY_WORD.get(words(s).replace(/\s*\/\s*/g, "/")) ?? null;
 
 type Fields = Record<string, string | number>;

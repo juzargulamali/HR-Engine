@@ -6,7 +6,7 @@ import { fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, refresh
 import { DP_SECTIONS } from "@/lib/projects/delivery-plan/model";
 
 /**
- * Delivery Plan server actions (migration 20261231000100). Thin wrappers over the proj_dp_* database functions: the function, not this file, decides who may change a
+ * Project Plan server actions (migrations 20261231000100 and 20270104000100). Thin wrappers over the proj_dp_* database functions: the function, not this file, decides who may change a
  * deliverable row, a section's lines, release the plan or decide a correction or a proposed change. This layer parses the form and turns errors into sentences.
  */
 type S = ProjectActionState & { notice?: string | null };
@@ -26,9 +26,13 @@ const outcome = (data: unknown): S => {
 };
 
 export async function saveDeliverable(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, itemId: optionalUuid, title: optionalText, neededBy: optionalDate, ownerId: optionalUuid, expectedVersion: version }).safeParse(Object.fromEntries(fd));
+  const p = z.object({
+    projectId: uuid, itemId: optionalUuid, title: optionalText, neededBy: optionalDate, ownerId: optionalUuid, expectedVersion: version,
+    qty: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().positive("The quantity must be more than zero").max(999_999_999).optional()),
+  }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const fields = patch(fd, ["zone", "title", "specs", "reason"]);
+  if (fd.has("qty")) fields.qty = p.data.qty ?? null;
   if (fd.has("ownerId")) fields.owner_id = p.data.ownerId ?? null;
   if (fd.has("neededBy")) fields.needed_by = p.data.neededBy ?? null;
   if (fd.has("imageFileId")) fields.image_file_id = String(fd.get("imageFileId") ?? "").trim() || null;
@@ -48,9 +52,19 @@ export async function removeDeliverable(_prev: S, fd: FormData): Promise<S> {
   return ok();
 }
 
+/** The detail keys a form may carry, by name: d_<key>. The database keeps only the keys of the line's section and refuses the rest. */
+const DETAIL_KEYS = ["source", "expected_date", "deliverable_type", "count", "format", "resolution", "orientation", "purpose", "platform", "app_count", "device_count", "kind"] as const;
+const detailFrom = (fd: FormData): Record<string, string | null> | undefined => {
+  const out: Record<string, string | null> = {};
+  let any = false;
+  for (const k of DETAIL_KEYS) if (fd.has(`d_${k}`)) { any = true; const v = String(fd.get(`d_${k}`) ?? "").trim(); out[k] = v === "" ? null : v; }
+  return any ? out : undefined;
+};
+
 export async function savePlanLine(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({
-    projectId: uuid, itemId: uuid, lineId: optionalUuid, section: section.optional(), assigneeId: optionalUuid, invItemId: optionalUuid, neededBy: optionalDate, expectedVersion: version,
+    projectId: uuid, itemId: uuid, lineId: optionalUuid, section: section.optional(), assigneeId: optionalUuid, invItemId: optionalUuid, neededBy: optionalDate, startDate: optionalDate,
+    milestoneId: optionalUuid, supplyRoute: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.enum(["inventory", "buy", "rent", "client"]).optional()), expectedVersion: version,
     qty: z.preprocess((v) => (v === "" || v == null ? undefined : v), z.coerce.number().positive("The quantity must be more than zero").max(1_000_000).optional()),
   }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
@@ -59,11 +73,68 @@ export async function savePlanLine(_prev: S, fd: FormData): Promise<S> {
   if (fd.has("assigneeId")) fields.assignee_id = p.data.assigneeId ?? null;
   if (fd.has("invItemId")) fields.inv_item_id = p.data.invItemId ?? null;
   if (fd.has("neededBy")) fields.needed_by = p.data.neededBy ?? null;
+  if (fd.has("startDate")) fields.start_date = p.data.startDate ?? null;
+  if (fd.has("milestoneId")) fields.milestone_id = p.data.milestoneId ?? null;
+  if (fd.has("supplyRoute") && p.data.supplyRoute) fields.supply_route = p.data.supplyRoute;
   if (fd.has("qty")) fields.qty = p.data.qty ?? null;
+  const detail = detailFrom(fd);
+  if (detail) fields.detail = detail;
+  // "Waits for": the form lists the other lines of the project; every ticked one is sent (none ticked clears it) when the field set is present.
+  if (fd.has("dependsOnPresent")) {
+    const ids = fd.getAll("dependsOn").map(String).filter(Boolean);
+    if (!ids.every((x) => uuid.safeParse(x).success)) return { error: "Choose the lines this one waits for from the list." };
+    fields.depends_on = ids;
+  }
   const { data, error } = await (await createClient()).rpc("proj_dp_save_line", { p_item_id: p.data.itemId, p_line_id: p.data.lineId ?? null, p_fields: fields, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return outcome(data);
+}
+
+/** A chain of lines, each waiting for the one before: the steps (names, owners, dates) are whatever the form carries. */
+export async function addPlanSequence(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid, section, milestoneId: optionalUuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const names = fd.getAll("stepDescription").map((x) => String(x).trim());
+  const owners = fd.getAll("stepOwner").map(String), starts = fd.getAll("stepStart").map(String), dues = fd.getAll("stepDue").map(String);
+  const steps: Record<string, unknown>[] = [];
+  for (let n = 0; n < names.length; n++) {
+    if (!names[n]) continue;
+    const o = owners[n] ?? "", st = starts[n] ?? "", du = dues[n] ?? "";
+    if (o && !uuid.safeParse(o).success) return { error: "Choose each owner from the list." };
+    if (st && !optionalDate.safeParse(st).success) return { error: `Check the start date of "${names[n]}".` };
+    if (du && !optionalDate.safeParse(du).success) return { error: `Check the due date of "${names[n]}".` };
+    steps.push({ description: names[n], assignee_id: o || null, start_date: st || null, needed_by: du || null, ...(p.data.milestoneId ? { milestone_id: p.data.milestoneId } : {}) });
+  }
+  if (steps.length === 0) return { error: "Add at least one step." };
+  if (steps.length > 12) return { error: "A sequence has at most 12 steps." };
+  const { data, error } = await (await createClient()).rpc("proj_dp_add_sequence", { p_item_id: p.data.itemId, p_section: p.data.section, p_steps: steps });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const created = Number((data as { created?: number } | null)?.created ?? 0);
+  return { error: null, notice: created === steps.length ? `${created} step${created === 1 ? "" : "s"} added, each waiting for the one before.` : `${created} new step${created === 1 ? "" : "s"} added; ${steps.length - created} already existed and were left as they are.` };
+}
+
+/** Bring the accepted handover's technologies into the plan once. Repeating it adds nothing and never touches what the Project Manager edited. */
+export async function seedPlanScope(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_dp_seed_scope", { p_project_id: p.data.projectId });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const added = Number((data as { added?: number } | null)?.added ?? 0);
+  return { error: null, notice: added === 0 ? "Everything accepted is already in the plan." : `${added} accepted technolog${added === 1 ? "y" : "ies"} added to the plan.` };
+}
+
+/** A change the linked task could not take: retry it, or keep the task as it is. Only a manager of the project can. */
+export async function reconcilePlanTask(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, lineId: uuid, action: z.enum(["retry", "keep_task"]) }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_dp_reconcile_task", { p_line_id: p.data.lineId, p_action: p.data.action });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const status = String((data as { status?: string } | null)?.status ?? "");
+  return { error: null, notice: status === "pending" ? "The task still cannot take the change. It stays flagged; you can keep the task as it is instead." : status === "kept_task" ? "The plan now follows the task." : status === "nothing_pending" ? "Nothing was waiting." : "The task was updated." };
 }
 
 export async function removePlanLine(_prev: S, fd: FormData): Promise<S> {
@@ -91,11 +162,12 @@ export async function releaseDeliveryPlan(_prev: S, fd: FormData): Promise<S> {
   const { data, error } = await (await createClient()).rpc("proj_dp_release", { p_project_id: p.data.projectId, p_item_ids: p.data.itemId ? [p.data.itemId] : null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
-  const r = (data ?? {}) as { tasks?: number; equipment?: number; skipped?: { line: string; reason: string }[] };
-  const tasks = r.tasks ?? 0, equipment = r.equipment ?? 0, skipped = r.skipped ?? [];
+  const r = (data ?? {}) as { tasks?: number; equipment?: number; external?: number; skipped?: { line: string; reason: string }[] };
+  const tasks = r.tasks ?? 0, equipment = r.equipment ?? 0, external = r.external ?? 0, skipped = r.skipped ?? [];
   const parts = [
     tasks + equipment === 0 ? "Nothing new to release." : `Released: ${tasks} task${tasks === 1 ? "" : "s"} created${equipment ? `, ${equipment} line${equipment === 1 ? "" : "s"} added to the draft equipment request` : ""}.`,
     equipment > 0 ? "The equipment request is still a draft: review it on the Equipment tab and submit it to the warehouse there." : "",
+    external > 0 ? `${external} hardware line${external === 1 ? " is" : "s are"} bought, rented or client supplied: followed in the plan, not sent to the warehouse.` : "",
     skipped.length > 0 ? `${skipped.length} line${skipped.length === 1 ? " was" : "s were"} not released: ${skipped.map((s) => `${s.line} (${s.reason})`).join("; ")}.` : "",
   ].filter(Boolean);
   return { error: null, notice: parts.join(" ") };

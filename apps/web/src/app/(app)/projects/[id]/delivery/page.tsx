@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { isFinishedProject } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -8,28 +9,30 @@ import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView, memberOptions } from "@/lib/projects/data";
 import { loadDeliveryPlan } from "@/lib/projects/delivery-plan/data";
 import { canEditSection, DP_SECTIONS } from "@/lib/projects/delivery-plan/model";
+import { todayIso } from "@/lib/projects/format";
 import { createClient } from "@/lib/supabase/server";
 
-export const metadata = { title: "Delivery plan" };
+export const metadata = { title: "Project Plan" };
 
 /**
- * The Delivery Plan of one project: deliverables by zone, each with the breakdown sections that apply. Every member of the project reads all of it. Whoever manages the
+ * The Project Plan of one project (the Delivery Plan, same records and same address): technologies / activations, each with the requirements that apply. Every member of the project reads all of it. Whoever manages the
  * project edits deliverable rows and releases; a section's delegate edits that section's lines; any member raises a correction. Work is entered once here: Release creates
  * the tasks and adds hardware to the DRAFT equipment request (submitting that to the warehouse stays on the Equipment tab). Progress is read from those records.
  */
-export default async function DeliveryPlanPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DeliveryPlanPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ view?: string; open?: string; from?: string }> }) {
   const { id } = await params;
+  const sp = await searchParams;
   const ctx = await getProjectsContext();
   if (!ctx) return null;
   const view = await loadProjectView(ctx, id);
   if (!view) notFound();
   if (view.level !== "details") redirect(`/projects/${id}`);
-  const heading = <h2 className="text-lg font-semibold">Delivery plan</h2>;
+  const heading = <h2 className="text-lg font-semibold">Project Plan</h2>;
 
   const res = await loadDeliveryPlan(id);
-  if (res.state === "not_installed") return <div className="space-y-4">{heading}<Alert role="status">The Delivery plan is not installed in this environment yet. Nothing else about this project is affected.</Alert></div>;
-  if (res.state === "denied") return <div className="space-y-4">{heading}<Alert role="status">The Delivery plan is for the people working on this project. The Project Manager can add you if you should take part.</Alert></div>;
-  if (res.state === "error") return <div className="space-y-4">{heading}<LoadError what="the delivery plan" retryHref={`/projects/${id}/delivery`} /></div>;
+  if (res.state === "not_installed") return <div className="space-y-4">{heading}<Alert role="status">The Project Plan is not installed in this environment yet. Nothing else about this project is affected.</Alert></div>;
+  if (res.state === "denied") return <div className="space-y-4">{heading}<Alert role="status">The Project Plan is for the people working on this project. The Project Manager can add you if you should take part.</Alert></div>;
+  if (res.state === "error") return <div className="space-y-4">{heading}<LoadError what="the Project Plan" retryHref={`/projects/${id}/delivery`} /></div>;
   const plan = res.plan;
   const readOnly = isFinishedProject(view.project.status);
   const members: Option[] = memberOptions(view);
@@ -46,7 +49,11 @@ export default async function DeliveryPlanPage({ params }: { params: Promise<{ i
   const images: Option[] = (fileRes.data ?? []).map((f) => ({ id: f.id, name: f.label || f.original_name || "Image" }));
 
   return (
+    <div className="space-y-4">
+      {sp.from === "handover" ? <Alert role="status" data-testid="dp-welcome">This project was created from the accepted handover. Start here: <strong>press Bring in accepted technologies</strong> (the accepted technologies are not added automatically), then assign and schedule what each needs and release it. The <Link href={`/projects/${id}/work`} className="font-medium underline">Work overview</Link> is one click away.</Alert> : null}
     <DeliveryPlanView projectId={id} plan={plan} userId={ctx.userId} readOnly={readOnly} statusWord={view.project.status} members={members} stock={stock} stockFailed={!!stockRes.error}
-      images={images} imagesFailed={!!fileRes.error} nameOfUser={view.nameOf} />
+      images={images} imagesFailed={!!fileRes.error} nameOfUser={view.nameOf}
+      view={sp.view === "timeline" ? "timeline" : "breakdown"} openKey={typeof sp.open === "string" && /^D\d{3,}$/.test(sp.open) ? sp.open : null} today={todayIso()} />
+    </div>
   );
 }

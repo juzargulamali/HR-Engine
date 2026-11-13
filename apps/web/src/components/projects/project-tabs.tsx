@@ -8,7 +8,7 @@ import { activeTabHref, type ProjectTabData } from "@/lib/projects/workspace-nav
 
 export type ProjectTab = ProjectTabData;
 
-const ICONS: Record<string, typeof Calendar> = { Work: ClipboardList, Timeline: Calendar, "Delivery plan": ListTree, Discussion: MessageSquare, Equipment: Package, Budget: Wallet };
+const ICONS: Record<string, typeof Calendar> = { Work: ClipboardList, Timeline: Calendar, "Project Plan": ListTree, Discussion: MessageSquare, Equipment: Package, Budget: Wallet };
 
 /**
  * The four primary sections of one project. The old overview address belongs to Work; the sections that were folded into the Plan page
