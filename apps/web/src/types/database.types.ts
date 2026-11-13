@@ -1693,6 +1693,8 @@ export interface Database {
       proj_milestones: ProjReadOnlyTable<ProjMilestoneRow>;
       proj_deliverables: ProjReadOnlyTable<ProjDeliverableRow>;
       proj_tasks: ProjReadOnlyTable<ProjTaskRow>;
+      proj_dp_items: ProjReadOnlyTable<{ id: string; project_id: string; item_key: string; zone: string; title: string; qty: number | null; removed_at: string | null }>;
+      proj_dp_lines: ProjReadOnlyTable<{ id: string; project_id: string; item_id: string; line_key: string; section: string; description: string; task_id: string | null; removed_at: string | null }>;
       proj_task_collaborators: ProjReadOnlyTable<ProjTaskCollaboratorRow>;
       proj_task_dependencies: ProjReadOnlyTable<ProjTaskDependencyRow>;
       proj_task_events: ProjReadOnlyTable<ProjTaskEventRow>;
@@ -2120,6 +2122,9 @@ export interface Database {
       proj_dp_raise_correction: { Args: { p_project_id: string; p_target_type: string; p_target_id: string | null; p_body: string }; Returns: string };
       proj_dp_decide_correction: { Args: { p_correction_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
       proj_dp_decide_change: { Args: { p_change_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
+      proj_dp_add_sequence: { Args: { p_item_id: string; p_section: string; p_steps: Record<string, unknown>[] }; Returns: unknown };
+      proj_dp_seed_scope: { Args: { p_project_id: string }; Returns: unknown };
+      proj_dp_reconcile_task: { Args: { p_line_id: string; p_action: string }; Returns: unknown };
       proj_dp_apply_import: { Args: { p_project_id: string; p_expected_rev: number; p_items: Record<string, unknown>[]; p_lines: Record<string, unknown>[] }; Returns: unknown };
       proj_record_plan_sent: { Args: { p_plan_id: string; p_note: string }; Returns: undefined };
       proj_record_plan_accepted: { Args: { p_plan_id: string; p_accepted_on: string; p_contact: string; p_note?: string | null }; Returns: undefined };

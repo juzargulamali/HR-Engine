@@ -10,7 +10,7 @@ import { DeliverableStatusBadge, MilestoneStatusBadge } from "@/components/proje
 import { OsFilterBar } from "@/components/os/filter-bar";
 import { OsStatCard } from "@/components/os/stat-card";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
-import { DeliverySummary, MilestoneStrip, NextOnSiteCard, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
+import { DeliverySummary, MilestoneStrip, NextOnSiteCard, ProjectPlanEntry, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
 import { loadEquipmentState } from "@/lib/projects/equipment-state";
 import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
@@ -315,6 +315,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
           {readinessRes.state === "error" ? <Alert variant="warning" role="status" data-testid="readiness-load-error">{READINESS_LOAD_ERROR}, so what is reserved, short or still out is not shown here. Open <Link href={`/projects/${id}/equipment`} className="font-medium underline">Equipment</Link> or reload.</Alert> : null}
           {/* A finished project whose equipment has not come back: completing a project does not return it. */}
           {equipmentStillOut ? <div className="space-y-1"><StillOutNotice out={equipmentStillOut} linkRequests={false} /><Link href={`/projects/${id}/equipment`} className="inline-block text-[13px] font-medium text-accent underline-offset-4 hover:underline">Open Equipment</Link></div> : null}
+          <ProjectPlanEntry projectId={id} canManage={view.canManage && !readOnly} />
           {view.canManage && !readOnly ? <DeliverySummary facts={summaryFacts} /> : null}
           <ul className="grid grid-cols-3 gap-2.5 sm:gap-3" aria-label="Where the work stands">
             <li><OsStatCard href={allHref} label={openTaskCount === 1 ? "Open task" : "Open tasks"} value={openTaskCount} icon={ListChecks} edge="cyan" active={showAll && !filtered} /></li>

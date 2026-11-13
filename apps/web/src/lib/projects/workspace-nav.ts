@@ -16,7 +16,7 @@ export function projectTabs(base: string, discussion: { unread: string | null } 
   return [
     { href: `${base}/work`, label: "Work" },
     { href: `${base}/plan`, label: "Timeline" },
-    { href: `${base}/delivery`, label: "Delivery plan" },
+    { href: `${base}/delivery`, label: "Project Plan" },
     ...(discussion ? [{ href: `${base}/discussion`, label: "Discussion", badge: discussion.unread }] : []),
     { href: `${base}/equipment`, label: "Equipment" },
     // Project Budget & Expenses: offered only to the Project Manager and to people the module's own access rules let in (never inferred from Projects access).

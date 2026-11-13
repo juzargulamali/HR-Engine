@@ -32,6 +32,8 @@ export interface TaskDetailData {
   team: { name: string; head: string; headId: string } | null;
   deliverable: string | null;
   milestone: string | null;
+  /** The Project Plan requirement this task was released from, so the task links back to its activation. Null when it was not released from the plan, or the plan could not be read (an optional link, never an error). */
+  planLink: { itemKey: string; itemTitle: string; lineKey: string } | null;
 }
 
 /**
@@ -71,6 +73,13 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     { userId: ctx.userId, today: todayIso(), nameOf: view.nameOf, formatDate: (d) => dateText(d) },
   );
   const team = view.teams.find((t) => t.id === task.team_id) ?? null;
+  // The activation this task came from (one optional read: the plan may not be installed here, and the task never depends on it).
+  let planLink: TaskDetailData["planLink"] = null;
+  const { data: planLine, error: planLineError } = await supabase.from("proj_dp_lines").select("line_key, item_id").eq("task_id", taskId).is("removed_at", null).maybeSingle();
+  if (!planLineError && planLine) {
+    const { data: planItem } = await supabase.from("proj_dp_items").select("item_key, title").eq("id", planLine.item_id).maybeSingle();
+    if (planItem) planLink = { itemKey: planItem.item_key, itemTitle: planItem.title, lineKey: planLine.line_key };
+  }
   return {
     task, row, readOnly, viewerId: ctx.userId, role,
     leader: role === "manager" || role === "head",
@@ -92,5 +101,6 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     team: team ? { name: team.name, head: view.nameOf(team.head_user_id), headId: team.head_user_id } : null,
     deliverable: (deliverables ?? []).find((d) => d.id === task.deliverable_id)?.title ?? null,
     milestone: (milestones ?? []).find((m) => m.id === task.milestone_id)?.title ?? null,
+    planLink,
   };
 }

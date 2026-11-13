@@ -8,6 +8,12 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-13 | Projects & Tasks Release 1: the Project Plan (Delivery Plan renamed and extended: requirements, supply routes, task dates and milestones, summary, Breakdown and Timeline, Task update pending) | branch `feat/project-plan-r1` from `main` `0b72962` (draft PR, not merged); **ONE additive migration `20270104000100_proj_project_plan_r1.sql` (install-order row 32)**
+
+* What changed for people: the **Delivery plan** tab is **Project Plan** (same address); a **Project Plan** card on Work; **Accept handover** opens the plan; **Bring in accepted technologies** (once); technologies / activations have a quantity; requirements in Hardware, Content, Apps, Engineering & integration and Site work with section-specific fields (one app on six devices = one app, six devices); supply routes (Inventory, Buy, Rent, Client supplied) and visible manual hardware (Specification pending, Needs stock match, Needs sourcing); **Start from a sequence**; planned start, milestone and waits-for; release passes start date and milestone to the task and makes the dependencies; an approved owner / date / milestone change reaches the task or shows **Task update pending** with **Resolve**; summary strip, Breakdown and Timeline, milestone "N of M complete"; the task panel links back to its activation.
+* Not changed: existing plan records, permissions, links, Excel import / export, release idempotency, the draft equipment request (submitted on the Equipment tab), any other module. Staff guidance for the plan is rewritten and the JARVIS published file regenerated; JARVIS code, settings and permissions are untouched.
+* Docs: `modules/projects-delivery-plan.md` section 8, coverage index, action catalogue (rows 103a to 103c), `02` route row, `05` ledger, `docs/launch-refinement-install-order.md` row 32, `docs/projects-project-plan-r1-deployment.md`.
+
 ### 2026-11-12 | Invite and password links: Resend invite, Send password reset and Forgot password links can be completed by the person they are sent to | branch `claude/invite-recovery-links` from `main` `c6fdc84` (not merged); **app only: no migration, no SQL, no change to Supabase Auth settings**
 
 * **Reported by the owner:** an invite sent from Preview opened the sign-in page; a Resend invite from Production showed as expired. Claude has no access to the hosted Auth users or logs.

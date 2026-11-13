@@ -407,45 +407,77 @@ Where your company uses dispatch notes, each time the warehouse sends equipment 
 - links: Handovers -> /projects/handovers; Projects -> /projects; My Work -> /projects/work; Requests -> /inventory/requests
 - screens: /projects/handovers; /projects/[id]/work; /projects/[id]/equipment
 
-A won job passes from Sales to a founder or Operations Manager, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder or Operations Manager names the Project Manager, who accepts it: that creates the project and opens its Work page. The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.
+A won job passes from Sales to a founder or Operations Manager, to the Project Manager, to the warehouse and back. Sales submits the handover. A founder or Operations Manager names the Project Manager, who accepts it: that creates the project and opens its Project Plan (the Work page is one click away). The Project Manager adds the team, plans the tasks and submits the equipment request. The warehouse reserves, sends out and later records what came back. Completing the project does not return equipment.
 
 1. Sales: confirm the enquiry as won, then prepare and submit the handover.
 2. Founder or Operations Manager: open Handovers and press Assign Project Manager.
-3. Project Manager: press Accept handover, add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
+3. Project Manager: press Accept handover (it opens the Project Plan), add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
 4. Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.
 5. Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list.
 
-## The Delivery plan of a project
+## The Project Plan of a project
 - id: projects-delivery-plan
 - area: projects
 - status: published
-- keywords: delivery plan; deliverables by zone; breakdown lines; release the plan; release work to the teams; delegate a section; accountable owner; raise a correction; proposed change to released work
+- keywords: project plan; delivery plan; plan the project; break a technology into requirements; technologies and activations; requirements; summary of what needs attention; next site date; delegate a section; accountable owner; start from a sequence; bring in accepted technologies; raise a correction
 - links: Projects -> /projects
 - screens: /projects/[id]/delivery
 
-The Delivery plan lists what the project delivers, zone by zone. Each deliverable has one accountable owner and a needed-by date, and only the breakdown it needs: Hardware, Content, Programming, Installation, Testing. Everyone on the project can read all of it. The Project Manager adds deliverables and releases the work; a person a section was delegated to fills in that section. Release creates the tasks and adds the hardware to the draft equipment request, once.
+The Project Plan is where the Project Manager breaks each technology of an accepted job into what it needs, gives each piece an owner and dates, and sees what holds up delivery. Everyone on the project can read it. Sections: Hardware, Content, Apps, Engineering & integration, Site work; a simple job may use only Hardware and Site work.
 
-1. Open the project and choose the Delivery plan tab.
-2. Project Manager: press Add deliverable, then Add line for each part it needs. Use Who defines each section to hand a section to Engineering, Content or Programming.
-3. Project Manager: press Release plan. Tasks go to their people; hardware goes on the draft equipment request, which you still submit on the Equipment tab.
-4. Anyone: press Correction on a deliverable or line if something is wrong. The lead decides and you see the decision under Decisions.
-5. After release a change is a proposal: press Edit, then Propose change. The Project Manager approves or rejects it.
+1. Open the project and choose the Project Plan tab (also the card at the top of Work, and where Accept handover takes you).
+2. Read the strip at the top: the next site date, what needs attention (blockers first, then missing owners, late dependencies, hardware to source, equipment drafts to send) and the next action. Each item opens its row.
+3. Project Manager: press Bring in accepted technologies to add what the handover accepted (once; it never duplicates or overwrites your edits), or Add technology / activation with a quantity, an accountable owner and a ready-by date.
+4. Open a technology and press Add requirement, or Start from a sequence (Moodboard, Storyboard, First draft and so on, each waiting for the one before; rename, add or remove steps, give each an owner and dates).
+5. Use Who defines each section to hand a section to Engineering, Content, Programming or the Site Lead. Anyone can press Correction if something is wrong.
 
-## Fill the Delivery plan from Excel
+## Hardware and releasing the Project Plan
+- id: projects-plan-hardware-and-release
+- area: projects
+- status: published
+- keywords: release the plan; release work to the teams; hardware in the plan; supply route; manual hardware line; needs stock match; specification pending; needs sourcing; rent; buy; client supplied; review and send to warehouse; draft equipment request
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+Release gives the work to the teams: each work requirement becomes one task for its owner, and each hardware line matched to Inventory goes on the project's draft equipment request. Releasing again, or at the same time, never creates anything twice.
+
+1. Hardware: choose the stock item from Inventory. If it is not there, save it as a manual line: it stays in the plan as Needs stock match or Specification pending while everything else is released.
+2. Bought, rented or client-supplied hardware is followed in the plan with its owner and expected date and is never sent to the warehouse.
+3. Project Manager: press Release plan. Read what it will create first, then confirm.
+4. Press Review and send to Warehouse on a hardware line to open the draft request, and submit it on the Equipment tab.
+5. Later, match a manual line to a stock item and release again: it is added once.
+
+## Follow the Project Plan after release
+- id: projects-plan-after-release
+- area: projects
+- status: published
+- keywords: timeline of the plan; breakdown and timeline; milestone n of m complete; ready for mockup; propose change to released work; task update pending; resolve task update; late dependency; unscheduled work
+- links: Projects -> /projects; My Work -> /projects/work
+- screens: /projects/[id]/delivery
+
+After release the task is the record: the person doing it updates it once in My Work, and the Project Plan, its Timeline and the milestone show the same status. Dates and owners change by proposal.
+
+1. Press Timeline beside Breakdown to see the same work with dates across; work with no dates is listed under the chart and a late predecessor is shown against the work that waits for it.
+2. A milestone shows how many of its tasks are complete and which are outstanding. All tasks complete means ready to confirm; confirming the milestone is a separate step on Work.
+3. To change something released, press Edit, then Propose change. The Project Manager approves or rejects it.
+4. When a new owner or date is approved, the task is updated. If the task cannot take it, the requirement says Task update pending.
+5. Project Manager: press Resolve, then Retry the update, or Keep the task as it is.
+
+## Fill the Project Plan from Excel
 - id: projects-delivery-plan-excel
 - area: projects
 - status: published
-- keywords: delivery plan excel; download template; import excel; export excel; delivery plan workbook; deliverables sheet; breakdown sheet; reimport the plan
+- keywords: project plan excel; delivery plan excel; download template; import excel; export excel; project plan workbook; deliverables sheet; breakdown sheet; reimport the plan
 - links: Projects -> /projects
 - screens: /projects/[id]/delivery/import
 
-You can prepare the Delivery plan in Excel. Download template gives a workbook with a Deliverables sheet and an optional Breakdown sheet; a simple job needs only Deliverables. Export Excel gives the current plan with its IDs, so you can edit and import it again without making duplicates. Importing shows a preview first and saves nothing until you confirm. Blank cells and missing rows never delete anything, and importing never releases work.
+You can prepare the Project Plan in Excel. Download template gives a workbook with a Deliverables sheet and an optional Breakdown sheet; a simple job needs only Deliverables. Export Excel gives the current plan with its IDs, so you can edit and import it again without making duplicates. Importing shows a preview first and changes nothing until you confirm; it never releases anything. Planned start dates, supply routes, details, milestones and waits-for are set on screen, not in the workbook.
 
-1. On the Delivery plan press Download template, or Export Excel to edit the current plan.
-2. Fill one row per deliverable. Keep the ID columns as they are; leave them empty for new rows.
+1. On the Project Plan press Download template, or Export Excel to edit the current plan.
+2. Fill one row per technology. Keep the ID columns as they are; leave them empty for new rows.
 3. Press Import Excel and upload the file. Read the preview: Add, Update, Unchanged, Needs attention.
 4. Answer anything under Needs attention, such as a name that matches two people, then press Import.
-5. Back on the Delivery plan, the Project Manager presses Release plan when the work should go to the teams.
+5. Back on the Project Plan, the Project Manager presses Release plan when the work should go to the teams.
 
 ## The closeout report of a project
 - id: projects-closeout-report

@@ -1,6 +1,6 @@
 import ExcelJS from "exceljs";
 import { INSTRUCTIONS_SHEET, neutraliseCell } from "@/lib/crm/clients-agencies/import/xlsx";
-import { DP_SECTIONS, DP_SECTION_SHEET_NAMES, itemProgress, lineProgress, type DeliveryPlan } from "../model";
+import { DP_CURRENT_SECTIONS, DP_SECTION_SHEET_NAMES, itemProgress, lineProgress, type DeliveryPlan } from "../model";
 
 /**
  * The Delivery Plan workbook: the template and the export have the same shape, so export, edit, import round-trips. Generated at request time; nothing is stored.
@@ -21,7 +21,7 @@ export const READ_ONLY_HEADERS = ["Released (read-only)", "Progress (read-only)"
 export const DP_INSTRUCTIONS = [
   "How to use this workbook",
   "1. Deliverables sheet: one row per deliverable (what the client gets, in which zone). A simple supply-and-install job needs only this sheet.",
-  "2. Breakdown sheet is optional. Use it only for jobs that need it: one row per line of Hardware, Content, Programming, Installation or Testing under a deliverable.",
+  "2. Breakdown sheet is optional. Use it only for jobs that need it: one row per line of Hardware, Content, Apps, Engineering or Site work under a deliverable. Plans made earlier may also carry Programming, Installation or Testing lines, which are still read.",
   "3. A Breakdown row names its deliverable by Deliverable ID, or, for a deliverable that is new in this workbook, by the same Zone and Deliverable as its row on the Deliverables sheet.",
   "4. Deliverable ID (D001) and Line ID (L0001) identify the same row even if its name changes. Never edit an ID. Leave the ID empty for a new row.",
   "5. Blank cells and missing rows never delete anything: a blank cell leaves the value as it is, and a row that is not in the workbook is left alone.",
@@ -73,7 +73,7 @@ function addInstructions(wb: ExcelJS.Workbook) {
 }
 
 function sectionPicker(ws: ExcelJS.Worksheet, lastRow: number) {
-  const list = `"${DP_SECTIONS.map((s) => DP_SECTION_SHEET_NAMES[s]).join(",")}"`;
+  const list = `"${DP_CURRENT_SECTIONS.map((s) => DP_SECTION_SHEET_NAMES[s]).join(",")}"`;
   for (let r = 2; r <= lastRow; r++) ws.getCell(r, 5).dataValidation = { type: "list", allowBlank: true, formulae: [list], showErrorMessage: false };
 }
 

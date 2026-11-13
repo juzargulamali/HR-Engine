@@ -146,8 +146,8 @@ export async function acceptHandover(_prev: S, fd: FormData): Promise<S> {
   const { data, error } = await supabase.rpc("proj_accept_handover", { p_handover_id: p.data.handoverId });
   if (error) return fail(error.message);
   refreshProjects();
-  // The new project's Work page: where the Project Manager starts planning. A repeated accept returns the same project (the database creates one only), so a retry lands here too.
-  redirect(`/projects/${data}/work`);
+  // The new project's Project Plan: where the Project Manager starts planning (the Work overview is one click away). A repeated accept returns the same project (the database creates one only), so a retry lands here too.
+  redirect(`/projects/${data}/delivery?from=handover`);
 }
 
 // ---------------------------------------------------------------------------------------------------------------

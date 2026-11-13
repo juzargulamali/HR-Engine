@@ -50,6 +50,12 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
         {main.length > 0 ? <div className="mt-2.5"><TaskPrimaryAction row={control} moves={main} /></div> : null}
       </section>
 
+      {data.planLink ? (
+        <p className="text-sm" data-testid="task-plan-link">
+          From the Project Plan: <Link href={`/projects/${view.project.id}/delivery?open=${data.planLink.itemKey}#dp-${data.planLink.lineKey}`} className="font-medium underline underline-offset-2">{data.planLink.itemKey} {data.planLink.itemTitle}</Link>
+          <span className="text-muted-foreground"> · {data.planLink.lineKey}. Status, owner and dates here are what the plan shows.</span>
+        </p>
+      ) : null}
       {task.description ? <p className="whitespace-pre-wrap text-sm">{task.description}</p> : <Muted>No description.</Muted>}
 
       <div className="flex flex-wrap items-start justify-between gap-3 rounded-md border border-border p-3">

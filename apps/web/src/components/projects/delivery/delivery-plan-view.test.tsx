@@ -7,7 +7,7 @@ vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children:
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/projects/p1/delivery", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/projectsDeliveryPlan", () => ({
   saveDeliverable: vi.fn(), removeDeliverable: vi.fn(), savePlanLine: vi.fn(), removePlanLine: vi.fn(), delegatePlanSection: vi.fn(), releaseDeliveryPlan: vi.fn(),
-  raisePlanCorrection: vi.fn(), decidePlanCorrection: vi.fn(), decidePlanChange: vi.fn(),
+  raisePlanCorrection: vi.fn(), decidePlanCorrection: vi.fn(), decidePlanChange: vi.fn(), addPlanSequence: vi.fn(), seedPlanScope: vi.fn(), reconcilePlanTask: vi.fn(),
 }));
 import { DeliveryPlanView, type DeliveryPlanViewProps } from "./delivery-plan-view";
 
@@ -38,7 +38,7 @@ const props = (p: DeliveryPlan, over: Partial<DeliveryPlanViewProps> = {}): Deli
 });
 const text = () => document.body.textContent ?? "";
 
-describe("Delivery plan screen", () => {
+describe("Project Plan screen", () => {
   it("an ordinary member reads the whole plan, every section, with progress from the task and the equipment line, and can raise a correction but change nothing", () => {
     render(<DeliveryPlanView {...props(plan())} />);
     expect(text()).toContain("D001 · Interactive LED welcome wall");
@@ -51,7 +51,7 @@ describe("Delivery plan screen", () => {
     expect(screen.queryByTestId("dp-add-deliverable")).toBeNull();
     expect(screen.queryByTestId("dp-release")).toBeNull();
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Add line" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add requirement" })).toBeNull();
     expect(screen.queryByRole("link", { name: /Import Excel/ })).toBeNull();
     expect(screen.getByRole("link", { name: /Export Excel/ }).getAttribute("href")).toBe("/api/projects/p1/delivery-plan/export");
     expect(screen.getAllByRole("button", { name: "Correction" }).length).toBe(5);        // two deliverables and three lines
@@ -68,7 +68,7 @@ describe("Delivery plan screen", () => {
     expect(within(screen.getByTestId("dp-line-L0001")).getByRole("button", { name: "Edit" })).toBeTruthy();
     expect(within(screen.getByTestId("dp-line-L0002")).queryByRole("button", { name: "Edit" })).toBeNull();
     expect(within(screen.getByTestId("dp-line-L0003")).queryByRole("button", { name: "Edit" })).toBeNull();
-    expect(screen.getAllByRole("button", { name: "Add line" }).length).toBe(2);
+    expect(screen.getAllByRole("button", { name: "Add requirement" }).length).toBe(2);
     expect(screen.getByRole("link", { name: /Import Excel/ }).getAttribute("href")).toBe("/projects/p1/delivery/import");
     expect(screen.queryByTestId("dp-release")).toBeNull();
     expect(screen.queryByTestId("dp-add-deliverable")).toBeNull();
@@ -103,15 +103,147 @@ describe("Delivery plan screen", () => {
   it("a finished project's plan is read-only for everyone, the manager included", () => {
     render(<DeliveryPlanView {...props(plan({ can_manage: true, my_sections: ["content"] }), { readOnly: true })} />);
     expect(text()).toContain("This project is completed. Its delivery plan is read-only.");
-    for (const name of ["Edit", "Add line", "Correction", "Approve change", "Accept correction"]) expect(screen.queryByRole("button", { name })).toBeNull();
+    for (const name of ["Edit", "Add requirement", "Correction", "Approve change", "Accept correction"]) expect(screen.queryByRole("button", { name })).toBeNull();
     expect(screen.queryByTestId("dp-release")).toBeNull();
     expect(screen.queryByRole("link", { name: /Import Excel/ })).toBeNull();
   });
 
   it("an empty plan says what to do; a failed image read says so", () => {
     render(<DeliveryPlanView {...props(plan({ can_manage: true, items: [], corrections: [], changes: [] }), { imagesFailed: true })} />);
-    expect(text()).toContain("No deliverables yet");
+    expect(text()).toContain("No technologies or activations yet");
     expect(text()).toMatch(/download the template, fill it in Excel and import it/);
     expect(text()).toContain("Could not load this project's image files");
+  });
+
+  describe("Release 1: the working Project Plan", () => {
+    const hw = (over: Partial<DpLine>): DpLine => line({ id: "h1", key: "L0010", section: "hardware", description: "Ring light", qty: 2, assignee_id: null, assignee_name: null, notes: "", ...over });
+    const photobooth: DpItem = {
+      id: "i9", key: "D001", zone: "", title: "Kids photobooth", specs: null, qty: 2, owner_id: "eng", owner_name: "Fictional Eli", needed_by: "2027-04-28", image_file_id: null, released_at: "2026-11-12T08:00:00Z", version: 1, sort_order: 10,
+      lines: [
+        hw({}),
+        hw({ id: "h2", key: "L0011", description: "Booth screen", inv_item_id: "led", notes: "55 in", released_at: "2026-11-12T08:00:00Z", equipment: { request_id: "r1", request_code: "EQ-1", request_status: "draft", qty: 2, reserved: 0, dispatched: 0, returned: 0 } }),
+        line({ id: "c1", key: "L0012", description: "Storyboard", released_at: "2026-11-12T08:00:00Z", detail: { deliverable_type: "Storyboard", count: 1, format: "PDF" }, milestone_id: "m1",
+          task: { id: "t9", title: "Kids photobooth: Storyboard", status: "in_progress", start_date: "2027-04-04", due_date: "2027-04-10", blocked: true, blocked_reason: "Waiting for the script", unblock_action: "Chase the client", assignee_name: "Fictional Cara", depends_on: [] } }),
+        line({ id: "c2", key: "L0013", description: "First draft", assignee_id: null, assignee_name: "Fictional Cara", start_date: "2027-04-08", needed_by: "2027-04-14", milestone_id: "m1", plan_depends_on: [{ line_id: "c1", line_key: "L0012", title: "Storyboard", task_id: "t9", status: "in_progress", due_date: "2027-04-10" }] }),
+        line({ id: "a1", key: "L0014", section: "apps", description: "Cartoon photo app", assignee_id: null, assignee_name: null, detail: { app_count: 1, platform: "Android tablet", device_count: 6 } }),
+      ],
+    };
+    const r1 = (over: Partial<DeliveryPlan> = {}) => plan({
+      can_manage: true, items: [photobooth], corrections: [], changes: [], delegations: [{ section: "engineering", user_id: "eng", name: "Fictional Eli" }],
+      site_dates: { install_start: "2027-05-01", event_start: "2027-05-03", event_end: "2027-05-04" },
+      milestones: [{ id: "m1", title: "Ready for mockup", due_date: "2027-04-12", status: "planned", is_required: true,
+        tasks: [{ task_id: "t9", title: "Kids photobooth: Storyboard", status: "in_progress", due_date: "2027-04-10", blocked: true, assignee_name: "Fictional Cara", line_key: "L0012", item_key: "D001" }],
+        planned: [{ line_id: "c2", line_key: "L0013", title: "Kids photobooth: First draft", item_key: "D001", needed_by: "2027-04-14", assignee_name: "Fictional Cara" }] }],
+      ...over,
+    });
+    const render1 = (p = r1(), over: Partial<DeliveryPlanViewProps> = {}) => render(<DeliveryPlanView {...props(p, { userId: "pm", today: "2027-04-09", ...over })} />);
+
+    it("leads with the next-step summary: the next site date, what needs attention in priority order, and one next action linked to its row", () => {
+      render1();
+      const s = screen.getByTestId("plan-summary");
+      expect(within(s).getByTestId("summary-site").textContent).toMatch(/1 May 2027.*Installation starts/);
+      const attention = within(s).getByTestId("summary-attention").textContent ?? "";
+      expect(attention).toMatch(/1 · Open blockers/);
+      expect(attention).toMatch(/1 · Late dependencies/);
+      expect(attention).toMatch(/1 · Hardware to source/);
+      expect(attention).toMatch(/1 · Equipment drafts to send/);
+      const next = within(within(s).getByTestId("summary-next")).getByRole("link");
+      expect(next.textContent).toMatch(/L0012 Storyboard is blocked: Waiting for the script\. Next: Chase the client/);
+      expect(next.getAttribute("href")).toBe("/projects/p1/delivery?open=D001#dp-L0012");
+    });
+
+    it("shows each requirement's owner, planned start, due date, status and blocker, and the supply route and state of hardware", () => {
+      render1();
+      const story = screen.getByTestId("dp-line-L0012").textContent ?? "";
+      expect(story).toMatch(/Storyboard × PDF|Storyboard · PDF|Storyboard.*PDF/);
+      expect(story).toMatch(/Fictional Cara.*starts 4 Apr 2027.*due 10 Apr 2027.*for Ready for mockup/);
+      expect(within(screen.getByTestId("dp-attention-L0012")).getByText(/Blocked: Waiting for the script\. Next: Chase the client/)).toBeTruthy();
+      expect(within(screen.getByTestId("dp-line-L0013")).getByText(/Late: Storyboard is due 2027-04-10, after this starts on 2027-04-08/)).toBeTruthy();
+      expect(within(screen.getByTestId("dp-line-L0010")).getByText("Specification pending")).toBeTruthy();                 // a manual line stays visible with its state
+      expect(within(screen.getByTestId("dp-line-L0010")).getByText("Inventory")).toBeTruthy();
+      expect(within(screen.getByTestId("dp-line-L0011")).getByRole("link", { name: "Review and send to Warehouse" }).getAttribute("href")).toBe("/projects/p1/equipment?request=r1");
+      expect(screen.getByTestId("dp-line-L0014").textContent).toMatch(/1 app · Android tablet · 6 devices/);
+    });
+
+    it("an activation shows name, quantity, owner, ready-by and a readiness summary; sections with no lines are not drawn; a delegated section with no input is named", () => {
+      render1(r1({ delegations: [{ section: "content", user_id: "c", name: "Fictional Cara" }, { section: "engineering", user_id: "eng", name: "Fictional Eli" }] }));
+      const card = screen.getByTestId("dp-activation-D001");
+      expect(card.textContent).toMatch(/D001 · Kids photobooth × 2/);
+      expect(card.textContent).toMatch(/Accountable owner: Fictional Eli · ready by 28 Apr 2027/);
+      expect(card.textContent).toMatch(/\d of 5 lines done · \d+ need/);
+      expect(within(card).getAllByRole("heading", { level: 4 }).map((h) => h.textContent?.split(" · ")[0])).toEqual(["Hardware", "Content", "Apps"]);   // no Engineering or Site work heading: nothing recorded there
+      expect(screen.getByTestId("dp-waiting-D001").textContent).toBe("Waiting for Fictional Eli: Engineering & integration");
+      expect(screen.queryByText("No zone")).toBeNull();                                                                       // a project without zones shows no zone heading
+    });
+
+    it("the milestone shows N of M complete with the outstanding tasks, apart from its confirmation", () => {
+      render1();
+      const m = screen.getByTestId("milestone-Ready for mockup");
+      expect(m.textContent).toMatch(/0 of 2 complete/);
+      expect(m.textContent).toMatch(/Not ready/);
+      expect(m.textContent).toMatch(/Kids photobooth: Storyboard.*in progress, blocked.*due 10 Apr 2027/);
+      expect(m.textContent).toMatch(/Kids photobooth: First draft.*not released yet/);
+      expect(m.textContent).toMatch(/At risk: 2027-04-14 is after the milestone date 2027-04-12/);
+      expect(within(m).getByRole("link", { name: "Kids photobooth: Storyboard" }).getAttribute("href")).toBe("/projects/p1/work?task=t9");
+    });
+
+    it("the Timeline draws the same records, lists unscheduled work, and Breakdown and Timeline switch by address", () => {
+      render1(r1(), { view: "timeline" });
+      const tl = screen.getByTestId("plan-timeline");
+      expect(within(tl).getAllByTestId("tl-row-activation")).toHaveLength(1);
+      expect(within(tl).getAllByTestId("tl-row-line").map((r) => r.textContent).join("|")).toMatch(/Storyboard.*First draft/);
+      expect(within(screen.getByTestId("tl-unscheduled")).getByText("Ring light")).toBeTruthy();                              // no dates: listed, not dropped
+      expect(within(tl).getByText(/Late: Storyboard is due/)).toBeTruthy();
+      expect(screen.getByTestId("dp-view-timeline").getAttribute("aria-current")).toBe("page");
+      expect(screen.getByTestId("dp-view-breakdown").getAttribute("href")).toBe("/projects/p1/delivery");
+      expect(screen.queryByTestId("dp-line-L0012")).toBeNull();
+    });
+
+    it("scope that exists only as a brief is shown beside the plan; accepted technologies not yet in the plan are offered once to the manager", () => {
+      render1(r1({ scope: { brief: "Photobooth with a cartoon app, printed on the spot.", technologies: [], pending: [] } }));
+      expect(screen.getByTestId("dp-brief").textContent).toMatch(/Photobooth with a cartoon app/);
+      expect(screen.getByTestId("dp-brief").closest(".grid")).toBeTruthy();
+      cleanup();
+      render1(r1({ items: [], scope: { brief: null, technologies: [{ name: "Photobooth", qty: 2 }], pending: [{ name: "Photobooth", qty: 2 }, { name: "Cartoon app", qty: 1 }] } }));
+      expect(screen.getByTestId("dp-scope-pending").textContent).toMatch(/2 technologies that are not in the plan yet: Photobooth, Cartoon app/);
+      expect(screen.getByTestId("dp-seed-scope").textContent).toBe("Bring in accepted technologies (2)");
+      cleanup();
+      render(<DeliveryPlanView {...props(r1({ can_manage: false, items: [], scope: { brief: null, technologies: [{ name: "Photobooth" }], pending: [{ name: "Photobooth" }] } }), { userId: "tech", today: "2027-04-09" })} />);
+      expect(screen.queryByTestId("dp-scope-pending")).toBeNull();                                                            // only a manager brings the scope in
+    });
+
+    it("an approved change the task could not take is flagged Task update pending, with the resolve control for a manager only", () => {
+      const pending = r1({ items: [{ ...photobooth, lines: [line({ id: "p1", key: "L0020", description: "Integration test", assignee_id: "eng", assignee_name: "Fictional Dev", needed_by: "2027-04-30", released_at: "x",
+        task: { id: "tp", title: "x", status: "done", start_date: null, due_date: "2027-04-26", blocked: false, assignee_name: "Fictional Cara", depends_on: [] },
+        task_pending: { fields: { assignee_id: "eng", due_date: "2027-04-30" }, reason: "A done task can no longer be edited" } })] }] });
+      render1(pending);
+      const row = screen.getByTestId("dp-line-L0020");
+      expect(within(row).getByTestId("dp-attention-L0020").textContent).toMatch(/Task update pending: A done task can no longer be edited/);
+      expect(within(screen.getByTestId("dp-pending-L0020")).getByRole("button", { name: "Resolve" })).toBeTruthy();
+      cleanup();
+      render(<DeliveryPlanView {...props({ ...pending, can_manage: false }, { userId: "tech", today: "2027-04-09" })} />);
+      expect(within(screen.getByTestId("dp-pending-L0020")).queryByRole("button", { name: "Resolve" })).toBeNull();
+      expect(screen.getByTestId("dp-pending-L0020").textContent).toMatch(/The Project Manager can resolve it/);
+    });
+
+    it("the line form shows only the fields of its section: a hardware line has a supply route, an app has devices, a simple job never meets the rest", () => {
+      render1();
+      fireEvent.click(within(screen.getByTestId("dp-line-L0010")).getByRole("button", { name: "Edit" }));
+      let dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByLabelText("How is it supplied?")).toBeTruthy();
+      expect(within(dialog).getByLabelText("Stock item").textContent).toMatch(/Not in Inventory yet: manual line/);
+      expect(within(dialog).queryByLabelText("Number of devices")).toBeNull();
+      fireEvent.change(within(dialog).getByLabelText("How is it supplied?"), { target: { value: "rent" } });
+      expect(within(dialog).queryByLabelText("Stock item")).toBeNull();
+      expect(within(dialog).getByLabelText("Supplier")).toBeTruthy();
+      cleanup();
+      render1();
+      fireEvent.click(within(screen.getByTestId("dp-line-L0014")).getByRole("button", { name: "Edit" }));
+      dialog = screen.getByRole("dialog");
+      expect(within(dialog).getByLabelText("Number of devices")).toBeTruthy();
+      expect(within(dialog).getByLabelText("Platform")).toBeTruthy();
+      expect(within(dialog).getByText(/One app on six screens is one app and six devices/)).toBeTruthy();
+      expect(within(dialog).queryByLabelText("Resolution")).toBeNull();
+    });
   });
 });
