@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ChevronDown, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Tooltip } from "@/components/ui/tooltip";
+import { RailFlyout, RailTip } from "./rail-popover";
 import { UserMenu } from "./user-menu";
 import { NAV_ICONS } from "./nav-icons";
 import { COLLAPSE_COOKIE } from "./collapse-cookie";
@@ -60,47 +60,9 @@ function ComingSoonRow({ m, collapsed }: { m: NavModuleData; collapsed?: boolean
       )}
     </div>
   );
-  return collapsed ? (
-    <Tooltip label={`${m.label} (coming soon)`} side="right">
-      {row}
-    </Tooltip>
-  ) : (
-    row
-  );
+  return collapsed ? <RailTip label={`${m.label} (coming soon)`}>{row}</RailTip> : row;
 }
 
-
-/**
- * The pages of one module, shown beside the icon rail while the sidebar is collapsed (on hover, and on keyboard focus: the links come straight after the icon in tab order, so
- * Tab reaches them). Fixed-position so the rail's own scrolling cannot clip it; closes on leaving, on Escape and on choosing a page. Reads the same links as the open sidebar.
- */
-function RailFlyout({ m, sub, onNavigate, children }: { m: NavModuleData; sub: string | null; onNavigate?: () => void; children: React.ReactNode }) {
-  const [open, setOpen] = useState(false);
-  const [top, setTop] = useState(0);
-  const wrap = useRef<HTMLDivElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const show = () => { if (timer.current) clearTimeout(timer.current); const r = wrap.current?.getBoundingClientRect(); if (r) setTop(Math.max(8, Math.min(r.top, window.innerHeight - 120))); setOpen(true); };
-  const hide = () => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 160); };
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-  const links = m.sections.flatMap((s) => s.links.filter((l) => !l.secondary));
-  return (
-    <div ref={wrap} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hide(); }} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
-      {children}
-      {open ? (
-        <div role="group" aria-label={`${m.label} pages`} data-testid={`rail-flyout-${m.id}`} style={{ top }} className="os-chrome fixed left-[4.5rem] z-50 w-60 rounded-xl border border-border p-2 shadow-lg">
-          <p className="px-2.5 pb-1 pt-1 text-[13px] font-semibold">{m.label}</p>
-          <div className="flex flex-col gap-px">
-            {links.map((l) => l.comingSoon ? (
-              <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle"><span className="block text-sm">{l.label}</span><span className="block text-sm">Coming soon</span></div>
-            ) : (
-              <Link key={l.href} href={l.href} onClick={() => { setOpen(false); onNavigate?.(); }} aria-current={sub === l.href ? "page" : undefined} className="os-nav-sub">{l.label}</Link>
-            ))}
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
-}
 
 export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: NavModuleData[]; collapsed?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
@@ -117,9 +79,9 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
         const hasSub = m.sections.length > 0;
         const open = !collapsed && hasSub && (overrides[m.id] ?? isActive);
         const sub = currentSubHref(pathname, m);
-        const rowClass = cn("os-nav-link min-w-0 flex-1", collapsed && "justify-center px-0");
+        const rowClass = cn("os-nav-link min-w-0 flex-1", collapsed && "h-11 w-full justify-center px-0 focus-visible:outline-2 focus-visible:-outline-offset-2");
         const link = (
-          <Link href={m.href} onClick={onNavigate} data-active={isActive ? "true" : undefined} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
+          <Link href={m.href} onClick={onNavigate} aria-haspopup={collapsed && hasSub ? "true" : undefined} data-active={isActive ? "true" : undefined} aria-current={isActive && (!hasSub || (!open && sub === m.href)) ? "page" : undefined} className={rowClass}>
             <Icon className="h-[1.15rem] w-[1.15rem] flex-none" aria-hidden />
             {collapsed ? <span className="sr-only">{m.label}</span> : <span className="truncate">{m.label}</span>}
             {m.waiting ? (
@@ -139,9 +101,7 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
                 hasSub ? (
                   <RailFlyout m={m} sub={sub} onNavigate={onNavigate}>{link}</RailFlyout>
                 ) : (
-                  <Tooltip label={m.label} side="right">
-                    {link}
-                  </Tooltip>
+                  <RailTip label={m.label}>{link}</RailTip>
                 )
               ) : (
                 link
