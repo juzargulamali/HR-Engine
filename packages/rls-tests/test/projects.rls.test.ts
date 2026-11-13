@@ -202,7 +202,7 @@ describe("Projects & Tasks", () => {
       );
       expect(rows.map((r) => r.proname).sort()).toEqual(["proj_site_technician_candidates", "proj_site_technician_eligible"]);
       for (const r of rows) {
-        const cols = [...r.src.matchAll(/\be\.([a-z_]+)/g)].map((m) => m[1]);
+        const cols = [...r.src.matchAll(/\be\.([a-z_]+)/g)].map((m) => m[1] ?? "");
         expect(cols.length).toBeGreaterThan(0);
         expect(cols.filter((c) => !["user_id", "company_id", "deleted_at", "employment_status", "termination_date"].includes(c))).toEqual([]);
         expect(r.src).not.toMatch(/manager_id|salary|payroll|attendance|leave/i);
