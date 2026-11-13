@@ -160,7 +160,7 @@ describe("Project Plan screen", () => {
       expect(within(screen.getByTestId("dp-attention-L0012")).getByText(/Blocked: Waiting for the script\. Next: Chase the client/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0013")).getByText(/Late: Storyboard is due 2027-04-10, after this starts on 2027-04-08/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0010")).getByText("Specification pending")).toBeTruthy();                 // a manual line stays visible with its state
-      expect(within(screen.getByTestId("dp-line-L0010")).getByText("Inventory")).toBeTruthy();
+      expect(within(screen.getByTestId("dp-line-L0010")).getByTestId("dp-who-L0010").textContent).toMatch(/^Inventory · /);
       expect(within(screen.getByTestId("dp-line-L0011")).getByRole("link", { name: "Review and send to Warehouse" }).getAttribute("href")).toBe("/projects/p1/equipment?request=r1");
       expect(screen.getByTestId("dp-line-L0014").textContent).toMatch(/1 app · Android tablet · 6 devices/);
     });
@@ -294,12 +294,12 @@ describe("Project Plan screen: compact Breakdown, Quick add and order", () => {
     open(plan({ can_manage: true }));
     const row = screen.getByTestId("dp-line-L0010");
     expect(within(row).getByTestId("dp-name-L0010").textContent).toContain("Batak unit × 4");
-    expect(within(row).getByTestId("dp-who-L0010").textContent).toMatch(/Not matched to stock|No owner/);
+    expect(within(row).getByTestId("dp-who-L0010").textContent).toMatch(/Inventory · Not matched to stock/);
     expect(within(row).getByTestId("dp-when-L0010").textContent).toMatch(/no date recorded/);
-    expect(within(row).getByTestId("dp-status-L0010").textContent).toMatch(/Inventory.*Specification pending/);      // supply route and the hardware state
+    expect(within(row).getByTestId("dp-status-L0010").textContent).toMatch(/Specification pending/);
     expect(row.className).toMatch(/md:grid-cols-\[/);                                      // a table row from the md breakpoint, stacked below it
     const section = screen.getByTestId("dp-section-D002-hardware");
-    expect(section.textContent).toMatch(/Requirement.*Supply.*Dates.*Status.*Actions/);
+    expect(section.textContent).toMatch(/Requirement.*Supply \/ owner.*Dates.*Status.*Actions/);
   });
 
   it("the Project Manager can Quick add and reorder; a section's delegate only in their section; an ordinary member and a finished project in none", () => {

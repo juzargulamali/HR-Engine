@@ -95,16 +95,19 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
     const when = l.section === "hardware" ? (sched.due ? `needed by ${dateText(sched.due)}` : "no date recorded") : sched.start || sched.due ? `${sched.start ? `starts ${dateText(sched.start)}` : "no start date"} · ${sched.due ? `due ${dateText(sched.due)}` : "no due date"}` : "not scheduled yet";
     const draftRequest = l.equipment?.request_id && l.equipment.request_status === "draft";
     return (
-      <div id={`dp-${l.key}`} className="scroll-mt-24 py-2 md:grid md:grid-cols-[minmax(0,3fr)_minmax(0,1.6fr)_minmax(0,1.7fr)_minmax(0,1.4fr)_auto] md:items-start md:gap-x-3" data-testid={`dp-line-${l.key}`}>
+      <div id={`dp-${l.key}`} className="scroll-mt-24 py-2 md:grid md:grid-cols-[minmax(0,2.6fr)_minmax(0,1.7fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_auto] md:items-start md:gap-x-3" data-testid={`dp-line-${l.key}`}>
         <div className="min-w-0" data-testid={`dp-name-${l.key}`}>
           <p className="break-words text-sm"><span className="font-mono text-[12px] text-muted-foreground">{l.key}</span> <span className="font-medium">{l.description}</span>{l.qty !== null ? <span className="text-muted-foreground"> × {l.qty}</span> : null}</p>
           {detail ? <p className="break-words text-[13px]">{detail}</p> : null}
           {l.notes ? <p className="break-words text-[13px] text-muted-foreground">{l.notes}</p> : null}
         </div>
-        <p className="mt-0.5 min-w-0 break-words text-[13px] md:mt-0" data-testid={`dp-who-${l.key}`}><span className="text-muted-foreground md:hidden">{l.section === "hardware" ? "Supply: " : "Owner: "}</span>{target}</p>
+        <p className="mt-0.5 min-w-0 break-words text-[13px] md:mt-0" data-testid={`dp-who-${l.key}`}>
+          <span className="text-muted-foreground md:hidden">{l.section === "hardware" ? "Supply: " : "Owner: "}</span>
+          {route ? <span className="text-muted-foreground">{SUPPLY_ROUTE_LABELS[route]} · </span> : null}{target}
+          {l.section === "hardware" && route === "inventory" && l.assignee_name ? <span className="block">Owner: {l.assignee_name}</span> : null}
+        </p>
         <p className="min-w-0 break-words text-[13px] text-muted-foreground" data-testid={`dp-when-${l.key}`}><span className="md:hidden">Dates: </span>{when}{l.milestone_id && milestoneName.get(l.milestone_id) ? ` · for ${milestoneName.get(l.milestone_id)}` : ""}</p>
         <div className="mt-1 flex flex-wrap items-start gap-1 md:mt-0" data-testid={`dp-status-${l.key}`}>
-          {route ? <OsBadge tone="quiet" className="whitespace-nowrap">{SUPPLY_ROUTE_LABELS[route]}</OsBadge> : null}
           <OsBadge tone={hs ? hs.tone : p.tone} className="whitespace-normal! text-left">{hs ? hs.text : p.text}</OsBadge>
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-1 md:mt-0 md:justify-end">
@@ -184,8 +187,8 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
             return (
               <div key={s} data-testid={`dp-section-${item.key}-${s}`}>
                 <h4 className="text-[13px] font-semibold text-muted-foreground">{DP_SECTION_LABELS[s]}{plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s)) ? <span className="font-normal"> · defined by {plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s))!.name}</span> : null}</h4>
-                <div className={`mt-1 hidden border-b border-border pb-1 text-[12px] font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(0,3fr)_minmax(0,1.6fr)_minmax(0,1.7fr)_minmax(0,1.4fr)_auto] md:gap-x-3 ${reorder ? "md:ml-16" : ""}`} aria-hidden>
-                  <span>Requirement</span><span>{s === "hardware" ? "Supply" : "Owner"}</span><span>Dates</span><span>Status</span><span className="md:w-[9.5rem] md:text-right">Actions</span>
+                <div className={`mt-1 hidden border-b border-border pb-1 text-[12px] font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(0,2.6fr)_minmax(0,1.7fr)_minmax(0,1.5fr)_minmax(0,1.5fr)_auto] md:gap-x-3 ${reorder ? "md:ml-16" : ""}`} aria-hidden>
+                  <span>Requirement</span><span>{s === "hardware" ? "Supply / owner" : "Owner"}</span><span>Dates</span><span>Status</span><span className="md:w-[9.5rem] md:text-right">Actions</span>
                 </div>
                 <ReorderableLines projectId={id} itemId={item.id} sectionLabel={DP_SECTION_LABELS[s]} enabled={reorder} rows={lines.map((l) => ({ id: l.id, label: l.key, node: lineRow(item, l) }))} />
               </div>
