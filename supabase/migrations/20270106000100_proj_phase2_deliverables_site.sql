@@ -73,7 +73,8 @@ grant select on table proj_task_output_versions to authenticated;
 -- Client feedback can be linked to the version (and activation) it is about. Display and history only: a feedback that changes scope, dates or booked equipment still goes
 -- through the existing scope-change / change-request paths.
 alter table proj_feedback add column if not exists output_version_id uuid references proj_task_output_versions(id);
-alter table proj_feedback add column if not exists activation_id uuid references proj_dp_items(id);
+-- No foreign key on purpose: proj_link_feedback_output checks the activation belongs to the project, and a key to proj_dp_items would stop the earlier Delivery Plan rollback pack from dropping that table.
+alter table proj_feedback add column if not exists activation_id uuid;
 create index if not exists idx_proj_feedback_output on proj_feedback(output_version_id) where output_version_id is not null;
 
 -- May this reader use this project file? The same rule as the files' own policy (restricted = manager only), for the project the file belongs to.
