@@ -572,3 +572,20 @@ When a project is completed or archived, its group moves in Chat to a closed sec
 2. Scroll to Archived at the bottom of the list and press it to open the section.
 3. Choose the project to read its conversation.
 4. Or type the project's name or reference in the search box, if you have one: it finds finished groups too.
+
+## Add several requirements at once and put them in order
+- id: projects-plan-quick-add-and-order
+- area: projects
+- status: published
+- keywords: quick add; add several requirements; paste a list; reorder requirements
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+Quick add saves a whole list of requirements for one technology in one go, and saving it again never adds a row twice. Rows can be put in order by dragging or with the arrow buttons; the order is saved.
+
+1. Open the technology on the Project Plan and press Quick add. Choose the section if you are offered more than one.
+2. Type the rows, or press Paste a list, put one requirement on each line (a quantity can follow a tab, or be written like Batak unit x 4), and press Put these in the rows below. Add an owner and dates to any row.
+3. Press Add rows. Rows that are already in the plan are left as they are and the message says so. If a row is refused, nothing is added and the message names the row.
+4. To change the order, drag the grip at the start of a row, or press the up or down arrow beside it (Tab to the button, then Enter). The order is saved as you go and is the same for everyone.
+5. Only the Project Manager, or the person a section is delegated to, sees these controls for that section.
+

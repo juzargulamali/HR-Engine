@@ -18,6 +18,8 @@ import { getLauncherState } from "@/lib/jarvis/launcher";
 import { JarvisLauncher } from "@/components/jarvis/jarvis-launcher";
 import { loadChatGroups } from "@/lib/chat/data";
 import { ChatLauncher } from "@/components/chat/chat-launcher";
+import { cookies } from "next/headers";
+import { COLLAPSE_COOKIE } from "@/components/nav/collapse-cookie";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await getCurrentSession();
@@ -105,13 +107,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   // configured). Any failure means no launcher and nothing else changes. Hiding it is a convenience: every JARVIS call checks the same things again on the server.
   const jarvis = await getLauncherState(session.userId);
 
+  // The desktop sidebar's collapsed choice (a cookie written by its Collapse button), so the page is drawn at the right width from the first paint.
+  const sidebarCollapsed = (await cookies()).get(COLLAPSE_COOKIE)?.value === "1";
+
   // Chat: the button is drawn only when the server lists at least one group for this person (membership is the database function's: an active Sales grant for that company, or active enrolment in a project).
   // Any failure, or the migration not being applied yet, means no button; nothing else on the page is affected.
   const chat = await loadChatGroups().catch(() => ({ state: "error" as const }));
 
   return (
     <>
-    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }} hasDirectReports={directReports.hasDirectReports}>
+    <AppShell session={session} clockOpenSince={clockOpenSince} clockLoadFailed={clockLoadFailed} hasPendingApprovals={hasPendingApprovals} crmGrants={crmGrants} projects={projects} inventory={inventory} budget={{ ...budget, ...(budgetWaiting ? { waiting: budgetWaiting } : {}) }} hasDirectReports={directReports.hasDirectReports} sidebarCollapsed={sidebarCollapsed}>
       <OsScope>
         {session.loadFailed || menuLoadFailed ? (
           <div className="mb-4 space-y-3">

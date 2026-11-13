@@ -115,6 +115,47 @@ export async function addPlanSequence(_prev: S, fd: FormData): Promise<S> {
   return { error: null, notice: created === steps.length ? `${created} step${created === 1 ? "" : "s"} added, each waiting for the one before.` : `${created} new step${created === 1 ? "" : "s"} added; ${steps.length - created} already existed and were left as they are.` };
 }
 
+/**
+ * Quick add: several requirements of one section in one save. Each row goes through the same database function as a single add, so the same permission, validation and
+ * "same name in the same section is the same line" rule apply: retrying or double-submitting the save adds nothing. One refused row refuses the whole batch and says which.
+ */
+export async function addPlanLines(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid, section, milestoneId: optionalUuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const names = fd.getAll("rowName").map((x) => String(x).trim());
+  const qtys = fd.getAll("rowQty").map(String), owners = fd.getAll("rowOwner").map(String), starts = fd.getAll("rowStart").map(String), dues = fd.getAll("rowDue").map(String);
+  const rows: Record<string, unknown>[] = [];
+  for (let n = 0; n < names.length; n++) {
+    if (!names[n]) continue;
+    const q = (qtys[n] ?? "").trim(), o = owners[n] ?? "", st = starts[n] ?? "", du = dues[n] ?? "";
+    if (q && !(Number(q) > 0 && Number(q) <= 1_000_000)) return { error: `The quantity of "${names[n]}" must be more than zero.` };
+    if (o && !uuid.safeParse(o).success) return { error: "Choose each owner from the list." };
+    if (st && !optionalDate.safeParse(st).success) return { error: `Check the start date of "${names[n]}".` };
+    if (du && !optionalDate.safeParse(du).success) return { error: `Check the due date of "${names[n]}".` };
+    rows.push({ description: names[n], ...(q ? { qty: Number(q) } : {}), assignee_id: o || null, start_date: st || null, needed_by: du || null, ...(p.data.milestoneId ? { milestone_id: p.data.milestoneId } : {}) });
+  }
+  if (rows.length === 0) return { error: "Name at least one row." };
+  if (rows.length > 50) return { error: "Quick add takes at most 50 rows at a time." };
+  const { data, error } = await (await createClient()).rpc("proj_dp_add_lines", { p_item_id: p.data.itemId, p_section: p.data.section, p_rows: rows, p_chain: fd.get("chain") === "on" });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const r = (data ?? {}) as { created?: number; existing?: number };
+  const created = Number(r.created ?? 0), existing = Number(r.existing ?? 0);
+  return { error: null, notice: existing === 0 ? `${created} row${created === 1 ? "" : "s"} added.` : `${created} new row${created === 1 ? "" : "s"} added; ${existing} already in the plan ${existing === 1 ? "was" : "were"} left as ${existing === 1 ? "it is" : "they are"}, so nothing was added twice.` };
+}
+
+/** Persist the order of requirements within a technology. The whole new order of the rows shown is sent; sending the same order again changes nothing. */
+export async function reorderPlanLines(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const ids = fd.getAll("lineId").map(String);
+  if (ids.length === 0 || !ids.every((x) => uuid.safeParse(x).success)) return { error: "Nothing to reorder." };
+  const { data, error } = await (await createClient()).rpc("proj_dp_reorder_lines", { p_item_id: p.data.itemId, p_line_ids: ids });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: Number((data as { moved?: number } | null)?.moved ?? 0) === 0 ? "The order was already saved." : "Order saved." };
+}
+
 /** Bring the accepted handover's technologies into the plan once. Repeating it adds nothing and never touches what the Project Manager edited. */
 export async function seedPlanScope(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({ projectId: uuid }).safeParse(Object.fromEntries(fd));

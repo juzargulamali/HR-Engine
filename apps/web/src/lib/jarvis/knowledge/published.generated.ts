@@ -1749,6 +1749,34 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "projects-plan-quick-add-and-order",
+    "area": "projects",
+    "title": "Add several requirements at once and put them in order",
+    "keywords": [
+      "quick add",
+      "add several requirements",
+      "paste a list",
+      "reorder requirements"
+    ],
+    "summary": "Quick add saves a whole list of requirements for one technology in one go, and saving it again never adds a row twice. Rows can be put in order by dragging or with the arrow buttons; the order is saved.",
+    "steps": [
+      "Open the technology on the Project Plan and press Quick add. Choose the section if you are offered more than one.",
+      "Type the rows, or press Paste a list, put one requirement on each line (a quantity can follow a tab, or be written like Batak unit x 4), and press Put these in the rows below. Add an owner and dates to any row.",
+      "Press Add rows. Rows that are already in the plan are left as they are and the message says so. If a row is refused, nothing is added and the message names the row.",
+      "To change the order, drag the grip at the start of a row, or press the up or down arrow beside it (Tab to the button, then Enter). The order is saved as you go and is the same for everyone.",
+      "Only the Project Manager, or the person a section is delegated to, sees these controls for that section."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/delivery"
+    ]
+  },
+  {
     "id": "sales-overview",
     "area": "sales",
     "title": "How Sales & CRM works",

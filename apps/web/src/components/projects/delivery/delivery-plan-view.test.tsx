@@ -7,7 +7,7 @@ vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children:
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/projects/p1/delivery", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/projectsDeliveryPlan", () => ({
   saveDeliverable: vi.fn(), removeDeliverable: vi.fn(), savePlanLine: vi.fn(), removePlanLine: vi.fn(), delegatePlanSection: vi.fn(), releaseDeliveryPlan: vi.fn(),
-  raisePlanCorrection: vi.fn(), decidePlanCorrection: vi.fn(), decidePlanChange: vi.fn(), addPlanSequence: vi.fn(), seedPlanScope: vi.fn(), reconcilePlanTask: vi.fn(),
+  raisePlanCorrection: vi.fn(), decidePlanCorrection: vi.fn(), decidePlanChange: vi.fn(), addPlanSequence: vi.fn(), seedPlanScope: vi.fn(), reconcilePlanTask: vi.fn(), addPlanLines: vi.fn(), reorderPlanLines: vi.fn(),
 }));
 import { DeliveryPlanView, type DeliveryPlanViewProps } from "./delivery-plan-view";
 
@@ -160,7 +160,7 @@ describe("Project Plan screen", () => {
       expect(within(screen.getByTestId("dp-attention-L0012")).getByText(/Blocked: Waiting for the script\. Next: Chase the client/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0013")).getByText(/Late: Storyboard is due 2027-04-10, after this starts on 2027-04-08/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0010")).getByText("Specification pending")).toBeTruthy();                 // a manual line stays visible with its state
-      expect(within(screen.getByTestId("dp-line-L0010")).getByText("Inventory")).toBeTruthy();
+      expect(within(screen.getByTestId("dp-line-L0010")).getByTestId("dp-who-L0010").textContent).toMatch(/Inventory · /);
       expect(within(screen.getByTestId("dp-line-L0011")).getByRole("link", { name: "Review and send to Warehouse" }).getAttribute("href")).toBe("/projects/p1/equipment?request=r1");
       expect(screen.getByTestId("dp-line-L0014").textContent).toMatch(/1 app · Android tablet · 6 devices/);
     });
@@ -283,5 +283,41 @@ describe("Project Plan screen", () => {
       expect(within(dialog).getByText(/One app on six screens is one app and six devices/)).toBeTruthy();
       expect(within(dialog).queryByLabelText("Resolution")).toBeNull();
     });
+  });
+});
+
+describe("Project Plan screen: compact Breakdown, Quick add and order", () => {
+  const two: DpItem = { ...kiosk, lines: [line({ id: "k1", key: "L0010", section: "hardware", description: "Batak unit", qty: 4, assignee_id: null, assignee_name: null }), line({ id: "k2", key: "L0011", section: "hardware", description: "Network switch", qty: 1, assignee_id: null, assignee_name: null })] };
+  const open = (p: DeliveryPlan, over: Partial<DeliveryPlanViewProps> = {}) => render(<DeliveryPlanView {...props({ ...p, items: [two] }, { today: "2026-11-13", ...over })} />);
+
+  it("a requirement is one compact row: name and quantity, who, dates, status and actions, under one column heading per section", () => {
+    open(plan({ can_manage: true }));
+    const row = screen.getByTestId("dp-line-L0010");
+    expect(within(row).getByTestId("dp-name-L0010").textContent).toContain("Batak unit × 4");
+    expect(within(row).getByTestId("dp-who-L0010").textContent).toMatch(/Inventory · Not matched to stock/);
+    expect(within(row).getByTestId("dp-when-L0010").textContent).toMatch(/no date recorded/);
+    expect(within(row).getByTestId("dp-status-L0010").textContent).toMatch(/Specification pending/);
+    expect(row.className).toMatch(/md:grid-cols-\[/);                                      // a table row from the md breakpoint, stacked below it
+    const section = screen.getByTestId("dp-section-D002-hardware");
+    expect(section.textContent).toMatch(/Requirement.*Supply \/ owner.*Dates.*Status.*Actions/);
+  });
+
+  it("the Project Manager can Quick add and reorder; a section's delegate only in their section; an ordinary member and a finished project in none", () => {
+    open(plan({ can_manage: true }));
+    expect(screen.getByRole("button", { name: "Quick add" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move L0010 down" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Move L0011 up" })).toBeTruthy();
+    cleanup();
+    open(plan({ my_sections: ["content"] }));
+    expect(screen.getByRole("button", { name: "Quick add" })).toBeTruthy();               // Content is theirs
+    expect(screen.queryByRole("button", { name: /Move L0010/ })).toBeNull();               // the hardware rows are not
+    cleanup();
+    open(plan());
+    expect(screen.queryByRole("button", { name: "Quick add" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Move L0010/ })).toBeNull();
+    cleanup();
+    open(plan({ can_manage: true }), { readOnly: true });
+    expect(screen.queryByRole("button", { name: "Quick add" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Move L0010/ })).toBeNull();
   });
 });

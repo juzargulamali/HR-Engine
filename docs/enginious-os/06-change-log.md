@@ -17,6 +17,14 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 * **Follow-up (same draft PR): Timeline dates readable.** A labelled column and gridline for every day on schedules up to 28 days, bars aligned to the columns; weekly labels beyond that; every row states its exact dates ("14–16 Nov", "Due 16 Nov", "No dates") in a left column that stays in view while the chart scrolls; released work uses the task's current dates, drafts the effective plan dates. Display only: no database change. Checked in `project-plan-timeline-flow.mjs` against the saved records at desktop and phone widths.
 * Docs: `modules/projects-delivery-plan.md` section 8, coverage index, action catalogue (rows 103a to 103c), `02` route row, `05` ledger, `docs/launch-refinement-install-order.md` row 32, `docs/projects-project-plan-r1-deployment.md`.
 
+### 2026-11-13 | Project Plan usability: compact Breakdown rows, multi-row Quick add, saved row order, flash-free collapsed sidebar with a page flyout | branch `feat/project-plan-usability` stacked on `feat/project-plan-r1` (draft, not merged)
+
+* Summary: each requirement is one row (Requirement, Supply / owner, Dates, Status, Actions; stacked on a phone); **Quick add** saves up to 50 requirements in one go and never adds a row twice; rows can be reordered by dragging or with up / down buttons and the order is saved; the shared sidebar's collapsed choice is remembered in a cookie so the first paint is right, and a collapsed rail opens a module's pages in a flyout.
+* Migrations: `20270105000100_proj_plan_quick_add_reorder.sql` (two functions, `proj_dp_add_lines` and `proj_dp_reorder_lines`; additive; pack prefix `proj_plan_quick_add_reorder_`). Not applied anywhere by Claude.
+* Files updated in `docs/enginious-os/`: `modules/projects-delivery-plan.md` (section 9), `modules/projects-action-catalogue.md` (rows 103d, 103e), staff guidance `projects.md` (topic `projects-plan-quick-add-and-order`; JARVIS published file regenerated), plus `docs/projects-plan-usability-scope.md` and `docs/launch-refinement-install-order.md`.
+* Hosted status: not applied.
+* Tests: `packages/rls-tests/test/proj-plan-quick-add-reorder.rls.test.ts` (11), `ordering.test.ts`, `quick-add-dialog.test.tsx`, `reorderable-lines.test.tsx`, `sidebar-rail.test.tsx`, additions to `delivery-plan-view.test.tsx`; browser flow `apps/web/os-shell-checks/project-plan-usability-flow.mjs` (11 steps, run on the local stack).
+
 ### 2026-11-12 | Invite and password links: Resend invite, Send password reset and Forgot password links can be completed by the person they are sent to | branch `claude/invite-recovery-links` from `main` `c6fdc84` (not merged); **app only: no migration, no SQL, no change to Supabase Auth settings**
 
 * **Reported by the owner:** an invite sent from Preview opened the sign-in page; a Resend invite from Production showed as expired. Claude has no access to the hosted Auth users or logs.
