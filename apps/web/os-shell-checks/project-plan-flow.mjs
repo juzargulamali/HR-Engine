@@ -155,9 +155,11 @@ await step("a content sequence the delegate adds: editable steps with their own 
   await c.getByRole("button", { name: "Start from a sequence" }).click();
   const d = dialog();
   const names = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
+  if ((await d.getByLabel("Step 1 name").inputValue()) !== "") throw new Error("the sequence starts prefilled");   // blank: the person types the steps
+  for (let n = 2; n < names.length; n++) await d.getByRole("button", { name: "Add a step" }).click();
   for (let n = 0; n < names.length; n++) {
     const li = d.getByTestId(`seq-step-${n}`);
-    if ((await li.getByLabel(`Step ${n + 1} name`).inputValue()) !== names[n]) throw new Error(`step ${n + 1} is not ${names[n]}`);
+    await li.getByLabel(`Step ${n + 1} name`).fill(names[n]);
     await choose(li.getByLabel(`Step ${n + 1} owner`), n === 5 ? /^lead/i : /^hr(?!1)/i);
     await li.getByLabel(`Step ${n + 1} start`).fill(dayIso(1 + n * 2)); await li.getByLabel(`Step ${n + 1} due`).fill(dayIso(2 + n * 2));
   }

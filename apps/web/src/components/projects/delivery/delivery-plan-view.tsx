@@ -28,11 +28,11 @@ export interface DeliveryPlanViewProps {
   readOnly: boolean; statusWord: string;
   members: Option[]; stock: Option[]; stockFailed: boolean; images: Option[]; imagesFailed: boolean;
   nameOfUser: (id: string) => string;
-  /** Breakdown (the working view, the default) or Timeline. Both draw the same plan records. */
+  /** Breakdown (the working view, the default) or the Work schedule (`timeline` in the address, `work-schedule` accepted too). Both draw the same plan records. */
   view?: "breakdown" | "timeline" | "deliverables";
   /** The Deliverables register (Phase 2), built by the page from the same records as the task panel; drawn only in the Deliverables view. */
   deliverablesSlot?: React.ReactNode;
-  /** The activation to open (its key, D001), from a link in the summary or the Timeline. */
+  /** The activation to open (its key, D001), from a link in the summary or the Work schedule. */
   openKey?: string | null;
   /** Today as YYYY-MM-DD; the page passes it so the same day is used throughout. */
   today?: string;
@@ -43,7 +43,7 @@ const WORK_SECTIONS: DpSection[] = ["content", "apps", "engineering", "site"];
 
 /**
  * The Project Plan as drawn: technologies / activations (grouped by zone when the project has zones), what each needs, the next-step summary, milestones, and the
- * Breakdown / Timeline views of the same records. It receives the plan already read for this person; which controls it draws follows `plan.can_manage` and
+ * Breakdown / Work schedule views of the same records. It receives the plan already read for this person; which controls it draws follows `plan.can_manage` and
  * `plan.my_sections`, and the database decides again on every action.
  */
 export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, statusWord, members, stock, stockFailed, images, imagesFailed, nameOfUser, view = "breakdown", deliverablesSlot = null, openKey = null, today = todayIso() }: DeliveryPlanViewProps) {
@@ -237,7 +237,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
 
       <div className={briefOnly ? "grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : "space-y-5"}>
         <div className="min-w-0 space-y-5">
-          <nav aria-label="Plan views" className="flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border p-1">{viewLink("breakdown", "Breakdown")}{viewLink("timeline", "Timeline")}{viewLink("deliverables", "Deliverables")}</nav>
+          <nav aria-label="Plan views" className="flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border p-1">{viewLink("breakdown", "Breakdown")}{viewLink("timeline", "Work schedule")}{viewLink("deliverables", "Deliverables")}</nav>
 
           {proposed.length > 0 ? (
             <Panel title={`Proposed changes to released work (${proposed.length})`} description="Nothing that was released changes until the Project Manager approves it. An approved owner, date or milestone change is applied to the task through the existing task rules; if the task cannot take it, the requirement shows Task update pending. Booked equipment is changed on the Equipment tab.">

@@ -74,7 +74,7 @@ export default async function DeliveryPlanPage({ params, searchParams }: { param
       {sp.from === "handover" ? <Alert role="status" data-testid="dp-welcome">This project was created from the accepted handover. Start here: <strong>press Bring in accepted technologies</strong> (the accepted technologies are not added automatically), then assign and schedule what each needs and release it. The <Link href={`/projects/${id}/work`} className="font-medium underline">Work overview</Link> is one click away.</Alert> : null}
     <DeliveryPlanView projectId={id} plan={plan} userId={ctx.userId} readOnly={readOnly} statusWord={view.project.status} members={members} stock={stock} stockFailed={!!stockRes.error}
       images={images} imagesFailed={!!fileRes.error} nameOfUser={view.nameOf}
-      view={sp.view === "timeline" ? "timeline" : sp.view === "deliverables" ? "deliverables" : "breakdown"} deliverablesSlot={deliverablesSlot} openKey={typeof sp.open === "string" && /^D\d{3,}$/.test(sp.open) ? sp.open : null} today={todayIso()} />
+      view={sp.view === "timeline" || sp.view === "work-schedule" ? "timeline" : sp.view === "deliverables" ? "deliverables" : "breakdown"} deliverablesSlot={deliverablesSlot} openKey={typeof sp.open === "string" && /^D\d{3,}$/.test(sp.open) ? sp.open : null} today={todayIso()} />
     </div>
   );
 }

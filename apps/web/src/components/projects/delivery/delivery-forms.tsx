@@ -243,11 +243,12 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
   );
 }
 
-const SEQUENCE_DEFAULT = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
+/** A sequence starts blank: work that is already tracked as tasks (a moodboard, a storyboard) is not offered again, so nobody re-enters it here by habit. */
+const SEQUENCE_START_STEPS = 2;
 type Step = { id: number; name: string; owner: string; start: string; due: string };
 
 /**
- * Start from an editable chain (Moodboard, Storyboard, First draft ...): each step is a requirement that waits for the one before; names, owners and dates are the person's.
+ * Start from an empty, editable chain: each step is a requirement that waits for the one before; names, owners and dates are the person's.
  * Each step is a card: a full-width name, then Owner (the widest), Start date and Due date on a second row with visible labels; the fields stack on a phone. The chosen owner is
  * also written out in full under the field, so a long name is readable even where the box would clip it. "Use activation owner" is what an empty owner means: at release the task
  * goes to the technology's accountable owner.
@@ -255,20 +256,21 @@ type Step = { id: number; name: string; owner: string; start: string; due: strin
 export function SequenceDialog({ projectId, itemId, section, members, milestones, activationOwner }: {
   projectId: string; itemId: string; section: DpSection; members: Option[]; milestones: Option[]; /** The accountable owner of the technology, named in the default choice. */ activationOwner?: string | null;
 }) {
-  const next = useRef(SEQUENCE_DEFAULT.length);
+  const next = useRef(SEQUENCE_START_STEPS);
   const blank = (name: string): Step => ({ id: next.current++, name, owner: "", start: "", due: "" });
-  const [steps, setSteps] = useState<Step[]>(() => SEQUENCE_DEFAULT.map((name, i) => ({ id: i, name, owner: "", start: "", due: "" })));
+  const [steps, setSteps] = useState<Step[]>(() => Array.from({ length: SEQUENCE_START_STEPS }, (_, i) => ({ id: i, name: "", owner: "", start: "", due: "" })));
   const set = (id: number, patch: Partial<Step>) => setSteps((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
   const defaultOwner = `Use activation owner${activationOwner ? ` (${activationOwner})` : " (none set yet)"}`;
   return (
     <FormDialog label="Start from a sequence" title="Add a sequence of requirements" dialogSize="xl"
-      description={`Each step waits for the one before it. Rename, remove or add steps, and give each its own owner and dates. Section: ${DP_SECTION_LABELS[section]}. Nothing is released until the Project Manager releases it.`}>
+      description={`Each step waits for the one before it. Name each step, add or remove steps, and give each its own owner and dates. Section: ${DP_SECTION_LABELS[section]}. Nothing is released until the Project Manager releases it.`}>
       {(done) => (
         <ActionForm action={addPlanSequence} submitLabel="Add the steps" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="itemId" value={itemId} />
           <input type="hidden" name="section" value={section} />
+          <p className="text-[13px] text-muted-foreground" data-testid="seq-hint">Nothing is filled in for you. Work that already exists as a task (see the Work page) is tracked there: add only requirements that are not tasks yet. Empty steps are ignored.</p>
           <ol className="space-y-3">
             {steps.map((st, n) => (
               <li key={st.id} className="space-y-3 rounded-md border border-border p-3" data-testid={`seq-step-${n}`}>
@@ -277,7 +279,7 @@ export function SequenceDialog({ projectId, itemId, section, members, milestones
                     <label htmlFor={`seq-name-${st.id}`} className="text-[13px] font-medium text-muted-foreground">Step {n + 1}</label>
                     <Button type="button" variant="ghost" size="sm" onClick={() => setSteps((all) => all.filter((x) => x.id !== st.id))} aria-label={`Remove step ${n + 1}`}>Remove</Button>
                   </div>
-                  <Input id={`seq-name-${st.id}`} name="stepDescription" aria-label={`Step ${n + 1} name`} value={st.name} onChange={(e) => set(st.id, { name: e.target.value })} maxLength={300} className="w-full" />
+                  <Input id={`seq-name-${st.id}`} name="stepDescription" aria-label={`Step ${n + 1} name`} placeholder="Name this step" value={st.name} onChange={(e) => set(st.id, { name: e.target.value })} maxLength={300} className="w-full" />
                 </div>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
                   <div className="min-w-0">

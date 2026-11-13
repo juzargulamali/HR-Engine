@@ -168,7 +168,7 @@ export function ProjectPlanEntry({ projectId, canManage }: { projectId: string; 
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/projects/${projectId}/delivery`} className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open the Project Plan</Link>
-        <Link href={`/projects/${projectId}/delivery?view=timeline`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Timeline</Link>
+        <Link href={`/projects/${projectId}/delivery?view=timeline`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Work schedule</Link>
       </div>
     </section>
   );

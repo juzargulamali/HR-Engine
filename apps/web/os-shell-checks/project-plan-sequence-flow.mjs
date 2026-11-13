@@ -27,11 +27,17 @@ const ownerBox = (n) => dialog().getByLabel(`Step ${n} owner`);
 const noOverflow = async (what) => { const o = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (o > 1) throw new Error(`${what}: horizontal overflow of ${o}px`); };
 
 let PRJ = ""; let ITEM = "";
+const NAMES = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
+// The sequence starts blank (nothing is prefilled); the check types its own six steps.
 const openForm = async () => {
   await page.goto(`${BASE}/projects/${PRJ}/delivery?open=D001`, { waitUntil: "networkidle" });
   const c = page.getByTestId("dp-activation-D001"); if (!(await c.evaluate((e) => e.open))) await c.locator("summary").click();
   await c.getByRole("button", { name: "Start from a sequence" }).click();
   await dialog().waitFor();
+  if ((await dialog().getByLabel("Step 1 name").inputValue()) !== "") throw new Error("the sequence starts prefilled");
+  if (!(await dialog().getByTestId("seq-hint").isVisible())) throw new Error("no hint that tasks are already tracked");
+  for (let n = 2; n < NAMES.length; n++) await dialog().getByRole("button", { name: "Add a step" }).click();
+  for (let n = 0; n < NAMES.length; n++) await dialog().getByLabel(`Step ${n + 1} name`).fill(NAMES[n]);
 };
 
 await as("mgr");
@@ -93,7 +99,7 @@ for (const [label, viewport] of [["desktop", { width: 1280, height: 900 }], ["ph
 
 await step("saved: the steps appear as requirements with the chosen owners; the default owner is the activation owner", async () => {
   await as("mgr", { width: 1280, height: 900 }); await openForm();
-  const names = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
+  const names = NAMES;
   for (let n = 0; n < 6; n++) {
     if ((await dialog().getByLabel(`Step ${n + 1} name`).inputValue()) !== names[n]) throw new Error(`step ${n + 1}`);
     await dialog().getByLabel(`Step ${n + 1} start`).fill(dayIso(1 + n * 2)); await dialog().getByLabel(`Step ${n + 1} due`).fill(dayIso(2 + n * 2));
