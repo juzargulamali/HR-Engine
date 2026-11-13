@@ -35,11 +35,11 @@ const BASE = "/projects/work";
 
 const EMPTY: Record<MyWorkShow, { title: string; description: string }> = {
   mine: { title: "No open tasks", description: "Tasks assigned to you, or shared with you as a collaborator, appear here. You can add your own task inside a project you are part of." },
-  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the departments you head appear here." },
+  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the project teams you lead appear here." },
   overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed appear here." },
   blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you as the person who can unblock them appear here, and blocked tasks with nobody named on a project you manage." },
   waiting: { title: "Nothing of yours is in review", description: "Tasks you sent for review appear here until a reviewer accepts them or sends them back. There is nothing for you to do on them meanwhile." },
-  review: { title: "Nothing is waiting for your review", description: "Tasks sent for review that you lead as Project Manager, temporary leader, founder or department head appear here. You never review your own work." },
+  review: { title: "Nothing is waiting for your review", description: "Tasks sent for review that you lead as Project Manager, temporary leader, founder or team lead appear here. You never review your own work." },
 };
 
 /**

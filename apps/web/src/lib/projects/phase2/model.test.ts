@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  pickAttention,
+  pickAttention, feedbackLinks, reviewStateWord,
   toLocalInput, activityWhen, attentionHref, filterRegister, formatAt, groupByActivation, nextOutputAction, parseRegisterFilter, quantityText, recentText, registerCounts, registerCsv, resolveZone, runGroups, siteRange,
   type Register, type RegisterRow, type SiteActivity, type OutputVersion,
 } from "./model";
@@ -117,5 +117,30 @@ describe("pickAttention", () => {
     const { shown, more } = pickAttention(all);
     expect(shown.map((a) => a.title)).toEqual(["output_missing-1", "output_missing-2", "shipment_conflict-1"]);
     expect(more).toBe(5);
+  });
+});
+
+describe("feedbackLinks", () => {
+  const look = { items: new Map([["a1", { key: "D001", title: "Batak wall", removed: false }], ["a2", { key: "D002", title: "Old idea", removed: true }]]), versions: new Map([["v1", { task_id: "t1", version_no: 2 }]]), tasks: new Map([["t1", "Storyboard"]]) };
+  it("links a live activation and a version", () => {
+    const r = feedbackLinks({ activation_id: "a1", output_version_id: "v1" }, "p1", look);
+    expect(r.activation).toEqual({ text: "D001 Batak wall", href: "/projects/p1/delivery?open=D001#dp-D001" });
+    expect(r.version).toEqual({ text: "Version 2 of Storyboard", href: "/projects/p1/work?task=t1&version=v1" });
+  });
+  it("says Activation removed, with no link, when the activation was removed or is gone", () => {
+    expect(feedbackLinks({ activation_id: "a2" }, "p1", look).activation).toEqual({ text: "Activation removed", href: null });
+    expect(feedbackLinks({ activation_id: "missing" }, "p1", look).activation).toEqual({ text: "Activation removed", href: null });
+    expect(feedbackLinks({ output_version_id: "gone" }, "p1", look).version).toEqual({ text: "Version no longer available", href: null });
+    expect(feedbackLinks({}, "p1", look)).toEqual({ activation: null, version: null });
+  });
+});
+
+describe("reviewStateWord", () => {
+  it("names the Operations reviewer, or says one is needed", () => {
+    expect(reviewStateWord({ status: "awaiting", route: "operations", reviewer_name: "Lena", needs_reviewer: false })).toBe("Awaiting Operations review · Lena");
+    expect(reviewStateWord({ status: "awaiting", route: "operations", reviewer_name: null, needs_reviewer: false })).toBe("Awaiting Operations review");
+    expect(reviewStateWord({ status: "awaiting", route: "operations", reviewer_name: null, needs_reviewer: true })).toBe("Needs an Operations reviewer");
+    expect(reviewStateWord({ status: "awaiting", route: "team", reviewer_name: null, needs_reviewer: false })).toBe("Awaiting review");
+    expect(reviewStateWord({ status: "approved", route: "operations", reviewer_name: "Lena", needs_reviewer: false })).toBe("Approved");
   });
 });

@@ -1680,7 +1680,7 @@ export interface Database {
       inv_project_note_events: InvReadOnlyTable<InvProjectNoteEventRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
       proj_closeout_reports: ProjReadOnlyTable<{ id: string; project_id: string; version_no: number; status: string; snapshot: unknown; snapshot_at: string; selection: unknown; payload_hash: string; generation: string; provider_kind: string | null; sections: unknown; source_refs: unknown; created_by: string; created_at: string; updated_by: string | null; updated_at: string; approved_by: string | null; approved_at: string | null; version: number }>;
-      proj_task_output_versions: ProjReadOnlyTable<{ id: string; project_id: string; task_id: string; version_no: number; file_id: string; snapshot_file_id: string | null; mutable_link: boolean; item_count: number; note: string | null; submitted_by: string; attached_at: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; approved_by: string | null; approved_at: string | null; client_key: string | null }>;
+      proj_task_output_versions: ProjReadOnlyTable<{ id: string; project_id: string; task_id: string; version_no: number; file_id: string; snapshot_file_id: string | null; mutable_link: boolean; item_count: number; note: string | null; submitted_by: string; attached_at: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; approved_by: string | null; approved_at: string | null; client_key: string | null; review_route: string; reviewer_id: string | null; reviewer_assigned_at: string | null; reviewer_assigned_by: string | null }>;
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
       proj_company_settings: ProjReadOnlyTable<ProjCompanySettingsRow>;
@@ -2133,7 +2133,12 @@ export interface Database {
       proj_deliverables_register: { Args: { p_project_id: string; p_task_id?: string | null }; Returns: unknown };
       proj_save_site_activity: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
       proj_add_site_activities: { Args: { p_project_id: string; p_rows: Record<string, unknown>[] }; Returns: unknown };
-      proj_set_site_crew: { Args: { p_item_id: string; p_rows: Record<string, unknown>[] }; Returns: unknown };
+      proj_set_site_crew: { Args: { p_item_id: string; p_rows: Record<string, unknown>[]; p_override_reason?: string | null }; Returns: unknown };
+      proj_setup_teams: { Args: { p_project_id: string; p_teams: Record<string, unknown>[]; p_confirm_access?: boolean }; Returns: unknown };
+      proj_set_activity_readiness: { Args: { p_item_id: string; p_fields: Record<string, unknown> }; Returns: unknown };
+      proj_site_technician_candidates: { Args: { p_project_id: string }; Returns: { user_id: string; name: string; is_member: boolean }[] };
+      proj_my_site_assignments: { Args: Record<string, never>; Returns: unknown };
+      proj_assign_output_reviewer: { Args: { p_version_id: string; p_reviewer: string | null }; Returns: unknown };
       proj_save_shipment: { Args: { p_project_id: string; p_shipment_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
       proj_remove_shipment: { Args: { p_shipment_id: string }; Returns: undefined };
       proj_site_schedule: { Args: { p_project_id: string }; Returns: unknown };

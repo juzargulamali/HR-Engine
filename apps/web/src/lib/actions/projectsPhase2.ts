@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { setupNotice } from "@/lib/projects/teams/model";
 import { fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, refreshProjects, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
 /**
@@ -147,20 +148,62 @@ export async function addSiteActivities(_prev: S, fd: FormData): Promise<S> {
 }
 
 export async function setSiteCrew(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, itemId: uuid }).safeParse(Object.fromEntries(fd));
+  const p = z.object({ projectId: uuid, itemId: uuid, overrideReason: optionalText }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
-  const users = fd.getAll("crewUser").map(String), roles = fd.getAll("crewRole").map(String);
-  const rows: { user_id: string; role: string }[] = [];
+  const users = fd.getAll("crewUser").map(String), roles = fd.getAll("crewRole").map(String), calls = fd.getAll("crewCall").map(String), notes = fd.getAll("crewNote").map(String);
+  const rows: { user_id: string; role: string; call_local?: string; instructions?: string }[] = [];
   for (let n = 0; n < users.length; n++) {
     if (!users[n]) continue;
     if (!uuid.safeParse(users[n]).success || !z.enum(["installation", "standby", "backup", "dismantling"]).safeParse(roles[n]).success) return { error: "Choose each person and role from the lists." };
-    rows.push({ user_id: users[n]!, role: roles[n]! });
+    const call = (calls[n] ?? "").trim(), note = (notes[n] ?? "").trim();
+    if (call && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(call)) return { error: "Enter the call time as a date and time." };
+    if (note.length > 1000) return { error: "Instructions are limited to 1000 characters." };
+    rows.push({ user_id: users[n]!, role: roles[n]!, ...(call ? { call_local: call } : {}), ...(note ? { instructions: note } : {}) });
   }
-  const { data, error } = await (await createClient()).rpc("proj_set_site_crew", { p_item_id: p.data.itemId, p_rows: rows });
+  const { data, error } = await (await createClient()).rpc("proj_set_site_crew", { p_item_id: p.data.itemId, p_rows: rows, p_override_reason: p.data.overrideReason ?? null });
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
-  const r = (data ?? {}) as { added?: number; removed?: number };
-  return { error: null, notice: (r.added ?? 0) + (r.removed ?? 0) === 0 ? "The crew was already saved." : `Crew saved: ${r.added ?? 0} added, ${r.removed ?? 0} removed.` };
+  const r = (data ?? {}) as { added?: number; removed?: number; updated?: number; overlaps?: number; overlap_names?: string | null };
+  const changed = (r.added ?? 0) + (r.removed ?? 0) + (r.updated ?? 0);
+  const base = changed === 0 ? "The crew was already saved." : `Crew saved: ${r.added ?? 0} added, ${r.removed ?? 0} removed${(r.updated ?? 0) > 0 ? `, ${r.updated} updated` : ""}.`;
+  return { error: null, notice: (r.overlaps ?? 0) > 0 ? `${base} Check the overlap: ${r.overlap_names} already has a confirmed commitment at this time.` : base };
+}
+
+/** The crew's brief: hardware / content / app readiness and instructions every assigned person can read. */
+export async function setActivityReadiness(_prev: S, fd: FormData): Promise<S> {
+  const level = z.enum(["unknown", "not_ready", "ready"]);
+  const p = z.object({ projectId: uuid, itemId: uuid, hardware: level, content: level, app: level, note: optionalText, crewInstructions: optionalText }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_set_activity_readiness", { p_item_id: p.data.itemId, p_fields: { hardware: p.data.hardware, content: p.data.content, app: p.data.app, note: p.data.note ?? "", crew_instructions: p.data.crewInstructions ?? "" } });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: (data as { unchanged?: boolean } | null)?.unchanged ? "Nothing changed." : "Readiness and instructions saved." };
+}
+
+/** Choose the project teams in one go, each with an optional lead. The database never duplicates a team or replaces a lead, and asks for explicit confirmation before it adds a lead to the project. */
+export async function setupProjectTeams(_prev: S, fd: FormData): Promise<S> {
+  const row = z.object({ name: z.string().trim().min(1).max(80), preset: z.enum(["content", "programming", "engineering", "site_installation"]).optional(), lead_user_id: z.string().uuid().optional() });
+  const p = z.object({ projectId: uuid, teams: z.string().min(2) }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: "Choose at least one team." };
+  let parsed: unknown;
+  try { parsed = JSON.parse(p.data.teams); } catch { return { error: "The team list could not be read. Reload and try again." }; }
+  const rows = z.array(row).min(1, "Choose at least one team.").max(12, "At most 12 teams in one save.").safeParse(parsed);
+  if (!rows.success) return { error: firstIssue(rows.error) };
+  const { data, error } = await (await createClient()).rpc("proj_setup_teams", { p_project_id: p.data.projectId, p_teams: rows.data, p_confirm_access: fd.get("confirmAccess") === "on" });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: setupNotice((data ?? {}) as Parameters<typeof setupNotice>[0]) };
+}
+
+/** Assign (or release) the Operations reviewer of a version waiting for review. The Project Manager or an Operations Manager; the database checks who may be the reviewer. */
+export async function assignOutputReviewer(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, versionId: uuid, reviewerId: optionalUuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_assign_output_reviewer", { p_version_id: p.data.versionId, p_reviewer: p.data.reviewerId ?? null });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const r = (data ?? {}) as { unchanged?: boolean };
+  return { error: null, notice: r.unchanged ? "That was already the case." : p.data.reviewerId ? "Reviewer assigned and told." : "Released to the Operations queue." };
 }
 
 export async function saveShipment(_prev: S, fd: FormData): Promise<S> {

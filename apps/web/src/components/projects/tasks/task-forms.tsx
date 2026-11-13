@@ -208,13 +208,13 @@ export function EditTaskForm({ projectId, task, leader, otherTasks, collaborator
       {leader ? (
         <>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Department team" htmlFor="et-team"><Select id="et-team" name="teamId" defaultValue={task.team_id ?? ""}><option value="">No team</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
+            <Field label="Project team" htmlFor="et-team"><Select id="et-team" name="teamId" defaultValue={task.team_id ?? ""}><option value="">No team</option>{teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}</Select></Field>
             <Field label="Deliverable" htmlFor="et-del"><Select id="et-del" name="deliverableId" defaultValue={task.deliverable_id ?? ""}><option value="">None</option>{deliverables.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}</Select></Field>
             <Field label="Milestone" htmlFor="et-ms"><Select id="et-ms" name="milestoneId" defaultValue={task.milestone_id ?? ""}><option value="">None</option>{milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select></Field>
           </div>
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" name="requiresReview" defaultChecked={task.requires_review} className="mt-1 h-4 w-4" />
-            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">A department head or the Project Manager (not the assignee) accepts it as done.</span></span>
+            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">A team lead or the Project Manager (not the assignee) accepts it as done.</span></span>
           </label>
         </>
       ) : null}

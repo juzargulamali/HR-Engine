@@ -1,12 +1,12 @@
 import Link from "next/link";
 import { OsBadge } from "@/components/os/pills";
 import { Muted, Panel } from "@/components/projects/parts";
-import { ActivityDialog, CrewDialog, QuickAddActivitiesDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
+import { ActivityDialog, CrewDialog, QuickAddActivitiesDialog, ReadinessDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
 import type { Option } from "@/components/projects/delivery/delivery-forms";
 import { barPosition, timelineScale, type TimelineScale } from "@/lib/projects/delivery-plan/insights";
 import { cn } from "@/lib/utils";
 import {
-  ACTIVITY_KIND_LABELS, activityDays, activityWhen, CREW_ROLE_LABELS, legText, MISSING_LABELS, requestStateText, runGroups, shortDay, siteRange, dateOnly,
+  ACTIVITY_KIND_LABELS, activityDays, activityWhen, CREW_ROLE_LABELS, crewName, formatAt, legText, MISSING_LABELS, READY_LABELS, requestStateText, runGroups, shortDay, siteRange, dateOnly,
   type SiteActivity, type SiteSchedule, type SiteShipment,
 } from "@/lib/projects/phase2/model";
 import { dateText } from "@/lib/projects/format";
@@ -17,8 +17,10 @@ const weekday = (iso: string) => WEEKDAYS[new Date(`${iso}T00:00:00Z`).getUTCDay
 
 const StateBadge = ({ state }: { state: "tentative" | "confirmed" }) => <OsBadge tone={state === "confirmed" ? "green" : "amber"}>{state === "confirmed" ? "Confirmed" : "Tentative"}</OsBadge>;
 
-function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActivity; projectId: string; schedule: SiteSchedule; canEdit: boolean; members: Option[] }) {
-  const crewByRole = a.crew.reduce<Record<string, string[]>>((o, c) => { (o[c.role] ??= []).push(c.name ?? "Someone"); return o; }, {});
+function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActivity; projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[] }) {
+  const crewByRole = a.crew.reduce<Record<string, string[]>>((o, c) => { (o[c.role] ??= []).push(crewName(c)); return o; }, {});
+  const overlapNames = a.crew.filter((c) => (c.overlaps ?? 0) > 0).map((c) => c.name ?? "Someone");
+  const calls = a.crew.filter((c) => c.call_at);
   return (
     <li id={`site-${a.id}`} className="scroll-mt-24 space-y-1 py-2.5" data-testid={`site-activity-${a.id}`}>
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
@@ -27,11 +29,14 @@ function ActivityRow({ a, projectId, schedule, canEdit, members }: { a: SiteActi
           <p className="break-words text-[13px] font-medium" data-testid={`site-when-${a.id}`}>{activityWhen(a, schedule.tz)}</p>
           <p className="break-words text-[13px] text-muted-foreground">{a.location ?? "No location"} · Owner {a.owner_name ?? "not named"}</p>
           {a.crew.length > 0 ? <p className="break-words text-[13px]" data-testid={`site-crew-text-${a.id}`}>{Object.entries(crewByRole).map(([r, n]) => `${CREW_ROLE_LABELS[r as keyof typeof CREW_ROLE_LABELS]}: ${n.join(", ")}`).join(" · ")}</p> : null}
+          {calls.length > 0 ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-calls-${a.id}`}>Call times: {calls.map((c) => `${c.name ?? "Someone"} ${formatAt(c.call_at!, c.call_tz ?? a.tz ?? schedule.tz)}`).join(" · ")}</p> : null}
+          {overlapNames.length > 0 ? <p className="break-words text-[13px] font-medium text-[hsl(var(--os-red))]" role="status" data-testid={`site-crew-overlap-${a.id}`}>Already booked at this time: {overlapNames.join(", ")}. Another confirmed activity or booking overlaps.</p> : null}
+          {a.ready && (a.ready.hardware !== "unknown" || a.ready.content !== "unknown" || a.ready.app !== "unknown" || a.ready.note) ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-ready-${a.id}`}>Ready: hardware {READY_LABELS[a.ready.hardware].toLowerCase()}, content {READY_LABELS[a.ready.content].toLowerCase()}, app {READY_LABELS[a.ready.app].toLowerCase()}{a.ready.note ? ` · ${a.ready.note}` : ""}</p> : null}
           {a.notes ? <p className="break-words text-[13px] text-muted-foreground">{a.notes}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <StateBadge state={a.state} />
-          {canEdit ? <><CrewDialog projectId={projectId} activity={a} members={members} /><ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} /></> : null}
+          {canEdit ? <><CrewDialog projectId={projectId} activity={a} members={members} /><ReadinessDialog projectId={projectId} activity={a} /><ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} /></> : null}
         </div>
       </div>
       {a.missing.length > 0 ? (
@@ -75,7 +80,7 @@ function ShipmentRow({ s, projectId, schedule, canEdit, activities, requests }: 
 }
 
 /** The Site schedule: what happens on site (separate runs of setup, show and dismantling), who works each, and the shipments, drawn from the same records the Work overview reads. */
-export function SiteSchedulePanel({ projectId, schedule, canEdit, members, requests }: { projectId: string; schedule: SiteSchedule; canEdit: boolean; members: Option[]; requests: { id: string; name: string }[] }) {
+export function SiteSchedulePanel({ projectId, schedule, canEdit, members, requests }: { projectId: string; schedule: SiteSchedule; canEdit: boolean; members: (Option & { siteOnly?: boolean })[]; requests: { id: string; name: string }[] }) {
   const acts = schedule.activities.filter((a) => a.status !== "cancelled");
   const activityChoices = acts.map((a) => ({ id: a.id, name: a.title }));
   const firstSetup = acts.find((a) => a.kind === "setup" && (a.start_date || a.starts_at));

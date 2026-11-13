@@ -5,7 +5,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...(rest as Record<string, unknown>)}>{children}</a> }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/projects/p1/delivery", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/projectsPhase2", () => ({
-  saveTaskOutput: vi.fn(), submitTaskOutput: vi.fn(), decideTaskOutput: vi.fn(), linkFeedbackToOutput: vi.fn(), saveSiteActivity: vi.fn(), addSiteActivities: vi.fn(), setSiteCrew: vi.fn(), saveShipment: vi.fn(), removeShipment: vi.fn(),
+  saveTaskOutput: vi.fn(), submitTaskOutput: vi.fn(), decideTaskOutput: vi.fn(), linkFeedbackToOutput: vi.fn(), saveSiteActivity: vi.fn(), addSiteActivities: vi.fn(), setSiteCrew: vi.fn(), saveShipment: vi.fn(), removeShipment: vi.fn(), setActivityReadiness: vi.fn(), setupProjectTeams: vi.fn(), assignOutputReviewer: vi.fn(),
 }));
 vi.mock("@/lib/actions/projectsFiles", () => ({ prepareProjectUpload: vi.fn(), finalizeProjectUpload: vi.fn(), getProjectFileUrl: vi.fn() }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));

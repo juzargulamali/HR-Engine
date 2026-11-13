@@ -34,7 +34,7 @@ export function TaskActionsMenu({ projectId, task, leader, canEdit, canReassign,
   const [dialog, setDialog] = useState<Dialog>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const items: MoreItem[] = [
-    ...(canEdit ? [{ key: "edit", label: "Edit task", hint: "Title, dates, department, review rule, dependencies" }] : []),
+    ...(canEdit ? [{ key: "edit", label: "Edit task", hint: "Title, dates, project team, review rule, dependencies" }] : []),
     ...(canReassign ? [{ key: "reassign", label: "Reassign" }] : []),
     ...(canUnblock ? [{ key: "unblock", label: "Clear blocker", separatorBefore: canEdit || canReassign }] : []),
   ].map((i) => ({ ...i, onSelect: (k: string) => setDialog(k as Dialog) }));

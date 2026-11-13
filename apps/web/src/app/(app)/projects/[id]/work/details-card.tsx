@@ -47,7 +47,7 @@ export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, e
         <h2 className="mb-3 hidden font-heading text-base font-semibold xl:block">Project details</h2>
         <dl className="space-y-3.5">
           <Fact label="Project Manager">{pmName}{acting.length > 0 ? <span className="block text-muted-foreground">Temporary leader: {acting.join(", ")}</span> : null}</Fact>
-          <Fact label="Team">{team.length > 0 ? team.join("; ") : "No department team yet"}<span className="block text-muted-foreground">{peopleCount} {peopleCount === 1 ? "person" : "people"} on the project</span></Fact>
+          <Fact label="Team">{team.length > 0 ? team.join("; ") : "No project team yet"}<span className="block text-muted-foreground">{peopleCount} {peopleCount === 1 ? "person" : "people"} on the project</span></Fact>
           <Fact label="Project dates">{dateRangeText(start, end)}</Fact>
           <Fact label="Installation starts">{dateText(details.install_start)}</Fact>
           <Fact label="Event">{dateRangeText(details.event_start, details.event_end)}</Fact>

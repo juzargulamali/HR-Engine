@@ -38,7 +38,12 @@ export interface OverviewProject {
   plan_unreleased: number; equipment: RequestState[]; equipment_reviews: number; release_failed: boolean;
 }
 export interface OverviewOverlap { user_id: string; person: string; a: string; a_id: string; b: string; b_id: string; from: string; to: string }
-export interface Overview { company_id: string; taken_at: string; handovers: OverviewHandover[]; projects: OverviewProject[]; overlaps: OverviewOverlap[] }
+/** A version the Project Manager submitted that waits for an Operations review (the existing overview read carries them; absent on a database without the follow-up migration). */
+export interface OutputReviewItem {
+  version_id: string; task_id: string; project_id: string; reference: string; project: string; task: string; label: string | null; version_no: number; attached_at: string; submitted_by_id: string; submitted_by: string;
+  assignee_id: string; assignee: string; reviewer_id: string | null; reviewer: string | null; needs_reviewer: boolean; pm: string;
+}
+export interface Overview { company_id: string; taken_at: string; handovers: OverviewHandover[]; projects: OverviewProject[]; overlaps: OverviewOverlap[]; output_reviews?: OutputReviewItem[] }
 
 export const STAGE_WORDS: Record<string, string> = {
   new: "New", qualified: "Qualified", proposal_prep: "Preparing proposal", proposal_sent: "Proposal sent", estimate_sent: "Estimate sent", quote_sent: "Quote sent", negotiation: "Negotiation",
@@ -94,10 +99,10 @@ export const isFinished = (status: string) => status === "completed" || status =
 /** A finished project whose equipment is still out: two separate facts, both shown. */
 export const completeButOut = (p: Pick<OverviewProject, "status" | "equipment">) => isFinished(p.status) && unitsOut(p) > 0;
 
-export type DecisionKind = "pm_unassigned" | "handover_stalled" | "blocker" | "at_risk_installation" | "equipment_review" | "release_failed";
+export type DecisionKind = "pm_unassigned" | "handover_stalled" | "output_review" | "blocker" | "at_risk_installation" | "equipment_review" | "release_failed";
 export interface DecisionItem { kind: DecisionKind; key: string; title: string; detail: string; owner: string; date: string | null; href: string; action: string }
 export const DECISION_WORDS: Record<DecisionKind, string> = {
-  pm_unassigned: "Project Manager not assigned", handover_stalled: "Handover stalled", blocker: "Blocker not resolved", at_risk_installation: "Installation at risk",
+  pm_unassigned: "Project Manager not assigned", handover_stalled: "Handover stalled", output_review: "Output waiting for Operations review", blocker: "Blocker not resolved", at_risk_installation: "Installation at risk",
   equipment_review: "Review equipment booking", release_failed: "Unused reservations not released",
 };
 /** A handover that has waited this many days for its next step is "stalled". A blocker this old, or one that waits on someone other than the assignee, is listed. */
@@ -154,7 +159,12 @@ export function decisions(o: Overview, today: string): DecisionItem[] {
     if (p.equipment_reviews > 0) out.push({ kind: "equipment_review", key: `review:${p.id}`, title: `${p.reference} ${p.name}`, detail: `A committed date changed while equipment is booked. ${plural(p.equipment_reviews, "booking")} to review. The booking itself has not been changed.`, owner: p.pm, date: null, href: `/projects/${p.id}/equipment`, action: "Review equipment booking" });
     if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, title: `${p.reference} ${p.name}`, detail: "Releasing unused reservations failed when the project finished. The warehouse releases them on the request.", owner: "Warehouse", date: null, href: `/projects/${p.id}/equipment`, action: "Open the Equipment tab" });
   }
-  const order: DecisionKind[] = ["pm_unassigned", "handover_stalled", "blocker", "at_risk_installation", "equipment_review", "release_failed"];
+  for (const r of o.output_reviews ?? []) {
+    out.push({ kind: "output_review", key: `output:${r.version_id}`, title: `${r.reference} ${r.project}`,
+      detail: `${r.needs_reviewer ? "Needs an Operations reviewer: " : ""}Version ${r.version_no} of "${r.label ?? r.task}" (${r.task}) was submitted by ${r.submitted_by} and is assigned to ${r.assignee}. ${r.needs_reviewer ? `Nobody else holds the Operations role, so ${r.pm} needs someone with access to People & Access to give it to another person.` : r.reviewer ? `Reviewer: ${r.reviewer}.` : "Not assigned yet: any eligible Operations Manager can take it."}`,
+      owner: r.reviewer ?? (r.needs_reviewer ? r.pm : "Operations"), date: day(r.attached_at), href: `/projects/${r.project_id}/work?task=${r.task_id}&version=${r.version_id}`, action: r.needs_reviewer ? "Open the version (ask for a reviewer)" : "Open the version to review it" });
+  }
+  const order: DecisionKind[] = ["pm_unassigned", "handover_stalled", "output_review", "blocker", "at_risk_installation", "equipment_review", "release_failed"];
   return out.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (a.date ?? "9999").localeCompare(b.date ?? "9999") || a.title.localeCompare(b.title));
 }
 

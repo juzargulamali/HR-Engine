@@ -22,7 +22,7 @@ function task(over: Partial<ProjTaskRow> = {}): ProjTaskRow {
 }
 const standing = (over: Partial<ProjectStanding> = {}): ProjectStanding => ({ companyId: "c", grants: [], isPm: false, isMember: true, isActingPm: false, headOfTeamIds: [], isSalesLinked: false, status: "in_progress", ...over });
 const person = (id: string, team: string | null, name = id): ProjProjectPersonRow => ({ user_id: id, full_name: name, role: "member", team_id: team, is_team_head: false, acting_until: null });
-const team = (id: string, name: string, head: string): ProjTeamRow => ({ id, project_id: "p", name, department_id: null, head_user_id: head, created_by: null, created_at: "", removed_at: null });
+const team = (id: string, name: string, head: string): ProjTeamRow => ({ id, project_id: "p", name, department_id: null, head_user_id: head, preset_key: null, created_by: null, created_at: "", removed_at: null });
 
 describe("parseTaskFilters", () => {
   it("defaults to open tasks and ignores unknown or malformed values", () => {

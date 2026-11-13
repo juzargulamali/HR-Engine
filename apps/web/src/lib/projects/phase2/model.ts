@@ -42,6 +42,9 @@ export interface OutputVersion {
   submitted_by: string; submitted_by_name: string | null; attached_at: string; decided_at: string | null; decided_by_name: string | null; decision_note: string | null;
   approved_at: string | null; approved_by_name: string | null; file: FileRef; snapshot: FileRef;
   feedback: { id: string; status: string; kind: string; source: string; text: string; received_on: string }[];
+  /** Who reviews it: the team (lead or Project Manager) or, for a version the Project Manager submitted, an Operations Manager. `can_decide` / `can_assign` are for THIS reader, from the database. */
+  route?: "team" | "operations"; reviewer_id?: string | null; reviewer_name?: string | null; reviewer_assigned_at?: string | null; is_current?: boolean; needs_reviewer?: boolean;
+  eligible_reviewers?: { id: string; name: string }[]; can_assign?: boolean; can_decide?: boolean;
 }
 export interface RegisterRow {
   task_id: string; task_title: string; task_status: string; task_due: string | null; blocked: boolean; requires_review: boolean; team_id: string | null; assignee_id: string; assignee_name: string | null;
@@ -53,6 +56,28 @@ export interface Register { tz: string | null; rows: RegisterRow[] }
 
 export const OUTPUT_STATE_LABELS: Record<OutputState, string> = { missing: "Missing", partial: "Incomplete", awaiting_review: "Awaiting review", changes_requested: "Changes requested", approved: "Approved" };
 export const OUTPUT_STATE_TONE: Record<OutputState, "red" | "amber" | "blue" | "green"> = { missing: "red", partial: "amber", awaiting_review: "blue", changes_requested: "amber", approved: "green" };
+/** The review state in words, naming the reviewer when there is one: "Awaiting Operations review · Lena", "Needs an Operations reviewer". */
+export function reviewStateWord(v: Pick<OutputVersion, "status" | "route" | "reviewer_name" | "needs_reviewer">): string {
+  if (v.status !== "awaiting") return VERSION_STATUS_LABELS[v.status];
+  if (v.route !== "operations") return "Awaiting review";
+  if (v.needs_reviewer) return "Needs an Operations reviewer";
+  return v.reviewer_name ? `Awaiting Operations review · ${v.reviewer_name}` : "Awaiting Operations review";
+}
+/**
+ * What a client feedback item is linked to, in words, for the Feedback & changes page. The links are looked up when shown: if the activation was removed (or can no longer be read) the
+ * words say "Activation removed" and there is no link to follow, so a historical item stays readable and never points at nothing.
+ */
+export interface FeedbackLinkLookup { items: ReadonlyMap<string, { key: string; title: string; removed: boolean }>; versions: ReadonlyMap<string, { task_id: string; version_no: number }>; tasks: ReadonlyMap<string, string> }
+export interface FeedbackLinkWords { activation: { text: string; href: string | null } | null; version: { text: string; href: string | null } | null }
+export function feedbackLinks(f: { activation_id?: string | null; output_version_id?: string | null }, projectId: string, look: FeedbackLinkLookup): FeedbackLinkWords {
+  const item = f.activation_id ? look.items.get(f.activation_id) : undefined;
+  const ver = f.output_version_id ? look.versions.get(f.output_version_id) : undefined;
+  return {
+    activation: !f.activation_id ? null : !item || item.removed ? { text: "Activation removed", href: null } : { text: `${item.key} ${item.title}`, href: `/projects/${projectId}/delivery?open=${item.key}#dp-${item.key}` },
+    version: !f.output_version_id ? null : !ver ? { text: "Version no longer available", href: null } : { text: `Version ${ver.version_no} of ${look.tasks.get(ver.task_id) ?? "a task"}`, href: `/projects/${projectId}/work?task=${ver.task_id}&version=${f.output_version_id}` },
+  };
+}
+export const NEEDS_REVIEWER_HELP = "Nobody can review this: the Operations role is held only by the person who submitted it and the person it is assigned to, or by nobody. The Project Manager can ask someone with access to People & Access to give the Operations role to another person; the review then appears in their queue.";
 export const VERSION_STATUS_LABELS: Record<OutputVersion["status"], string> = { awaiting: "Awaiting review", changes_requested: "Changes requested", approved: "Approved", superseded: "Replaced by a newer version" };
 
 export type RegisterFilter = "all" | "missing" | "awaiting" | "changes" | "approved";
@@ -81,7 +106,11 @@ export function nextOutputAction(r: RegisterRow, who: { isAssignee: boolean; isR
   switch (r.state) {
     case "missing": return who.isAssignee ? `Add the expected output: ${what}.${r.output_required ? " The task cannot be sent for review or completed without it." : ""}` : `Waiting for ${r.assignee_name ?? "the assignee"} to add ${what}.`;
     case "partial": return who.isAssignee ? `Only ${r.current?.item_count} of ${r.output_qty} provided. Submit a version with all of them.` : `${r.assignee_name ?? "The assignee"} has provided ${r.current?.item_count} of ${r.output_qty}.`;
-    case "awaiting_review": return who.isReviewer ? `Version ${r.current?.version_no} is waiting for your review.` : `Version ${r.current?.version_no} is waiting for review.`;
+    case "awaiting_review": {
+      const c = r.current;
+      if (c?.route === "operations") return c.needs_reviewer ? `Version ${c.version_no} needs an Operations reviewer.` : who.isReviewer ? `Version ${c.version_no} is waiting for your Operations review.` : `Version ${c.version_no} is waiting for Operations review${c.reviewer_name ? ` by ${c.reviewer_name}` : ""}.`;
+      return who.isReviewer ? `Version ${c?.version_no} is waiting for your review.` : `Version ${c?.version_no} is waiting for review.`;
+    }
     case "changes_requested": return who.isAssignee ? `Changes were requested on version ${r.current?.version_no}${r.current?.decision_note ? `: ${r.current.decision_note}` : ""}. Submit a new version.` : `Changes were requested on version ${r.current?.version_no}. ${r.assignee_name ?? "The assignee"} submits the next version.`;
     case "approved": return `Version ${r.current?.version_no} was approved.`;
   }
@@ -115,8 +144,16 @@ export const MISSING_LABELS: Record<Missing, string> = { date: "No date", time: 
 export interface SiteActivity {
   id: string; title: string; kind: ActivityKind | null; run_label: string | null; location: string | null; status: string; owner_id: string | null; owner_name: string | null; state: "tentative" | "confirmed"; confirmed_at: string | null;
   start_date: string | null; end_date: string | null; starts_at: string | null; ends_at: string | null; tz: string | null; notes: string | null; version: number; milestone_id: string | null; client_facing: boolean;
-  crew: { user_id: string; name: string | null; role: CrewRole }[]; missing: Missing[];
+  crew: SiteCrew[]; missing: Missing[];
+  /** Brief for everyone assigned: instructions, and hardware / content / app readiness (hardware also shows Inventory's own state elsewhere). */
+  crew_instructions?: string | null; ready?: ActivityReadiness;
 }
+export type ReadyLevel = "unknown" | "not_ready" | "ready";
+export interface ActivityReadiness { hardware: ReadyLevel; content: ReadyLevel; app: ReadyLevel; note: string | null }
+export const READY_LABELS: Record<ReadyLevel, string> = { unknown: "Not known", not_ready: "Not ready", ready: "Ready" };
+export interface SiteCrew { user_id: string; name: string | null; role: CrewRole; call_at?: string | null; call_tz?: string | null; instructions?: string | null; site_only?: boolean; overlaps?: number }
+/** "Cara (site-only)": a person assigned to this activity who is not on the project and sees only their own assignment. */
+export const crewName = (c: Pick<SiteCrew, "name" | "site_only">) => `${c.name ?? "Someone"}${c.site_only ? " (site-only)" : ""}`;
 export interface SiteShipment {
   id: string; label: string; plan_item_id: string | null; activity_title: string | null; carrier: string | null; reference: string | null; notes: string | null; state: "tentative" | "confirmed"; version: number;
   departs_at: string | null; departs_tz: string | null; arrives_at: string | null; arrives_tz: string | null; returns_at: string | null; returns_tz: string | null;
@@ -164,10 +201,10 @@ export const requestStateText = (r: SiteShipment["request"]): string | null => (
 } as Record<string, string>)[r.state] ?? r.state);
 
 // ------------------------------------------------------------------------------------------------ Work overview
-export interface OverviewAttention { kind: "output_missing" | "changes_requested" | "review_waiting" | "site_missing" | "shipment_conflict"; task_id?: string; activity_id?: string; shipment_id?: string; title: string; detail: string; who: string[] }
+export interface OverviewAttention { kind: "output_missing" | "changes_requested" | "review_waiting" | "ops_review_waiting" | "ops_reviewer_needed" | "team_lead_needed" | "site_missing" | "shipment_conflict"; task_id?: string; activity_id?: string; shipment_id?: string; title: string; detail: string; who: string[] }
 export interface OverviewRecent { at: string; actor: string | null; entity: "task_output" | "site_activity" | "shipment"; entity_id: string; field: string; from: string | null; to: string | null; note: string | null; title: string | null }
 export interface WorkOverview { tz: string; today: string; next_on_site: SiteActivity | null; attention: OverviewAttention[]; recent: OverviewRecent[] }
-export const ATTENTION_KIND_LABELS: Record<OverviewAttention["kind"], string> = { output_missing: "Output missing", changes_requested: "Changes requested", review_waiting: "Review waiting", site_missing: "Site plan incomplete", shipment_conflict: "Shipment arrives too late" };
+export const ATTENTION_KIND_LABELS: Record<OverviewAttention["kind"], string> = { output_missing: "Output missing", changes_requested: "Changes requested", review_waiting: "Review waiting", ops_review_waiting: "Operations review waiting", ops_reviewer_needed: "Needs an Operations reviewer", team_lead_needed: "Lead needed", site_missing: "Site plan incomplete", shipment_conflict: "Shipment arrives too late" };
 /** Where to go to fix an attention line, as a path under /projects/[id]. */
 /** At most `perKind` lines of each kind, in the original order, so one busy kind (many missing outputs) can never hide another (a late shipment). `more` counts what was left out. */
 export function pickAttention(all: OverviewAttention[], perKind = 2): { shown: OverviewAttention[]; more: number } {
@@ -178,6 +215,7 @@ export function pickAttention(all: OverviewAttention[], perKind = 2): { shown: O
 
 export function attentionHref(projectId: string, a: OverviewAttention): string {
   const base = `/projects/${projectId}`;
+  if (a.kind === "team_lead_needed") return `${base}/people`;
   if (a.task_id) return `${base}/work?task=${a.task_id}`;
   if (a.activity_id) return `${base}/plan?plan=site&mode=list#site-${a.activity_id}`;
   if (a.shipment_id) return `${base}/plan?plan=site&mode=list#ship-${a.shipment_id}`;

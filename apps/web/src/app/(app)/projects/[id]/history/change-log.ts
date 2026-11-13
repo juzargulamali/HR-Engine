@@ -20,7 +20,7 @@ export interface ChangeContext {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const FIELD_LABELS: Record<string, string> = {
   start_date: "start date", end_date: "end date", due_date: "due date", install_start: "installation start", event_start: "event start", event_end: "event end",
-  priority: "priority", start: "start", end: "end", expected: "expected date", team: "department",
+  priority: "priority", start: "start", end: "end", expected: "expected date", team: "team",
 };
 
 function value(field: string, entity: string, v: string | null): string {
@@ -39,7 +39,7 @@ function value(field: string, entity: string, v: string | null): string {
 }
 
 const ENTITY_WORD: Record<string, string> = {
-  project: "The project", milestone: "Milestone", deliverable: "Deliverable", plan_item: "Timeline activity", booking: "Site booking",
+  project: "The project", milestone: "Milestone", deliverable: "Work package", plan_item: "Timeline activity", booking: "Site booking",
   member: "Person", message: "Discussion message", external_dependency: "Dependency", task_output: "Task output", site_activity: "Site activity", shipment: "Shipment",
 };
 

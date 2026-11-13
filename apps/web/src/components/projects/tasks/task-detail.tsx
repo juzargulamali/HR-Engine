@@ -22,7 +22,7 @@ import { cn } from "@/lib/utils";
  * then the description, status / assignee / due (each editable only by the people who may) with the rarer actions under "More"; then comments, details, dependencies and history. `taskHref` says how a
  * related task is opened (in the panel, or as its own page).
  */
-export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData; view: ProjectView; taskHref: (taskId: string) => string }) {
+export function TaskDetailBody({ data, view, taskHref, focusVersionId }: { data: TaskDetailData; view: ProjectView; taskHref: (taskId: string) => string; focusVersionId?: string }) {
   const { task, row } = data;
   const fmtDay = (d: string | null) => (d ? dateText(d) : "no date");
   const control = toControlRow(row);
@@ -54,6 +54,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
       {/* The expected output sits right under the action the assignee takes: what is expected, what is missing, the current version and its review. */}
       <TaskOutputSection
         projectId={view.project.id} task={{ id: task.id, version: task.version, status: task.status }} row={data.output.row} tz={data.output.tz} files={data.output.files}
+        focusVersionId={focusVersionId}
         flags={{ canDefine: data.leader, canSubmit: data.role !== null, viewerIsAssignee: task.assignee_id === data.viewerId, canReview: data.leader && task.assignee_id !== data.viewerId, readOnly: data.readOnly }}
       />
       {data.output.state === "unavailable" ? <Muted>The expected output could not be read just now. The rest of the task is unaffected; reload to try again.</Muted> : null}
@@ -118,7 +119,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
       <Panel title="Details">
         <dl className="grid gap-4 sm:grid-cols-2">
           <Fact label="Collaborators">{data.collaboratorIds.length > 0 ? data.collaboratorIds.map((c) => view.nameOf(c)).join(", ") : "None"}</Fact>
-          <Fact label="Department team">{data.team ? `${data.team.name} (head: ${data.team.head})` : "None"}</Fact>
+          <Fact label="Project team">{data.team ? `${data.team.name} (head: ${data.team.head})` : "None"}</Fact>
           <Fact label="Deliverable">{data.deliverable ?? "None"}</Fact>
           <Fact label="Milestone">{data.milestone ?? "None"}</Fact>
           <Fact label="Start date">{task.start_date ? dateText(task.start_date) : "Not set"}</Fact>

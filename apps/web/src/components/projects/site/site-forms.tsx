@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { addSiteActivities, removeShipment, saveShipment, saveSiteActivity, setSiteCrew } from "@/lib/actions/projectsPhase2";
+import { addSiteActivities, removeShipment, saveShipment, saveSiteActivity, setActivityReadiness, setSiteCrew } from "@/lib/actions/projectsPhase2";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormDialog, type Done, type Option } from "@/components/projects/delivery/delivery-forms";
-import { ACTIVITY_KIND_LABELS, ACTIVITY_KINDS, CREW_ROLE_LABELS, CREW_ROLES, dayIn, timeIn, toLocalInput, type ActivityKind, type CrewRole, type SiteActivity, type SiteShipment } from "@/lib/projects/phase2/model";
+import { ACTIVITY_KIND_LABELS, ACTIVITY_KINDS, CREW_ROLE_LABELS, CREW_ROLES, dayIn, READY_LABELS, timeIn, toLocalInput, type ActivityKind, type CrewRole, type ReadyLevel, type SiteActivity, type SiteShipment } from "@/lib/projects/phase2/model";
 import { COMMON_TIME_ZONES } from "@/lib/projects/format";
 
 const zones = (tz: string | null, extra: (string | null | undefined)[] = []) => [...new Set([tz, ...extra, ...COMMON_TIME_ZONES].filter((z): z is string => !!z))];
@@ -101,23 +101,64 @@ export function QuickAddActivitiesDialog({ projectId, members }: { projectId: st
   );
 }
 
-/** The crew of ONE activity, by role, set as a whole: separate runs can have different people. */
-export function CrewDialog({ projectId, activity, members, label }: { projectId: string; activity: SiteActivity; members: Option[]; label?: string }) {
-  const [rows, setRows] = useState<{ id: number; user: string; role: CrewRole }[]>(() => (activity.crew.length > 0 ? activity.crew.map((c, id) => ({ id, user: c.user_id, role: c.role })) : [{ id: 0, user: "", role: "installation" as CrewRole }]));
+/** The crew of ONE activity, by role, set as a whole: separate runs can have different people. People may be members of the project or site-only technicians of the company; each can have a call time and instructions. */
+export function CrewDialog({ projectId, activity, members, label }: { projectId: string; activity: SiteActivity; members: (Option & { siteOnly?: boolean })[]; label?: string }) {
+  type Row = { id: number; user: string; role: CrewRole; call: string; note: string };
+  const localCall = (iso: string | null | undefined, tz: string | null | undefined) => {
+    if (!iso) return "";
+    try {
+      const parts = new Intl.DateTimeFormat("en-CA", { timeZone: tz ?? activity.tz ?? "UTC", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(iso));
+      const g = (t: string) => parts.find((x) => x.type === t)?.value ?? "00";
+      return `${g("year")}-${g("month")}-${g("day")}T${g("hour")}:${g("minute")}`;
+    } catch { return ""; }
+  };
+  const [rows, setRows] = useState<Row[]>(() => (activity.crew.length > 0 ? activity.crew.map((c, id) => ({ id, user: c.user_id, role: c.role, call: localCall(c.call_at, c.call_tz), note: c.instructions ?? "" })) : [{ id: 0, user: "", role: "installation" as CrewRole, call: "", note: "" }]));
+  const set = (id: number, patch: Partial<Row>) => setRows((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
   return (
     <FormDialog label={label ?? (activity.crew.length > 0 ? "Crew" : "Assign crew")} title={`Crew: ${activity.title}`} dialogSize="wide" testId={`site-crew-${activity.id}`}
       description="Who works this activity, and in which role: Installation, Standby, Backup or Dismantling. Another run has its own crew. People removed here are taken off this activity only.">
       {(done) => (
         <ActionForm action={setSiteCrew} submitLabel="Save crew" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="itemId" value={activity.id} />
+          <Alert role="note" data-testid="crew-site-only-note">People marked <strong>site-only</strong> are company employees who are not on the project. They see only this assignment: the activity, their role, the venue, their call time, the instructions below and brief readiness. They get no Project Chat, tasks, files, reviews or commercial information, and lose even that when you remove them here or the activity ends.</Alert>
           {rows.map((r, n) => (
-            <div key={r.id} className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
-              <Select name="crewUser" aria-label={`Crew ${n + 1} person`} value={r.user} onChange={(e) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, user: e.target.value } : x)))}><option value="">Choose a person…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>
-              <Select name="crewRole" aria-label={`Crew ${n + 1} role`} value={r.role} onChange={(e) => setRows((all) => all.map((x) => (x.id === r.id ? { ...x, role: e.target.value as CrewRole } : x)))}>{CREW_ROLES.map((c) => <option key={c} value={c}>{CREW_ROLE_LABELS[c]}</option>)}</Select>
-              <Button type="button" variant="ghost" size="sm" onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))} aria-label={`Remove crew row ${n + 1}`}>Remove</Button>
+            <div key={r.id} className="space-y-2 rounded-md border border-border p-2.5" data-testid={`crew-row-${n}`}>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_auto]">
+                <Select name="crewUser" aria-label={`Crew ${n + 1} person`} value={r.user} onChange={(e) => set(r.id, { user: e.target.value })}><option value="">Choose a person…</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}{m.siteOnly ? " (site-only)" : ""}</option>)}</Select>
+                <Select name="crewRole" aria-label={`Crew ${n + 1} role`} value={r.role} onChange={(e) => set(r.id, { role: e.target.value as CrewRole })}>{CREW_ROLES.map((c) => <option key={c} value={c}>{CREW_ROLE_LABELS[c]}</option>)}</Select>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setRows((all) => all.filter((x) => x.id !== r.id))} aria-label={`Remove crew row ${n + 1}`}>Remove</Button>
+              </div>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-[minmax(0,12rem)_minmax(0,1fr)]">
+                <Field label="Call time" htmlFor={`cw-call-${r.id}`} hint={`In the activity's zone${activity.tz ? ` (${activity.tz})` : ""}.`}><Input id={`cw-call-${r.id}`} name="crewCall" type="datetime-local" value={r.call} onChange={(e) => set(r.id, { call: e.target.value })} /></Field>
+                <Field label="Instructions for this person (optional)" htmlFor={`cw-note-${r.id}`}><Input id={`cw-note-${r.id}`} name="crewNote" maxLength={1000} value={r.note} onChange={(e) => set(r.id, { note: e.target.value })} placeholder="Where to meet, what to bring" /></Field>
+              </div>
             </div>
           ))}
-          <Button type="button" variant="outline" size="sm" onClick={() => setRows((all) => [...all, { id: Math.max(-1, ...all.map((x) => x.id)) + 1, user: "", role: "installation" }])}>Add a person</Button>
+          <Button type="button" variant="outline" size="sm" onClick={() => setRows((all) => [...all, { id: Math.max(-1, ...all.map((x) => x.id)) + 1, user: "", role: "installation", call: "", note: "" }])}>Add a person</Button>
+          <details className="text-sm"><summary className="cursor-pointer font-medium">Someone is already booked at this time?</summary>
+            <div className="mt-2"><Field label="Reason to assign them anyway (needs site-conflict authority)" htmlFor="cw-override" hint="On a confirmed activity an overlap with a confirmed booking or another confirmed activity is refused unless a founder, or someone a founder gave site-conflict authority to, gives a reason."><Input id="cw-override" name="overrideReason" maxLength={300} /></Field></div>
+          </details>
+        </ActionForm>
+      )}
+    </FormDialog>
+  );
+}
+
+/** The crew's brief: instructions every assigned person can read, and a quick hardware / content / app readiness. Project Manager only. */
+export function ReadinessDialog({ projectId, activity }: { projectId: string; activity: SiteActivity }) {
+  const r = activity.ready ?? { hardware: "unknown", content: "unknown", app: "unknown", note: null };
+  const sel = (name: "hardware" | "content" | "app", label: string) => (
+    <Field label={label} htmlFor={`rd-${name}`}><Select id={`rd-${name}`} name={name} defaultValue={r[name]}>{(Object.keys(READY_LABELS) as ReadyLevel[]).map((k) => <option key={k} value={k}>{READY_LABELS[k]}</option>)}</Select></Field>
+  );
+  return (
+    <FormDialog label="Brief" title={`Brief for the crew: ${activity.title}`} testId={`site-brief-${activity.id}`}
+      description="What everyone assigned to this activity should know. They see this, their own role, the venue and their call time, and nothing else about the project.">
+      {(done) => (
+        <ActionForm action={setActivityReadiness} submitLabel="Save brief" onDone={(s) => done(s as Done)}>
+          <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="itemId" value={activity.id} />
+          <div className="grid gap-3 sm:grid-cols-3">{sel("hardware", "Hardware")}{sel("content", "Content")}{sel("app", "App")}</div>
+          <Field label="Readiness note (optional)" htmlFor="rd-note"><Input id="rd-note" name="note" maxLength={500} defaultValue={r.note ?? ""} placeholder="For example: final video due Thursday" /></Field>
+          <Field label="Instructions for the crew (optional)" htmlFor="rd-ins" hint="Access, parking, safety, who to ask for on arrival."><Textarea id="rd-ins" name="crewInstructions" rows={4} maxLength={2000} defaultValue={activity.crew_instructions ?? ""} /></Field>
         </ActionForm>
       )}
     </FormDialog>

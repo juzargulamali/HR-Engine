@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CRM_ALLOWED_FILE_SUMMARY, validateCrmFileMeta } from "@enginious-hr/domain";
-import { decideTaskOutput, linkFeedbackToOutput, saveTaskOutput, submitTaskOutput } from "@/lib/actions/projectsPhase2";
+import { assignOutputReviewer, decideTaskOutput, linkFeedbackToOutput, saveTaskOutput, submitTaskOutput } from "@/lib/actions/projectsPhase2";
 import { finalizeProjectUpload, getProjectFileUrl, prepareProjectUpload } from "@/lib/actions/projectsFiles";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
@@ -174,6 +174,27 @@ export function LinkFeedbackDialog({ projectId, versionId, feedback, activations
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
           <Field label="Feedback" htmlFor="lf-fb"><Select id="lf-fb" name="feedbackId" required><option value="">Choose…</option>{feedback.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</Select></Field>
           {activations.length > 0 ? <Field label="Activation (optional)" htmlFor="lf-act"><Select id="lf-act" name="activationId" defaultValue=""><option value="">None</option>{activations.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field> : null}
+        </ActionForm>
+      )}
+    </FormDialog>
+  );
+}
+
+/** Assign (or release) the Operations reviewer of a version waiting for review. The Project Manager or an Operations Manager; only people who may review it are offered. */
+export function AssignReviewerDialog({ projectId, versionId, versionNo, current, eligible }: { projectId: string; versionId: string; versionNo: number; current: string; eligible: { id: string; name: string }[] }) {
+  return (
+    <FormDialog label={current ? "Reassign reviewer" : "Assign reviewer"} title={`Operations reviewer for version ${versionNo}`} testId="output-assign-reviewer"
+      description="Only an Operations Manager of this company can review a version the Project Manager submitted, and never the person who submitted it or the person the task is assigned to. Leaving it unassigned keeps it in the Operations queue for any of them.">
+      {(done) => (
+        <ActionForm action={assignOutputReviewer} submitLabel="Save" onDone={(s) => done(s as Done)}>
+          <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
+          <Field label="Reviewer" htmlFor="ar-reviewer">
+            <Select id="ar-reviewer" name="reviewerId" defaultValue={current}>
+              <option value="">Anyone eligible (keep in the Operations queue)</option>
+              {eligible.map((e) => <option key={e.id} value={e.id}>{e.name}</option>)}
+            </Select>
+          </Field>
+          {eligible.length === 0 ? <p className="text-[13px] text-muted-foreground">Nobody is eligible yet. Someone with access to People &amp; Access can give the Operations role to another person.</p> : null}
         </ActionForm>
       )}
     </FormDialog>

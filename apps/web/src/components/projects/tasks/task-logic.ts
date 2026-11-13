@@ -15,7 +15,7 @@ export interface PickOption {
 
 /**
  * Who a new blocker names as responsible for unblocking it, before the person changes it: the project head (the Project Manager) when that is
- * someone other than the person reporting it, else the head of the task's department team, else the Project Manager anyway. Only people who are
+ * someone other than the person reporting it, else the head of the task's project team, else the Project Manager anyway. Only people who are
  * members of the project can be named (the database checks the same), so an empty answer means "the person must choose".
  */
 export function defaultUnblocker(o: { viewerId: string; pmId: string | null; teamHeadId: string | null; memberIds: readonly string[] }): string {
@@ -190,7 +190,7 @@ export function sortTaskRows<T extends TaskRowData>(rows: readonly T[], sort: So
 
 export const TASK_COLUMNS = [
   { id: "priority", label: "Priority" },
-  { id: "team", label: "Department" },
+  { id: "team", label: "Project team" },
   { id: "milestone", label: "Milestone" },
   { id: "deliverable", label: "Deliverable" },
 ] as const;
@@ -244,17 +244,17 @@ export interface NextStepInput {
 /** One sentence at the top of a task: what happens next and whose step it is, from recorded facts. `forViewer` says whether that step is the viewer's. */
 export function nextStep(i: NextStepInput): { text: string; forViewer: boolean } {
   if (i.readOnly) return { text: "This project is finished, so the task is read-only.", forViewer: false };
-  if (!i.open) return { text: "This task is closed. A department head or the Project Manager can reopen it.", forViewer: false };
+  if (!i.open) return { text: "This task is closed. A team lead or the Project Manager can reopen it.", forViewer: false };
   if (i.blocked) {
     const who = i.viewerIsUnblocker ? "You are named to unblock it" : i.unblockOwnerName ? `${i.unblockOwnerName} can unblock it` : `No one is named to unblock it; ${i.pmName} manages the project`;
     return { text: `Blocked${i.blockedReason ? `: ${i.blockedReason}` : " (no reason recorded)"}. ${who}${i.unblockAction ? `: ${i.unblockAction}` : ""}.`, forViewer: i.viewerIsUnblocker || (!i.unblockOwnerName && i.role === "manager") };
   }
   if (i.status === "ready_for_review") {
-    if (i.viewerIsAssignee) return { text: "You sent this for review. A department head or the Project Manager decides; there is nothing for you to do until then.", forViewer: false };
+    if (i.viewerIsAssignee) return { text: "You sent this for review. A team lead or the Project Manager decides; there is nothing for you to do until then.", forViewer: false };
     if (i.role === "manager" || i.role === "head") return { text: "Waiting for your review: accept it or request changes.", forViewer: true };
-    return { text: "Waiting for a review by the department head or the Project Manager.", forViewer: false };
+    return { text: "Waiting for a review by the team lead or the Project Manager.", forViewer: false };
   }
-  if (!i.role) return { text: "The assignee, the department head or the Project Manager move this task on. You can comment.", forViewer: false };
+  if (!i.role) return { text: "The assignee, the team lead or the Project Manager move this task on. You can comment.", forViewer: false };
   if (!i.viewerIsAssignee) return { text: i.status === "todo" ? "Not started yet. The assignee starts it." : "In progress with the assignee.", forViewer: false };
   if (i.status === "todo") return { text: "Yours to start.", forViewer: true };
   return { text: i.requiresReview ? "Yours: when the work is finished, send it for review." : "Yours: mark it done when the work is finished.", forViewer: true };
@@ -264,14 +264,14 @@ export function nextStep(i: NextStepInput): { text: string; forViewer: boolean }
 
 export const GROUP_BY = ["none", "team", "milestone", "status", "assignee"] as const;
 export type GroupBy = (typeof GROUP_BY)[number];
-export const GROUP_LABELS: Record<GroupBy, string> = { none: "No grouping", team: "Department", milestone: "Milestone", status: "Status", assignee: "Assignee" };
+export const GROUP_LABELS: Record<GroupBy, string> = { none: "No grouping", team: "Project team", milestone: "Milestone", status: "Status", assignee: "Assignee" };
 export const parseGroupBy = (raw: string): GroupBy => ((GROUP_BY as readonly string[]).includes(raw) ? (raw as GroupBy) : "none");
 
 export interface TaskGroup<T> {
   key: string;
   label: string;
   rows: T[];
-  /** True for the honest catch-all ("Unlinked", "No department", "Unassigned"): tasks that have no such link. */
+  /** True for the honest catch-all ("Unlinked", "No project team", "Unassigned"): tasks that have no such link. */
   none?: boolean;
 }
 
@@ -289,7 +289,7 @@ export function groupTaskRows<T extends TaskRowData>(rows: readonly T[], by: Gro
     buckets.set(key, g);
   };
   for (const r of rows) {
-    if (by === "team") r.teamId ? put(r.teamId, r.teamName ?? "Department", r) : put("none", "No department", r, true);
+    if (by === "team") r.teamId ? put(r.teamId, r.teamName ?? "Project team", r) : put("none", "No project team", r, true);
     else if (by === "milestone") r.effectiveMilestoneId ? put(r.effectiveMilestoneId, r.milestoneTitle ?? "Milestone", r) : put("none", "Unlinked", r, true);
     else if (by === "status") put(r.status, TASK_STATUS_LABELS[r.status as TaskStatus] ?? r.status, r);
     else r.assigneeId ? put(r.assigneeId, r.assigneeName, r) : put("none", "Unassigned", r, true);

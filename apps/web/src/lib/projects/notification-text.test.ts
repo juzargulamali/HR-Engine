@@ -27,7 +27,7 @@ describe("describeNotification", () => {
     expect(describeNotification("project_reply", { ...base, message_id: "m1" }).href).toBe("/projects/p1/discussion");
   });
   it("distinguishes the three kinds of assignment", () => {
-    expect(describeNotification("project_assignment", { ...base, deliverable: "Floor build" }).text).toContain("assigned to your department");
+    expect(describeNotification("project_assignment", { ...base, deliverable: "Floor build" }).text).toContain("assigned to your team");
     expect(describeNotification("project_assignment", { ...base, booking_id: "b", location: "Expo Hall" })).toMatchObject({ href: "/projects/p1/timeline" });
     expect(describeNotification("project_assignment", { ...base, feedback_id: "f" }).href).toBe("/projects/p1/changes");
   });

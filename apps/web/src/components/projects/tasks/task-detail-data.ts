@@ -31,7 +31,7 @@ export interface TaskDetailData {
   milestones: PickOption[];
   events: ProjTaskEventRow[];
   comments: ProjTaskCommentRow[];
-  team: { name: string; head: string; headId: string } | null;
+  team: { name: string; head: string; headId: string | null } | null;
   deliverable: string | null;
   milestone: string | null;
   /** The Project Plan requirement this task was released from, so the task links back to its activation. Null when it was not released from the plan, or the plan could not be read (an optional link, never an error). */
@@ -107,7 +107,7 @@ export async function loadTaskDetail(view: ProjectView, ctx: ProjectsContext, ta
     milestones: (milestones ?? []).map((m) => ({ id: m.id, name: m.title })),
     events: events ?? [],
     comments: comments ?? [],
-    team: team ? { name: team.name, head: view.nameOf(team.head_user_id), headId: team.head_user_id } : null,
+    team: team ? { name: team.name, head: team.head_user_id ? view.nameOf(team.head_user_id) : "Lead needed", headId: team.head_user_id } : null,
     deliverable: (deliverables ?? []).find((d) => d.id === task.deliverable_id)?.title ?? null,
     milestone: (milestones ?? []).find((m) => m.id === task.milestone_id)?.title ?? null,
     planLink,

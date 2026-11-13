@@ -41,7 +41,7 @@ export async function TaskPanel({ rawTaskId, projectId, basePath, current, panel
   if (!view || view.level !== "details" || !data) return <MissingTask closeHref={closeHref} />;
   return (
     <SidePanel title={data.task.title} subtitle={`${view.project.reference} · ${view.project.name}`} closeHref={closeHref} fullPageHref={`/projects/${pid}/work/tasks/${taskId}`}>
-      <TaskDetailBody data={data} view={view} taskHref={(id) => withParams(basePath, current, { [panelParam]: id })} />
+      <TaskDetailBody data={data} view={view} focusVersionId={current.version} taskHref={(id) => withParams(basePath, current, { [panelParam]: id })} />
     </SidePanel>
   );
 }

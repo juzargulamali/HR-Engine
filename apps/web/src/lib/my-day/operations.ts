@@ -1,4 +1,4 @@
-import { PackageSearch, MessageSquareReply } from "lucide-react";
+import { PackageSearch, MessageSquareReply, ClipboardCheck } from "lucide-react";
 import type { OpsResult } from "@/lib/operations/data";
 import { DECISION_WORDS, decisions, installationsWithin, projectHealth, type DecisionKind, type Health, type Overview, type UpcomingRow } from "@/lib/operations/model";
 import type { AttentionCandidate } from "./attention";
@@ -73,6 +73,28 @@ export function opsAnswerCandidates(day: OpsDay, now: Date): AttentionCandidate[
   }
   return out;
 }
+/**
+ * "What needs my attention" for an Operations Manager: a version the Project Manager submitted that waits for THIS person to review, because it is assigned to them or is waiting for any
+ * eligible Operations Manager. It is never offered to the person who submitted it or to the person the task is assigned to (the database refuses them too), and a version nobody can
+ * review is not an action for anyone here (it is listed in the Operations queue, flagged, for the Project Manager to resolve). The link opens that exact version.
+ */
+export function opsReviewCandidates(day: OpsDay, userId: string, now: Date): AttentionCandidate[] {
+  const out: AttentionCandidate[] = [];
+  for (const r of day.reads) {
+    if (r.overview.state !== "ok") continue;
+    for (const v of r.overview.data.output_reviews ?? []) {
+      if (v.needs_reviewer || v.submitted_by_id === userId || v.assignee_id === userId) continue;
+      if (v.reviewer_id && v.reviewer_id !== userId) continue;
+      out.push({
+        key: `output:${v.version_id}`, source: "operations", icon: ClipboardCheck, title: `${v.label ?? v.task} (version ${v.version_no})`, context: `${v.reference} ${v.project}`,
+        what: v.reviewer_id ? "Operations review assigned to you" : "Operations review waiting: take it", ...(waitingAgeText(v.attached_at, now) ? { when: waitingAgeText(v.attached_at, now)! } : {}), tier: 2, at: v.attached_at,
+        href: `/projects/${v.project_id}/work?task=${v.task_id}&version=${v.version_id}`,
+      });
+    }
+  }
+  return out;
+}
+
 /** True when an Operations read that feeds the candidates failed for any company: the attention list then names Operations as not loaded. */
 export const opsCandidatesFailed = (day: OpsDay) => day.reads.some((r) => r.upcoming.state === "error");
 

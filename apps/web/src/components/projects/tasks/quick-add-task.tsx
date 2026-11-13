@@ -13,7 +13,7 @@ import type { PickOption } from "./task-logic";
 /**
  * Add a task with three fields: what, who, when. Everything else (department, deliverable, milestone, priority, start date, review rule,
  * description, dependencies, collaborators) is under "Add more details". The people offered are exactly those the existing rules allow
- * (a member: themself; a department head: their team; the PM: anyone), and the database applies the same rules again.
+ * (a member: themself; a team lead: their team; the PM: anyone), and the database applies the same rules again.
  */
 function QuickTaskForm({ projectId, options, choices, milestones, tasks, collaborators, defaultAssignee, onDone }: {
   projectId: string; options: NewTaskOptions; choices: QuickAssignee[]; milestones: PickOption[]; tasks: PickOption[]; collaborators: PickOption[]; defaultAssignee: string; onDone: () => void;
@@ -34,7 +34,7 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
       <input type="hidden" name="teamId" value={effectiveTeam} />
       <Field label="What needs doing" htmlFor="qt-title"><Input id="qt-title" name="title" required maxLength={200} autoFocus /></Field>
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Assignee" htmlFor="qt-assignee" hint={people.length <= 1 ? "You can add tasks for yourself. Your department head or the Project Manager assigns work to others." : undefined}>
+        <Field label="Assignee" htmlFor="qt-assignee" hint={people.length <= 1 ? "You can add tasks for yourself. Your team lead or the Project Manager assigns work to others." : undefined}>
           <Select id="qt-assignee" name="assigneeId" value={selected?.id ?? ""} onChange={(e) => setAssignee(e.target.value)} required>
             {people.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
           </Select>
@@ -47,7 +47,7 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
         <Field label="Description (optional)" htmlFor="qt-desc"><Textarea id="qt-desc" name="description" rows={3} /></Field>
         <div className="grid gap-3 sm:grid-cols-2">
           {options.teams.length > 0 ? (
-            <Field label="Department team" htmlFor="qt-team" hint="Leave as automatic unless the task belongs to a department.">
+            <Field label="Project team" htmlFor="qt-team" hint="Leave as automatic unless the task belongs to a project team.">
               <Select id="qt-team" value={teamOverride} onChange={(e) => setTeamOverride(e.target.value)}>
                 <option value="">Automatic</option>
                 {options.teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
@@ -74,7 +74,7 @@ function QuickTaskForm({ projectId, options, choices, milestones, tasks, collabo
         {options.canRequireReview ? (
           <label className="flex items-start gap-2 text-sm">
             <input type="checkbox" name="requiresReview" className="mt-1 h-4 w-4" />
-            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">The assignee sends it for review; a department head or the Project Manager accepts it. Without this, the owner completes it.</span></span>
+            <span><span className="font-medium">Needs review</span><span className="block text-muted-foreground">The assignee sends it for review; a team lead or the Project Manager accepts it. Without this, the owner completes it.</span></span>
           </label>
         ) : null}
         {tasks.length > 0 ? (

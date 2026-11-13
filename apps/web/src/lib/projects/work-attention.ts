@@ -76,7 +76,7 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
   }
   // The viewer's work that someone else must review.
   for (const t of open.filter((x) => x.assignee_id === i.userId && x.status === "ready_for_review" && !x.blocked_at)) {
-    waiting.push({ key: `w-${t.id}`, kind: "in_review", label: "In review", title: t.title, href: i.taskHref(t.id), owner: "A reviewer (the department head or the Project Manager)", due: t.due_date, detail: "You sent it for review.", tone: "quiet" });
+    waiting.push({ key: `w-${t.id}`, kind: "in_review", label: "In review", title: t.title, href: i.taskHref(t.id), owner: "A reviewer (the team lead or the Project Manager)", due: t.due_date, detail: "You sent it for review.", tone: "quiet" });
   }
   // Overdue milestones belong to whoever manages the project.
   for (const m of i.lateMilestones) {

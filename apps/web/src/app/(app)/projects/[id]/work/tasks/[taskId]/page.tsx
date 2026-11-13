@@ -13,8 +13,9 @@ export const metadata = { title: "Task" };
  * One task on its own page (a direct, shareable address). It shows exactly what the side panel shows: both are the same component, fed by
  * the same loader, so what a person may see and change here can never differ from the panel.
  */
-export default async function TaskPage({ params }: { params: Promise<{ id: string; taskId: string }> }) {
+export default async function TaskPage({ params, searchParams }: { params: Promise<{ id: string; taskId: string }>; searchParams: Promise<{ version?: string | string[] }> }) {
   const { id, taskId } = await params;
+  const versionParam = (await searchParams).version;
   const ctx = await getProjectsContext();
   if (!ctx) return null;
   const view = await loadProjectView(ctx, id);
@@ -28,7 +29,7 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
       <BackLink section={`tasks-${id}`} fallback={`/projects/${id}/work`}>Back to the task list</BackLink>
       <h2 className="text-xl font-semibold">{data.task.title}</h2>
       <div className="max-w-3xl">
-        <TaskDetailBody data={data} view={view} taskHref={(tid) => `/projects/${id}/work/tasks/${tid}`} />
+        <TaskDetailBody data={data} view={view} focusVersionId={Array.isArray(versionParam) ? versionParam[0] : versionParam} taskHref={(tid) => `/projects/${id}/work/tasks/${tid}`} />
       </div>
     </div>
   );

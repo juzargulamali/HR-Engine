@@ -27,9 +27,9 @@ export function AddMemberForm({ projectId, candidates, teams }: { projectId: str
             {candidates.map((c) => <option key={c.id} value={c.id}>{c.name}{c.note ? ` (${c.note})` : ""}</option>)}
           </Select>
         </Field>
-        <Field label="Department (optional)" htmlFor="am-team">
+        <Field label="Project team (optional)" htmlFor="am-team">
           <Select id="am-team" name="teamId" defaultValue="">
-            <option value="">No department</option>
+            <option value="">No project team</option>
             {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
           </Select>
         </Field>
@@ -45,15 +45,15 @@ export function MemberActions({ projectId, person, teams, openTasks, others, can
   const [remove, setRemove] = useState(false);
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <Button type="button" size="sm" variant="outline" onClick={() => setDept(true)}>Department</Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => setDept(true)}>Project team</Button>
       {canRemove ? <Button type="button" size="sm" variant="outline" onClick={() => setRemove(true)}>Remove</Button> : null}
-      <Modal open={dept} onClose={() => setDept(false)} title="Department" description={person.name}>
+      <Modal open={dept} onClose={() => setDept(false)} title="Project team" description={person.name}>
         <ActionForm action={setMemberTeam} submitLabel="Save" onDone={() => setDept(false)} secondary={cancel(() => setDept(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="userId" value={person.id} />
-          <Field label="Department team" htmlFor={`mt-${person.id}`}>
+          <Field label="Project team" htmlFor={`mt-${person.id}`}>
             <Select id={`mt-${person.id}`} name="teamId" defaultValue={person.teamId ?? ""}>
-              <option value="">No department</option>
+              <option value="">No project team</option>
               {teams.map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
             </Select>
           </Field>
@@ -78,29 +78,29 @@ export function MemberActions({ projectId, person, teams, openTasks, others, can
   );
 }
 
-/** Create or edit a department team inside this project. The head must be a member. */
-export function TeamButton({ projectId, team, members }: { projectId: string; team?: { id: string; name: string; headUserId: string }; members: Option[] }) {
+/** Create or edit a project team inside this project. The head must be a member. */
+export function TeamButton({ projectId, team, members }: { projectId: string; team?: { id: string; name: string; headUserId: string | null }; members: Option[] }) {
   const [open, setOpen] = useState(false);
   const [removing, setRemoving] = useState(false);
   return (
     <>
-      <Button type="button" size="sm" variant={team ? "outline" : "default"} onClick={() => setOpen(true)}>{team ? "Edit" : "Add department team"}</Button>
+      <Button type="button" size="sm" variant={team ? "outline" : "default"} onClick={() => setOpen(true)}>{team ? "Edit" : "Add project team"}</Button>
       {team ? <Button type="button" size="sm" variant="outline" onClick={() => setRemoving(true)}>Remove</Button> : null}
-      <Modal open={open} onClose={() => setOpen(false)} title={team ? "Edit department team" : "Add department team"} description="A department team is a group inside this project with its own head, who manages the team's deliverables and tasks.">
+      <Modal open={open} onClose={() => setOpen(false)} title={team ? "Edit project team" : "Add project team"} description="A project team is a group inside this project with its own head, who manages the team's deliverables and tasks.">
         <ActionForm action={saveProjectTeam} submitLabel="Save team" onDone={() => setOpen(false)} secondary={cancel(() => setOpen(false))}>
           <input type="hidden" name="projectId" value={projectId} />
           {team ? <input type="hidden" name="teamId" value={team.id} /> : null}
           <Field label="Name" htmlFor={`tn-${team?.id ?? "new"}`}><Input id={`tn-${team?.id ?? "new"}`} name="name" required defaultValue={team?.name ?? ""} maxLength={80} placeholder="e.g. Programming" /></Field>
-          <Field label="Department head" htmlFor={`th-${team?.id ?? "new"}`} hint="Added to the project first if they are not a member yet (they need Projects access).">
+          <Field label="Team lead" htmlFor={`th-${team?.id ?? "new"}`} hint="Added to the project first if they are not a member yet (they need Projects access).">
             <Select id={`th-${team?.id ?? "new"}`} name="headUserId" required defaultValue={team?.headUserId ?? ""}>
-              <option value="" disabled>Choose the head</option>
+              <option value="" disabled>Choose the lead</option>
               {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
             </Select>
           </Field>
         </ActionForm>
       </Modal>
       {team ? (
-        <Modal open={removing} onClose={() => setRemoving(false)} title="Remove department team" description={`${team.name} can only be removed when it has no open deliverables or tasks. Its people stay on the project.`}>
+        <Modal open={removing} onClose={() => setRemoving(false)} title="Remove project team" description={`${team.name} can only be removed when it has no open deliverables or tasks. Its people stay on the project.`}>
           <ActionForm action={removeProjectTeam} submitLabel="Remove team" variant="destructive" onDone={() => setRemoving(false)} secondary={cancel(() => setRemoving(false))}>
             <input type="hidden" name="projectId" value={projectId} />
             <input type="hidden" name="teamId" value={team.id} />

@@ -46,6 +46,11 @@ import { PlanAddMenu } from "./plan-add-menu";
 import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
 import { WorkOverviewAreas } from "@/components/projects/work-overview";
+import { WorkSummary } from "@/components/projects/work-summary";
+import { milestoneSummary, outputSummary } from "@/lib/projects/work-summary";
+import { loadRegister } from "@/lib/projects/phase2/data";
+import { TeamSetupDialog, TeamSummary, type LeadOption, type TeamWithLead } from "@/components/projects/team/team-setup";
+import { leadNeeded, setupState } from "@/lib/projects/teams/model";
 import { loadWorkOverview } from "@/lib/projects/phase2/data";
 
 export const metadata = { title: "Work" };
@@ -216,7 +221,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   const toolbarFilters = [
     { name: "status", label: "Show", value: filters.status === "open" ? "" : filters.status, options: [{ value: "", label: "Open tasks" }, { value: "all", label: "All tasks" }, ...TASK_STATUSES.map((s) => ({ value: s, label: TASK_STATUS_LABELS[s] }))] },
     { name: "assignee", label: "Assignee", value: filters.assignee ?? "", options: [{ value: "", label: "Anyone" }, ...members.map((m) => ({ value: m.id, label: m.name }))] },
-    ...(view.teams.length > 0 ? [{ name: "team", secondary: true, label: "Department", value: filters.team ?? "", options: [{ value: "", label: "Any department" }, ...teamOptions.map((t) => ({ value: t.id, label: t.name }))] }] : []),
+    ...(view.teams.length > 0 ? [{ name: "team", secondary: true, label: "Project team", value: filters.team ?? "", options: [{ value: "", label: "Any project team" }, ...teamOptions.map((t) => ({ value: t.id, label: t.name }))] }] : []),
     ...(dls.length > 0 ? [{ name: "deliverable", secondary: true, label: "Deliverable", value: filters.deliverable ?? "", options: [{ value: "", label: "Any deliverable" }, ...dls.map((d) => ({ value: d.id, label: d.title }))] }] : []),
     { name: "show", secondary: true, label: "Narrow to", value: showChoiceOf(filters), options: [{ value: "", label: "Everything" }, { value: "mine", label: "My tasks" }, { value: "overdue", label: "Overdue" }, { value: "blocked", label: "Blocked" }] },
     ...(mode === "table" ? [{ name: "group", label: "Group by", value: group === "none" ? "" : group, options: (["none", "team", "milestone", "status", "assignee"] as const).map((g) => ({ value: g === "none" ? "" : g, label: GROUP_LABELS[g] })) }] : []),
@@ -246,7 +251,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
           <p className="font-medium">{allTasks.length === 0 ? "No tasks yet" : weekMode ? "Nothing due this week" : "No tasks match"}</p>
           <p className="text-sm text-muted-foreground">
             {allTasks.length === 0
-              ? canCreateTask ? "Add the first task. Department heads give deliverables out as tasks; any member can add one for themself." : "Department heads give deliverables out as tasks; any member can add one for themself."
+              ? canCreateTask ? "Add the first task. Team leads give deliverables out as tasks; any member can add one for themself." : "Team leads give deliverables out as tasks; any member can add one for themself."
               : weekMode ? "No open task is due this week, overdue or blocked." : "Clear the filters, or open all tasks to include finished ones."}
           </p>
         </div>
@@ -282,12 +287,41 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       </div>
     );
 
-  const overviewRes = await loadWorkOverview(id);
+  // Project teams: the Project Manager's first step on a new project, then a compact summary with Manage team. A lead may be unknown yet (Lead needed).
+  const teamRows: TeamWithLead[] = view.teams.map((t) => ({ id: t.id, name: t.name, head_user_id: t.head_user_id, preset_key: t.preset_key, leadName: t.head_user_id ? view.nameOf(t.head_user_id) : null }));
+  const projectMemberIds = new Set(view.people.map((p) => p.user_id));
+  const leadOptions: LeadOption[] = [
+    ...view.people.map((p) => ({ id: p.user_id, name: p.full_name ?? "Unnamed", onProject: true })),
+    ...ctx.people.filter((p) => p.companyIds.includes(view.project.company_id) && !projectMemberIds.has(p.id)).map((p) => ({ id: p.id, name: p.name, onProject: false })),
+  ];
+  const teamCounts = Object.fromEntries(view.teams.map((t) => [t.id, view.people.filter((p) => p.team_id === t.id).length]));
+  const teamState = setupState(teamRows);
+  const [overviewRes, registerRes] = await Promise.all([loadWorkOverview(id), loadRegister(id)]);
+  const msSummary = milestoneSummary(ms, today);
+  const outSummary = outputSummary(registerRes.state === "ok" ? registerRes.data : null);
   const overview = overviewRes.state === "ok" ? overviewRes.data : null;
 
   return (
     <div className="space-y-4">
       <RememberList section={`tasks-${id}`} />
+      {canManage && teamState === "none" ? (
+        <section aria-label="Set up your project team" className="os-card flex flex-wrap items-center justify-between gap-3 border-l-4 border-l-[hsl(var(--accent))] p-4" data-testid="team-setup-card">
+          <div className="min-w-0 flex-1 basis-72">
+            <h2 className="font-heading text-lg font-semibold">Set up your project team</h2>
+            <p className="text-sm text-muted-foreground">Start here: choose the teams this project needs (Content, Programming, Engineering, Site / Installation, or your own) and who leads each. You can save before every lead is known.</p>
+          </div>
+          <TeamSetupDialog projectId={id} teams={teamRows} leads={leadOptions} label="Set up your project team" />
+        </section>
+      ) : teamState !== "none" ? (
+        <section aria-label="Project team" className="os-card flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3" data-testid="team-summary-card">
+          <div className="min-w-0 flex-1 basis-72 space-y-1.5">
+            <h2 className="font-heading text-base font-semibold">Project team</h2>
+            <TeamSummary teams={teamRows} counts={teamCounts} />
+            {teamState === "lead_needed" ? <p className="text-[13px] text-muted-foreground" data-testid="team-lead-needed-note">Lead needed: {leadNeeded(teamRows).join(", ")}.{canManage ? " Choose one under Manage team." : " The Project Manager can choose one."}</p> : null}
+          </div>
+          {canManage ? <TeamSetupDialog projectId={id} teams={teamRows} leads={leadOptions} label="Manage team" variant="outline" testId="team-manage-open" /> : <Link href={`/projects/${id}/people`} className={buttonVariants({ variant: "outline", size: "sm" })}>People &amp; access</Link>}
+        </section>
+      ) : null}
       {readOnly ? <Muted>This project is {view.project.status}. Its plan is read-only; a founder can reopen it from History.</Muted> : null}
       {view.project.status === "on_hold" ? (
         <Alert variant="warning" role="status">
@@ -308,6 +342,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
         <Alert role="status">This project was completed and then reopened. The earlier completion record is kept on the <Link href={`/projects/${id}/history`} className="font-medium underline">History</Link> page.</Alert>
       ) : null}
 
+      <WorkSummary projectId={id} milestones={msSummary} milestonesHref={`${withParams(basePath, current, { ms: "1" })}#milestones`} outputs={outSummary} outputsFailed={registerRes.state === "error"} canManage={canManage} />
       {overview ? <WorkOverviewAreas projectId={id} overview={overview} /> : overviewRes.state === "error" ? <Alert variant="warning" role="status" data-testid="overview-load-error">Could not load the overview (next on site, what needs attention and recent changes). The tasks below are unaffected; reload to try again.</Alert> : null}
 
       {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
@@ -401,7 +436,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       {/* ---- Milestones and deliverables ---- */}
       <details id="milestones" open={openMilestones} className="os-card group">
         <summary className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-[14px] px-4 py-3 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <span className="text-sm font-semibold">Milestones &amp; deliverables <span className="font-normal text-muted-foreground">({ms.length} milestone{ms.length === 1 ? "" : "s"}, {dls.length} deliverable{dls.length === 1 ? "" : "s"})</span></span>
+          <span className="text-sm font-semibold">Milestones &amp; work packages <span className="font-normal text-muted-foreground">({ms.length} milestone{ms.length === 1 ? "" : "s"}, {dls.length} work package{dls.length === 1 ? "" : "s"})</span></span>
           <span className="text-sm text-muted-foreground">{progress ? progress.basis : "No required milestone set yet"}</span>
         </summary>
         <div className="space-y-5 border-t border-border p-4">
@@ -456,16 +491,16 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
 
           <Panel
             id="deliverables"
-            title="Deliverables"
-            description="Pieces of work the PM gives to a department. The department head distributes the tasks and accepts the deliverable."
+            title="Work packages"
+            description="Pieces of work the PM gives to a project team (the older team-level deliverables). The team lead distributes the tasks and accepts the work package. Task outputs, the files and links people hand in, are in Project Plan > Deliverables."
             actions={canManage ? <AddDeliverableButton projectId={id} teams={teamOptions} milestones={milestoneOptions} /> : undefined}
           >
             {dls.length === 0 ? (
-              <EmptyState icon={ListChecks} dense title="No deliverables yet" description={view.canManage ? (view.teams.length === 0 ? "Add a department team on the People page first, then give it a deliverable." : "Add a deliverable and choose the department team responsible for it.") : "The Project Manager assigns deliverables to departments."} />
+              <EmptyState icon={ListChecks} dense title="No work packages yet" description={view.canManage ? (view.teams.length === 0 ? "Add a project team on the People page first, then give it a work package." : "Add a work package and choose the project team responsible for it.") : "The Project Manager assigns work packages to departments."} />
             ) : (
               <div className="space-y-5">
                 {groupDeliverables(ms, dls).map((g) => (
-                  <section key={g.milestone?.id ?? "none"} aria-label={g.milestone ? `Deliverables for ${g.milestone.title}` : "Deliverables not linked to a milestone"}>
+                  <section key={g.milestone?.id ?? "none"} aria-label={g.milestone ? `Work packages for ${g.milestone.title}` : "Work packages not linked to a milestone"}>
                     <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">{g.milestone ? g.milestone.title : "Not linked to a milestone"}</h3>
                     <ul className="divide-y divide-border rounded-md border border-border">
                       {g.deliverables.map((d) => {
@@ -481,7 +516,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
                               <div className="flex flex-wrap items-center gap-2"><span className="font-medium">{d.title}</span><DeliverableStatusBadge status={d.status} /></div>
                               {d.description ? <p className="text-sm text-muted-foreground">{d.description}</p> : null}
                               <p className="text-sm text-muted-foreground">
-                                {team ? `${team.name} (head: ${view.nameOf(team.head_user_id)})` : "No department assigned"} · <span className={due.overdue ? "font-medium text-destructive" : undefined}>{due.text}</span> ·{" "}
+                                {team ? `${team.name} (head: ${view.nameOf(team.head_user_id)})` : "No project team assigned"} · <span className={due.overdue ? "font-medium text-destructive" : undefined}>{due.text}</span> ·{" "}
                                 {c.total === 0 ? "No tasks yet" : `${c.open} open of ${c.total} task${c.total === 1 ? "" : "s"}`}
                               </p>
                             </div>
@@ -552,7 +587,7 @@ function GroupBlock({ group, by, milestone, deliverables, counts, teams, childre
       <div className="space-y-3 border-t border-border p-3">
         {by === "milestone" && deliverables.length > 0 ? (
           <div>
-            <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Deliverables</h3>
+            <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">Work packages</h3>
             <ul className="space-y-1 text-sm">
               {deliverables.map((d) => {
                 const c = counts.get(d.id) ?? { open: 0, total: 0 };
@@ -560,7 +595,7 @@ function GroupBlock({ group, by, milestone, deliverables, counts, teams, childre
                   <li key={d.id} className="flex flex-wrap items-center gap-2">
                     <span className="font-medium">{d.title}</span>
                     <DeliverableStatusBadge status={d.status} />
-                    <span className="text-muted-foreground">{teams.find((t) => t.id === d.team_id)?.name ?? "No department"} · {c.total === 0 ? "no tasks yet" : `${c.open} open of ${c.total}`}</span>
+                    <span className="text-muted-foreground">{teams.find((t) => t.id === d.team_id)?.name ?? "No project team"} · {c.total === 0 ? "no tasks yet" : `${c.open} open of ${c.total}`}</span>
                   </li>
                 );
               })}

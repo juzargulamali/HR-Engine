@@ -102,9 +102,14 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       </div>
     );
   }
-  const [siteRes, reqR] = plan === "site"
-    ? await Promise.all([loadSiteSchedule(id), supabase.from("inv_requests").select("id, code, status").eq("project_id", id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(50)])
-    : [null, { data: [] as { id: string; code: string; status: string }[] }];
+  const [siteRes, reqR, techR] = plan === "site"
+    ? await Promise.all([
+      loadSiteSchedule(id), supabase.from("inv_requests").select("id, code, status").eq("project_id", id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(50),
+      // People who can be assigned on site: the project's members and the company's active employees who are not on it (site-only). Project Managers only.
+      canEditPlan ? supabase.rpc("proj_site_technician_candidates", { p_project_id: id }) : Promise.resolve({ data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }),
+    ])
+    : [null, { data: [] as { id: string; code: string; status: string }[] }, { data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }];
+  const crewChoices = (techR.data ?? []).length > 0 ? (techR.data ?? []).map((t) => ({ id: t.user_id, name: t.name, siteOnly: !t.is_member })) : memberOptions(view);
   const milestones = milestoneR.data ?? [];
   const milestoneTitle = (mid: string | null) => milestones.find((m) => m.id === mid)?.title ?? null;
   const items = planR.data ?? [];
@@ -134,7 +139,7 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       {plan === "site" && siteRes?.state === "ok" ? (
         <>
           {mode === "timeline" ? <Panel title="Site timeline" description="Setup, show and dismantling run by run, and the shipments that supply them, on one calendar. Names stay in view while it scrolls; exact dates are on every row."><SiteTimelineStrip schedule={siteRes.data} today={todayIso()} /></Panel> : null}
-          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={memberOptions(view)} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
+          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={crewChoices} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
           <details className="os-card px-4 py-3" data-testid="site-all-items">
             <summary className="cursor-pointer text-sm font-semibold">All site timeline items (client-facing, milestone and status)</summary>
             <p className="mb-3 mt-1 text-[13px] text-muted-foreground">The same items as the Site schedule above, with the fields that are not part of it: whether an item is offered to a client timeline, its milestone and its status.</p>
@@ -178,10 +183,10 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
           >
             <Muted className="mb-3">
               Several assignments in one day are never a conflict. Only physical site bookings are compared, across every project, including each booking&apos;s preparation and travel time. A booking is tentative until confirmed, and confirming one that overlaps another needs authority and a reason.
-              {!view.canManage && view.headOfTeamIds.length > 0 ? " As a department head you can book the people of your own team." : ""}
+              {!view.canManage && view.headOfTeamIds.length > 0 ? " As a team lead you can book the people of your own team." : ""}
             </Muted>
             {bookings.length === 0 ? (
-              <EmptyState dense title="No site bookings" description={canBookAny ? "Book the people who have to be on site, then confirm each booking." : "The Project Manager, or the head of a person's department team, books people on site."} />
+              <EmptyState dense title="No site bookings" description={canBookAny ? "Book the people who have to be on site, then confirm each booking." : "The Project Manager, or the head of a person's project team, books people on site."} />
             ) : (
               <div className="space-y-3">
                 {bookings.map((b) => {
