@@ -11,6 +11,8 @@ import {
 } from "@/components/projects/delivery/delivery-forms";
 import { MilestonePanel, PlanSummaryStrip } from "@/components/projects/delivery/plan-summary";
 import { PlanTimeline } from "@/components/projects/delivery/plan-timeline";
+import { QuickAddDialog } from "@/components/projects/delivery/quick-add-dialog";
+import { ReorderableLines } from "@/components/projects/delivery/reorderable-lines";
 import {
   activationReadiness, detailText, hardwareState, lateDependency, lineAttention, lineSchedule, planSummary, routeOf, timelineModel,
 } from "@/lib/projects/delivery-plan/insights";
@@ -46,6 +48,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
   const manage = plan.can_manage && !readOnly;
   const editable = (s: DpSection) => !readOnly && canEditSection(plan, s);
   const mySections = DP_CURRENT_SECTIONS.filter(editable);
+  const quickSections: DpSection[] = [...mySections];
   const stockName = new Map(stock.map((s) => [s.id, s.name]));
   const imageName = new Map(images.map((f) => [f.id, f.name]));
   const memberName = new Map(members.map((m) => [m.id, m.name]));
@@ -92,28 +95,19 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
     const when = l.section === "hardware" ? (sched.due ? `needed by ${dateText(sched.due)}` : "no date recorded") : sched.start || sched.due ? `${sched.start ? `starts ${dateText(sched.start)}` : "no start date"} · ${sched.due ? `due ${dateText(sched.due)}` : "no due date"}` : "not scheduled yet";
     const draftRequest = l.equipment?.request_id && l.equipment.request_status === "draft";
     return (
-      <li key={l.id} id={`dp-${l.key}`} className="flex scroll-mt-24 flex-wrap items-start justify-between gap-x-4 gap-y-1.5 py-2.5" data-testid={`dp-line-${l.key}`}>
-        <div className="min-w-0 flex-1 basis-72">
+      <div id={`dp-${l.key}`} className="scroll-mt-24 py-2 md:grid md:grid-cols-[minmax(0,3fr)_minmax(0,1.6fr)_minmax(0,1.7fr)_minmax(0,1.4fr)_auto] md:items-start md:gap-x-3" data-testid={`dp-line-${l.key}`}>
+        <div className="min-w-0" data-testid={`dp-name-${l.key}`}>
           <p className="break-words text-sm"><span className="font-mono text-[12px] text-muted-foreground">{l.key}</span> <span className="font-medium">{l.description}</span>{l.qty !== null ? <span className="text-muted-foreground"> × {l.qty}</span> : null}</p>
           {detail ? <p className="break-words text-[13px]">{detail}</p> : null}
-          <p className="break-words text-[13px] text-muted-foreground">
-            {target} · {when}{l.milestone_id && milestoneName.get(l.milestone_id) ? ` · for ${milestoneName.get(l.milestone_id)}` : ""}{l.notes ? ` · ${l.notes}` : ""}
-          </p>
-          {att.length > 0 ? (
-            <ul className="mt-0.5 space-y-0.5" data-testid={`dp-attention-${l.key}`}>
-              {att.map((a, n) => <li key={`${a.kind}-${n}`} className="break-words text-[13px] font-medium text-[hsl(var(--os-red))]">{a.kind === "blocker" ? a.text.replace(/^.*? is blocked: /, "Blocked: ") : a.kind === "late_dependency" ? `Late: ${late}` : a.kind === "no_owner" ? "No owner: name who does this" : a.kind === "overdue" ? `Overdue: ${a.text.replace(/^.* was due /, "was due ")}` : `Task update pending: ${l.task_pending?.reason ?? "the task could not take it"}`}</li>)}
-            </ul>
-          ) : null}
-          {l.task_pending ? (
-            <p className="mt-0.5 text-[13px]" data-testid={`dp-pending-${l.key}`}>
-              <span className="text-muted-foreground">The plan says {Object.entries(l.task_pending.fields).map(([k, v]) => `${k === "assignee_id" ? "owner" : k === "due_date" ? "due date" : k === "start_date" ? "start date" : "milestone"} ${v === null || v === undefined ? "cleared" : nameOf(k === "assignee_id" ? "assignee_id" : k === "milestone_id" ? "milestone_id" : "needed_by", String(v))}`).join(", ")}; the task still has {l.task?.assignee_name ?? "its owner"}{l.task?.start_date ? `, start ${dateText(l.task.start_date)}` : ""}{l.task?.due_date ? `, due ${dateText(l.task.due_date)}` : ""}{l.task?.milestone_id && milestoneName.get(l.task.milestone_id) ? `, milestone ${milestoneName.get(l.task.milestone_id)}` : ""}. </span>
-              {manage ? <ReconcileDialog projectId={id} lineId={l.id} reason={l.task_pending.reason} /> : <span className="text-muted-foreground">The Project Manager can resolve it.</span>}
-            </p>
-          ) : null}
+          {l.notes ? <p className="break-words text-[13px] text-muted-foreground">{l.notes}</p> : null}
         </div>
-        <div className="flex flex-wrap items-center gap-1.5">
+        <p className="mt-0.5 min-w-0 break-words text-[13px] md:mt-0" data-testid={`dp-who-${l.key}`}><span className="text-muted-foreground md:hidden">{l.section === "hardware" ? "Supply: " : "Owner: "}</span>{target}</p>
+        <p className="min-w-0 break-words text-[13px] text-muted-foreground" data-testid={`dp-when-${l.key}`}><span className="md:hidden">Dates: </span>{when}{l.milestone_id && milestoneName.get(l.milestone_id) ? ` · for ${milestoneName.get(l.milestone_id)}` : ""}</p>
+        <div className="mt-1 flex flex-wrap items-start gap-1 md:mt-0" data-testid={`dp-status-${l.key}`}>
           {route ? <OsBadge tone="quiet" className="whitespace-nowrap">{SUPPLY_ROUTE_LABELS[route]}</OsBadge> : null}
           <OsBadge tone={hs ? hs.tone : p.tone} className="whitespace-normal! text-left">{hs ? hs.text : p.text}</OsBadge>
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-1 md:mt-0 md:justify-end">
           {l.task ? <Link href={`${base}/work?task=${l.task.id}`} className="text-[13px] font-medium text-accent underline-offset-4 hover:underline">Open task</Link> : null}
           {l.equipment?.request_id ? <Link href={`${base}/equipment?request=${l.equipment.request_id}`} className="text-[13px] font-medium text-accent underline-offset-4 hover:underline">{draftRequest ? "Review and send to Warehouse" : "Open equipment request"}</Link> : null}
           {editable(l.section) ? (
@@ -124,7 +118,22 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
           {editable(l.section) && !l.released_at ? <RemoveDialog projectId={id} kind="line" id={l.id} name={l.description} /> : null}
           {!readOnly ? <CorrectionDialog projectId={id} targetType="line" targetId={l.id} about={`${l.key} ${l.description}`} label="Correction" /> : null}
         </div>
-      </li>
+        {att.length > 0 || l.task_pending ? (
+          <div className="min-w-0 md:col-span-5">
+            {att.length > 0 ? (
+              <ul className="mt-0.5 space-y-0.5" data-testid={`dp-attention-${l.key}`}>
+                {att.map((a, n) => <li key={`${a.kind}-${n}`} className="break-words text-[13px] font-medium text-[hsl(var(--os-red))]">{a.kind === "blocker" ? a.text.replace(/^.*? is blocked: /, "Blocked: ") : a.kind === "late_dependency" ? `Late: ${late}` : a.kind === "no_owner" ? "No owner: name who does this" : a.kind === "overdue" ? `Overdue: ${a.text.replace(/^.* was due /, "was due ")}` : `Task update pending: ${l.task_pending?.reason ?? "the task could not take it"}`}</li>)}
+              </ul>
+            ) : null}
+            {l.task_pending ? (
+              <p className="mt-0.5 text-[13px]" data-testid={`dp-pending-${l.key}`}>
+                <span className="text-muted-foreground">The plan says {Object.entries(l.task_pending.fields).map(([k, v]) => `${k === "assignee_id" ? "owner" : k === "due_date" ? "due date" : k === "start_date" ? "start date" : "milestone"} ${v === null || v === undefined ? "cleared" : nameOf(k === "assignee_id" ? "assignee_id" : k === "milestone_id" ? "milestone_id" : "needed_by", String(v))}`).join(", ")}; the task still has {l.task?.assignee_name ?? "its owner"}{l.task?.start_date ? `, start ${dateText(l.task.start_date)}` : ""}{l.task?.due_date ? `, due ${dateText(l.task.due_date)}` : ""}{l.task?.milestone_id && milestoneName.get(l.task.milestone_id) ? `, milestone ${milestoneName.get(l.task.milestone_id)}` : ""}. </span>
+                {manage ? <ReconcileDialog projectId={id} lineId={l.id} reason={l.task_pending.reason} /> : <span className="text-muted-foreground">The Project Manager can resolve it.</span>}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     );
   };
 
@@ -158,6 +167,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
             {manage && !item.released_at && item.lines.every((l) => !l.released_at) ? <RemoveDialog projectId={id} kind="deliverable" id={item.id} name={item.title} /> : null}
             {manage && item.lines.some((l) => !l.released_at) ? <ReleaseDialog projectId={id} itemId={item.id} label="Release" preview={itemPreview} /> : null}
             {mySections.length > 0 ? <LineDialog projectId={id} itemId={item.id} sections={mySections} members={members} stock={stock} stockFailed={stockFailed} milestones={milestoneOptions} others={others("")} /> : null}
+            {quickSections.length > 0 ? <QuickAddDialog projectId={id} itemId={item.id} sections={quickSections} members={members} milestones={milestoneOptions} activationOwner={item.owner_name} /> : null}
             {seqSection ? <SequenceDialog projectId={id} itemId={item.id} section={seqSection} members={members} milestones={milestoneOptions} activationOwner={item.owner_name} /> : null}
             {!readOnly ? <CorrectionDialog projectId={id} targetType="deliverable" targetId={item.id} about={`${item.key} ${item.title}`} label="Correction" /> : null}
           </div>
@@ -168,12 +178,19 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
               {waitingFor.map((d) => <OsBadge key={d.section} tone="amber" className="mr-1.5">Waiting for {d.name}: {DP_SECTION_LABELS[sectionFamily(d.section)]}</OsBadge>)}
             </p>
           ) : null}
-          {sections.length === 0 ? <Muted>No requirements yet. Add only the sections this {item.title} needs: a simple job may be hardware and site work alone.</Muted> : sections.map((s) => (
-            <div key={s}>
-              <h4 className="text-[13px] font-semibold text-muted-foreground">{DP_SECTION_LABELS[s]}{plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s)) ? <span className="font-normal"> · defined by {plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s))!.name}</span> : null}</h4>
-              <ul className="divide-y divide-border/70">{item.lines.filter((l) => l.section === s).map((l) => lineRow(item, l))}</ul>
-            </div>
-          ))}
+          {sections.length === 0 ? <Muted>No requirements yet. Add only the sections this {item.title} needs: a simple job may be hardware and site work alone.</Muted> : sections.map((s) => {
+            const lines = item.lines.filter((l) => l.section === s);
+            const reorder = editable(s) && lines.length > 1;
+            return (
+              <div key={s} data-testid={`dp-section-${item.key}-${s}`}>
+                <h4 className="text-[13px] font-semibold text-muted-foreground">{DP_SECTION_LABELS[s]}{plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s)) ? <span className="font-normal"> · defined by {plan.delegations.find((d) => sectionFamily(d.section) === sectionFamily(s))!.name}</span> : null}</h4>
+                <div className={`mt-1 hidden border-b border-border pb-1 text-[12px] font-semibold text-muted-foreground md:grid md:grid-cols-[minmax(0,3fr)_minmax(0,1.6fr)_minmax(0,1.7fr)_minmax(0,1.4fr)_auto] md:gap-x-3 ${reorder ? "md:ml-16" : ""}`} aria-hidden>
+                  <span>Requirement</span><span>{s === "hardware" ? "Supply" : "Owner"}</span><span>Dates</span><span>Status</span><span className="md:w-[9.5rem] md:text-right">Actions</span>
+                </div>
+                <ReorderableLines projectId={id} itemId={item.id} sectionLabel={DP_SECTION_LABELS[s]} enabled={reorder} rows={lines.map((l) => ({ id: l.id, label: l.key, node: lineRow(item, l) }))} />
+              </div>
+            );
+          })}
         </div>
       </details>
     );

@@ -19,10 +19,10 @@ import { DP_SECTION_LABELS, SUPPLY_ROUTE_LABELS, SUPPLY_ROUTES, type DpDetail, t
  * released says, before saving, that the change becomes a proposal for the Project Manager. Nothing here creates a task or an equipment line: only Release does.
  */
 export interface Option { id: string; name: string }
-type Done = { error: string | null; notice?: string | null };
+export type Done = { error: string | null; notice?: string | null };
 
 /** A dialog whose form may answer with a notice (a proposal was sent, or the row already existed): the notice stays on screen until the person closes it. */
-function FormDialog({ label, title, description, variant = "outline", size = "sm", children, testId, dialogSize }: {
+export function FormDialog({ label, title, description, variant = "outline", size = "sm", children, testId, dialogSize }: {
   label: string; title: string; description?: string; variant?: "default" | "outline" | "secondary" | "ghost" | "destructive"; size?: "default" | "sm"; testId?: string; dialogSize?: "default" | "wide" | "xl";
   children: (done: (s: Done) => void) => React.ReactNode;
 }) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
@@ -9,9 +9,13 @@ import { cn } from "@/lib/utils";
 import { Tooltip } from "@/components/ui/tooltip";
 import { UserMenu } from "./user-menu";
 import { NAV_ICONS } from "./nav-icons";
+import { COLLAPSE_COOKIE } from "./collapse-cookie";
 import { activeModuleId, isLinkActive, type NavModuleData } from "./nav-groups";
 
 const COLLAPSE_STORAGE_KEY = "sidebar-collapsed";
+/** The collapsed choice is also kept in a cookie so the server draws the right width on the first paint (no flash of the wide sidebar on every page load). */
+const writeCollapseCookie = (collapsed: boolean) => { document.cookie = `${COLLAPSE_COOKIE}=${collapsed ? "1" : "0"}; path=/; max-age=31536000; samesite=lax`; };
+const hasCollapseCookie = () => document.cookie.split("; ").some((c) => c.startsWith(`${COLLAPSE_COOKIE}=`));
 
 /** The most specific link of a module that matches the path, so only one sub-link is ever marked as the current page. */
 function currentSubHref(pathname: string, m: NavModuleData): string | null {
@@ -65,6 +69,39 @@ function ComingSoonRow({ m, collapsed }: { m: NavModuleData; collapsed?: boolean
   );
 }
 
+
+/**
+ * The pages of one module, shown beside the icon rail while the sidebar is collapsed (on hover, and on keyboard focus: the links come straight after the icon in tab order, so
+ * Tab reaches them). Fixed-position so the rail's own scrolling cannot clip it; closes on leaving, on Escape and on choosing a page. Reads the same links as the open sidebar.
+ */
+function RailFlyout({ m, sub, onNavigate, children }: { m: NavModuleData; sub: string | null; onNavigate?: () => void; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const [top, setTop] = useState(0);
+  const wrap = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const show = () => { if (timer.current) clearTimeout(timer.current); const r = wrap.current?.getBoundingClientRect(); if (r) setTop(Math.max(8, Math.min(r.top, window.innerHeight - 120))); setOpen(true); };
+  const hide = () => { if (timer.current) clearTimeout(timer.current); timer.current = setTimeout(() => setOpen(false), 160); };
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+  const links = m.sections.flatMap((s) => s.links.filter((l) => !l.secondary));
+  return (
+    <div ref={wrap} onMouseEnter={show} onMouseLeave={hide} onFocus={show} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) hide(); }} onKeyDown={(e) => { if (e.key === "Escape") setOpen(false); }}>
+      {children}
+      {open ? (
+        <div role="group" aria-label={`${m.label} pages`} data-testid={`rail-flyout-${m.id}`} style={{ top }} className="os-chrome fixed left-[4.5rem] z-50 w-60 rounded-xl border border-border p-2 shadow-lg">
+          <p className="px-2.5 pb-1 pt-1 text-[13px] font-semibold">{m.label}</p>
+          <div className="flex flex-col gap-px">
+            {links.map((l) => l.comingSoon ? (
+              <div key={l.label} aria-disabled="true" className="rounded-md px-2.5 py-1.5 text-subtle"><span className="block text-sm">{l.label}</span><span className="block text-sm">Coming soon</span></div>
+            ) : (
+              <Link key={l.href} href={l.href} onClick={() => { setOpen(false); onNavigate?.(); }} aria-current={sub === l.href ? "page" : undefined} className="os-nav-sub">{l.label}</Link>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: NavModuleData[]; collapsed?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
   const active = activeModuleId(pathname, modules);
@@ -99,9 +136,13 @@ export function ModuleNavigation({ modules, collapsed, onNavigate }: { modules: 
           <div key={m.id}>
             <div className="flex items-center gap-0.5">
               {collapsed ? (
-                <Tooltip label={m.label} side="right">
-                  {link}
-                </Tooltip>
+                hasSub ? (
+                  <RailFlyout m={m} sub={sub} onNavigate={onNavigate}>{link}</RailFlyout>
+                ) : (
+                  <Tooltip label={m.label} side="right">
+                    {link}
+                  </Tooltip>
+                )
               ) : (
                 link
               )}
@@ -161,48 +202,54 @@ export function DesktopSidebar({
   email,
   roleLabels,
   signOutSlot,
+  defaultCollapsed = false,
 }: {
   modules: NavModuleData[];
   fullName: string;
   email: string | null;
   roleLabels: string[];
   signOutSlot: React.ReactNode;
+  /** What the server read from the cookie, so the first paint already has the person's width. */
+  defaultCollapsed?: boolean;
 }) {
-  const [collapsed, setCollapsed] = useState(false);
-  const [collapseReady, setCollapseReady] = useState(false);
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [animate, setAnimate] = useState(false);
 
   useEffect(() => {
-    // Deferred a tick rather than calling setState synchronously in the
-    // effect body (matches the same pattern in theme-toggle.tsx).
+    // Someone who collapsed the sidebar before the cookie existed: adopt their saved choice once and write the cookie, so the next load is right from the start.
     Promise.resolve().then(() => {
       try {
-        setCollapsed(window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1");
+        if (!hasCollapseCookie()) {
+          const saved = window.localStorage.getItem(COLLAPSE_STORAGE_KEY) === "1";
+          if (saved) setCollapsed(true);
+          writeCollapseCookie(saved);
+        }
       } catch {
         // ignore
       } finally {
-        setCollapseReady(true);
+        setAnimate(true);
       }
     });
   }, []);
 
   function toggleCollapsed() {
-    setCollapsed((prev) => {
-      const next = !prev;
-      try {
-        window.localStorage.setItem(COLLAPSE_STORAGE_KEY, next ? "1" : "0");
-      } catch {
-        // ignore
-      }
-      return next;
-    });
+    const next = !collapsed;
+    setCollapsed(next);
+    try {
+      window.localStorage.setItem(COLLAPSE_STORAGE_KEY, next ? "1" : "0");
+      writeCollapseCookie(next);
+    } catch {
+      // ignore
+    }
   }
 
   return (
     <aside
       aria-label="ENGINIOUS OS modules"
+      data-collapsed={collapsed ? "true" : "false"}
       className={cn(
-        "os-chrome os-sidebar sticky top-0 hidden h-screen flex-none flex-col transition-[width] duration-200 lg:flex",
-        collapseReady ? "" : "duration-0",
+        "os-chrome os-sidebar sticky top-0 hidden h-screen flex-none flex-col lg:flex",
+        animate ? "transition-[width] duration-200" : "",
         collapsed ? "w-[4.5rem]" : "w-[16rem]",
       )}
     >
@@ -215,6 +262,7 @@ export function DesktopSidebar({
         type="button"
         onClick={toggleCollapsed}
         aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+        aria-pressed={collapsed}
         className="flex items-center justify-center gap-2 border-t border-border py-2.5 text-sm font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
         {collapsed ? <PanelLeftOpen className="h-4 w-4" aria-hidden /> : <PanelLeftClose className="h-4 w-4" aria-hidden />}

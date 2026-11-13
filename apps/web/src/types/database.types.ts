@@ -2123,6 +2123,8 @@ export interface Database {
       proj_dp_decide_correction: { Args: { p_correction_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
       proj_dp_decide_change: { Args: { p_change_id: string; p_decision: string; p_note?: string | null }; Returns: undefined };
       proj_dp_add_sequence: { Args: { p_item_id: string; p_section: string; p_steps: Record<string, unknown>[] }; Returns: unknown };
+      proj_dp_add_lines: { Args: { p_item_id: string; p_section: string; p_rows: Record<string, unknown>[]; p_chain?: boolean }; Returns: unknown };
+      proj_dp_reorder_lines: { Args: { p_item_id: string; p_line_ids: string[] }; Returns: unknown };
       proj_dp_seed_scope: { Args: { p_project_id: string }; Returns: unknown };
       proj_dp_reconcile_task: { Args: { p_line_id: string; p_action: string }; Returns: unknown };
       proj_dp_apply_import: { Args: { p_project_id: string; p_expected_rev: number; p_items: Record<string, unknown>[]; p_lines: Record<string, unknown>[] }; Returns: unknown };

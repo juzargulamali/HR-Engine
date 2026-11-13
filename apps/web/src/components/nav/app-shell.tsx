@@ -21,6 +21,7 @@ export function AppShell({
   inventory,
   budget,
   hasDirectReports = false,
+  sidebarCollapsed = false,
   children,
 }: {
   session: CurrentSession;
@@ -37,6 +38,8 @@ export function AppShell({
   budget?: { any: boolean; finance?: boolean; manageAccess?: boolean; waiting?: number };
   /** The person has direct reports: offers "People & HR" to a manager who does not hold the Reporting Manager role. */
   hasDirectReports?: boolean;
+  /** The desktop sidebar was left collapsed (read from a cookie by the layout), so it is drawn that way from the first paint. */
+  sidebarCollapsed?: boolean;
   children: React.ReactNode;
 }) {
   const roleLabels = roleLabelsFor(session.grants);
@@ -61,7 +64,7 @@ export function AppShell({
         Skip to main content
       </a>
 
-      <DesktopSidebar modules={modules} fullName={fullName} email={session.email} roleLabels={roleLabels} signOutSlot={signOutSlot} />
+      <DesktopSidebar modules={modules} fullName={fullName} email={session.email} roleLabels={roleLabels} signOutSlot={signOutSlot} defaultCollapsed={sidebarCollapsed} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         <ShellChrome
