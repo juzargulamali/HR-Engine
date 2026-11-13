@@ -146,6 +146,9 @@ Proven on a real PostgreSQL by `packages/rls-tests/test/proj-project-plan-r1.rls
 
 ## 9. Usability follow-up: compact Breakdown, Quick add, order (migration `20270105000100_proj_plan_quick_add_reorder.sql`; draft PR stacked on Release 1)
 
+> **Phase 2 (draft PR, migration `20270106000100`, not applied by Claude):** Project Plan gains a Deliverables view (`?view=deliverables`) and a Site panel (`?plan=site`); Breakdown, Quick add and saved row order are unchanged (S 5, S 6). See [`projects-phase-2-deliverables-and-site.md`](./projects-phase-2-deliverables-and-site.md) (reference S) and `docs/projects-phase-2-scope.md`.
+
+
 Full write-up: `docs/projects-plan-usability-scope.md`. The Breakdown draws each requirement as one grid row (Requirement, Supply / owner, Dates, Status, Actions; stacked on a phone). **Quick add** (`QuickAddDialog`, `addPlanLines` -> `proj_dp_add_lines`) saves up to 50 requirements of one section in one transaction through `proj_dp_save_line`, so permission, validation and the same-name-in-a-section rule are the existing ones and a retry adds nothing (existing rows are left as they are). Row order (`ReorderableLines`, `reorderPlanLines` -> `proj_dp_reorder_lines`) persists `sort_order` only: drag the grip, or the up / down buttons and arrow keys; released lines may be reordered (no proposal, no task or equipment change); the listed lines swap places among the positions they hold; idempotent; allowed per line to the section's editor. The shared sidebar's Collapse choice is also stored in the `sidebar-collapsed` cookie (read by `app/(app)/layout.tsx`, so the first paint has the right width) and a collapsed rail shows each module's pages in a flyout (`RailFlyout` in `components/nav/sidebar-nav.tsx`).
 
 ## Coverage rows

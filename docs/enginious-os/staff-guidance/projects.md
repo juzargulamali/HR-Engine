@@ -589,3 +589,109 @@ Quick add saves a whole list of requirements for one technology in one go, and s
 4. To change the order, drag the grip at the start of a row, or press the up or down arrow beside it (Tab to the button, then Enter). The order is saved as you go and is the same for everyone.
 5. Only the Project Manager, or the person a section is delegated to, sees these controls for that section.
 
+## Say what a task must produce
+- id: projects-task-expected-output
+- area: projects
+- status: published
+- keywords: expected output; what a task must produce; required output; deliverable on a task
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+A task can name the thing it must produce, for example a moodboard, and say whether it is required. A required output stops the task being sent for review or finished until it is added.
+
+1. Open the task from the project's Work page.
+2. Press Set expected output (or Edit expected output). Type the name, a quantity if there is more than one, and tick Required if the task cannot be finished without it.
+3. The person doing the task sees what is expected and what is missing right beside their action.
+4. Only the Project Manager, or the head of the task's team, can set or change this.
+
+## Hand in a version of a task's output
+- id: projects-task-submit-output
+- area: projects
+- status: published
+- keywords: submit output; add a version; attach a file to a task; version 2; hand in work
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+Each time you hand work in, it becomes a new version. Earlier versions and the feedback on them stay available.
+
+1. Open your task and press Submit output (or Submit version 2, and so on).
+2. Choose Upload a file, Choose a project file, or Add a link, and add a note for the reviewer if you like.
+3. A link to a document that can change later is marked so; add a snapshot or a link to one exact version if the reviewer needs it.
+4. Press the submit button once. Pressing it again by mistake does not make a second version.
+5. A file marked as restricted can only be chosen by the Project Manager.
+
+## Review one version of a task's output
+- id: projects-task-review-output
+- area: projects
+- status: published
+- keywords: review output; approve a version; request changes on a version; changes requested
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+Your decision applies to the one version you are looking at. If a newer version arrives while your screen is open, you are told and nothing is approved by mistake.
+
+1. Open the task and press Review.
+2. Choose Approve, or Request changes and write what needs changing.
+3. If you are told a newer version exists, reload and review that one.
+4. The time it was handed in and the time it was approved appear separately, in the project's time zone.
+5. You cannot review your own work.
+
+## Deliverables view and register export
+- id: projects-deliverables-register
+- area: projects
+- status: published
+- keywords: deliverables view; register of outputs; export deliverables; missing outputs
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+The Deliverables view on the Project Plan gathers the expected outputs of a project, grouped by activation, with the current version, status and times.
+
+1. Open the project, go to Project Plan, then Deliverables.
+2. Use Missing, Awaiting review, Changes requested or Approved to narrow the list.
+3. Open a row's Version history to see earlier versions and decisions.
+4. Press Export register (CSV) for a spreadsheet. It holds only what you can see on the screen: a restricted file appears as restricted.
+
+## Plan the installation and dismantling on site
+- id: projects-site-schedule
+- area: projects
+- status: published
+- keywords: site schedule; installation and dismantling; second installation; tentative or confirmed; run on site
+- links: Projects -> /projects
+- screens: /projects/[id]/plan
+
+The Site schedule is what happens at the venue. It is separate from the Project Plan's work schedule, which is the tasks. A plan with gaps still saves, and the gaps are listed with a link to fix each.
+
+1. Open the project, go to Project Plan, then Site.
+2. Press Add activity, or Quick add to enter several runs in one go (for example installation 11 Nov, the live days 12 to 13 Nov, dismantling).
+3. Give each run an owner, a place, the date or time window and its time zone, and mark it Tentative or Confirmed.
+4. Changing the date of a Confirmed run asks you for a reason. Only the Project Manager can add or change site activities.
+
+## Add crew and shipments to the site schedule
+- id: projects-site-crew-shipments
+- area: projects
+- status: published
+- keywords: site crew; standby crew; shipment arrival; equipment arriving late
+- links: Projects -> /projects
+- screens: /projects/[id]/plan
+
+Each run can have a crew by role. A shipment records when it leaves, when it should arrive and when it comes back, and warns you if it arrives after the installation it is for.
+
+1. On the Site schedule press Assign crew on a run and add people as installation, standby, backup or dismantling.
+2. Press Add shipment, enter each leg with its own time zone, and say which installation it supports.
+3. If the shipment is linked to an equipment request, its reservation, dispatch and return state comes from Inventory. Change that in Inventory, not here.
+4. A red warning means the shipment arrives after the installation starts.
+
+## What is next on site and what needs attention
+- id: projects-work-overview
+- area: projects
+- status: published
+- keywords: work overview; next on site; needs attention; recent changes on a project
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+The top of a project's Work page lists the next thing happening on site, what is missing or waiting, who can act on it, and the latest changes.
+
+1. Open the project's Work page.
+2. Next on site gives the next activity with its time, place, owner and whether it is confirmed.
+3. Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.
+4. Recent changes links to the full History.

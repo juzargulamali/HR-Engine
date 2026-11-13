@@ -1777,6 +1777,199 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "projects-task-expected-output",
+    "area": "projects",
+    "title": "Say what a task must produce",
+    "keywords": [
+      "expected output",
+      "what a task must produce",
+      "required output",
+      "deliverable on a task"
+    ],
+    "summary": "A task can name the thing it must produce, for example a moodboard, and say whether it is required. A required output stops the task being sent for review or finished until it is added.",
+    "steps": [
+      "Open the task from the project's Work page.",
+      "Press Set expected output (or Edit expected output). Type the name, a quantity if there is more than one, and tick Required if the task cannot be finished without it.",
+      "The person doing the task sees what is expected and what is missing right beside their action.",
+      "Only the Project Manager, or the head of the task's team, can set or change this."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
+    "id": "projects-task-submit-output",
+    "area": "projects",
+    "title": "Hand in a version of a task's output",
+    "keywords": [
+      "submit output",
+      "add a version",
+      "attach a file to a task",
+      "version 2",
+      "hand in work"
+    ],
+    "summary": "Each time you hand work in, it becomes a new version. Earlier versions and the feedback on them stay available.",
+    "steps": [
+      "Open your task and press Submit output (or Submit version 2, and so on).",
+      "Choose Upload a file, Choose a project file, or Add a link, and add a note for the reviewer if you like.",
+      "A link to a document that can change later is marked so; add a snapshot or a link to one exact version if the reviewer needs it.",
+      "Press the submit button once. Pressing it again by mistake does not make a second version.",
+      "A file marked as restricted can only be chosen by the Project Manager."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
+    "id": "projects-task-review-output",
+    "area": "projects",
+    "title": "Review one version of a task's output",
+    "keywords": [
+      "review output",
+      "approve a version",
+      "request changes on a version",
+      "changes requested"
+    ],
+    "summary": "Your decision applies to the one version you are looking at. If a newer version arrives while your screen is open, you are told and nothing is approved by mistake.",
+    "steps": [
+      "Open the task and press Review.",
+      "Choose Approve, or Request changes and write what needs changing.",
+      "If you are told a newer version exists, reload and review that one.",
+      "The time it was handed in and the time it was approved appear separately, in the project's time zone.",
+      "You cannot review your own work."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
+    "id": "projects-deliverables-register",
+    "area": "projects",
+    "title": "Deliverables view and register export",
+    "keywords": [
+      "deliverables view",
+      "register of outputs",
+      "export deliverables",
+      "missing outputs"
+    ],
+    "summary": "The Deliverables view on the Project Plan gathers the expected outputs of a project, grouped by activation, with the current version, status and times.",
+    "steps": [
+      "Open the project, go to Project Plan, then Deliverables.",
+      "Use Missing, Awaiting review, Changes requested or Approved to narrow the list.",
+      "Open a row's Version history to see earlier versions and decisions.",
+      "Press Export register (CSV) for a spreadsheet. It holds only what you can see on the screen: a restricted file appears as restricted."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/delivery"
+    ]
+  },
+  {
+    "id": "projects-site-schedule",
+    "area": "projects",
+    "title": "Plan the installation and dismantling on site",
+    "keywords": [
+      "site schedule",
+      "installation and dismantling",
+      "second installation",
+      "tentative or confirmed",
+      "run on site"
+    ],
+    "summary": "The Site schedule is what happens at the venue. It is separate from the Project Plan's work schedule, which is the tasks. A plan with gaps still saves, and the gaps are listed with a link to fix each.",
+    "steps": [
+      "Open the project, go to Project Plan, then Site.",
+      "Press Add activity, or Quick add to enter several runs in one go (for example installation 11 Nov, the live days 12 to 13 Nov, dismantling).",
+      "Give each run an owner, a place, the date or time window and its time zone, and mark it Tentative or Confirmed.",
+      "Changing the date of a Confirmed run asks you for a reason. Only the Project Manager can add or change site activities."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan"
+    ]
+  },
+  {
+    "id": "projects-site-crew-shipments",
+    "area": "projects",
+    "title": "Add crew and shipments to the site schedule",
+    "keywords": [
+      "site crew",
+      "standby crew",
+      "shipment arrival",
+      "equipment arriving late"
+    ],
+    "summary": "Each run can have a crew by role. A shipment records when it leaves, when it should arrive and when it comes back, and warns you if it arrives after the installation it is for.",
+    "steps": [
+      "On the Site schedule press Assign crew on a run and add people as installation, standby, backup or dismantling.",
+      "Press Add shipment, enter each leg with its own time zone, and say which installation it supports.",
+      "If the shipment is linked to an equipment request, its reservation, dispatch and return state comes from Inventory. Change that in Inventory, not here.",
+      "A red warning means the shipment arrives after the installation starts."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan"
+    ]
+  },
+  {
+    "id": "projects-work-overview",
+    "area": "projects",
+    "title": "What is next on site and what needs attention",
+    "keywords": [
+      "work overview",
+      "next on site",
+      "needs attention",
+      "recent changes on a project"
+    ],
+    "summary": "The top of a project's Work page lists the next thing happening on site, what is missing or waiting, who can act on it, and the latest changes.",
+    "steps": [
+      "Open the project's Work page.",
+      "Next on site gives the next activity with its time, place, owner and whether it is confirmed.",
+      "Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.",
+      "Recent changes links to the full History."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
     "id": "sales-overview",
     "area": "sales",
     "title": "How Sales & CRM works",

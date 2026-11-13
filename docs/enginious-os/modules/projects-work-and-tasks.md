@@ -73,6 +73,9 @@ A person's part in one task is exactly one of `manager`, `head`, `assignee` or n
 
 ## 3. Top of the Work page: What needs doing, Delivery summary, summary cards
 
+> **Phase 2 (draft PR, migration `20270106000100`, not applied by Claude):** The Work page opens with Next on site, Needs attention and Recent changes (S 7); the four-line Recent activity no longer repeats output and site records. The task panel (section 8) gains Expected output, Submit output, Review and Version history (S 3, S 4); `proj_set_task_status` now refuses a required output that is missing. See [`projects-phase-2-deliverables-and-site.md`](./projects-phase-2-deliverables-and-site.md) (reference S) and `docs/projects-phase-2-scope.md`.
+
+
 **How to reach it.** The first things in the main column of `/projects/[id]/work`, on a phone too. **Who.** Reader; Delivery summary and the import control only for a Manager. Hidden on a finished project (What needs doing, Delivery summary). **Purpose.** Say what needs the viewer and what is waiting on someone else, from recorded facts only.
 
 ### 3.1 What goes in "What needs doing" (`workAttention`, `L/projects/work-attention.ts`)

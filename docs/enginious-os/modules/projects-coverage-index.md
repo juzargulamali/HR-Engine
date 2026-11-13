@@ -11,6 +11,7 @@ Reference files (all under `docs/enginious-os/modules/`):
 * **H** [`projects-handovers-equipment-and-workflow.md`](./projects-handovers-equipment-and-workflow.md): Handovers, the Equipment tab, the Budget tab, the end-to-end workflow trace.
 * **L** [`projects-delivery-plan.md`](./projects-delivery-plan.md): the Delivery Plan (Phase 2, part 1; merged in PR #84, `e12c22f`; migration `20261231000100` applied on hosted, owner-reported) and, in its section 8, **Release 1: the Project Plan** (draft PR; migration `20270104000100`, not yet applied anywhere): technologies / activations with quantities, five requirement sections with their fields, supply routes, task dates and milestones, release, the summary strip, Breakdown and Timeline, milestone progress, Task update pending, corrections, proposals, Excel import and export. Entries added by Release 1: Project Plan page (Breakdown, Timeline), Summary strip, Milestones panel, Accepted scope (brief), Bring in accepted technologies, requirement dialog, Start from a sequence, Resolve (task update pending), the Project Plan card on Work and Open the Project Plan on Handovers; all **Documented**, none verified signed in.
 * **R** [`projects-closeout-report.md`](./projects-closeout-report.md): the Project Closeout Report (Phase 2, part 2; merged in PR #84, `e12c22f`; migration `20270101000100` applied on hosted, owner-reported): evidence snapshot, Review data to be sent, the AI or facts-only draft, checks, approval, PDF.
+* **S** [`projects-phase-2-deliverables-and-site.md`](./projects-phase-2-deliverables-and-site.md): Phase 2 (draft PR, migration `20270106000100`, not applied by Claude): task expected outputs and versioned reviews, the Deliverables view and CSV register, the Site schedule (activities, crew, shipments), the Work overview, and the collapsed-sidebar fixes.
 * **C** [`app-chat.md`](./app-chat.md) section 9: the project's Chat group (membership, the end of the Discussion tab, old Discussion links).
 * **O** [`operations.md`](./operations.md): Operations (Phase 2B; merged as PR #86, merge `5b75ade`; migration `20270102000100` not applied by Claude; on hosted it is treated as applied from the owner's report of 2026-11-12 that the signed-in Preview checks of PR #86 passed, `Unverified` by Claude): the Operations Manager, Overview, Upcoming Work, the event edition on projects, equipment readiness and booking review, the Operations path into project Chat and the Archived section.
 * [`projects-action-catalogue.md`](./projects-action-catalogue.md): every action that changes data. [`projects-phase1-changes.md`](./projects-phase1-changes.md): what Phase 1 changed, per workflow (who can act, what it does, where the user goes next), the Phase 2 boundary and the verification gaps.
@@ -344,7 +345,31 @@ Who can see: **Member** = actively enrolled in the project and still eligible (`
 | 266 | My Day: **Operations** summary card (Waiting for a decision, Next installations, Most urgent issue, **Open Operations**) | panel | My Day `/`, above the main grid | Operations Manager of a company, or Projects founder; nobody else | Oversight from the same two Operations reads; a company whose read failed is named and never counted as zero | O 14.1 | Documented |
 | 267 | My Day, Needs me: "Sales answered the Operations question" and "Review equipment booking" | panel | My Day `/`, the attention list | The Operations Managers of the enquiry's company; the Project Manager of the project | What the person can act on; a handover to assign is listed once by the existing Projects source, not again | O 14.2 | Documented |
 
+## 10. Phase 2: deliverables, versioned reviews, site schedule, Work overview (S)
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 268 | Task panel: Expected output and what is missing | panel | A task with an expected output | Readers of the project | Show the expected output, required or not, and the next step beside the assignee's action | S 3 | Documented |
+| 269 | Set expected output / Edit expected output | dialog | Task panel | Project Manager; the team head | Name the output, quantity, required | S 2, 3 | Documented |
+| 270 | Submit output / Submit version N | dialog | Task panel | Assignee, team head, Project Manager | Add a version by upload, project file or link | S 3 | Documented |
+| 271 | Review (Approve / Request changes) | dialog | Task panel | Team head, Project Manager (never the submitter) | Decide on the exact version | S 4 | Documented |
+| 272 | Version history | panel | Task panel; Deliverables view | Readers of the project | Every version with its decision, note and times | S 3 | Documented |
+| 273 | Link client feedback | dialog | Task panel; Feedback & changes | Project Manager | Tie feedback to a version and activation | S 2 | Documented |
+| 274 | Deliverables view | view | Project Plan, **Deliverables** | Readers of the project | Register by activation with filters | S 5 | Documented |
+| 275 | Export register (CSV) | download | Deliverables view | Readers of the project | Same rows as the screen, nothing more | S 5 | Documented |
+| 276 | Site schedule panel and strip | panel | Project Plan, Site | Readers of the project | The venue schedule, labelled apart from the work schedule | S 6 | Documented |
+| 277 | Add activity / Edit (site) | dialog | Site schedule | Project Manager | One activity with owner, location, window, zone, state | S 6 | Documented |
+| 278 | Quick add (site runs) | dialog | Site schedule | Project Manager | Several runs in one save | S 6 | Documented |
+| 279 | Assign crew / Crew | dialog | An activity | Project Manager | Crew by role per activity | S 6 | Documented |
+| 280 | Add shipment / Edit / Remove | dialog | Site schedule | Project Manager | Departure, arrival, return and the Inventory link | S 6 | Documented |
+| 281 | Next on site | panel | Work page | Readers of the project | The next activity, window, owner, state | S 7 | Documented |
+| 282 | Needs attention | panel | Work page | Readers of the project | What is missing or waiting, who can act, where to fix it | S 7 | Documented |
+| 283 | Recent changes | panel | Work page | Readers of the project | Newest output, review and site records | S 7 | Documented |
+| 284 | History wording for outputs, activities, shipments | list | History tab | Readers of the project | Plain sentences, not raw field names | S 7 | Documented |
+| 285 | Collapsed sidebar tooltip | overlay | Hover or focus an icon | Signed-in staff | The whole label outside the rail | S 8 | Documented |
+| 286 | Collapsed sidebar flyout | overlay | Open a module icon | Signed-in staff | Module pages above the page content | S 8 | Documented |
+
 ## Totals
 
-267 entries: 238 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8, O 31 (section 9: 18 Operations screens, rows 237 to 249 and 261 to 265; 11 changes on existing Projects screens, rows 250 to 260; 2 on My Day, rows 266 and 267; all 31 are `Documented` from the code, none was seen signed in by Claude). *(260 entries and O 24 until the Overview redesign of 2026-11-12; rows 240 to 244, 247 and 258 were rewritten in place and keep their numbers.)*
+286 entries: 257 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8, S 19, O 31 (section 9: 18 Operations screens, rows 237 to 249 and 261 to 265; 11 changes on existing Projects screens, rows 250 to 260; 2 on My Day, rows 266 and 267; all 31 are `Documented` from the code, none was seen signed in by Claude). *(260 entries and O 24 until the Overview redesign of 2026-11-12; rows 240 to 244, 247 and 258 were rewritten in place and keep their numbers.)*
 

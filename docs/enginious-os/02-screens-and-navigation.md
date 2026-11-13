@@ -131,6 +131,8 @@ Source: `buildNavModules` in `nav-groups.ts`. Order is as listed. "Always" = no 
 
 Notes
 * Desktop sidebar (usability follow-up, draft): the **Collapse** button keeps the choice in `localStorage` and in the `sidebar-collapsed` cookie (read by `app/(app)/layout.tsx`, so the first paint has the right width); a collapsed icon rail shows a module's pages in a flyout on hover or keyboard focus (`RailFlyout`, `components/nav/sidebar-nav.tsx`). Which modules and pages exist is unchanged.
+* Collapsed-rail tooltip and flyout (Phase 2, draft PR): both are drawn in body-level layers (`components/nav/rail-popover.tsx`), above sticky project headers and tabs and below native dialogs. The tooltip shows the whole label on hover and keyboard focus; the flyout is anchored to the icon, kept inside the viewport, scrolls when long, can be entered with the pointer, moves with the arrow keys and closes with Escape, returning focus. The saved collapsed preference, active route, role-filtered links and the phone drawer are unchanged.
+* Projects Phase 2 screens (draft PR; see `modules/projects-phase-2-deliverables-and-site.md`): the **Work** page opens with Next on site, Needs attention and Recent changes; the task panel gains **Expected output** and versions; **Project Plan** gains **Deliverables** (`?view=deliverables`, with `/api/projects/[id]/deliverables/export`) and the **Site schedule** panel (`?plan=site`).
 * Timesheets, Departments and a notification bell have no menu entry (`nav-groups.ts`, `shell-chrome.tsx`).
 * `navGroupsFromModules` feeds the command palette (search); secondary links appear there only.
 * The header shows a breadcrumb "Module / Page" (`breadcrumbFor`); the most specific link wins (`/attendance-clock` is not swallowed by `/attendance`).
