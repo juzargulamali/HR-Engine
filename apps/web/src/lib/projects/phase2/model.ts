@@ -169,6 +169,13 @@ export interface OverviewRecent { at: string; actor: string | null; entity: "tas
 export interface WorkOverview { tz: string; today: string; next_on_site: SiteActivity | null; attention: OverviewAttention[]; recent: OverviewRecent[] }
 export const ATTENTION_KIND_LABELS: Record<OverviewAttention["kind"], string> = { output_missing: "Output missing", changes_requested: "Changes requested", review_waiting: "Review waiting", site_missing: "Site plan incomplete", shipment_conflict: "Shipment arrives too late" };
 /** Where to go to fix an attention line, as a path under /projects/[id]. */
+/** At most `perKind` lines of each kind, in the original order, so one busy kind (many missing outputs) can never hide another (a late shipment). `more` counts what was left out. */
+export function pickAttention(all: OverviewAttention[], perKind = 2): { shown: OverviewAttention[]; more: number } {
+  const seen = new Map<string, number>();
+  const shown = all.filter((a) => { const n = (seen.get(a.kind) ?? 0) + 1; seen.set(a.kind, n); return n <= perKind; });
+  return { shown, more: all.length - shown.length };
+}
+
 export function attentionHref(projectId: string, a: OverviewAttention): string {
   const base = `/projects/${projectId}`;
   if (a.task_id) return `${base}/work?task=${a.task_id}`;

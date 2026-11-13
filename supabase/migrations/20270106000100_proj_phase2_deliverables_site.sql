@@ -133,7 +133,7 @@ begin
   if t.status in ('done', 'cancelled', 'deferred') then raise exception 'This task is %: reopen it before submitting another version', t.status using errcode = '23514'; end if;
   select coalesce(max(version_no), 0) into v_cur from proj_task_output_versions where task_id = t.id;
   if p_expected_current is not null and p_expected_current <> v_cur then
-    raise exception 'A newer version (v%) was submitted since you opened this. Reload to see it', v_cur using errcode = '40001';
+    raise exception 'A newer version (v%) was submitted since you opened this. Reload to see it', v_cur;
   end if;
   if p_item_count is null or p_item_count < 1 or p_item_count > 999 then raise exception 'How many items does this version hold? (1 to 999)' using errcode = '22023'; end if;
   if not proj_file_usable(p_file_id, v.id) then raise exception 'That file or link is not available to you in this project' using errcode = '42501'; end if;
@@ -169,7 +169,7 @@ begin
   if x.status = p_decision then return jsonb_build_object('id', x.id, 'version_no', x.version_no, 'unchanged', true); end if;
   select max(version_no) into v_cur from proj_task_output_versions where task_id = t.id;
   if x.version_no <> v_cur then
-    raise exception 'Version % is no longer the current one: version % was submitted. Review that one', x.version_no, v_cur using errcode = '40001';
+    raise exception 'Version % is no longer the current one: version % was submitted. Review that one', x.version_no, v_cur;
   end if;
   if x.status <> 'awaiting' then raise exception 'Version % was already decided (%)', x.version_no, replace(x.status, '_', ' ') using errcode = '23514'; end if;
   if p_decision = 'changes_requested' and v_note is null then raise exception 'Say what needs changing' using errcode = '22023'; end if;
@@ -693,7 +693,7 @@ begin
     select 3, jsonb_build_object('kind', 'review_waiting', 'task_id', t.id, 'title', t.title, 'detail', 'Version ' || cur.version_no || ' of "' || t.output_label || '" is waiting for review',
            'who', jsonb_build_array(coalesce((select proj_display_name(tm.head_user_id) from proj_teams tm where tm.id = t.team_id and tm.head_user_id <> t.assignee_id), v_pm)))
       from proj_tasks t join lateral (select z.* from proj_task_output_versions z where z.task_id = t.id order by z.version_no desc limit 1) cur on true
-     where t.project_id = p_project_id and cur.status = 'awaiting' and t.status in ('in_progress', 'ready_for_review')
+     where t.project_id = p_project_id and cur.status = 'awaiting' and t.status in ('todo', 'in_progress', 'ready_for_review')
     union all
     select 4, jsonb_build_object('kind', 'site_missing', 'activity_id', i.id, 'title', i.title || coalesce(' (' || i.run_label || ')', ''), 'detail',
            'Missing: ' || (select string_agg(case m when 'date' then 'date' when 'time' then 'time' else 'crew' end, ', ') from jsonb_array_elements_text(proj_site_activity_json(i.id, d.site_timezone) -> 'missing') m), 'who', jsonb_build_array(v_pm))

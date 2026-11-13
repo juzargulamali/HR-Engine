@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  pickAttention,
   toLocalInput, activityWhen, attentionHref, filterRegister, formatAt, groupByActivation, nextOutputAction, parseRegisterFilter, quantityText, recentText, registerCounts, registerCsv, resolveZone, runGroups, siteRange,
   type Register, type RegisterRow, type SiteActivity, type OutputVersion,
 } from "./model";
@@ -106,5 +107,15 @@ describe("Work overview text and links", () => {
     expect(recentText(r({ field: "review of v1", to: "changes_requested" }))).toBe("Fictional Eli asked for changes on v1 of Storyboard");
     expect(recentText(r({ entity: "site_activity", field: "state", to: "confirmed", title: "Show (run 2)" }))).toBe("Fictional Eli confirmed Show (run 2)");
     expect(recentText(r({ entity: "shipment", field: "arrival", title: "Crates" }))).toBe("Fictional Eli changed the arrival of Crates");
+  });
+});
+
+describe("pickAttention", () => {
+  const line = (kind: "output_missing" | "shipment_conflict", n: number) => ({ kind, title: `${kind}-${n}`, detail: "", who: [] });
+  it("keeps a late shipment visible behind many missing outputs, and counts what it left out", () => {
+    const all = [1, 2, 3, 4, 5, 6, 7].map((n) => line("output_missing", n)).concat([line("shipment_conflict", 1)]);
+    const { shown, more } = pickAttention(all);
+    expect(shown.map((a) => a.title)).toEqual(["output_missing-1", "output_missing-2", "shipment_conflict-1"]);
+    expect(more).toBe(5);
   });
 });

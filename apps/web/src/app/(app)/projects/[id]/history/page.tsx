@@ -38,7 +38,8 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
   // Titles for the things the log mentions (they may have been renamed since; the current title is shown).
   const idsOf = (type: string) => [...new Set(log.filter((l) => l.entity_type === type).map((l) => l.entity_id))];
   const titleMap = new Map<string, string>();
-  const lookups: [string, "proj_milestones" | "proj_deliverables" | "proj_plan_items" | "proj_external_dependencies", string][] = [
+  const lookups: [string, "proj_milestones" | "proj_deliverables" | "proj_plan_items" | "proj_external_dependencies" | "proj_tasks", string][] = [
+    ["task_output", "proj_tasks", "title"], ["site_activity", "proj_plan_items", "title"],
     ["milestone", "proj_milestones", "title"], ["deliverable", "proj_deliverables", "title"], ["plan_item", "proj_plan_items", "title"], ["external_dependency", "proj_external_dependencies", "label"],
   ];
   await Promise.all(

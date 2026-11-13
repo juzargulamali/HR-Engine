@@ -90,7 +90,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     // What the system can confirm about equipment (drafts, a failed handover import, requests the warehouse has not started). A failed read is shown as such.
     loadEquipmentState(id).catch(() => ({ status: "error" as const })),
     // The member-visible change log (dates, status, people): the newest few for the preview. Chat messages and task comments are not in it.
-    supabase.from("proj_change_log").select("id, entity_type, entity_id, field, from_value, to_value, note, actor_id, created_at").eq("project_id", id).neq("entity_type", "message").order("id", { ascending: false }).limit(4),
+    supabase.from("proj_change_log").select("id, entity_type, entity_id, field, from_value, to_value, note, actor_id, created_at").eq("project_id", id).neq("entity_type", "message").not("entity_type", "in", "(task_output,site_activity,shipment)").order("id", { ascending: false }).limit(4),
     supabase.from("proj_external_dependencies").select("id, label, confirmation").eq("project_id", id),
     supabase.from("proj_plan_items").select("id, title").eq("project_id", id),
     // Readiness as the database states it (reserved, short, dispatched, still out) and the bookings to review after a date change. A failed read is shown as such.
