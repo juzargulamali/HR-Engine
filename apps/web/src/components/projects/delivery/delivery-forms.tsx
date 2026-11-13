@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import {
   addPlanSequence, decidePlanChange, decidePlanCorrection, delegatePlanSection, raisePlanCorrection, reconcilePlanTask, releaseDeliveryPlan, removeDeliverable, removePlanLine, saveDeliverable,
   savePlanLine, seedPlanScope,
@@ -22,8 +22,8 @@ export interface Option { id: string; name: string }
 type Done = { error: string | null; notice?: string | null };
 
 /** A dialog whose form may answer with a notice (a proposal was sent, or the row already existed): the notice stays on screen until the person closes it. */
-function FormDialog({ label, title, description, variant = "outline", size = "sm", children, testId }: {
-  label: string; title: string; description?: string; variant?: "default" | "outline" | "secondary" | "ghost" | "destructive"; size?: "default" | "sm"; testId?: string;
+function FormDialog({ label, title, description, variant = "outline", size = "sm", children, testId, dialogSize }: {
+  label: string; title: string; description?: string; variant?: "default" | "outline" | "secondary" | "ghost" | "destructive"; size?: "default" | "sm"; testId?: string; dialogSize?: "default" | "wide" | "xl";
   children: (done: (s: Done) => void) => React.ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -32,7 +32,7 @@ function FormDialog({ label, title, description, variant = "outline", size = "sm
   return (
     <>
       <Button type="button" variant={variant} size={size} onClick={() => setOpen(true)} data-testid={testId}>{label}</Button>
-      <Modal open={open} onClose={close} title={title} description={description}>
+      <Modal open={open} onClose={close} title={title} description={description} size={dialogSize}>
         {notice ? (
           <div className="space-y-3">
             <Alert role="status">{notice}</Alert>
@@ -244,32 +244,63 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
 }
 
 const SEQUENCE_DEFAULT = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
-type Step = { name: string; owner: string; start: string; due: string };
+type Step = { id: number; name: string; owner: string; start: string; due: string };
 
-/** Start from an editable chain (Moodboard, Storyboard, First draft ...): each step is a requirement that waits for the one before; names, owners and dates are the person's. */
-export function SequenceDialog({ projectId, itemId, section, members, milestones }: { projectId: string; itemId: string; section: DpSection; members: Option[]; milestones: Option[] }) {
-  const [steps, setSteps] = useState<Step[]>(SEQUENCE_DEFAULT.map((name) => ({ name, owner: "", start: "", due: "" })));
-  const set = (n: number, patch: Partial<Step>) => setSteps((all) => all.map((x, i) => (i === n ? { ...x, ...patch } : x)));
+/**
+ * Start from an editable chain (Moodboard, Storyboard, First draft ...): each step is a requirement that waits for the one before; names, owners and dates are the person's.
+ * Each step is a card: a full-width name, then Owner (the widest), Start date and Due date on a second row with visible labels; the fields stack on a phone. The chosen owner is
+ * also written out in full under the field, so a long name is readable even where the box would clip it. "Use activation owner" is what an empty owner means: at release the task
+ * goes to the technology's accountable owner.
+ */
+export function SequenceDialog({ projectId, itemId, section, members, milestones, activationOwner }: {
+  projectId: string; itemId: string; section: DpSection; members: Option[]; milestones: Option[]; /** The accountable owner of the technology, named in the default choice. */ activationOwner?: string | null;
+}) {
+  const next = useRef(SEQUENCE_DEFAULT.length);
+  const blank = (name: string): Step => ({ id: next.current++, name, owner: "", start: "", due: "" });
+  const [steps, setSteps] = useState<Step[]>(() => SEQUENCE_DEFAULT.map((name, i) => ({ id: i, name, owner: "", start: "", due: "" })));
+  const set = (id: number, patch: Partial<Step>) => setSteps((all) => all.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+  const memberName = new Map(members.map((m) => [m.id, m.name]));
+  const defaultOwner = `Use activation owner${activationOwner ? ` (${activationOwner})` : " (none set yet)"}`;
   return (
-    <FormDialog label="Start from a sequence" title="Add a sequence of requirements"
+    <FormDialog label="Start from a sequence" title="Add a sequence of requirements" dialogSize="xl"
       description={`Each step waits for the one before it. Rename, remove or add steps, and give each its own owner and dates. Section: ${DP_SECTION_LABELS[section]}. Nothing is released until the Project Manager releases it.`}>
       {(done) => (
         <ActionForm action={addPlanSequence} submitLabel="Add the steps" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
           <input type="hidden" name="itemId" value={itemId} />
           <input type="hidden" name="section" value={section} />
-          <ol className="space-y-2">
+          <ol className="space-y-3">
             {steps.map((st, n) => (
-              <li key={n} className="grid gap-2 rounded-md border border-border p-2 sm:grid-cols-[1.4fr_1fr_1fr_1fr_auto]" data-testid={`seq-step-${n}`}>
-                <Input name="stepDescription" aria-label={`Step ${n + 1} name`} value={st.name} onChange={(e) => set(n, { name: e.target.value })} maxLength={300} />
-                <Select name="stepOwner" aria-label={`Step ${n + 1} owner`} value={st.owner} onChange={(e) => set(n, { owner: e.target.value })}><option value="">Accountable owner</option>{members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>
-                <Input name="stepStart" type="date" aria-label={`Step ${n + 1} start`} value={st.start} onChange={(e) => set(n, { start: e.target.value })} />
-                <Input name="stepDue" type="date" aria-label={`Step ${n + 1} due`} value={st.due} onChange={(e) => set(n, { due: e.target.value })} />
-                <Button type="button" variant="ghost" size="sm" onClick={() => setSteps((all) => all.filter((_, i) => i !== n))} aria-label={`Remove step ${n + 1}`}>Remove</Button>
+              <li key={st.id} className="space-y-3 rounded-md border border-border p-3" data-testid={`seq-step-${n}`}>
+                <div>
+                  <div className="mb-1 flex items-center justify-between gap-2">
+                    <label htmlFor={`seq-name-${st.id}`} className="text-[13px] font-medium text-muted-foreground">Step {n + 1}</label>
+                    <Button type="button" variant="ghost" size="sm" onClick={() => setSteps((all) => all.filter((x) => x.id !== st.id))} aria-label={`Remove step ${n + 1}`}>Remove</Button>
+                  </div>
+                  <Input id={`seq-name-${st.id}`} name="stepDescription" aria-label={`Step ${n + 1} name`} value={st.name} onChange={(e) => set(st.id, { name: e.target.value })} maxLength={300} className="w-full" />
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+                  <div className="min-w-0">
+                    <label htmlFor={`seq-owner-${st.id}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">Owner</label>
+                    <Select id={`seq-owner-${st.id}`} name="stepOwner" aria-label={`Step ${n + 1} owner`} value={st.owner} onChange={(e) => set(st.id, { owner: e.target.value })} className="w-full min-w-0">
+                      <option value="">{defaultOwner}</option>
+                      {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                    </Select>
+                    {st.owner ? <p className="mt-1 break-words text-[13px]" data-testid={`seq-owner-name-${n}`}>Assigned to {memberName.get(st.owner) ?? "the person chosen"}</p> : null}
+                  </div>
+                  <div className="min-w-0">
+                    <label htmlFor={`seq-start-${st.id}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">Start date</label>
+                    <Input id={`seq-start-${st.id}`} name="stepStart" type="date" aria-label={`Step ${n + 1} start`} value={st.start} onChange={(e) => set(st.id, { start: e.target.value })} className="w-full" />
+                  </div>
+                  <div className="min-w-0">
+                    <label htmlFor={`seq-due-${st.id}`} className="mb-1 block text-[13px] font-medium text-muted-foreground">Due date</label>
+                    <Input id={`seq-due-${st.id}`} name="stepDue" type="date" aria-label={`Step ${n + 1} due`} value={st.due} onChange={(e) => set(st.id, { due: e.target.value })} className="w-full" />
+                  </div>
+                </div>
               </li>
             ))}
           </ol>
-          {steps.length < 12 ? <Button type="button" variant="outline" size="sm" onClick={() => setSteps((all) => [...all, { name: "", owner: "", start: "", due: "" }])}>Add a step</Button> : null}
+          {steps.length < 12 ? <Button type="button" variant="outline" size="sm" onClick={() => setSteps((all) => [...all, blank("")])}>Add a step</Button> : null}
           {milestones.length > 0 ? (
             <Field label="Milestone for all steps (optional)" htmlFor="seq-ms">
               <Select id="seq-ms" name="milestoneId" defaultValue=""><option value="">None</option>{milestones.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}</Select>

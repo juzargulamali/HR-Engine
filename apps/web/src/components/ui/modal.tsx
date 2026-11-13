@@ -9,7 +9,7 @@ import { X } from "lucide-react";
  * It is a child of whatever opened it (a table cell, a menu), so it takes that element's text rules; `whitespace-normal` stops a
  * "do not wrap" cell from making the dialog's text run out of its box.
  */
-export function Modal({ open, onClose, title, description, children, size = "default" }: { open: boolean; onClose: () => void; title: string; description?: string; children: React.ReactNode; size?: "default" | "wide" }) {
+export function Modal({ open, onClose, title, description, children, size = "default" }: { open: boolean; onClose: () => void; title: string; description?: string; children: React.ReactNode; size?: "default" | "wide" | "xl" }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -27,7 +27,7 @@ export function Modal({ open, onClose, title, description, children, size = "def
         if (e.target === ref.current) onClose();
       }}
       aria-labelledby={titleId}
-      className={`m-auto whitespace-normal rounded-xl border border-border bg-card p-0 text-left text-card-foreground shadow-xl backdrop:bg-black/50 backdrop:backdrop-blur-[2px] ${size === "wide" ? "w-[min(44rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]"}`}
+      className={`m-auto whitespace-normal rounded-xl border border-border bg-card p-0 text-left text-card-foreground shadow-xl backdrop:bg-black/50 backdrop:backdrop-blur-[2px] ${size === "xl" ? "w-[min(60rem,calc(100vw-2rem))]" : size === "wide" ? "w-[min(44rem,calc(100vw-2rem))]" : "w-[min(32rem,calc(100vw-2rem))]"}`}
     >
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>

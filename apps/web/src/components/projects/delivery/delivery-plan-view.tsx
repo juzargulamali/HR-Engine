@@ -158,7 +158,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
             {manage && !item.released_at && item.lines.every((l) => !l.released_at) ? <RemoveDialog projectId={id} kind="deliverable" id={item.id} name={item.title} /> : null}
             {manage && item.lines.some((l) => !l.released_at) ? <ReleaseDialog projectId={id} itemId={item.id} label="Release" preview={itemPreview} /> : null}
             {mySections.length > 0 ? <LineDialog projectId={id} itemId={item.id} sections={mySections} members={members} stock={stock} stockFailed={stockFailed} milestones={milestoneOptions} others={others("")} /> : null}
-            {seqSection ? <SequenceDialog projectId={id} itemId={item.id} section={seqSection} members={members} milestones={milestoneOptions} /> : null}
+            {seqSection ? <SequenceDialog projectId={id} itemId={item.id} section={seqSection} members={members} milestones={milestoneOptions} activationOwner={item.owner_name} /> : null}
             {!readOnly ? <CorrectionDialog projectId={id} targetType="deliverable" targetId={item.id} about={`${item.key} ${item.title}`} label="Correction" /> : null}
           </div>
           {item.specs ? <p className="whitespace-pre-wrap break-words text-sm">{item.specs}</p> : null}
