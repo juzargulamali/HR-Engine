@@ -33,7 +33,7 @@ function Times({ v, tz }: { v: OutputVersion; tz: string | null }) {
 function VersionBody({ v, row, tz, linkFeedback }: { v: OutputVersion; row: Pick<RegisterRow, "output_qty">; tz: string | null; linkFeedback?: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">Version {v.version_no}</span><OsBadge tone={v.status === "approved" ? "green" : v.status === "changes_requested" ? "amber" : v.status === "awaiting" ? (v.needs_reviewer ? "red" : "blue") : "quiet"} data-testid={`output-version-state-${v.version_no}`}>{reviewStateWord(v)}</OsBadge>{quantityText(row, v) ? <span className="text-[13px] text-muted-foreground">{quantityText(row, v)}</span> : null}</div>
+      <div className="flex flex-wrap items-center gap-2"><span className="text-sm font-medium">Version {v.version_no}</span><span data-testid={`output-version-state-${v.version_no}`}><OsBadge tone={v.status === "approved" ? "green" : v.status === "changes_requested" ? "amber" : v.status === "awaiting" ? (v.needs_reviewer ? "red" : "blue") : "quiet"}>{reviewStateWord(v)}</OsBadge></span>{quantityText(row, v) ? <span className="text-[13px] text-muted-foreground">{quantityText(row, v)}</span> : null}</div>
       <Times v={v} tz={tz} />
       <p className="text-[13px]"><FileLine f={v.file} /></p>
       {v.snapshot ? <p className="text-[13px]"><span className="text-muted-foreground">Snapshot: </span><FileLine f={v.snapshot} /></p> : null}

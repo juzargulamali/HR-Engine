@@ -2,7 +2,9 @@
 
 import { useMemo, useState } from "react";
 import { setupProjectTeams } from "@/lib/actions/projectsPhase2";
-import { accessAdditions, ACCESS_NOTICE, buildSetup, leadLabel, leadOf, SITE_TEAM_NOTE, sameTeam, TEAM_PRESETS, type TeamRow } from "@/lib/projects/teams/model";
+import { accessAdditions, ACCESS_NOTICE, buildSetup, leadLabel, leadNeeded, leadOf, setupState, SITE_TEAM_NOTE, sameTeam, TEAM_PRESETS, type TeamRow } from "@/lib/projects/teams/model";
+import Link from "next/link";
+import { buttonVariants } from "@/components/ui/button";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -152,3 +154,25 @@ export function TeamSummary({ teams, counts }: { teams: TeamWithLead[]; counts: 
 const leadLabelShort = (t: TeamWithLead) => `${leadLabel(t.name)}: ${t.leadName ?? "named"}`;
 // Field is re-exported so a caller can build a matching label without a second import.
 export { Field };
+
+/**
+ * The team block at the top of Work, ONE component for every state so the dialog is never remounted when the page refreshes after a save (its confirmation stays on screen):
+ * no team yet (the Project Manager's first step), teams with a lead still needed, or complete (a compact summary with Manage team).
+ */
+export function TeamPanel({ projectId, teams, leads, counts, canManage }: { projectId: string; teams: TeamWithLead[]; leads: LeadOption[]; counts: Record<string, number>; canManage: boolean }) {
+  const state = setupState(teams);
+  if (state === "none" && !canManage) return null;
+  const first = state === "none";
+  return (
+    <section aria-label={first ? "Set up your project team" : "Project team"} className={`os-card flex flex-wrap items-center justify-between gap-x-4 gap-y-2 p-4 ${first ? "border-l-4 border-l-[hsl(var(--accent))]" : "px-4 py-3"}`} data-testid={first ? "team-setup-card" : "team-summary-card"}>
+      <div className="min-w-0 flex-1 basis-72 space-y-1.5">
+        <h2 className={first ? "font-heading text-lg font-semibold" : "font-heading text-base font-semibold"}>{first ? "Set up your project team" : "Project team"}</h2>
+        {first ? <p className="text-sm text-muted-foreground">Start here: choose the teams this project needs (Content, Programming, Engineering, Site / Installation, or your own) and who leads each. You can save before every lead is known.</p> : <TeamSummary teams={teams} counts={counts} />}
+        {state === "lead_needed" ? <p className="text-[13px] text-muted-foreground" data-testid="team-lead-needed-note">Lead needed: {leadNeeded(teams).join(", ")}.{canManage ? " Choose one under Manage team." : " The Project Manager can choose one."}</p> : null}
+      </div>
+      {canManage
+        ? <TeamSetupDialog projectId={projectId} teams={teams} leads={leads} label={first ? "Set up your project team" : "Manage team"} variant={first ? "default" : "outline"} testId={first ? "team-setup-open" : "team-manage-open"} />
+        : <Link href={`/projects/${projectId}/people`} className={buttonVariants({ variant: "outline", size: "sm" })}>People &amp; access</Link>}
+    </section>
+  );
+}

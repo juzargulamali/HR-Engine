@@ -186,7 +186,7 @@ const dayStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const DAY = 86_400_000;
 /** Up to this many days a schedule starts in Day view (a column for every day); a longer one starts in Week view. The person can switch either way. */
 export const DAY_MODE_MAX_DAYS = 31;
-/** Day view: every day is at least this wide, so "Mon / 14 / Nov" stays readable. A plan of seven days is 392px, so it fits when there is room and never needs to scroll. */
+/** Day view: every day is at least this wide, so "Mon / 14 / Nov" stays readable. A plan of seven days is 392px, so it fits beside the names in a normal window; nine days (504px) and more extend and scroll inside the chart there. */
 export const DAY_PX = 56;
 /** Week view: about 18px a day, which still leaves a weekly label (about 125px) clear of the next. */
 export const WEEK_PX_PER_DAY = 18;

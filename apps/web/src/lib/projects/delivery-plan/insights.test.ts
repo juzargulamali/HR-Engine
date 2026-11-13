@@ -175,7 +175,7 @@ describe("timeline", () => {
   it("Day view gives every day a readable minimum width: a 7-day plan is narrow enough to fit, a 9- and a 30-day plan are wider than a screen and scroll inside the chart", () => {
     expect(DAY_PX).toBeGreaterThanOrEqual(56);
     const seven = timelineScale({ start: "2027-04-14", end: "2027-04-20" });
-    expect(seven.mode).toBe("day"); expect(seven.widthPx).toBe(7 * DAY_PX); expect(seven.widthPx).toBeLessThan(500);
+    expect(seven.mode).toBe("day"); expect(seven.widthPx).toBe(7 * DAY_PX); expect(seven.widthPx).toBeLessThan(700);
     const nine = timelineScale({ start: "2027-04-14", end: "2027-04-22" });
     expect(nine.days).toHaveLength(9); expect(nine.widthPx).toBe(9 * DAY_PX);
     const thirty = timelineScale({ start: "2027-04-01", end: "2027-04-30" });

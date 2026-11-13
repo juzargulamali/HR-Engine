@@ -49,8 +49,7 @@ import { WorkOverviewAreas } from "@/components/projects/work-overview";
 import { WorkSummary } from "@/components/projects/work-summary";
 import { milestoneSummary, outputSummary } from "@/lib/projects/work-summary";
 import { loadRegister } from "@/lib/projects/phase2/data";
-import { TeamSetupDialog, TeamSummary, type LeadOption, type TeamWithLead } from "@/components/projects/team/team-setup";
-import { leadNeeded, setupState } from "@/lib/projects/teams/model";
+import { TeamPanel, type LeadOption, type TeamWithLead } from "@/components/projects/team/team-setup";
 import { loadWorkOverview } from "@/lib/projects/phase2/data";
 
 export const metadata = { title: "Work" };
@@ -295,7 +294,6 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     ...ctx.people.filter((p) => p.companyIds.includes(view.project.company_id) && !projectMemberIds.has(p.id)).map((p) => ({ id: p.id, name: p.name, onProject: false })),
   ];
   const teamCounts = Object.fromEntries(view.teams.map((t) => [t.id, view.people.filter((p) => p.team_id === t.id).length]));
-  const teamState = setupState(teamRows);
   const [overviewRes, registerRes] = await Promise.all([loadWorkOverview(id), loadRegister(id)]);
   const msSummary = milestoneSummary(ms, today);
   const outSummary = outputSummary(registerRes.state === "ok" ? registerRes.data : null);
@@ -304,24 +302,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
   return (
     <div className="space-y-4">
       <RememberList section={`tasks-${id}`} />
-      {canManage && teamState === "none" ? (
-        <section aria-label="Set up your project team" className="os-card flex flex-wrap items-center justify-between gap-3 border-l-4 border-l-[hsl(var(--accent))] p-4" data-testid="team-setup-card">
-          <div className="min-w-0 flex-1 basis-72">
-            <h2 className="font-heading text-lg font-semibold">Set up your project team</h2>
-            <p className="text-sm text-muted-foreground">Start here: choose the teams this project needs (Content, Programming, Engineering, Site / Installation, or your own) and who leads each. You can save before every lead is known.</p>
-          </div>
-          <TeamSetupDialog projectId={id} teams={teamRows} leads={leadOptions} label="Set up your project team" />
-        </section>
-      ) : teamState !== "none" ? (
-        <section aria-label="Project team" className="os-card flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3" data-testid="team-summary-card">
-          <div className="min-w-0 flex-1 basis-72 space-y-1.5">
-            <h2 className="font-heading text-base font-semibold">Project team</h2>
-            <TeamSummary teams={teamRows} counts={teamCounts} />
-            {teamState === "lead_needed" ? <p className="text-[13px] text-muted-foreground" data-testid="team-lead-needed-note">Lead needed: {leadNeeded(teamRows).join(", ")}.{canManage ? " Choose one under Manage team." : " The Project Manager can choose one."}</p> : null}
-          </div>
-          {canManage ? <TeamSetupDialog projectId={id} teams={teamRows} leads={leadOptions} label="Manage team" variant="outline" testId="team-manage-open" /> : <Link href={`/projects/${id}/people`} className={buttonVariants({ variant: "outline", size: "sm" })}>People &amp; access</Link>}
-        </section>
-      ) : null}
+      <TeamPanel projectId={id} teams={teamRows} leads={leadOptions} counts={teamCounts} canManage={canManage} />
       {readOnly ? <Muted>This project is {view.project.status}. Its plan is read-only; a founder can reopen it from History.</Muted> : null}
       {view.project.status === "on_hold" ? (
         <Alert variant="warning" role="status">

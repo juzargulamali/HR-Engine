@@ -64,7 +64,7 @@ function Bar({ row, scale, today, describedBy, onShow, onHide, onToggle }: {
       onClick={(e) => onToggle(row.key, e.currentTarget)}
       className={cn(
         "absolute top-1/2 -translate-y-1/2 cursor-default rounded-sm outline-none transition-[filter,box-shadow] duration-150 hover:brightness-110 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
-        "before:absolute before:-inset-x-1 before:-inset-y-2 before:content-['']",       // a larger touch target than the drawn bar
+        "before:absolute before:inset-x-0 before:-inset-y-2 before:content-['']",         // a taller touch target than the drawn bar (not wider: that would push the last day past the edge)
         row.kind === "activation" ? "h-2.5 opacity-70" : "h-4", marker ? cn("border-2 bg-transparent", OUTLINE[row.tone]) : BAR[row.tone],
         row.blocked && "ring-2 ring-[hsl(var(--os-red))]",
       )}
@@ -124,7 +124,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
   const scale: TimelineScale | null = userMode && model.range ? timelineScale(model.range, userMode) : model.scale;
   const todayIdx = scale ? dayIndex(scale, today) : -1;
   const n = scale?.days.length ?? 1;
-  const cols = "grid-cols-[10rem_minmax(0,1fr)] sm:grid-cols-[16rem_minmax(0,1fr)]";
+  const cols = "grid-cols-[10rem_minmax(0,1fr)] sm:grid-cols-[12rem_minmax(0,1fr)]";
   const rowByKey = new Map(model.rows.map((r) => [r.key, r]));
   const active = tip ? rowByKey.get(tip.key) ?? null : null;
 
@@ -183,7 +183,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
         <div
           ref={attachScroller} data-testid="tl-scroll" role="region" aria-label="Work schedule chart. Scroll sideways with a swipe, the trackpad or the arrow keys." tabIndex={0} onKeyDown={onKeyDown}
           className="max-h-[75vh] max-w-full overflow-auto overscroll-x-contain rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <div className="min-w-[calc(10rem+var(--tl-chart))] sm:min-w-[calc(16rem+var(--tl-chart))]" style={{ "--tl-chart": `${scale?.widthPx ?? 392}px` } as React.CSSProperties}>
+          <div className="min-w-[calc(10rem+var(--tl-chart))] sm:min-w-[calc(12rem+var(--tl-chart))]" style={{ "--tl-chart": `${scale?.widthPx ?? 392}px` } as React.CSSProperties}>
             <div className={cn("sticky top-0 z-30 grid border-b border-border bg-muted text-[12px] font-semibold text-muted-foreground", cols)}>
               <div data-testid="tl-corner" className="sticky left-0 z-20 border-r border-border bg-muted px-3 py-2">Activation / requirement, with its dates</div>
               <div className="relative h-[4.5rem]" data-testid="tl-header">
@@ -239,7 +239,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
           </div>
         </div>
         {edges.left ? (
-          <div data-testid="tl-more-left" aria-hidden className="pointer-events-none absolute inset-y-px left-[10rem] z-20 flex w-8 items-center bg-gradient-to-r from-foreground/15 to-transparent sm:left-[16rem]">
+          <div data-testid="tl-more-left" aria-hidden className="pointer-events-none absolute inset-y-px left-[10rem] z-20 flex w-8 items-center bg-gradient-to-r from-foreground/15 to-transparent sm:left-[12rem]">
             <ChevronLeft className="h-4 w-4 text-muted-foreground" />
           </div>
         ) : null}
