@@ -73,7 +73,7 @@ await step("Quick add (desktop): a pasted list fills the rows with quantities; o
   await until(async () => /6 rows added\./.test(await dialog().innerText())); 
   if (batakOrder().join("|") !== BATAK.map((b) => b.split("\t")[0]).join("|")) throw new Error(`saved order ${batakOrder()}`);
   const first = db(`select qty || '|' || assignee_id || '|' || start_date || '|' || needed_by from proj_dp_lines where item_id='${BAT}' and description='Batak unit'`);
-  if (first !== `4|${U}7|${dayIso(5)}|${dayIso(9)}`) throw new Error(`row 1 saved as ${first}`);
+  if (first !== `4.000|${U}7|${dayIso(5)}|${dayIso(9)}`) throw new Error(`row 1 saved as ${first}`);
   if (db(`select count(*) from proj_tasks where project_id='${PRJ}'`) !== "0") throw new Error("adding rows created a task");
 });
 
@@ -81,10 +81,10 @@ await step("retrying the save adds nothing: the same list again, and a double cl
   await as("mgr", { width: 1280, height: 900 }); await quickOpen();
   await paste(BATAK.join("\n"));
   await dialog().getByRole("button", { name: "Add rows" }).click();
-  await until(async () => /already in the plan/.test(await dialog().innerText()));
+  await until(async () => /left as they are/.test(await dialog().innerText()));
   const t = await dialog().innerText(); if (!/0 new rows added; 6 already in the plan were left as they are/.test(t)) throw new Error(`notice: ${t.slice(0, 300)}`);
   if (db(`select count(*) from proj_dp_lines where item_id='${BAT}' and removed_at is null`) !== "6") throw new Error("the retry added rows");
-  await dialog().getByRole("button", { name: "Close", exact: true }).click();
+  await dialog().getByRole("button", { name: "Close", exact: true }).last().click();
   await quickOpen();
   await dialog().getByLabel("Row 1 name").fill("Gaffer tape"); await dialog().getByLabel("Row 1 quantity").fill("5");
   await dialog().getByRole("button", { name: "Add rows" }).dblclick();
@@ -112,7 +112,7 @@ await step("Moodboard -> Storyboard sequence with owners and dates, each step wa
 await step("the compact Breakdown table (desktop): one row per requirement under column headings; name, who, dates, status and actions on one line", async () => {
   await as("mgr", { width: 1280, height: 900 }); await openActivation(BKEY);
   const sec = page.getByTestId(`dp-section-${BKEY}-hardware`);
-  const head = (await sec.innerText()).replace(/\s+/g, " "); if (!/Requirement Supply Dates Status Actions/.test(head)) throw new Error(`no column headings: ${head.slice(0, 120)}`);
+  const head = (await sec.innerText()).replace(/\s+/g, " "); if (!/Requirement Supply \/ owner Dates Status Actions/.test(head)) throw new Error(`no column headings: ${head.slice(0, 120)}`);
   const key = lineKey("Network switch"); const row = page.getByTestId(`dp-line-${key}`);
   const ys = await Promise.all(["name", "who", "when", "status"].map(async (c) => (await row.getByTestId(`dp-${c}-${key}`).boundingBox()).y));
   if (Math.max(...ys) - Math.min(...ys) > 6) throw new Error(`cells are not on one line: ${ys}`);

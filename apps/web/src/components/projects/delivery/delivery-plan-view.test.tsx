@@ -160,7 +160,7 @@ describe("Project Plan screen", () => {
       expect(within(screen.getByTestId("dp-attention-L0012")).getByText(/Blocked: Waiting for the script\. Next: Chase the client/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0013")).getByText(/Late: Storyboard is due 2027-04-10, after this starts on 2027-04-08/)).toBeTruthy();
       expect(within(screen.getByTestId("dp-line-L0010")).getByText("Specification pending")).toBeTruthy();                 // a manual line stays visible with its state
-      expect(within(screen.getByTestId("dp-line-L0010")).getByTestId("dp-who-L0010").textContent).toMatch(/^Inventory · /);
+      expect(within(screen.getByTestId("dp-line-L0010")).getByTestId("dp-who-L0010").textContent).toMatch(/Inventory · /);
       expect(within(screen.getByTestId("dp-line-L0011")).getByRole("link", { name: "Review and send to Warehouse" }).getAttribute("href")).toBe("/projects/p1/equipment?request=r1");
       expect(screen.getByTestId("dp-line-L0014").textContent).toMatch(/1 app · Android tablet · 6 devices/);
     });

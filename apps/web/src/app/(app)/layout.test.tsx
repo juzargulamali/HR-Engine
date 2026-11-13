@@ -8,6 +8,7 @@ import { failing, fakeSupabase, rows, type FakeResult } from "@/test/fake-supaba
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/log", () => ({ logServerError: vi.fn() }));
 vi.mock("next/navigation", () => ({ redirect: vi.fn() }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (n: string) => (n === "sidebar-collapsed" ? { value: "1" } : undefined) }) }));
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables) }));
 let session: Record<string, unknown> = {};

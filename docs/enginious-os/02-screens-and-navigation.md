@@ -130,6 +130,7 @@ Source: `buildNavModules` in `nav-groups.ts`. Order is as listed. "Always" = no 
 | Company information | Holidays, Policies | Always |
 
 Notes
+* Desktop sidebar (usability follow-up, draft): the **Collapse** button keeps the choice in `localStorage` and in the `sidebar-collapsed` cookie (read by `app/(app)/layout.tsx`, so the first paint has the right width); a collapsed icon rail shows a module's pages in a flyout on hover or keyboard focus (`RailFlyout`, `components/nav/sidebar-nav.tsx`). Which modules and pages exist is unchanged.
 * Timesheets, Departments and a notification bell have no menu entry (`nav-groups.ts`, `shell-chrome.tsx`).
 * `navGroupsFromModules` feeds the command palette (search); secondary links appear there only.
 * The header shows a breadcrumb "Module / Page" (`breadcrumbFor`); the most specific link wins (`/attendance-clock` is not swallowed by `/attendance`).
