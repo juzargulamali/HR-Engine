@@ -77,7 +77,10 @@ await step("the summary at the top is honest about an empty plan, and the brief 
   await go(`/projects/${PRJ}/delivery`);
   await expectText(/next site date/i);
   await expectText(/Nothing in the plan yet/);
-  await expectText(/The accepted handover lists 2 technologies that are not in the plan yet: Photobooth, Cartoon app/);
+  await expectText(/Next step: bring in the accepted technologies/i);
+  await expectText(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
+  await expectText(/manual step/);
+  if (!(await page.getByTestId("dp-scope-pending").isVisible())) throw new Error("the scope step is not visible");
   const brief = (await page.getByTestId("dp-brief").textContent()) ?? "";
   if (!/six tablets/.test(brief)) throw new Error("the handover brief is not shown beside the plan");
 });

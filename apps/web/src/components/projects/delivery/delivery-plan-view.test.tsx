@@ -205,7 +205,11 @@ describe("Project Plan screen", () => {
       expect(screen.getByTestId("dp-brief").closest(".grid")).toBeTruthy();
       cleanup();
       render1(r1({ items: [], scope: { brief: null, technologies: [{ name: "Photobooth", qty: 2 }], pending: [{ name: "Photobooth", qty: 2 }, { name: "Cartoon app", qty: 1 }] } }));
-      expect(screen.getByTestId("dp-scope-pending").textContent).toMatch(/2 technologies that are not in the plan yet: Photobooth, Cartoon app/);
+      const pending = screen.getByTestId("dp-scope-pending").textContent ?? "";
+      expect(pending).toMatch(/Next step: bring in the accepted technologies/);
+      expect(pending).toMatch(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
+      expect(pending).toMatch(/manual step: accepting a handover does not add anything to the plan by itself/);
+      expect(screen.getByTestId("plan-summary").compareDocumentPosition(screen.getByTestId("dp-scope-pending")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();   // shown above the summary, first thing on the page
       expect(screen.getByTestId("dp-seed-scope").textContent).toBe("Bring in accepted technologies (2)");
       cleanup();
       render(<DeliveryPlanView {...props(r1({ can_manage: false, items: [], scope: { brief: null, technologies: [{ name: "Photobooth" }], pending: [{ name: "Photobooth" }] } }), { userId: "tech", today: "2027-04-09" })} />);
@@ -224,6 +228,14 @@ describe("Project Plan screen", () => {
       render(<DeliveryPlanView {...props({ ...pending, can_manage: false }, { userId: "tech", today: "2027-04-09" })} />);
       expect(within(screen.getByTestId("dp-pending-L0020")).queryByRole("button", { name: "Resolve" })).toBeNull();
       expect(screen.getByTestId("dp-pending-L0020").textContent).toMatch(/The Project Manager can resolve it/);
+      cleanup();
+      const cleared = r1({ items: [{ ...photobooth, lines: [line({ id: "p2", key: "L0021", description: "Cleared dates", assignee_id: "eng", assignee_name: "Fictional Dev", released_at: "x",
+        task: { id: "tq", title: "x", status: "done", start_date: "2027-09-01", due_date: "2027-09-04", blocked: false, assignee_name: "Fictional Cara", milestone_id: "m1", depends_on: [] },
+        task_pending: { fields: { start_date: null as unknown as string, due_date: null as unknown as string, milestone_id: null as unknown as string }, reason: "A done task can no longer be edited" } })] }] });
+      render1(cleared);
+      const text = screen.getByTestId("dp-pending-L0021").textContent ?? "";
+      expect(text).toMatch(/The plan says start date cleared, due date cleared, milestone cleared; the task still has Fictional Cara, start 1 Sept? 2027, due 4 Sept? 2027, milestone Ready for mockup/);
+      expect(within(screen.getByTestId("dp-pending-L0021")).getByRole("button", { name: "Resolve" })).toBeTruthy();
     });
 
     it("the line form shows only the fields of its section: a hardware line has a supply route, an app has devices, a simple job never meets the rest", () => {

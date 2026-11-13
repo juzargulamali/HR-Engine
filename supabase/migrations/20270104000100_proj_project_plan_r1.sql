@@ -10,9 +10,10 @@
 --                 app count/platform/device count, engineering kind, site kind, expected date and supplier for outside supply), milestone_id (an existing project
 --                 milestone), depends_on (other lines of the same project), task_pending (an approved change the linked task could not take yet).
 --   Release       as before (one task per work line, one DRAFT equipment line per stock-matched hardware line, both stored so repeating is safe) plus: the task gets the planned
---                 start date and the milestone, dependencies between released lines become existing task dependencies, and hardware without a stock match or supplied from
+--                 start date and the milestone, dependencies between released lines become existing task dependencies (every release reconciles EVERY released line of the project, so a
+--                 prerequisite released later in another activation is connected; dependencies added directly to a task are never removed), and hardware without a stock match or supplied from
 --                 outside stays in the plan, visible, without blocking the rest.
---   After release An approved owner, date or milestone change is applied to the linked task through the existing task functions (proj_reassign_task / proj_update_task, so the
+--   After release An approved owner, date or milestone change (a CLEARED start date, due date or milestone included, as the effective value) is applied to the linked task through the existing task functions (proj_reassign_task / proj_update_task, so the
 --                 existing roles and rules decide). If the task cannot take it (finished, cancelled, the actor lacks the task role) the line carries task_pending until a manager
 --                 retries it or keeps the task as it is (proj_dp_reconcile_task). The linked task is the source after release: nothing here overwrites an assignee's own edits.
 --   Scope         proj_dp_seed_scope brings the accepted handover's structured technologies into the plan once; a row removed later is not brought back.
@@ -142,15 +143,17 @@ begin
       end;
     end if;
   end if;
-  if 'due' = any (p_fields) and v_due is not null then
+  -- A cleared date or milestone is applied too: what the task takes is the EFFECTIVE plan value, which is empty (or the activation's date, for a due date) once the line's own is
+  -- cleared. The task rules still decide: a refusal leaves the line with task_pending, naming the cleared value.
+  if 'due' = any (p_fields) then
     v_old := v_old - 'due_date';
     if v_due is distinct from tk.due_date then v_upd := v_upd || jsonb_build_object('due_date', v_due); end if;
   end if;
-  if 'start' = any (p_fields) and ln.start_date is not null then
+  if 'start' = any (p_fields) then
     v_old := v_old - 'start_date';
     if ln.start_date is distinct from tk.start_date then v_upd := v_upd || jsonb_build_object('start_date', ln.start_date); end if;
   end if;
-  if 'milestone' = any (p_fields) and ln.milestone_id is not null then
+  if 'milestone' = any (p_fields) then
     v_old := v_old - 'milestone_id';
     if ln.milestone_id is distinct from tk.milestone_id then v_upd := v_upd || jsonb_build_object('milestone_id', ln.milestone_id); end if;
   end if;
@@ -372,8 +375,12 @@ begin
     if p_fields ? 'depends_on' then
       update proj_dp_lines set depends_on = v_deps, updated_at = now() where id = ln.id;
       if ln.task_id is not null then
-        perform proj_set_task_dependencies(ln.task_id, coalesce((select array_agg(dl.task_id) from proj_dp_lines dl where dl.id = any (v_deps) and dl.task_id is not null), '{}'::uuid[])
-          || coalesce((select array_agg(d.depends_on_task_id) from proj_task_dependencies d where d.task_id = ln.task_id and not exists (select 1 from proj_dp_lines x where x.task_id = d.depends_on_task_id)), '{}'::uuid[]));
+        -- Only the prerequisites THIS plan line no longer names are taken off the task; everything else on the task (added directly, or by another line) stays.
+        perform proj_set_task_dependencies(ln.task_id,
+          coalesce((select array_agg(d.depends_on_task_id) from proj_task_dependencies d
+                     where d.task_id = ln.task_id
+                       and not exists (select 1 from proj_dp_lines gone where gone.task_id = d.depends_on_task_id and gone.id = any (ln.depends_on) and not (gone.id = any (v_deps)))), '{}'::uuid[])
+          || coalesce((select array_agg(dl.task_id) from proj_dp_lines dl where dl.id = any (v_deps) and dl.task_id is not null), '{}'::uuid[]));
       end if;
     end if;
     if v_diff = '{}'::jsonb then
@@ -558,9 +565,10 @@ begin
     end if;
   end loop;
 
-  -- Dependencies between lines become task dependencies as soon as BOTH tasks exist. Existing dependencies of a task (added elsewhere) are kept.
+  -- Dependencies between lines become task dependencies as soon as BOTH tasks exist. This looks at EVERY released line of the project, not only the activations selected for this
+  -- release: a prerequisite released after its dependent task (in another activation) is connected by the release that created its task. Dependencies added directly to a task are kept.
   for ln in select l.* from proj_dp_lines l where l.project_id = v.id and l.removed_at is null and l.task_id is not null and cardinality(l.depends_on) > 0
-                and (p_item_ids is null or l.item_id = any (p_item_ids)) order by l.sort_order, l.line_key loop
+                order by l.sort_order, l.line_key loop
     select coalesce(array_agg(x.task_id), '{}'::uuid[]) into v_want from proj_dp_lines x where x.id = any (ln.depends_on) and x.removed_at is null and x.task_id is not null;
     if cardinality(v_want) = 0 then continue; end if;
     v_have := coalesce((select array_agg(d.depends_on_task_id) from proj_task_dependencies d where d.task_id = ln.task_id), '{}'::uuid[]);

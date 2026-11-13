@@ -411,7 +411,7 @@ A won job passes from Sales to a founder or Operations Manager, to the Project M
 
 1. Sales: confirm the enquiry as won, then prepare and submit the handover.
 2. Founder or Operations Manager: open Handovers and press Assign Project Manager.
-3. Project Manager: press Accept handover (it opens the Project Plan), add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
+3. Project Manager: press Accept handover (it opens the Project Plan, where you press Bring in accepted technologies), add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
 4. Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.
 5. Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list.
 
@@ -427,7 +427,7 @@ The Project Plan is where the Project Manager breaks each technology of an accep
 
 1. Open the project and choose the Project Plan tab (also the card at the top of Work, and where Accept handover takes you).
 2. Read the strip at the top: the next site date, what needs attention (blockers first, then missing owners, late dependencies, hardware to source, equipment drafts to send) and the next action. Each item opens its row.
-3. Project Manager: press Bring in accepted technologies to add what the handover accepted (once; it never duplicates or overwrites your edits), or Add technology / activation with a quantity, an accountable owner and a ready-by date.
+3. Project Manager: accepting a handover does not add anything to the plan. Press Bring in accepted technologies in the highlighted Next step panel at the top to add what the handover accepted (a manual step; pressing it again never duplicates or overwrites your edits), or press Add technology / activation with a quantity, an accountable owner and a ready-by date.
 4. Open a technology and press Add requirement, or Start from a sequence (Moodboard, Storyboard, First draft and so on, each waiting for the one before; rename, add or remove steps, give each an owner and dates).
 5. Use Who defines each section to hand a section to Engineering, Content, Programming or the Site Lead. Anyone can press Correction if something is wrong.
 
@@ -460,7 +460,7 @@ After release the task is the record: the person doing it updates it once in My 
 1. Press Timeline beside Breakdown to see the same work with dates across; work with no dates is listed under the chart and a late predecessor is shown against the work that waits for it.
 2. A milestone shows how many of its tasks are complete and which are outstanding. All tasks complete means ready to confirm; confirming the milestone is a separate step on Work.
 3. To change something released, press Edit, then Propose change. The Project Manager approves or rejects it.
-4. When a new owner or date is approved, the task is updated. If the task cannot take it, the requirement says Task update pending.
+4. When a new owner, date or milestone is approved, or an old one is cleared, the task is updated to match. If the task cannot take it, the requirement says Task update pending.
 5. Project Manager: press Resolve, then Retry the update, or Keep the task as it is.
 
 ## Fill the Project Plan from Excel

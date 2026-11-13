@@ -106,7 +106,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
           ) : null}
           {l.task_pending ? (
             <p className="mt-0.5 text-[13px]" data-testid={`dp-pending-${l.key}`}>
-              <span className="text-muted-foreground">The plan says {Object.entries(l.task_pending.fields).map(([k, v]) => `${k === "assignee_id" ? "owner" : k === "due_date" ? "due" : k === "start_date" ? "start" : "milestone"} ${nameOf(k === "assignee_id" ? "assignee_id" : k === "milestone_id" ? "milestone_id" : "needed_by", String(v))}`).join(", ")}; the task still has {l.task?.assignee_name ?? "its owner"}{l.task?.due_date ? `, due ${dateText(l.task.due_date)}` : ""}. </span>
+              <span className="text-muted-foreground">The plan says {Object.entries(l.task_pending.fields).map(([k, v]) => `${k === "assignee_id" ? "owner" : k === "due_date" ? "due date" : k === "start_date" ? "start date" : "milestone"} ${v === null || v === undefined ? "cleared" : nameOf(k === "assignee_id" ? "assignee_id" : k === "milestone_id" ? "milestone_id" : "needed_by", String(v))}`).join(", ")}; the task still has {l.task?.assignee_name ?? "its owner"}{l.task?.start_date ? `, start ${dateText(l.task.start_date)}` : ""}{l.task?.due_date ? `, due ${dateText(l.task.due_date)}` : ""}{l.task?.milestone_id && milestoneName.get(l.task.milestone_id) ? `, milestone ${milestoneName.get(l.task.milestone_id)}` : ""}. </span>
               {manage ? <ReconcileDialog projectId={id} lineId={l.id} reason={l.task_pending.reason} /> : <span className="text-muted-foreground">The Project Manager can resolve it.</span>}
             </p>
           ) : null}
@@ -202,14 +202,16 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
       {readOnly ? <Muted>This project is {statusWord}. Its delivery plan is read-only.</Muted> : null}
       {imagesFailed ? <Alert variant="warning" role="status">Could not load this project&apos;s image files, so a reference image cannot be chosen or named just now.</Alert> : null}
 
-      <PlanSummaryStrip projectId={id} summary={summary} manage={manage} releaseHint={releaseHint} />
-
       {manage && pendingNames.length > 0 ? (
-        <Alert role="status" data-testid="dp-scope-pending">
-          <span className="mr-2">The accepted handover lists {pendingNames.length} technolog{pendingNames.length === 1 ? "y" : "ies"} that {pendingNames.length === 1 ? "is" : "are"} not in the plan yet: {pendingNames.join(", ")}.</span>
+        <section aria-label="Bring in the accepted technologies" className="os-card space-y-2 border-primary/60 bg-primary/5 px-4 py-3 sm:px-5" data-testid="dp-scope-pending">
+          <h3 className="text-base font-semibold">Next step: bring in the accepted technologies</h3>
+          <p className="text-sm">The accepted handover lists {pendingNames.length} technolog{pendingNames.length === 1 ? "y" : "ies"} that {pendingNames.length === 1 ? "is" : "are"} not in the plan yet: {(scope?.pending ?? []).map((t) => `${t.name}${t.qty ? ` × ${t.qty}` : ""}`).join(", ")}.</p>
+          <p className="text-[13px] text-muted-foreground">This is a manual step: accepting a handover does not add anything to the plan by itself. Pressing the button adds one row per technology with its quantity; doing it again never duplicates a row or overwrites what you have edited, and a row you remove stays removed.</p>
           <SeedScopeDialog projectId={id} names={pendingNames} />
-        </Alert>
+        </section>
       ) : null}
+
+      <PlanSummaryStrip projectId={id} summary={summary} manage={manage} releaseHint={releaseHint} />
 
       <div className={briefOnly ? "grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : "space-y-5"}>
         <div className="min-w-0 space-y-5">

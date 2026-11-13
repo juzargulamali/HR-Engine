@@ -284,7 +284,7 @@ export function SequenceDialog({ projectId, itemId, section, members, milestones
 /** Brings the accepted handover's technologies in, once. Repeating it adds nothing and never overwrites what the Project Manager edited. */
 export function SeedScopeDialog({ projectId, names }: { projectId: string; names: string[] }) {
   return (
-    <FormDialog label={`Bring in accepted technologies (${names.length})`} variant="default" testId="dp-seed-scope" title="Bring the accepted scope into the plan"
+    <FormDialog label={`Bring in accepted technologies (${names.length})`} variant="default" size="default" testId="dp-seed-scope" title="Bring the accepted scope into the plan"
       description="Each technology from the accepted handover becomes one row with its quantity. Rows already in the plan, or brought in and removed earlier, are left alone, so doing this again never duplicates or overwrites anything.">
       {(done) => (
         <ActionForm action={seedPlanScope} submitLabel="Add to the plan" onDone={(s) => done(s as Done)}>

@@ -340,6 +340,113 @@ describe("Project Plan, Release 1", () => {
     expect(rows.length).toBeGreaterThan(5);
   });
 
+  describe("synchronisation regressions", () => {
+    let REG = "", MS2 = "";
+    const L = {} as { story: string; mood: string; draft: string; a: string; b: string; c: string; d: string };
+    const taskOf = async (lineId: string) => (await admin<{ task_id: string }>(`select task_id from proj_dp_lines where id = '${lineId}'`))[0]!.task_id;
+    const depsOf = async (taskId: string) => (await admin<{ d: string }>(`select depends_on_task_id d from proj_task_dependencies where task_id = '${taskId}'`)).map((r) => r.d).sort();
+
+    beforeAll(async () => {
+      REG = (await admin<{ id: string }>(`insert into proj_projects (company_id, reference, name, kind, status, pm_user_id, created_by) values ('${CO.a}', 'UAE-P-2027-0110', 'Fictional sync regressions', 'internal', 'in_progress', '${U.pm}', '${U.pm}') returning id`))[0]!.id;
+      await db.seed(`
+        insert into proj_project_details (project_id, location, site_timezone) values ('${REG}', 'Hall', 'Asia/Dubai');
+        insert into proj_project_members (project_id, user_id, role) values ('${REG}', '${U.pm}', 'pm'), ('${REG}', '${U.design}', 'member'), ('${REG}', '${U.dev}', 'member'), ('${REG}', '${U.site}', 'member');
+      `);
+      MS2 = (await admin<{ id: string }>(`insert into proj_milestones (project_id, title, due_date, created_by) values ('${REG}', 'Ready for mockup', '2027-07-20', '${U.pm}') returning id`))[0]!.id;
+    });
+
+    it("a prerequisite released AFTER its dependent task is connected by that release, whichever activation is selected, and direct task dependencies are kept", async () => {
+      const early = (await saveItem(U.pm, REG, { title: "Early activation", owner_id: U.design })).id;       // released first
+      const late = (await saveItem(U.pm, REG, { title: "Late activation", owner_id: U.dev })).id;            // released second
+      L.story = (await saveLine(U.pm, late, { section: "content", description: "Storyboard", assignee_id: U.dev })).id;
+      L.mood = (await saveLine(U.pm, late, { section: "content", description: "Moodboard", assignee_id: U.dev })).id;
+      L.draft = (await saveLine(U.pm, early, { section: "content", description: "First draft", assignee_id: U.design, depends_on: [L.story] })).id;
+      // a task nobody planned: a dependency added directly to the task
+      const brief = await call<string>(U.pm, `proj_create_task('${REG}', ${j({ title: "Client brief (not in the plan)", assignee_id: U.design })})`);
+
+      // 1. release ONLY the early activation: the dependent task exists, its prerequisite does not yet
+      expect(await call<Row>(U.pm, `proj_dp_release('${REG}', array['${early}']::uuid[])`)).toMatchObject({ tasks: 1, dependencies: 0 });
+      const draftTask = await taskOf(L.draft);
+      await admin(`insert into proj_task_dependencies (task_id, depends_on_task_id, project_id) values ('${draftTask}', '${brief}', '${REG}')`);
+      expect(await depsOf(draftTask)).toEqual([brief]);
+
+      // 2. release ONLY the late activation: its tasks are created and the dependent task (in the other activation, not selected) is connected
+      const r = await call<Row>(U.pm, `proj_dp_release('${REG}', array['${late}']::uuid[])`);
+      expect(r).toMatchObject({ tasks: 2, dependencies: 1, skipped: [] });
+      const storyTask = await taskOf(L.story);
+      expect(await depsOf(draftTask)).toEqual([brief, storyTask].sort());                                   // the direct dependency survived
+      expect((await plan(U.pm, REG)).items.flatMap((i: Row) => i.lines).find((l: Row) => l.id === L.draft).task.depends_on.map((d: Row) => d.task_id).sort()).toEqual([brief, storyTask].sort());
+      // repeating connects nothing new
+      expect(await call<Row>(U.pm, `proj_dp_release('${REG}')`)).toMatchObject({ tasks: 0, dependencies: 0 });
+      expect(await call<Row>(U.pm, `proj_dp_release('${REG}', array['${early}']::uuid[])`)).toMatchObject({ tasks: 0, dependencies: 0 });
+
+      // 3. editing the plan dependency takes off only what the plan line no longer names; the direct ones (even on a plan line's task) stay
+      const moodTask = await taskOf(L.mood);
+      await admin(`insert into proj_task_dependencies (task_id, depends_on_task_id, project_id) values ('${draftTask}', '${moodTask}', '${REG}')`);
+      await saveLine(U.pm, early, { depends_on: [] }, L.draft);
+      expect(await depsOf(draftTask)).toEqual([brief, moodTask].sort());
+      await saveLine(U.pm, early, { depends_on: [L.story] }, L.draft);
+      expect(await depsOf(draftTask)).toEqual([brief, moodTask, storyTask].sort());
+    });
+
+    it("an approved change that CLEARS a start date, due date or milestone clears it on the task (the effective value), through the existing task rules", async () => {
+      const item = (await saveItem(U.pm, REG, { title: "Clearing activation", owner_id: U.design, needed_by: "2027-08-30" })).id;
+      L.a = (await saveLine(U.pm, item, { section: "content", description: "Clear all three", assignee_id: U.design, start_date: "2027-08-01", needed_by: "2027-08-05", milestone_id: MS2 })).id;
+      L.b = (await saveLine(U.pm, item, { section: "content", description: "Clear own due date only", assignee_id: U.design, start_date: "2027-08-02", needed_by: "2027-08-06" })).id;
+      await call(U.pm, `proj_dp_release('${REG}', array['${item}']::uuid[])`);
+      const ta = await taskOf(L.a), tb = await taskOf(L.b);
+      expect((await admin<Row>(`select start_date::text s, due_date::text d, milestone_id m from proj_tasks where id = '${ta}'`))[0]).toMatchObject({ s: "2027-08-01", d: "2027-08-05", m: MS2 });
+
+      // clear start, due and milestone of line a: the activation keeps its own date, so the task falls back to it for the due date and to nothing for the rest
+      const res = await saveLine(U.pm, item, { start_date: null, needed_by: null, milestone_id: null }, L.a);
+      expect(res.proposed).toBeTruthy();
+      expect((await admin<Row>(`select start_date::text s, due_date::text d from proj_tasks where id = '${ta}'`))[0]).toMatchObject({ s: "2027-08-01", d: "2027-08-05" });   // nothing before approval
+      await call(U.pm, `proj_dp_decide_change('${res.proposed}', 'approved')`);
+      expect((await admin<Row>(`select start_date::text s, due_date::text d, milestone_id m from proj_tasks where id = '${ta}'`))[0]).toEqual({ s: null, d: "2027-08-30", m: null });
+      let p = await plan(U.pm, REG);
+      expect(p.items.flatMap((i: Row) => i.lines).find((l: Row) => l.id === L.a)).toMatchObject({ start_date: null, needed_by: null, milestone_id: null, task_pending: null });
+      expect(p.milestones.find((m: Row) => m.id === MS2).tasks.map((t: Row) => t.task_id)).not.toContain(ta);
+      // with no activation date either, the due date clears completely
+      await admin(`update proj_dp_items set needed_by = null where id = '${item}'`);
+      const res2 = await saveLine(U.pm, item, { needed_by: null }, L.b);
+      await call(U.pm, `proj_dp_decide_change('${res2.proposed}', 'approved')`);
+      expect((await admin<Row>(`select start_date::text s, due_date::text d from proj_tasks where id = '${tb}'`))[0]).toEqual({ s: "2027-08-02", d: null });
+    });
+
+    it("where the task rules refuse the cleared value (finished task) the line shows Task update pending with the cleared value, and a manager can retry or keep the task", async () => {
+      const item = (await saveItem(U.pm, REG, { title: "Refusing activation", owner_id: U.design })).id;
+      L.c = (await saveLine(U.pm, item, { section: "content", description: "Finished then cleared", assignee_id: U.design, start_date: "2027-09-01", needed_by: "2027-09-04", milestone_id: MS2 })).id;
+      await call(U.pm, `proj_dp_release('${REG}', array['${item}']::uuid[])`);
+      const tc = await taskOf(L.c);
+      await call(U.design, `proj_set_task_status('${tc}', 'in_progress')`);
+      await call(U.design, `proj_set_task_status('${tc}', 'done')`);
+      const res = await saveLine(U.pm, item, { start_date: null, needed_by: null, milestone_id: null }, L.c);
+      await call(U.pm, `proj_dp_decide_change('${res.proposed}', 'approved')`);
+      const line = (await plan(U.pm, REG)).items.flatMap((i: Row) => i.lines).find((l: Row) => l.id === L.c);
+      expect(line).toMatchObject({ start_date: null, needed_by: null, milestone_id: null });                       // the plan holds the decision
+      expect(line.task).toMatchObject({ status: "done", start_date: "2027-09-01", due_date: "2027-09-04", milestone_id: MS2 });   // the finished task is untouched
+      expect(line.task_pending.fields).toEqual({ start_date: null, due_date: null, milestone_id: null });
+      expect(line.task_pending.reason).toMatch(/done|edited|finished/i);
+      expect(await call<Row>(U.pm, `proj_dp_reconcile_task('${L.c}', 'retry')`)).toEqual({ status: "pending" });     // still refused, still flagged
+      expect(await call<Row>(U.pm, `proj_dp_reconcile_task('${L.c}', 'keep_task')`)).toEqual({ status: "kept_task" });
+      const kept = (await plan(U.pm, REG)).items.flatMap((i: Row) => i.lines).find((l: Row) => l.id === L.c);
+      expect(kept).toMatchObject({ task_pending: null, start_date: "2027-09-01", needed_by: "2027-09-04", milestone_id: MS2 });
+    });
+
+    it("a cleared milestone the existing rules do not let the actor change is flagged, not silently dropped", async () => {
+      const item = (await saveItem(U.pm, REG, { title: "Role activation", owner_id: U.design })).id;
+      L.d = (await saveLine(U.pm, item, { section: "content", description: "Cancelled then cleared", assignee_id: U.design, milestone_id: MS2, needed_by: "2027-09-10" })).id;
+      await call(U.pm, `proj_dp_release('${REG}', array['${item}']::uuid[])`);
+      const td = await taskOf(L.d);
+      await call(U.pm, `proj_set_task_status('${td}', 'cancelled', 'Scope dropped')`);
+      const res = await saveLine(U.pm, item, { milestone_id: null }, L.d);
+      await call(U.pm, `proj_dp_decide_change('${res.proposed}', 'approved')`);
+      const line = (await plan(U.pm, REG)).items.flatMap((i: Row) => i.lines).find((l: Row) => l.id === L.d);
+      expect(line.task_pending.fields).toEqual({ milestone_id: null });
+      expect((await admin<Row>(`select milestone_id m from proj_tasks where id = '${td}'`))[0]!.m).toBe(MS2);
+    });
+  });
+
   it("rollback: refuses while Release 1 data exists; once it is cleared it restores the previous behaviour, keeps tasks and equipment, and the migration applies again", async () => {
     const tasks = await count(`select 1 from proj_tasks where project_id = '${KIDS}'`);
     const eq = await count(`select 1 from inv_request_lines`);
