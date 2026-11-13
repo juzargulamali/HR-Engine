@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
@@ -16,6 +18,8 @@ const U = { pm: id(), head: id(), design: id(), eng: id(), lead1: id(), lead2: i
 const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@followup.ae')`).join(", ");
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const j = (o: unknown) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;
+const manual = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
+const migrationSql = () => readFileSync(path.join(__dirname, "../../../supabase/migrations/20270107000100_proj_phase2_teams_crew_ops_review.sql"), "utf8");
 const day = (n: number) => { const d = new Date(); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 
 describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operations review", () => {
@@ -312,5 +316,38 @@ describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operati
     const n = await admin<{ payload: Row }>(`select payload from notifications where user_id = '${U.ops1}' and type = 'project_review_requested' and payload->>'version_id' = '${v.id}'`);
     expect(n).toHaveLength(1);
     expect(n[0]!.payload).toMatchObject({ task_id: t, version_id: v.id, operations: true });
+  });
+
+  // ------------------------------------------------------------------------------------------------------------------------------------------------ owner packs (last: it rolls the migration back and applies it again)
+  it("the owner packs: preflight has no STOP, verify says OK, rollback refuses while data exists and, once it is cleared, restores the previous behaviour; applying again works", async () => {
+    const pre = (await admin<{ item: string; result: string }>(manual("proj_phase2_teams_crew_ops_review_00_preflight_readonly.sql")));
+    expect(pre.filter((r) => /^STOP/.test(r.result))).toEqual([]);
+    const verify = async () => await admin<{ item: string; result: string }>(manual("proj_phase2_teams_crew_ops_review_20_verify_readonly.sql"));
+    const v1 = await verify();
+    expect(v1.filter((r) => r.result === "FAIL" || r.result.startsWith("FAIL"))).toEqual([]);
+    expect(v1).toHaveLength(9);
+    // the Phase 2 verify script, run by the owner before, still passes after this migration
+    const phase2 = await admin<{ item: string; result: string }>(manual("proj_phase2_deliverables_site_20_verify_readonly.sql"));
+    expect(phase2.filter((r) => r.result.startsWith("FAIL"))).toEqual([]);
+    await expect(db.seed(manual("proj_phase2_teams_crew_ops_review_90_rollback.sql"))).rejects.toThrow(/STOP/);              // data exists
+    await admin(`delete from proj_site_crew; delete from proj_task_output_versions where review_route = 'operations'; delete from proj_change_log where entity_type = 'team';
+                 update proj_teams set head_user_id = '${U.head}' where head_user_id is null;
+                 update proj_plan_items set ready_hardware = 'unknown', ready_content = 'unknown', ready_app = 'unknown', ready_note = null, crew_instructions = null`);
+    await db.seed(manual("proj_phase2_teams_crew_ops_review_90_rollback.sql"));
+    await db.seed(manual("proj_phase2_teams_crew_ops_review_90_rollback.sql"));                                              // safe twice
+    expect((await admin<{ is_nullable: string }>(`select is_nullable from information_schema.columns where table_name = 'proj_teams' and column_name = 'head_user_id'`))[0]!.is_nullable).toBe("NO");
+    expect(await count(`select 1 from information_schema.columns where table_name = 'proj_task_output_versions' and column_name = 'review_route'`)).toBe(0);
+    expect(await count(`select 1 from pg_proc where proname = 'proj_my_site_assignments'`)).toBe(0);
+    expect(await count(`select 1 from pg_proc where proname = 'ops_overview_base'`)).toBe(0);
+    expect((await call<Row>(U.ops1, `ops_overview('${CO.a}')`)).output_reviews).toBeUndefined();                              // the original read
+    const old = await call<Row>(U.pm, `proj_set_site_crew('${SETUP}', ${j([{ user_id: U.eng, role: "installation" }])})`);   // the two-argument function is the original again
+    expect(old).toMatchObject({ added: 1, removed: 0 });
+    await expect(call(U.pm, `proj_set_site_crew('${SETUP}', ${j([{ user_id: U.tech1, role: "installation" }])})`)).rejects.toThrow(/active members/);   // site-only crew is not possible again
+    // applying the migration again restores everything
+    await db.seed(migrationSql());
+    const v2 = await verify();
+    expect(v2.filter((r) => r.result.startsWith("FAIL"))).toEqual([]);
+    expect((await call<Row>(U.ops1, `ops_overview('${CO.a}')`)).output_reviews).toBeDefined();
+    expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()")).toEqual([]);
   });
 });
