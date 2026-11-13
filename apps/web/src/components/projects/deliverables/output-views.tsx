@@ -5,7 +5,7 @@ import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Muted } from "@/components/projects/parts";
-import { AssignReviewerDialog, DecideDialog, ExpectedOutputDialog, LinkFeedbackDialog, OpenOutputButton, SubmitVersionDialog } from "@/components/projects/deliverables/output-forms";
+import { AssignReviewerDialog, DecideDialog, ExpectedOutputDialog, LinkFeedbackDialog, OpenOutputButton, RerouteDialog, SubmitVersionDialog } from "@/components/projects/deliverables/output-forms";
 import {
   fileLabel, formatAt, groupByActivation, NEEDS_REVIEWER_HELP, nextOutputAction, OUTPUT_STATE_LABELS, OUTPUT_STATE_TONE, quantityText, REGISTER_FILTERS, registerCounts, reviewStateWord,
   type FileRef, type OutputVersion, type Register, type RegisterFilter, type RegisterRow,
@@ -88,6 +88,7 @@ export function TaskOutputSection({ projectId, task, row, tz, files, flags, focu
         <div className="flex flex-wrap items-center gap-2">
           {flags.canSubmit && open ? <SubmitVersionDialog projectId={projectId} taskId={task.id} label={row.output_label} expected={row.output_qty ?? 1} nextNo={(cur?.version_no ?? 0) + 1} files={files} /> : null}
           {mayDecide && cur && cur.status === "awaiting" && cur.is_current !== false ? <DecideDialog projectId={projectId} versionId={cur.id} versionNo={cur.version_no} label={row.output_label} /> : null}
+          {cur && cur.status === "awaiting" && cur.can_reroute ? <RerouteDialog projectId={projectId} versionId={cur.id} versionNo={cur.version_no} restricted={!!cur.evidence_restricted} /> : null}
           {cur && cur.status === "awaiting" && cur.can_assign ? <AssignReviewerDialog projectId={projectId} versionId={cur.id} versionNo={cur.version_no} current={cur.reviewer_id ?? ""} eligible={cur.eligible_reviewers ?? []} /> : null}
           {flags.canDefine && open ? <ExpectedOutputDialog projectId={projectId} taskId={task.id} taskVersion={task.version} current={{ label: row.output_label, qty: row.output_qty, required: row.output_required }} /> : null}
         </div>

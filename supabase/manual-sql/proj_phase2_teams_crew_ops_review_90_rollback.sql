@@ -217,6 +217,10 @@ begin
 end;
 $$;
 
+drop function if exists proj_reroute_output_review(uuid);
+drop function if exists proj_route_output_to_operations(uuid, text);
+drop function if exists proj_output_evidence_restricted(uuid);
+drop function if exists proj_is_pm_user(uuid, uuid);
 drop function if exists proj_assign_output_reviewer(uuid, uuid);
 drop function if exists proj_my_site_assignments();
 drop function if exists proj_site_technician_candidates(uuid);

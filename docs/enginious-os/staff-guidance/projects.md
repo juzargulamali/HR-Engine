@@ -742,6 +742,7 @@ When the Project Manager hands in a version of a task's output, even on someone 
 2. Check the version number and read the evidence within the files you may open.
 3. Press Approve this version or Request changes.
 4. If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager.
+5. A version the Project Manager handed in before this rule, still waiting for the team, shows Send to Operations review for the Project Manager and Operations. Press it: nothing is uploaded again. A restricted file must be made unrestricted first.
 
 ## The Work schedule chart
 - id: projects-work-schedule

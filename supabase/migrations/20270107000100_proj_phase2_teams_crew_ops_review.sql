@@ -254,7 +254,8 @@ end;
 $$;
 
 -- What a person is assigned to on site, for themselves only. This is the ONLY read a site-only technician has: no table is opened to them. It returns the activity, their role, the venue, the
--- call time, the instructions and brief readiness: no task, file, chat, review, budget or client record. The assignment lasts while the crew row exists and the activity has not ended (a day of grace).
+-- call time, the instructions and brief readiness: no task, file, chat, review, budget or client record. The assignment lasts while the crew row exists, the activity has not ended (a day of grace)
+-- and, for a site-only person, they are still an eligible employee of the project's company.
 create or replace function proj_my_site_assignments()
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare v_uid uuid := auth.uid();
@@ -275,7 +276,10 @@ begin
     left join proj_project_details d on d.project_id = c.project_id
     where c.user_id = v_uid and i.status not in ('done', 'cancelled') and p.status not in ('completed', 'archived')
       and (proj_activity_range(i.id) is null or upper(proj_activity_range(i.id)) > now() - interval '1 day')
-      and exists (select 1 from profiles pr where pr.id = v_uid and pr.is_active)), '[]'::jsonb);
+      and exists (select 1 from profiles pr where pr.id = v_uid and pr.is_active)
+      -- A project member keeps what membership already gives them. Anyone else reads through the assignment ONLY while the same-company employment check still holds (an active employee of the
+      -- project's company): if they leave, transfer out of the company or their employment record is removed, the assignment stops showing even though their sign-in stays active.
+      and (proj_dp_active_member(c.project_id, v_uid) or proj_site_technician_eligible(p.company_id, v_uid))), '[]'::jsonb);
 end;
 $$;
 
@@ -445,6 +449,94 @@ begin
 end;
 $$;
 
+-- Versions that were already waiting when this migration is applied. The review-route column starts as 'team' for every earlier row, so a version the Project Manager submitted under the first Phase 2
+-- migration would otherwise keep waiting for a team review that the new rule says it must not have. Two things move it WITHOUT uploading it again: (a) this migration moves each such pending version
+-- to Operations once, here; (b) the Project Manager or an Operations Manager can send one to Operations at any time with proj_reroute_output_review. Decided versions (approved, changes requested,
+-- superseded) are never touched, so completed review history stays exactly as it was.
+create or replace function proj_is_pm_user(p_project_id uuid, p_user_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from proj_projects pr
+    where pr.id = p_project_id and proj_user_eligible(pr.company_id, p_user_id, pr.id)
+      and (pr.pm_user_id = p_user_id
+           or exists (select 1 from proj_project_members m
+                       where m.project_id = pr.id and m.user_id = p_user_id and m.removed_at is null and m.role = 'acting_pm' and m.acting_until >= current_date)));
+$$;
+
+-- Does the evidence of a version include a restricted file (Operations cannot open those)?
+create or replace function proj_output_evidence_restricted(p_version_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (select 1 from proj_task_output_versions x join proj_files f on f.id in (x.file_id, x.snapshot_file_id) where x.id = p_version_id and f.restricted);
+$$;
+
+-- Moves ONE pending team-route version to Operations: route, the single eligible reviewer when there is exactly one, a notice to the pool, a change-log line. Checks nothing about who may ask;
+-- the callers do. Returns false when there is nothing to move. Never reads or changes a decided version.
+create or replace function proj_route_output_to_operations(p_version_id uuid, p_note text)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare x proj_task_output_versions; t proj_tasks; v proj_projects; v_pool uuid[]; v_u uuid;
+begin
+  select * into x from proj_task_output_versions where id = p_version_id for update;
+  if not found or x.status <> 'awaiting' or x.review_route <> 'team' then return false; end if;
+  select * into t from proj_tasks where id = x.task_id;
+  select * into v from proj_projects where id = x.project_id;
+  update proj_task_output_versions set review_route = 'operations', reviewer_id = null, reviewer_assigned_at = null, reviewer_assigned_by = null where id = x.id;
+  select array_agg(u) into v_pool from proj_output_reviewer_pool(v.company_id, x.submitted_by, t.assignee_id) u;
+  if coalesce(cardinality(v_pool), 0) = 1 then
+    update proj_task_output_versions set reviewer_id = v_pool[1], reviewer_assigned_at = now(), reviewer_assigned_by = auth.uid() where id = x.id;
+  end if;
+  foreach v_u in array coalesce(v_pool, '{}'::uuid[]) loop
+    perform proj_notify(v.id, v_u, 'project_review_requested',
+      jsonb_build_object('name', v.name, 'reference', v.reference, 'task_id', t.id, 'task', t.title, 'version_id', x.id, 'version_no', x.version_no, 'operations', true), 'output:' || x.id || ':ops', false);
+  end loop;
+  perform proj_log_change(v.id, 'task_output', t.id, 'review route', 'Team', 'Operations', coalesce(p_note, 'Submitted by the Project Manager'));
+  return true;
+end;
+$$;
+
+-- Send a pending Project Manager submission to Operations without uploading it again. The Project Manager or an Operations Manager of the company may; only the CURRENT version that is still waiting,
+-- only one the Project Manager submitted, never one that has been decided. A restricted file cannot go (Operations cannot open it): the message says to make the file unrestricted first.
+create or replace function proj_reroute_output_review(p_version_id uuid)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare x proj_task_output_versions; t proj_tasks; v proj_projects; v_cur integer;
+begin
+  perform proj_require_user();
+  select * into x from proj_task_output_versions where id = p_version_id;
+  if not found then raise exception 'Version not found' using errcode = 'P0002'; end if;
+  select * into t from proj_tasks where id = x.task_id for update;
+  v := proj_lock_project(t.project_id);
+  perform proj_require_open_project(v);
+  if not (proj_can_manage(v.id) or proj_is_ops_manager(v.company_id, auth.uid())) then raise exception 'Only the Project Manager or an Operations Manager can send this review to Operations' using errcode = '42501'; end if;
+  select * into x from proj_task_output_versions where id = p_version_id for update;
+  if x.review_route = 'operations' then return jsonb_build_object('id', x.id, 'unchanged', true); end if;
+  select max(version_no) into v_cur from proj_task_output_versions where task_id = t.id;
+  if x.status <> 'awaiting' or x.version_no <> v_cur then raise exception 'Only the current version that is waiting can be sent to Operations' using errcode = '23514'; end if;
+  if not proj_is_pm_user(v.id, x.submitted_by) then raise exception 'Only a version the Project Manager submitted goes to Operations; this one stays with the team review' using errcode = '23514'; end if;
+  if proj_output_evidence_restricted(x.id) then
+    raise exception 'Operations cannot open restricted files. Make the file unrestricted in Files & client plan, then send this version to Operations' using errcode = '23514';
+  end if;
+  perform proj_route_output_to_operations(x.id, 'Sent to Operations without a new upload');
+  return jsonb_build_object('id', x.id, 'route', 'operations', 'rerouted', true);
+end;
+$$;
+
+-- Once, at install: every version already waiting that the Project Manager submitted (and whose evidence Operations can open) moves to Operations. Restricted evidence stays with the team review and is
+-- counted by the verify script; the Project Manager can unrestrict the file and use the button on the version.
+do $$
+declare r record; n integer := 0;
+begin
+  for r in
+    select x.id from proj_task_output_versions x
+    where x.status = 'awaiting' and x.review_route = 'team'
+      and x.version_no = (select max(z.version_no) from proj_task_output_versions z where z.task_id = x.task_id)
+      and proj_is_pm_user(x.project_id, x.submitted_by) and not proj_output_evidence_restricted(x.id)
+      and exists (select 1 from proj_projects p where p.id = x.project_id and p.status not in ('completed', 'archived'))
+    order by x.attached_at
+  loop
+    if proj_route_output_to_operations(r.id, 'Moved to Operations when the new review rule was installed') then n := n + 1; end if;
+  end loop;
+  raise notice 'Pending Project Manager submissions moved to Operations: %', n;
+end $$;
+
 -- One version as JSON for the reader: adds the review route, the reviewer, whether one is needed, who is eligible, and whether THIS reader may decide it now (the screen mirrors this).
 create or replace function proj_output_version_json(p_version_id uuid)
 returns jsonb language sql stable security definer set search_path = public as $$
@@ -463,6 +555,9 @@ returns jsonb language sql stable security definer set search_path = public as $
                                then coalesce((select jsonb_agg(jsonb_build_object('id', u, 'name', proj_display_name(u)) order by proj_display_name(u)) from proj_output_reviewer_pool(pr.company_id, x.submitted_by, t.assignee_id) u), '[]'::jsonb)
                                else '[]'::jsonb end,
     'can_assign', (x.review_route = 'operations' and x.status = 'awaiting' and (proj_can_manage(x.project_id) or proj_is_ops_manager(pr.company_id, auth.uid()))),
+    'can_reroute', (x.review_route = 'team' and x.status = 'awaiting' and x.version_no = (select max(z.version_no) from proj_task_output_versions z where z.task_id = x.task_id)
+                    and proj_is_pm_user(x.project_id, x.submitted_by) and (proj_can_manage(x.project_id) or proj_is_ops_manager(pr.company_id, auth.uid()))),
+    'evidence_restricted', proj_output_evidence_restricted(x.id),
     'can_decide', (x.status = 'awaiting' and x.version_no = (select max(z.version_no) from proj_task_output_versions z where z.task_id = x.task_id)
                    and x.submitted_by is distinct from auth.uid() and t.assignee_id is distinct from auth.uid()
                    and case when x.review_route = 'operations' then proj_is_ops_manager(pr.company_id, auth.uid()) and (x.reviewer_id is null or x.reviewer_id = auth.uid())
@@ -593,11 +688,11 @@ $$;
 revoke all on function
   proj_setup_teams(uuid, jsonb, boolean), proj_site_technician_eligible(uuid, uuid), proj_activity_range(uuid), proj_crew_overlaps(uuid, uuid), proj_set_site_crew(uuid, jsonb, text), proj_set_site_crew(uuid, jsonb),
   proj_set_activity_readiness(uuid, jsonb), proj_site_technician_candidates(uuid), proj_my_site_assignments(), proj_is_ops_manager(uuid, uuid), proj_output_reviewer_pool(uuid, uuid, uuid),
-  proj_assign_output_reviewer(uuid, uuid), ops_overview(uuid), ops_overview_base(uuid)
+  proj_assign_output_reviewer(uuid, uuid), proj_is_pm_user(uuid, uuid), proj_output_evidence_restricted(uuid), proj_route_output_to_operations(uuid, text), proj_reroute_output_review(uuid), ops_overview(uuid), ops_overview_base(uuid)
   from public, anon, authenticated;
 grant execute on function
   proj_setup_teams(uuid, jsonb, boolean), proj_set_site_crew(uuid, jsonb, text), proj_set_site_crew(uuid, jsonb), proj_set_activity_readiness(uuid, jsonb), proj_site_technician_candidates(uuid), proj_my_site_assignments(),
-  proj_assign_output_reviewer(uuid, uuid), ops_overview(uuid)
+  proj_assign_output_reviewer(uuid, uuid), proj_reroute_output_review(uuid), ops_overview(uuid)
   to authenticated;
 -- Re-assert the grants of the functions replaced above (create or replace keeps them, this makes the intent explicit and survives a re-run).
 revoke all on function proj_submit_task_output(uuid, uuid, uuid, integer, text, boolean, text, integer), proj_decide_task_output(uuid, text, text), proj_output_version_json(uuid),

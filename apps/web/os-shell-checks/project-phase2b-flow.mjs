@@ -67,6 +67,7 @@ await step("choose Content and Programming, a lead for Programming only: Lead ne
   await dialog().getByTestId("ts-confirm").check();
   await save.click();
   await until(() => db(`select count(*) from proj_teams where project_id = '${PRJ}' and removed_at is null`) === "2");
+  await until(async () => /2 teams created/.test(await dialog().innerText()));                      // the database row lands before the notice is drawn
   const t = await dialog().innerText();
   if (!/2 teams created/.test(t) || !/Lead needed: Content/.test(t)) throw new Error(`notice: ${t.slice(0, 200)}`);
   if (db(`select head_user_id from proj_teams where project_id = '${PRJ}' and name = 'Programming'`) !== `${U}7`) throw new Error("Programming lead");
@@ -267,6 +268,37 @@ await step("removing the assignment ends the access: the technician's list is em
   if (!/Nothing assigned to you on site/.test(await body())) throw new Error("the revoked assignment is still shown");
   await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
   if (await page.getByTestId("my-day-site-assignments").count()) throw new Error("My Day still shows the revoked assignment");
+});
+
+await step("the technician's employment ends (the sign-in stays active): the old assignment stops showing; restored employment shows it again", async () => {
+  asDb(4, `select proj_set_site_crew('${ACT}', '[{"user_id":"${U}2","role":"installation"},{"user_id":"${U}5","role":"installation"}]'::jsonb, null)`);
+  await as("emp"); await page.goto(`${BASE}/site-assignments`, { waitUntil: "networkidle" });
+  if (/Nothing assigned to you on site/.test(await body())) throw new Error("the assignment is not shown before employment ends");
+  db(`update employees set employment_status = 'terminated' where user_id = '${U}5'`);
+  if (db(`select is_active from profiles where id = '${U}5'`) !== "t") throw new Error("test setup: the sign-in should stay active");
+  await page.goto(`${BASE}/site-assignments`, { waitUntil: "networkidle" });
+  if (!/Nothing assigned to you on site/.test(await body())) throw new Error("the assignment still shows after employment ended");
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  if (await page.getByTestId("my-day-site-assignments").count()) throw new Error("My Day still shows the assignment after employment ended");
+  db(`update employees set employment_status = 'active' where user_id = '${U}5'`);
+  await page.goto(`${BASE}/site-assignments`, { waitUntil: "networkidle" });
+  if (/Nothing assigned to you on site/.test(await body())) throw new Error("restored employment did not restore the assignment");
+});
+
+await step("a Project Manager version already waiting from the first Phase 2 migration (team route) can be sent to Operations without a new upload", async () => {
+  T3 = asDb(4, `select proj_create_task('${PRJ}', '{"title":"Legacy pending output","assignee_id":"${U}2","requires_review":true,"due_date":"${WHEN}"}'::jsonb)`);
+  asDb(4, `select proj_set_task_output('${T3}', 'Legacy pending output', 1, true, null)`);
+  const F = db(`insert into proj_files (project_id, kind, purpose, label, url, restricted, uploaded_by) values ('${PRJ}', 'link', 'document', 'Legacy pending', 'https://docs.example.com/legacy-pending', false, '${U}4') returning id`).split("\n")[0];
+  const VL = db(`insert into proj_task_output_versions (project_id, task_id, version_no, file_id, item_count, submitted_by, status) values ('${PRJ}', '${T3}', 1, '${F}', 1, '${U}4', 'awaiting') returning id`).split("\n")[0];
+  if (db(`select review_route from proj_task_output_versions where id = '${VL}'`) !== "team") throw new Error("test setup: the legacy row should start on the team route");
+  await as("mgr"); await page.goto(taskUrl(T3), { waitUntil: "networkidle" });
+  await page.getByTestId("output-reroute").click(); await dialog().waitFor();
+  await dialog().getByRole("button", { name: "Send to Operations" }).click();
+  await until(() => db(`select review_route from proj_task_output_versions where id = '${VL}'`) === "operations");
+  await page.goto(taskUrl(T3), { waitUntil: "networkidle" });
+  if (!/Awaiting Operations review/.test(await page.getByTestId("output-version-state-1").innerText())) throw new Error("the version does not say Awaiting Operations review");
+  if (await page.getByTestId("output-reroute").count()) throw new Error("the button is still offered after the version was sent");
+  if (db(`select count(*) from proj_task_output_versions where task_id = '${T3}'`) !== "1") throw new Error("a new version was created instead of rerouting");
 });
 
 console.log(`\n${passes} passed, ${fails} failed. Screenshots in ${SHOTS}`);

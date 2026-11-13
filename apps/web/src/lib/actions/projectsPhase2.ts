@@ -206,6 +206,17 @@ export async function assignOutputReviewer(_prev: S, fd: FormData): Promise<S> {
   return { error: null, notice: r.unchanged ? "That was already the case." : p.data.reviewerId ? "Reviewer assigned and told." : "Released to the Operations queue." };
 }
 
+/** Send a pending Project Manager version that is still on the team route to Operations, without uploading it again. The Project Manager or an Operations Manager; the database refuses restricted evidence and anything already decided. */
+export async function rerouteOutputReview(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, versionId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { data, error } = await (await createClient()).rpc("proj_reroute_output_review", { p_version_id: p.data.versionId });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  const r = (data ?? {}) as { unchanged?: boolean };
+  return { error: null, notice: r.unchanged ? "It was already with Operations." : "Sent to Operations for review. Nothing was uploaded again." };
+}
+
 export async function saveShipment(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({
     projectId: uuid, shipmentId: optionalUuid, label: optionalText, planItemId: optionalUuid, requestId: optionalUuid, carrier: optionalText, reference: optionalText, notes: optionalText, state: state.optional(), reason: optionalText,

@@ -45,6 +45,8 @@ export interface OutputVersion {
   /** Who reviews it: the team (lead or Project Manager) or, for a version the Project Manager submitted, an Operations Manager. `can_decide` / `can_assign` are for THIS reader, from the database. */
   route?: "team" | "operations"; reviewer_id?: string | null; reviewer_name?: string | null; reviewer_assigned_at?: string | null; is_current?: boolean; needs_reviewer?: boolean;
   eligible_reviewers?: { id: string; name: string }[]; can_assign?: boolean; can_decide?: boolean;
+  /** A Project Manager's version that is still waiting on the team route (it was submitted before the Operations rule): the PM or Operations can send it on without a new upload. */
+  can_reroute?: boolean; evidence_restricted?: boolean;
 }
 export interface RegisterRow {
   task_id: string; task_title: string; task_status: string; task_due: string | null; blocked: boolean; requires_review: boolean; team_id: string | null; assignee_id: string; assignee_name: string | null;

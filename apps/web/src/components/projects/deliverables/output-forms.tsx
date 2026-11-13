@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CRM_ALLOWED_FILE_SUMMARY, validateCrmFileMeta } from "@enginious-hr/domain";
-import { assignOutputReviewer, decideTaskOutput, linkFeedbackToOutput, saveTaskOutput, submitTaskOutput } from "@/lib/actions/projectsPhase2";
+import { assignOutputReviewer, decideTaskOutput, linkFeedbackToOutput, rerouteOutputReview, saveTaskOutput, submitTaskOutput } from "@/lib/actions/projectsPhase2";
 import { finalizeProjectUpload, getProjectFileUrl, prepareProjectUpload } from "@/lib/actions/projectsFiles";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
@@ -174,6 +174,21 @@ export function LinkFeedbackDialog({ projectId, versionId, feedback, activations
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
           <Field label="Feedback" htmlFor="lf-fb"><Select id="lf-fb" name="feedbackId" required><option value="">Choose…</option>{feedback.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}</Select></Field>
           {activations.length > 0 ? <Field label="Activation (optional)" htmlFor="lf-act"><Select id="lf-act" name="activationId" defaultValue=""><option value="">None</option>{activations.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</Select></Field> : null}
+        </ActionForm>
+      )}
+    </FormDialog>
+  );
+}
+
+/** A Project Manager version that is still waiting on the team route (submitted before the Operations rule): send it to Operations without uploading it again. */
+export function RerouteDialog({ projectId, versionId, versionNo, restricted }: { projectId: string; versionId: string; versionNo: number; restricted: boolean }) {
+  return (
+    <FormDialog label="Send to Operations review" title={`Send version ${versionNo} to Operations`} testId="output-reroute"
+      description="This version was submitted by the Project Manager, so an Operations Manager reviews it, not the team. Nothing is uploaded again, and earlier decisions on this task stay as they are.">
+      {(done) => (
+        <ActionForm action={rerouteOutputReview} submitLabel="Send to Operations" onDone={(s) => done(s as Done)}>
+          <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="versionId" value={versionId} />
+          {restricted ? <p className="text-[13px] text-[hsl(var(--os-amber))]" data-testid="output-reroute-restricted">The file is restricted and Operations cannot open restricted files. Make it unrestricted in Files &amp; client plan first, then send it.</p> : null}
         </ActionForm>
       )}
     </FormDialog>

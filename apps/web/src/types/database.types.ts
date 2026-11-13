@@ -2139,6 +2139,7 @@ export interface Database {
       proj_site_technician_candidates: { Args: { p_project_id: string }; Returns: { user_id: string; name: string; is_member: boolean }[] };
       proj_my_site_assignments: { Args: Record<string, never>; Returns: unknown };
       proj_assign_output_reviewer: { Args: { p_version_id: string; p_reviewer: string | null }; Returns: unknown };
+      proj_reroute_output_review: { Args: { p_version_id: string }; Returns: unknown };
       proj_save_shipment: { Args: { p_project_id: string; p_shipment_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
       proj_remove_shipment: { Args: { p_shipment_id: string }; Returns: undefined };
       proj_site_schedule: { Args: { p_project_id: string }; Returns: unknown };

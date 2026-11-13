@@ -188,6 +188,43 @@ describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operati
     expect(await call<Row[]>(U.outsider, "proj_my_site_assignments()")).toEqual([]);
   });
 
+  it("a site-only assignment stops showing when the same-company employment check no longer holds, while the sign-in stays active; project members keep their access", async () => {
+    // tech1 is assigned (site-only) to SETUP from the previous test and can see it
+    expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()")).toHaveLength(1);
+    const profileActive = async (u: string) => (await admin<{ is_active: boolean }>(`select is_active from profiles where id = '${u}'`))[0]!.is_active;
+    expect(await profileActive(U.tech1)).toBe(true);
+    const ended: Array<[string, string, string]> = [
+      ["the employee leaves (terminated)", `update employees set employment_status = 'terminated' where user_id = '${U.tech1}'`, `update employees set employment_status = 'active' where user_id = '${U.tech1}'`],
+      ["a leaving date in the past", `update employees set termination_date = current_date - 1 where user_id = '${U.tech1}'`, `update employees set termination_date = null where user_id = '${U.tech1}'`],
+      ["the employment record is removed", `update employees set deleted_at = now() where user_id = '${U.tech1}'`, `update employees set deleted_at = null where user_id = '${U.tech1}'`],
+      ["they transfer out of the project's company", `update employees set company_id = '${CO.b}' where user_id = '${U.tech1}'`, `update employees set company_id = '${CO.a}' where user_id = '${U.tech1}'`],
+    ];
+    for (const [what, end, restore] of ended) {
+      await admin(end);
+      expect(await profileActive(U.tech1), what).toBe(true);                                              // the sign-in is untouched in every case
+      expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()"), what).toEqual([]);                  // the old assignment no longer shows
+      expect(await count(`select 1 from proj_site_crew where user_id = '${U.tech1}'`), what).toBe(1);        // the crew row itself is kept (history), it just grants nothing
+      await admin(restore);
+      expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()"), `restored after: ${what}`).toHaveLength(1);
+    }
+    // only employment is read, and nothing of it is returned
+    const mine = await call<Row[]>(U.tech1, "proj_my_site_assignments()");
+    expect(JSON.stringify(mine)).not.toMatch(/employ|termination|hire|salary|first_name|last_name|manager/i);
+    // a project member keeps what membership gives them even without an employment record (eng has none)
+    expect(await count(`select 1 from employees where user_id = '${U.eng}'`)).toBe(0);
+    const eng = await call<Row[]>(U.eng, "proj_my_site_assignments()");
+    expect(eng).toHaveLength(1);
+    expect(eng[0]).toMatchObject({ site_only: false });
+    // a technician who is ALSO a member keeps the assignment through membership when the employment ends; once they are no longer a member it goes
+    await admin(`insert into proj_project_members (project_id, user_id, role) values ('${P}', '${U.tech1}', 'member')`);
+    await admin(`update employees set employment_status = 'terminated' where user_id = '${U.tech1}'`);
+    expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()")).toHaveLength(1);
+    await admin(`update proj_project_members set removed_at = now() where project_id = '${P}' and user_id = '${U.tech1}'`);
+    expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()")).toEqual([]);
+    await admin(`delete from proj_project_members where project_id = '${P}' and user_id = '${U.tech1}'; update employees set employment_status = 'active' where user_id = '${U.tech1}'`);
+    expect(await call<Row[]>(U.tech1, "proj_my_site_assignments()")).toHaveLength(1);
+  });
+
   it("the booking overlap rule applies: a tentative overlap warns, a confirmed one is refused without a reason from someone with site-conflict authority", async () => {
     SHOW = (await call<Row>(U.pm, `proj_save_site_activity('${P}', null, ${j({ activity_kind: "show", title: "Show (day 1)", location: "Hall 3", start_date: day(5), end_date: day(5), starts_local: dayAt(5, "12:00"), ends_local: dayAt(5, "20:00"), activity_state: "tentative" })})`)).id;
     const warn = await call<Row>(U.pm, `proj_set_site_crew('${SHOW}', ${j([{ user_id: U.tech1, role: "standby" }])}, null)`);
@@ -319,13 +356,70 @@ describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operati
   });
 
   // ------------------------------------------------------------------------------------------------------------------------------------------------ owner packs (last: it rolls the migration back and applies it again)
+  it("a Project Manager version already waiting from the first Phase 2 migration reaches Operations (at install, or with one click, without a new upload); decided history is untouched", async () => {
+    // Rows exactly as the first Phase 2 migration left them: route 'team' (the new column's default) for every version.
+    const mkTask = async (title: string) => { const t = await createTask(U.pm, P, { title, assignee_id: U.design, team_id: TEAM, requires_review: true }); await setOutput(U.pm, t, title); return t; };
+    const insertVersion = async (task: string, no: number, file: string, by: string, status: string) => (await admin<{ id: string }>(
+      `insert into proj_task_output_versions (project_id, task_id, version_no, file_id, item_count, submitted_by, status, decided_by, decided_at, approved_by, approved_at, decision_note)
+       values ('${P}', '${task}', ${no}, '${file}', 1, '${by}', '${status}',
+               ${status === "awaiting" || status === "superseded" ? "null, null" : `'${U.head}', now()`}, ${status === "approved" ? `'${U.head}', now()` : "null, null"}, ${status === "changes_requested" ? "'please fix the colours'" : "null"}) returning id`))[0]!.id;
+    const tPending = await mkTask("Legacy pending PM output"), tRestricted = await mkTask("Legacy restricted PM output"), tTeam = await mkTask("Legacy pending team output"), tHistory = await mkTask("Legacy decided PM output");
+    const fPending = await link(P, "Legacy pending", U.pm), fRestricted = await link(P, "Legacy restricted", U.pm, true), fTeam = await link(P, "Legacy team", U.design), fOld = await link(P, "Legacy old", U.pm);
+    const vPending = await insertVersion(tPending, 1, fPending, U.pm, "awaiting");
+    const vRestricted = await insertVersion(tRestricted, 1, fRestricted, U.pm, "awaiting");
+    const vTeam = await insertVersion(tTeam, 1, fTeam, U.design, "awaiting");
+    const vApproved = await insertVersion(tHistory, 1, fOld, U.pm, "approved"), vChanges = await insertVersion(tHistory, 2, fOld, U.pm, "changes_requested"), vNow = await insertVersion(tHistory, 3, fOld, U.pm, "awaiting");
+    const snapshot = async () => await admin<Row>(`select id, status, review_route, reviewer_id, decided_by, decided_at, approved_at, decision_note from proj_task_output_versions where id in ('${vApproved}', '${vChanges}') order by version_no`);
+    const historyBefore = JSON.stringify(await snapshot());
+    expect(await count(`select 1 from proj_task_output_versions where id in ('${vPending}', '${vRestricted}', '${vTeam}', '${vNow}') and review_route = 'team'`)).toBe(4);   // the starting point
+
+    // (a) the install step: replay the backfill block from the migration itself
+    const block = migrationSql().match(/do \$\$[\s\S]*?Pending Project Manager submissions moved[\s\S]*?end \$\$;/);
+    expect(block).not.toBeNull();
+    await db.seed(block![0]);
+    const route = async (v: string) => (await admin<{ review_route: string; reviewer_id: string | null }>(`select review_route, reviewer_id from proj_task_output_versions where id = '${v}'`))[0]!;
+    expect((await route(vPending)).review_route).toBe("operations");                                       // the PM's pending version now waits for Operations
+    expect((await route(vNow)).review_route).toBe("operations");                                           // also the current, still-waiting version of a task that has history
+    expect((await route(vRestricted)).review_route).toBe("team");                                          // evidence Operations cannot open: not moved silently
+    expect((await route(vTeam)).review_route).toBe("team");                                                // not submitted by the PM: normal team review
+    expect(JSON.stringify(await snapshot())).toBe(historyBefore);                                          // decided history is exactly as it was
+    expect(await count(`select 1 from proj_change_log where entity_id = '${tPending}' and field = 'review route' and to_value = 'Operations'`)).toBe(1);
+    expect(await count(`select 1 from notifications where user_id in ('${U.ops1}', '${U.ops2}', '${U.opsDual}') and payload->>'version_id' = '${vPending}'`)).toBeGreaterThan(0);
+    await db.seed(block![0]);                                                                              // running it again changes nothing and adds no second notice or log line
+    expect(await count(`select 1 from proj_change_log where entity_id = '${tPending}' and field = 'review route' and to_value = 'Operations'`)).toBe(1);
+
+    // it is now in the Operations queue and decided there, never by the submitter or the assignee
+    expect((await call<Row>(U.ops1, `ops_overview('${CO.a}')`)).output_reviews.some((x: Row) => x.version_id === vPending)).toBe(true);
+    expect((await register(U.ops1, P, tPending)).rows[0].current).toMatchObject({ route: "operations", can_decide: true, can_reroute: false });
+    await expect(decide(U.pm, vPending, "approved")).rejects.toThrow(/cannot review your own work/);
+    expect(await decide(U.ops1, vPending, "approved")).toMatchObject({ decision: "approved" });
+
+    // (b) one click, no new upload: a pending PM version that was not moved (restricted evidence, or created before a re-run) is sent by the PM or by Operations
+    const cur = (await register(U.pm, P, tRestricted)).rows[0].current;
+    expect(cur).toMatchObject({ route: "team", can_reroute: true, evidence_restricted: true });
+    await expect(call(U.pm, `proj_reroute_output_review('${vRestricted}')`)).rejects.toThrow(/restricted files/);          // clear reason, nothing changed
+    expect((await route(vRestricted)).review_route).toBe("team");
+    await expect(call(U.head, `proj_reroute_output_review('${vRestricted}')`)).rejects.toThrow(/Project Manager or an Operations Manager/);
+    await expect(call(U.outsiderOps, `proj_reroute_output_review('${vRestricted}')`)).rejects.toThrow();
+    await admin(`update proj_files set restricted = false where id = '${fRestricted}'`);                                // the PM makes the file unrestricted
+    expect(await call<Row>(U.ops2, `proj_reroute_output_review('${vRestricted}')`)).toMatchObject({ rerouted: true, route: "operations" });   // an Operations Manager can send it too
+    expect(await call<Row>(U.pm, `proj_reroute_output_review('${vRestricted}')`)).toMatchObject({ unchanged: true });       // clicking twice is harmless
+    expect(await count(`select 1 from proj_change_log where entity_id = '${tRestricted}' and field = 'review route'`)).toBe(1);
+    expect((await register(U.ops1, P, tRestricted)).rows[0].current).toMatchObject({ route: "operations", can_decide: true });
+
+    // only a Project Manager's version, only the current waiting one, never a decided one
+    await expect(call(U.pm, `proj_reroute_output_review('${vTeam}')`)).rejects.toThrow(/stays with the team review/);
+    await expect(call(U.pm, `proj_reroute_output_review('${vChanges}')`)).rejects.toThrow(/current version that is waiting/);
+    expect(JSON.stringify(await snapshot())).toBe(historyBefore);
+  });
+
   it("the owner packs: preflight has no STOP, verify says OK, rollback refuses while data exists and, once it is cleared, restores the previous behaviour; applying again works", async () => {
     const pre = (await admin<{ item: string; result: string }>(manual("proj_phase2_teams_crew_ops_review_00_preflight_readonly.sql")));
     expect(pre.filter((r) => /^STOP/.test(r.result))).toEqual([]);
     const verify = async () => await admin<{ item: string; result: string }>(manual("proj_phase2_teams_crew_ops_review_20_verify_readonly.sql"));
     const v1 = await verify();
     expect(v1.filter((r) => r.result === "FAIL" || r.result.startsWith("FAIL"))).toEqual([]);
-    expect(v1).toHaveLength(9);
+    expect(v1).toHaveLength(11);
     // the Phase 2 verify script, run by the owner before, still passes after this migration
     const phase2 = await admin<{ item: string; result: string }>(manual("proj_phase2_deliverables_site_20_verify_readonly.sql"));
     expect(phase2.filter((r) => r.result.startsWith("FAIL"))).toEqual([]);

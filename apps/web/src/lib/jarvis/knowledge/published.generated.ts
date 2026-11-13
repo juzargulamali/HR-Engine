@@ -2061,7 +2061,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open the task from the link on Operations or My Day.",
       "Check the version number and read the evidence within the files you may open.",
       "Press Approve this version or Request changes.",
-      "If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager."
+      "If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager.",
+      "A version the Project Manager handed in before this rule, still waiting for the team, shows Send to Operations review for the Project Manager and Operations. Press it: nothing is uploaded again. A restricted file must be made unrestricted first."
     ],
     "links": [
       {

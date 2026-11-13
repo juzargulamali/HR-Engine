@@ -16,7 +16,8 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 * Migrations: `20270107000100_proj_phase2_teams_crew_ops_review.sql` (pack `proj_phase2_teams_crew_ops_review_*`). Not applied by Claude; install order row 35.
 * Files updated in `docs/enginious-os/`: 02, 03, 04, 05 (A.3), 06, `modules/projects-phase-2-deliverables-and-site.md` (section 11, rows 287 to 300, actions 119 to 121), coverage index (S), action catalogue, `modules/operations.md`, `staff-guidance/projects.md` (new topics).
 * Hosted status: not applied. Signed-in Preview QA: pending the owner.
-* Tests: RLS 31 of 31 (both Phase 2 suites); local browser flows: follow-up 17 of 17, Work schedule 12 of 12, Files shortcut 3 of 3; earlier flows rerun, results in the PR body.
+* Follow-up correction (same unapplied migration, nothing applied edited): a site-only assignment stops showing when same-company employment ends (the sign-in may stay active; members keep membership access); pending Project Manager versions left on the team route by the first Phase 2 migration move to Operations at install, or by **Send to Operations review**, with decided history untouched. New action row 122; verify now has 11 rows.
+* Tests: RLS 33 of 33 (both Phase 2 suites); local browser flows: follow-up 19 of 19, Work schedule 12 of 12, Files shortcut 3 of 3; earlier flows rerun, results in the PR body.
 
 ### 2026-11-13 | Projects & Tasks Phase 2 (draft PR into `main`, not merged): task deliverables with versioned reviews, Site schedule with crew and shipments, Work overview, collapsed-sidebar fixes
 
