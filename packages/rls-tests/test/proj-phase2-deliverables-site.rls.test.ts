@@ -188,12 +188,16 @@ describe("Projects Phase 2: deliverables, versioned reviews, site schedule, Work
     const secret = await file(P, "confidential-quote", true), open = await file(P, "public-brief", false);
     await expect(submit(U.design, t, secret)).rejects.toThrow(/not available to you/);
     await expect(submit(U.design, t, open, { snap: secret })).rejects.toThrow(/snapshot file is not available/);
-    const mine = await submit(U.pm, t, secret, { key: "pm-restricted-1" });                                    // the manager may reference a restricted file
-    expect(mine).toMatchObject({ version_no: 1 });
+    // The Project Manager's versions go to Operations, who open evidence under the files' own rules: a restricted file cannot be that evidence.
+    await expect(submit(U.pm, t, secret, { key: "pm-restricted-1" })).rejects.toThrow(/Operations cannot open restricted files/);
+    const mine = await submit(U.design, t, open, { key: "design-open-1" });                                    // the assignee uses a file anyone on the project can open
+    expect(mine).toMatchObject({ version_no: 1, review_route: "team" });
+    await admin(`update proj_files set restricted = true where id = '${open}'`);                               // the manager restricts it afterwards
     const asDesign = (await register(U.design, P, t)).rows[0].current.file;
     expect(asDesign).toEqual({ id: null, accessible: false, restricted: true });                               // no name, no link, no size
-    expect(JSON.stringify(await register(U.eng, P, t))).not.toContain("confidential-quote");
-    expect((await register(U.pm, P, t)).rows[0].current.file).toMatchObject({ accessible: true, restricted: true, name: "confidential-quote" });
+    expect(JSON.stringify(await register(U.eng, P, t))).not.toContain("public-brief");
+    expect((await register(U.pm, P, t)).rows[0].current.file).toMatchObject({ accessible: true, restricted: true, name: "public-brief" });
+    await admin(`update proj_files set restricted = false where id = '${open}'`);
     // another company's file or a removed file cannot be referenced
     const foreign = await file(OTHER, "foreign-file");
     await expect(submit(U.pm, t, foreign)).rejects.toThrow(/not available to you/);
@@ -280,7 +284,7 @@ describe("Projects Phase 2: deliverables, versioned reviews, site schedule, Work
     expect(act(s.activities, "Setup (run 1)").missing).toEqual([]);
     expect(act(s.activities, "Setup (run 2)").missing).toEqual(["time"]);
     expect(await call<Row>(U.pm, `proj_set_site_crew('${SETUP2}', ${j([{ user_id: U.crew2, role: "installation" }])})`)).toMatchObject({ added: 0, removed: 1 });   // a person can be taken off
-    await expect(call(U.pm, `proj_set_site_crew('${SETUP2}', ${j([{ user_id: U.outsider, role: "installation" }])})`)).rejects.toThrow(/active members/);
+    await expect(call(U.pm, `proj_set_site_crew('${SETUP2}', ${j([{ user_id: U.outsider, role: "installation" }])})`)).rejects.toThrow(/members of the project or active employees/);
     await expect(call(U.pm, `proj_set_site_crew('${SETUP2}', ${j([{ user_id: U.crew2, role: "driver" }])})`)).rejects.toThrow(/crew role/);
     await expect(call(U.crew1, `proj_set_site_crew('${SETUP2}', '[]')`)).rejects.toThrow(/Only the Project Manager|manage/i);
   });
