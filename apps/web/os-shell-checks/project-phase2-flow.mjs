@@ -148,7 +148,13 @@ await step("a restricted file is never opened through a reference: the assignee 
   const secret = link("Confidential quote pack", true);
   const err = asDbErr(2, `select proj_submit_task_output('${MOOD}', '${secret}', null, 1, null, false, 'restricted-try-0001', null)`);
   if (!/not available to you/.test(err)) throw new Error(`the database allowed it: ${err.slice(0, 120)}`);
-  asDb(4, `select proj_submit_task_output('${MOOD}', '${secret}', null, 1, 'Manager submits', false, 'restricted-pm-0001', null)`);
+  // The Project Manager's own version goes to Operations, which cannot open restricted files: the database refuses it (a later change to Phase 2b).
+  const pmErr = asDbErr(4, `select proj_submit_task_output('${MOOD}', '${secret}', null, 1, 'Manager submits', false, 'restricted-pm-0001', null)`);
+  if (!/cannot open restricted files/.test(pmErr)) throw new Error(`a restricted file on a PM version was not refused: ${pmErr.slice(0, 120)}`);
+  // A file that becomes restricted AFTER it was attached stays hidden in the register and the export for everyone but the manager.
+  const later = link("Confidential later pack", false);
+  asDb(2, `select proj_submit_task_output('${MOOD}', '${later}', null, 1, 'Assignee submits', false, 'restricted-later-0001', null)`);
+  db(`update proj_files set restricted = true where id = '${later}'`);
   await as(email(2)); await page.goto(`${BASE}/projects/${PRJ}/delivery?view=deliverables`, { waitUntil: "networkidle" });
   const t = (await page.getByTestId(`deliverable-${MOOD}`).innerText());
   if (/Confidential/.test(t) || /docs\.example\.com/.test(t)) throw new Error("the restricted file leaked into the register");
@@ -156,11 +162,11 @@ await step("a restricted file is never opened through a reference: the assignee 
   const csvA = await (await page.context().request.get(`${BASE}/api/projects/${PRJ}/deliverables/export`)).text();
   if (/Confidential/.test(csvA) || !/Storyboard/.test(csvA) || !/Restricted file/.test(csvA)) throw new Error(`assignee export: ${csvA.slice(0, 200)}`);
   await as("mgr"); const csvM = await (await page.context().request.get(`${BASE}/api/projects/${PRJ}/deliverables/export`)).text();
-  if (!/Confidential quote pack/.test(csvM)) throw new Error("the manager's export lacks the file name");
+  if (!/Confidential later pack/.test(csvM)) throw new Error("the manager's export lacks the file name");
   const denied = await (await (await newPage(browser)).context().request.get(`${BASE}/api/projects/${PRJ}/deliverables/export`)).status();
   if (denied !== 401 && denied !== 307 && denied !== 302 && denied !== 200) throw new Error(`signed-out export status ${denied}`);
   await page.goto(`${BASE}/projects/${PRJ}/delivery?view=deliverables`, { waitUntil: "networkidle" });
-  if (!/Confidential quote pack/.test(await page.getByTestId(`deliverable-${MOOD}`).innerText())) throw new Error("the manager cannot see the file");
+  if (!/Confidential later pack/.test(await page.getByTestId(`deliverable-${MOOD}`).innerText())) throw new Error("the manager cannot see the file");
 });
 
 // ---------------------------------------------------------------------------------------------------- site

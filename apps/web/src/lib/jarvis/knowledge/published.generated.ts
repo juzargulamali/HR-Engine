@@ -1970,6 +1970,176 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "projects-team-setup",
+    "area": "projects",
+    "title": "Choose the project teams and their leads",
+    "keywords": [
+      "project team",
+      "project teams",
+      "team lead",
+      "lead needed",
+      "manage team",
+      "programming lead",
+      "content team",
+      "engineering team",
+      "installation team",
+      "add custom team",
+      "who leads"
+    ],
+    "summary": "A new project's Work page opens with Set up your project team. Choose teams from Content, Programming, Engineering and Site / Installation, or Add custom team, and pick a lead for each. You can save before every lead is known: that team is flagged Lead needed. A lead new to the project is added to it, so you confirm that first. Saving twice never duplicates a team or replaces a lead. Site / Installation never enrols technicians. Manage team reopens it.",
+    "steps": [
+      "Open the project's Work page and press Set up your project team.",
+      "Tick the teams you need, or press Add custom team and type a name.",
+      "Choose a lead for each team, or leave it for later.",
+      "Read which people will be added to the project and tick the confirmation.",
+      "Press save. Press Manage team on Work to name a missing lead later."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work"
+    ]
+  },
+  {
+    "id": "projects-site-only-technicians",
+    "area": "projects",
+    "title": "Assign technicians who are not on the project",
+    "keywords": [
+      "site only technician",
+      "my site assignments",
+      "call time",
+      "crew instructions",
+      "technician assignment",
+      "installation crew",
+      "readiness",
+      "hardware ready",
+      "content ready",
+      "app ready"
+    ],
+    "summary": "The Project Manager can put a company employee on an installation activity without adding them to the project; they are labelled site-only. In Assign crew choose the role, call time and instructions; Brief records hardware, content and app readiness. A site-only technician sees only their own assignment under My site assignments: activity, role, venue, call time and instructions. They cannot open Project Chat, tasks, files or exports. Access ends when they are removed, or the activity or project ends.",
+    "steps": [
+      "Open Project Plan and choose Site schedule.",
+      "Press Assign crew on the activity and choose people, roles, call times and instructions.",
+      "Press Brief to record Hardware, Content and App readiness.",
+      "Read the warning if a person is already committed at that time, or give the reason for the override.",
+      "Technicians open My site assignments to read their own assignment."
+    ],
+    "links": [
+      {
+        "label": "My site assignments",
+        "href": "/site-assignments"
+      },
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan",
+      "/site-assignments"
+    ]
+  },
+  {
+    "id": "projects-operations-review",
+    "area": "projects",
+    "title": "Output the Project Manager hands in: Operations review",
+    "keywords": [
+      "operations review",
+      "awaiting operations review",
+      "needs an operations reviewer",
+      "assign reviewer",
+      "operations manager review",
+      "project manager output",
+      "review of my own output"
+    ],
+    "summary": "When the Project Manager hands in a version of a task's output, even on someone else's task, an Operations Manager reviews it, not the team lead. It says Awaiting Operations review with the reviewer's name. The person who handed it in and the task's assignee can never approve it, even with the Operations role. With no eligible reviewer it says Needs an Operations reviewer, and the Project Manager or an Operations Manager presses Assign reviewer. Each new version gets its own review.",
+    "steps": [
+      "Open the task from the link on Operations or My Day.",
+      "Check the version number and read the evidence within the files you may open.",
+      "Press Approve this version or Request changes.",
+      "If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      },
+      {
+        "label": "Operations",
+        "href": "/operations"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work",
+      "/operations"
+    ]
+  },
+  {
+    "id": "projects-work-schedule",
+    "area": "projects",
+    "title": "The Work schedule chart",
+    "keywords": [
+      "work schedule",
+      "timeline renamed",
+      "project plan chart",
+      "day view",
+      "week view",
+      "today marker",
+      "chart scroll",
+      "chart tooltip",
+      "schedule bars"
+    ],
+    "summary": "The Project Plan view once called Timeline is now Work schedule: each activation and requirement as a bar by its dates. Installation, dismantling, crew and shipments stay under Site schedule. A week fits a normal desktop window; nine or thirty days scroll sideways inside the chart while the page stays still. Names and the date header stay pinned, Today is marked and rows print exact dates. Choose Day or Week, press Today, and hover, focus or tap a bar for details. Bars are read only.",
+    "steps": [
+      "Open the project and choose Project Plan, then Work schedule.",
+      "Scroll the chart sideways, or press Today.",
+      "Choose Day or Week.",
+      "Hover, focus or tap a bar for its details."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/delivery"
+    ]
+  },
+  {
+    "id": "projects-work-summary",
+    "area": "projects",
+    "title": "Work packages and the Work page summary",
+    "keywords": [
+      "work packages",
+      "milestones summary",
+      "task outputs summary",
+      "deliverables renamed",
+      "activation removed",
+      "feedback link"
+    ],
+    "summary": "A project's Work page lists a short summary of Milestones and Task outputs with links; the output counts open Deliverables filtered to missing, awaiting review, changes requested or approved. The older team-level deliverables are now Work packages: work the Project Manager gives to a project team. Feedback linked to an activation that was removed stays readable and says Activation removed. The Files & client plan link on Work opens the project's files and client plan.",
+    "steps": [
+      "Open the project's Work page and read Milestones and Task outputs.",
+      "Press a count to open the matching Deliverables list.",
+      "Open Work packages to see what each team was given."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/work",
+      "/projects/[id]/changes"
+    ]
+  },
+  {
     "id": "sales-overview",
     "area": "sales",
     "title": "How Sales & CRM works",

@@ -1,6 +1,6 @@
 # Projects & Tasks Phase 2: task deliverables, versioned reviews, site schedule, Work overview
 
-Status: written from the code on branch `feat/projects-phase-2` (draft PR into `main`, after #92 and #93). Migration `20270106000100_proj_phase2_deliverables_site.sql`. **Not applied on any hosted database by Claude.** Checked on a local PostgreSQL 16 and a local production build with fictional data (RLS tests, a 14-check browser flow, a 12-check sidebar flow); signed-in Preview QA and hosted SQL are the owner's. The scope, install order, rollback and signed-in checklist are in [`docs/projects-phase-2-scope.md`](../../projects-phase-2-scope.md); this file is the Map reference (reference letter **S**).
+Status: written from the code on branch `feat/projects-phase-2` (draft PR into `main`, after #92 and #93). Migrations `20270106000100_proj_phase2_deliverables_site.sql` (owner-reported applied and verified on hosted; not edited) and the follow-up `20270107000100_proj_phase2_teams_crew_ops_review.sql` (section 11; not applied). **Nothing here was applied on a hosted database by Claude.** Checked on a local PostgreSQL 16 and a local production build with fictional data (RLS tests, a 14-check browser flow, a 12-check sidebar flow); signed-in Preview QA and hosted SQL are the owner's. The scope, install order, rollback and signed-in checklist are in [`docs/projects-phase-2-scope.md`](../../projects-phase-2-scope.md); this file is the Map reference (reference letter **S**).
 
 ## 1. Words and rules
 
@@ -65,6 +65,36 @@ The collapsed rail's tooltip and flyout are drawn in body-level layers (above st
 
 `packages/rls-tests/test/proj-phase2-deliverables-site.rls.test.ts` (15); `apps/web/src/lib/projects/phase2/model.test.ts`; `apps/web/src/components/projects/phase2-views.test.tsx`; `apps/web/src/components/nav/sidebar-rail.test.tsx`; browser flows `apps/web/os-shell-checks/project-phase2-flow.mjs` (14) and `sidebar-rail-flow.mjs` (12), local stack only.
 
+## 11. Follow-up: team setup, site-only technicians, Operations review, Work schedule, Work page
+
+Migration `20270107000100_proj_phase2_teams_crew_ops_review.sql`, applied after `20270106000100`, never edited into it. Full text of scope, install order and rollback: `docs/projects-phase-2-scope.md` section 13.
+
+### 11.1 Project team setup
+
+On Work, a project with incomplete team setup shows **Set up your project team** as its first action (`team-setup-card`). The dialog (`TeamSetupDialog`) offers presets **Content, Programming, Engineering, Site / Installation** and **Add custom team**, one lead per team (eligible people only: Projects access in the company), and states which people will be added to the project and what that gives them (workspace, tasks, files, Project Chat); the save needs that confirmation, also checked in `proj_setup_teams`. A team may be saved with no lead: it carries **Lead needed**. Leads are labelled by team (for example "Programming Lead"). Saving creates only the selected teams, never duplicates one (same name, case and spacing ignored), fills a missing lead and never replaces an existing one, and keeps rosters. Afterwards Work shows a compact summary and **Manage team** (`team-summary-card`, `team-manage-open`). The old "Department" selector is **Project team**; HR departments are separate. **Site / Installation** is a project team and never enrols technicians. Needs attention lists a team without a lead (`team_lead_needed`, link to People).
+
+### 11.2 Site-only technicians and the brief
+
+Assign crew accepts members of the project and company employees who are not on it (`proj_site_technician_candidates`); the latter are labelled **site-only**. Each row can have a call time (with its zone) and instructions; **Brief** records Hardware, Content and App readiness (Ready, Not ready, Not known), a note and crew instructions (`proj_set_activity_readiness`); hardware also shows Inventory's request state, read not stored. A confirmed activity's overlap with a confirmed booking (with preparation and travel) or another confirmed activity is refused unless an override reason is given by someone with `override_site_conflict`; on a tentative one it is a warning.
+
+A site-only technician reads only `proj_my_site_assignments()`: activity, own role, venue, call time, relevant instructions and brief readiness, on `/site-assignments` and the My Day card. No policy is widened: tasks, files, Project Chat, reviews, exports and commercial data are refused, including by direct link. The access ends when the crew row is removed, the activity is done or cancelled or ended more than a day ago, or the project is completed.
+
+### 11.3 Operations review of PM-submitted outputs
+
+`proj_submit_task_output` sets the route to Operations when the submitter is the Project Manager (on anyone's task) and refuses a restricted file as evidence on that route. The eligible pool (`proj_output_reviewer_pool`) is the company's Operations Managers except the submitter and the task's assignee; with one person the version is assigned to them, otherwise the pool is notified. `proj_decide_task_output` refuses the submitter and the assignee even holding Operations; the screen mirrors it (`can_decide`). The version shows **Awaiting Operations review** and the reviewer, or **Needs an Operations reviewer** with **Assign reviewer** for the PM and Operations Managers (`proj_assign_output_reviewer`). It appears in the Operations decision queue and on My Day with a link to the version; each new version has its own review and an old link shows "no longer current" and approves nothing. Other submissions keep the team head / Project Manager review.
+
+### 11.4 Work schedule
+
+Project Plan **Timeline** is **Work schedule** (`?view=timeline` and `?view=work-schedule`). Each day is at least 56 px wide (7 days fit beside the 12rem pinned names on a normal desktop; 9 and 30 days scroll inside the chart, never the page); names and the date header stay pinned; **Today** marker and jump; exact dates on every row; **Day / Week**; an edge cue for offscreen dates; trackpad, touch and keyboard scrolling (smooth unless reduced motion); tooltip on hover, focus and tap; bars are read-only (dates change through the task edit action and its approval rules). The Site schedule stays the top-level place for installation, show, dismantling, crew and shipments; the sequence dialog starts blank.
+
+### 11.5 Work page
+
+Compact **Milestones** and **Task outputs** summary with links; older department deliverables are **Work packages**; feedback linked to a removed activation shows **Activation removed**; the Files & client plan shortcut opens the same project's documents page (the reported problem was not reproduced locally; browser check `project-work-files-shortcut-flow.mjs`).
+
+### 11.6 Tests
+
+`proj-phase2-teams-crew-ops.rls.test.ts` (16) with the reworked `proj-phase2-deliverables-site.rls.test.ts` (31 of 31 together); `apps/web/src/lib/projects/teams/model.test.ts`, `lib/projects/work-summary.test.ts`, `components/projects/delivery/plan-timeline.test.tsx`, `lib/projects/delivery-plan/insights.test.ts`; browser flows `project-phase2b-flow.mjs` (17), `project-work-schedule-flow.mjs` (12), `project-work-files-shortcut-flow.mjs` (3), local stack only. Hosted use and signed-in behaviour are unverified by Claude.
+
 ## Coverage rows
 
 | # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
@@ -88,6 +118,20 @@ The collapsed rail's tooltip and flyout are drawn in body-level layers (above st
 | 284 | History wording for outputs, activities, shipments | list | History tab | Readers of the project | Plain sentences, not raw field names | S 7 | Documented |
 | 285 | Collapsed sidebar tooltip | overlay | Hover or focus an icon | Signed-in staff | The whole label outside the rail | S 8 | Documented |
 | 286 | Collapsed sidebar flyout | overlay | Open a module icon | Signed-in staff | Module pages above the page content | S 8 | Documented |
+| 287 | Set up your project team (card and dialog) | dialog | Work page, first action while team setup is incomplete | Project Manager (others see the state) | Pick Content, Programming, Engineering, Site / Installation and custom teams and a lead per team in one save; saving twice never duplicates | S 11.1 | Documented |
+| 288 | Team summary and Manage team | panel | Work page, once teams exist | Readers of the project; Manage team for the Project Manager | Teams with their leads, **Lead needed** flag, and the way back into the same dialog | S 11.1 | Documented |
+| 289 | Project team filter (was Department) | filter | Work page, task filters | Readers of the project | Filter tasks by project team; HR departments stay separate | S 11.1 | Documented |
+| 290 | Milestones and Task outputs summary | panel | Work page | Readers of the project | Compact counts with links to Project Plan and Deliverables filtered by state | S 11.5 | Documented |
+| 291 | Work packages (was Deliverables, department level) | panel | Work page | Readers of the project | The older team-level work packages; the empty state tells the PM the next step | S 11.5 | Documented |
+| 292 | Work schedule (was Timeline) | view | Project Plan, **Work schedule** (`?view=timeline` or `?view=work-schedule`) | Readers of the project | Read-only chart: Day / Week, Today, pinned names and dates, tooltip, scrolls inside the chart | S 11.4 | Documented |
+| 293 | Awaiting Operations review / Needs an Operations reviewer / Assign reviewer | panel and dialog | Task panel and task page, current version | Readers of the project; Assign reviewer for the PM and Operations Managers | Show who reviews a PM-submitted version and let the PM or Operations assign one | S 11.3 | Documented |
+| 294 | Output review in the Operations decision queue and on My Day | panel | Operations Overview `#decisions`; My Day | Operations Managers of the company | Decide one version, linked directly (`?task=&version=`) | S 11.3; O 4.2, 14.3 | Documented |
+| 295 | Crew call time, instructions and site-only label | dialog | Assign crew / Crew | Project Manager | Per person: role, call time, instructions, overlap warning; site-only technicians are named as such | S 11.2 | Documented |
+| 296 | Brief (activity readiness) | dialog | An activity in the Site schedule | Project Manager | Hardware, Content and App readiness with a note and crew instructions | S 11.2 | Documented |
+| 297 | My site assignments | screen | `/site-assignments`; My Day card link | Anyone with a site assignment, including site-only technicians | Own assignments only: activity, role, venue, call time, instructions, brief readiness | S 11.2 | Documented |
+| 298 | My site assignments card | panel | My Day | Anyone with a site assignment | The next assignments with a link to the page | S 11.2 | Documented |
+| 299 | Feedback linked to a removed activation | list | Feedback & changes | Readers of the project | The feedback stays readable and says **Activation removed** (no broken link) | S 11.5 | Documented |
+| 300 | Files & client plan shortcut | link | Work page shortcuts; Manage menu | People who can read the project's details | Open the same project's `/documents` page | S 11.5 | Unverified: the reported hosted problem was not reproduced locally; if it persists send the URL and role |
 
 ## Actions
 
@@ -102,5 +146,11 @@ The collapsed rail's tooltip and flyout are drawn in body-level layers (above st
 | 116 | `projects.site.set_crew` | Assign crew / Crew | Manager | An activity | `setSiteCrew` -> `proj_set_site_crew` | `proj_site_crew`; change log | Crew replaced by the list sent | None | Safe: the same list changes nothing |
 | 117 | `projects.site.save_shipment` | Add shipment / Edit | Manager | Project exists | `saveShipment` -> `proj_save_shipment` | `proj_site_shipments`; change log | Shipment saved; late arrival flagged on read | None | Safe: a client key returns the existing shipment |
 | 118 | `projects.site.remove_shipment` | Remove | Manager | A shipment | `removeShipment` -> `proj_remove_shipment` | `proj_site_shipments`; change log | Shipment removed; the Inventory request is untouched | None | Safe: removing twice is refused as not found |
+
+| 119 | `projects.team.setup` | Set up your project team / Manage team (Save teams) | Manager (`proj_require_manager`); leads need Projects access; a lead not yet on the project needs the access confirmation | Open project | `setupProjectTeams` -> `proj_setup_teams` | `proj_teams` (preset, lead), `proj_project_members` (leads), change log (`team`) | Only the selected teams exist; a team with the same name is kept; a missing lead is filled, an existing lead never replaced; site team enrols no technicians | `project_assigned` to each new lead | Safe: the same list changes nothing; a retry never duplicates a team |
+| 120 | `projects.site.set_readiness` | Brief (Hardware, Content, App, note, instructions) | Manager, open project | An activity | `setActivityReadiness` -> `proj_set_activity_readiness` | `proj_plan_items` readiness and crew instruction columns; change log | Readiness stored; shown to everyone assigned | None | Safe: the same values report unchanged |
+| 121 | `projects.task.assign_output_reviewer` | Assign reviewer / Release to the Operations queue | Manager or an Operations Manager of the company; the reviewer must be an Operations Manager who is neither the submitter nor the task's assignee | The current version, awaiting, routed to Operations | `assignOutputReviewer` -> `proj_assign_output_reviewer` | `proj_task_output_versions` reviewer columns; change log | Reviewer named (or released to the pool) | `project_review_requested` to the reviewer | Safe: the same reviewer reports unchanged; a newer version is refused |
+
+Changed by the follow-up (migration `20270107000100`): `projects.site.set_crew` (116) now also takes a call time and instructions per person, accepts a **site-only technician** (an active company employee who is not a project member), warns on an overlap with confirmed bookings or other confirmed activities and refuses it on a confirmed activity without an override reason and the `override_site_conflict` capability; `projects.task.submit_output` (111) routes a Project Manager's version to Operations and refuses a restricted file as its evidence on that route; `projects.task.decide_output` (112) refuses the submitter and the task's assignee even holding Operations. Reads added: `proj_my_site_assignments` (a person's own assignments, the only read a site-only technician has) and `proj_site_technician_candidates` (who the PM may assign).
 
 The existing review and completion action (`proj_set_task_status`) is unchanged in its label and permissions; it now also refuses a required output that is missing.

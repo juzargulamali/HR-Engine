@@ -1,6 +1,6 @@
 # Projects & Tasks Phase 2: deliverables, versioned reviews, site schedule, Work overview, sidebar fixes
 
-**Status:** draft PR from `feat/projects-phase-2` into `main` (after #92 and #93 merged). One additive migration, `supabase/migrations/20270106000100_proj_phase2_deliverables_site.sql` (apply after `20270105000100`). **Nothing here was run against a hosted project by Claude.** Everything below was checked on a local PostgreSQL 16 and a local production build with fictional data; hosted SQL and signed-in Preview checks are the owner's (see "What was checked where").
+**Status:** draft PR from `feat/projects-phase-2` into `main` (after #92 and #93 merged), kept in draft for signed-in QA. Two additive migrations: `supabase/migrations/20270106000100_proj_phase2_deliverables_site.sql` (apply after `20270105000100`; **owner-reported applied and verified on the hosted project, and not edited since**) and the follow-up `supabase/migrations/20270107000100_proj_phase2_teams_crew_ops_review.sql` (section 13; **not applied anywhere**). **Nothing here was run against a hosted project by Claude.** Everything below was checked on a local PostgreSQL 16 and a local production build with fictional data; hosted SQL and signed-in Preview checks are the owner's (see "What was checked where"). Owner-reported, not run by Claude: the hosted Phase 2 migration and its verify script passed, and the sidebar fix (section 7) passed signed-in QA.
 
 Operations TV is **not** part of this release. It follows in Phase 3 and will read the records created here (task outputs and versions, site activities, crew, shipments, the work overview read).
 
@@ -87,8 +87,15 @@ Rollback: deploy the app from before Phase 2 first (it calls these functions), t
 | Browser flow, 14 checks: output panel, submit v1, changes requested, v2 and the stale review, approval, register, restricted file, RAF Quick add and schedule, shipment conflict, confirmed-date reason, Work overview links, phone | Local production build, fictional data | 14 of 14 passed |
 | #93 smoke: Quick add, retry adds nothing, saved reorder after reload, collapsed sidebar on first paint | Local | 11 of 11 passed |
 | Sidebar rail: icons, tooltip, flyout, keyboard, another module, phone, at normal width, narrow window and zoom | Local | 12 of 12 passed |
-| Hosted preflight, migration, verify | **Owner** | Not run by Claude |
-| Signed-in Preview QA | **Owner** | Not run by Claude (Claude cannot sign in to Preview) |
+| Follow-up RLS: `proj-phase2-teams-crew-ops.rls.test.ts` (16: team setup idempotency, site-only access and revocation, crew overlap and override, Operations routing, self and assignee refusal, no eligible reviewer, stale version, cross-company) with the reworked `proj-phase2-deliverables-site.rls.test.ts`; owner packs applied, verified and rolled back on the same scratch database | Local PostgreSQL 16 | 31 of 31 passed (both Phase 2 suites together) |
+| Follow-up browser flow `project-phase2b-flow.mjs`: new PM selects Content and Programming, assigns a lead, reopens setup without duplicates, submits an output that a different Operations Manager reviews, dual-role self-approval refused, old-version link, "Needs an Operations reviewer", site-only technician denied direct links and export, revocation | Local production build, fictional data | 17 of 17 passed |
+| Follow-up browser flow `project-work-schedule-flow.mjs`: 7-, 9- and 30-day plans on desktop and phone (fit, inner scroll, pinned names and header), wheel, touch swipe, keyboard, Day / Week, Today, tooltip on hover, focus and tap, read-only bars, reduced motion | Local production build, fictional data | 12 of 12 passed |
+| Follow-up browser flow `project-work-files-shortcut-flow.mjs`: Files & client plan shortcut as Project Manager and member, no access | Local production build, fictional data | 3 of 3 passed (the reported problem was not reproduced) |
+| Earlier flows rerun after the follow-up: `project-phase2-flow.mjs` (14 checks; its restricted-file step was updated because a Project Manager's own version can no longer carry a restricted file), `sidebar-rail-flow.mjs` (12), `project-plan-usability-flow.mjs` (11: Quick add, retry, saved reorder) | Local production build, fictional data | 14 of 14, 12 of 12, 11 of 11 passed |
+| Hosted preflight, migration, verify (20270106000100) | **Owner** | Reported passed by the owner (not run by Claude) |
+| Hosted preflight, migration, verify (20270107000100) | **Owner** | Not run by Claude |
+| Sidebar fix, signed-in | **Owner** | Reported passed by the owner (not run by Claude) |
+| Signed-in Preview QA of the follow-up | **Owner** | Not run by Claude (Claude cannot sign in to Preview) |
 
 ## 11. Signed-in Preview checklist (the owner)
 
@@ -106,3 +113,54 @@ Preview shares Production data. Steps marked **WRITES** change real records: use
 ## 12. Left for later releases
 
 Operations TV (Phase 3), AI-generated submissions, meeting-transcript automation. No polling, no per-row requests and no parallel tracking system were added: each screen makes one scoped read.
+
+## 13. Follow-up increment: team setup, site-only technicians, Operations review, Work schedule, Work page
+
+Same draft PR. The applied `20270106000100` is untouched; every database change below is in the new additive migration `supabase/migrations/20270107000100_proj_phase2_teams_crew_ops_review.sql` (apply **after** `20270106000100`). Owner pack: `supabase/manual-sql/proj_phase2_teams_crew_ops_review_00_preflight_readonly.sql`, `..._20_verify_readonly.sql`, `..._90_rollback.sql`.
+
+### 13.1 Project team setup (first step on Work)
+
+* A new project whose team setup is incomplete shows **Set up your project team** first on Work. The Project Manager picks departments from presets (**Content, Programming, Engineering, Site / Installation**) in one go, or **Add custom team** for an exception, and picks a lead per team in the same dialog. A team can be saved before its lead is known: it shows **Lead needed** until one is named. The lead is shown as, for example, "Programming Lead". Only people eligible for the project (Projects access in the company) are offered; the dialog says plainly who will be **added to the project** (and can then read its workspace, tasks, files and Project Chat) and the save needs that confirmation (enforced in the database).
+* `proj_setup_teams` (server action `setupProjectTeams`) creates only the selected teams. A team with the same name (case and spacing ignored) is never duplicated; a missing lead is filled; an **existing lead is never overwritten**; rosters are kept. Reopening and saving again therefore changes nothing. Once complete, Work shows a compact **team summary** and **Manage team** (`team-summary-card`, `team-manage-open`). The project-level "Department" filter is now **Project team**; HR departments stay separate.
+* **Site / Installation** is a team of project members: it never enrols technicians. Technicians are assigned to an activity (13.2).
+
+### 13.2 Site-only technicians
+
+* **Assign crew** (a Project Manager action) may name a company employee who is **not** on the project. They are labelled **site-only**; the dialog explains it. Each crew row can carry a **call time** and **instructions**; the activity carries a brief **readiness** (Hardware, Content, App: Ready / Not ready / Not known, with a note; hardware also shows Inventory's request state, read).
+* A site-only technician reads **only** `proj_my_site_assignments()`: activity, role, venue, call time, relevant instructions and the brief readiness. They see it on **My site assignments** (`/site-assignments`) and a card on My Day. No table policy was widened: they cannot open Project Chat, tasks, files, reviews, exports or commercial data, directly or by link (checked with direct URLs, and the register export is refused). A project engineer and a site-only technician can be on the same activity.
+* The access ends when the crew row is removed (revocation), the activity is done or cancelled, the activity ended more than a day ago, or the project is completed.
+* Conflicts reuse the existing rules: confirmed site bookings (with preparation and travel) and other **confirmed** activities of the same person. On a tentative activity an overlap is returned as a warning; on a **confirmed** one it is refused unless an **override reason** is given by someone holding `override_site_conflict`.
+
+**One deliberate boundary exception (owner decision needed if you disagree).** Until now no `proj_*` function read an HR table (a database test enforces it). Deciding who counts as an eligible site-only technician needs "active employee of this company", and Projects has no other source for that, so `proj_site_technician_eligible` and `proj_site_technician_candidates` read `employees` for exactly five columns (user, company, status, deleted, termination date): no name, pay, reporting line, leave or attendance. The guard test now allows only those two functions and a second test pins the columns they may read. Nothing else changed in that boundary.
+
+### 13.3 Operations review of outputs the Project Manager submits
+
+* A version submitted by the Project Manager (even on someone else's task) is routed to an eligible **Operations Manager** of the project's company (`proj_company_grants.capabilities` contains `operations`; founders do not count by themselves). Other submissions keep the normal Project Manager / team-lead review.
+* **Neither the submitter nor the task's assignee can decide it, even holding Operations**: enforced in `proj_decide_task_output` and mirrored in the screen. With exactly one eligible reviewer the version is assigned to them; otherwise the pool is notified and it waits. Operations gets review authority and evidence access only inside the existing file restrictions (a PM version that references a restricted file is refused for the Operations route).
+* The version shows **Awaiting Operations review** and the reviewer's name. It appears in the existing Operations decision queue and on My Day with a direct link to the version (`/projects/<id>/work?task=<task>&version=<version>`). With no eligible reviewer it shows **Needs an Operations reviewer**, and the Project Manager or an Operations Manager can **assign** one (`proj_assign_output_reviewer`). A new version gets its own review; an old link to an earlier version never approves the newer one (the screen says the version is no longer current and the database refuses).
+
+### 13.4 Work schedule (was Timeline)
+
+* Project Plan → **Timeline** is renamed **Work schedule**; the old `?view=timeline` link still opens it. The **Site schedule** stays the top-level place for installation, show, dismantling, crew and shipments. Delivery schedule records, links and client timeline issuing are unchanged. The "start from a sequence" dialog starts blank (no default Moodboard / Storyboard prompt).
+* Chart (`plan-timeline.tsx`): each day is at least **56 px** wide, so a 7-day plan fits beside the pinned **12rem** names column in a normal desktop window, while 9 and 30 days extend and **scroll inside the chart** (the page itself never scrolls sideways). Task names and the date header are pinned; a **Today** marker and a **Today** jump button; exact dates on every row; a compact **Day / Week** switch (Week groups by week, rows keep exact dates); a subtle edge cue when dates are offscreen. Scrolling works by trackpad, touch swipe and keyboard (arrows, PageUp/PageDown, Home/End), smooth unless the person prefers reduced motion. Hover or keyboard focus on a bar shows a tooltip (name, owner, status, exact dates) clear of the chart edges; on touch a tap does the same. Bars are **read-only**: dates change through the existing task edit action and approval rules.
+
+### 13.5 Work page
+
+* A compact **Milestones** and **Task outputs** summary on Work with links (Task outputs links to Deliverables filtered by Missing / Awaiting / Changes requested / Approved).
+* The older department-level deliverables are now called **Work packages** (an empty state tells the Project Manager the next step). Task outputs stay "Deliverables" under Project Plan.
+* A feedback item linked to an activation that was later removed stays readable and says **Activation removed** (no broken link).
+* **Files & client plan shortcut.** On the local stack the Work shortcut (and the Manage menu item) opens the same project's `/documents` page for the Project Manager and for a project member, and it shows only to people who can read the project; a person with no access to the project gets neither the link nor the page (browser check `project-work-files-shortcut-flow.mjs`, 3 of 3). The reported behaviour was **not reproduced locally**, so no code change was made for it. If it still happens on the hosted Preview, send the exact URL, the role and what appeared.
+
+### 13.6 Install order and rollback for the follow-up
+
+1. `supabase/manual-sql/proj_phase2_teams_crew_ops_review_00_preflight_readonly.sql` (read only): requires the applied `20270106000100`; a second run says "already installed".
+2. Apply `supabase/migrations/20270107000100_proj_phase2_teams_crew_ops_review.sql` (row 35 of `docs/launch-refinement-install-order.md`).
+3. `supabase/manual-sql/proj_phase2_teams_crew_ops_review_20_verify_readonly.sql` (read only): 9 rows; rows 1 to 8 `OK`; row 9 is for information (counts of site-only technicians, versions waiting for Operations review, teams needing a lead).
+4. Deploy the app. Safe in either order for the old screens; the new team, site-only and Operations review screens need the migration.
+
+Rollback: deploy the app from before this increment first, then run `..._90_rollback.sql`. It **stops** while any of this exists: teams without a lead, crew rows with a call time or instructions or site-only technicians, versions routed to Operations, readiness or crew instructions, or team change-log entries (export them first). Otherwise it restores the previous function bodies, unwraps `ops_overview` and restores the earlier constraints. It does not touch `20270106000100` data.
+
+### 13.7 Screenshots (fictional data, local stack)
+
+`docs/projects-phase-2-screenshots/`: `team-setup-dialog-desktop.png`, `team-summary-work-desktop.png`, `operations-review-awaiting-task-desktop.png`, `operations-review-queue-desktop.png`, `my-site-assignments-desktop.png`, `my-site-assignments-phone.png`, `work-schedule-7-days-desktop.png`, `work-schedule-30-days-desktop.png`, `work-schedule-7-days-phone.png`, `work-schedule-30-days-phone.png`, `work-schedule-tooltip-desktop.png`.
+

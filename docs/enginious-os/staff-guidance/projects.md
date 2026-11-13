@@ -695,3 +695,79 @@ The top of a project's Work page lists the next thing happening on site, what is
 2. Next on site gives the next activity with its time, place, owner and whether it is confirmed.
 3. Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.
 4. Recent changes links to the full History.
+
+## Choose the project teams and their leads
+- id: projects-team-setup
+- area: projects
+- status: published
+- keywords: project team; project teams; team lead; lead needed; manage team; programming lead; content team; engineering team; installation team; add custom team; who leads
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+A new project's Work page opens with Set up your project team. Choose teams from Content, Programming, Engineering and Site / Installation, or Add custom team, and pick a lead for each. You can save before every lead is known: that team is flagged Lead needed. A lead new to the project is added to it, so you confirm that first. Saving twice never duplicates a team or replaces a lead. Site / Installation never enrols technicians. Manage team reopens it.
+
+1. Open the project's Work page and press Set up your project team.
+2. Tick the teams you need, or press Add custom team and type a name.
+3. Choose a lead for each team, or leave it for later.
+4. Read which people will be added to the project and tick the confirmation.
+5. Press save. Press Manage team on Work to name a missing lead later.
+
+## Assign technicians who are not on the project
+- id: projects-site-only-technicians
+- area: projects
+- status: published
+- keywords: site only technician; my site assignments; call time; crew instructions; technician assignment; installation crew; readiness; hardware ready; content ready; app ready
+- links: My site assignments -> /site-assignments; Projects -> /projects
+- screens: /projects/[id]/plan; /site-assignments
+
+The Project Manager can put a company employee on an installation activity without adding them to the project; they are labelled site-only. In Assign crew choose the role, call time and instructions; Brief records hardware, content and app readiness. A site-only technician sees only their own assignment under My site assignments: activity, role, venue, call time and instructions. They cannot open Project Chat, tasks, files or exports. Access ends when they are removed, or the activity or project ends.
+
+1. Open Project Plan and choose Site schedule.
+2. Press Assign crew on the activity and choose people, roles, call times and instructions.
+3. Press Brief to record Hardware, Content and App readiness.
+4. Read the warning if a person is already committed at that time, or give the reason for the override.
+5. Technicians open My site assignments to read their own assignment.
+
+## Output the Project Manager hands in: Operations review
+- id: projects-operations-review
+- area: projects
+- status: published
+- keywords: operations review; awaiting operations review; needs an operations reviewer; assign reviewer; operations manager review; project manager output; review of my own output
+- links: Projects -> /projects; Operations -> /operations
+- screens: /projects/[id]/work; /operations
+
+When the Project Manager hands in a version of a task's output, even on someone else's task, an Operations Manager reviews it, not the team lead. It says Awaiting Operations review with the reviewer's name. The person who handed it in and the task's assignee can never approve it, even with the Operations role. With no eligible reviewer it says Needs an Operations reviewer, and the Project Manager or an Operations Manager presses Assign reviewer. Each new version gets its own review.
+
+1. Open the task from the link on Operations or My Day.
+2. Check the version number and read the evidence within the files you may open.
+3. Press Approve this version or Request changes.
+4. If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager.
+
+## The Work schedule chart
+- id: projects-work-schedule
+- area: projects
+- status: published
+- keywords: work schedule; timeline renamed; project plan chart; day view; week view; today marker; chart scroll; chart tooltip; schedule bars
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+The Project Plan view once called Timeline is now Work schedule: each activation and requirement as a bar by its dates. Installation, dismantling, crew and shipments stay under Site schedule. A week fits a normal desktop window; nine or thirty days scroll sideways inside the chart while the page stays still. Names and the date header stay pinned, Today is marked and rows print exact dates. Choose Day or Week, press Today, and hover, focus or tap a bar for details. Bars are read only.
+
+1. Open the project and choose Project Plan, then Work schedule.
+2. Scroll the chart sideways, or press Today.
+3. Choose Day or Week.
+4. Hover, focus or tap a bar for its details.
+
+## Work packages and the Work page summary
+- id: projects-work-summary
+- area: projects
+- status: published
+- keywords: work packages; milestones summary; task outputs summary; deliverables renamed; activation removed; feedback link
+- links: Projects -> /projects
+- screens: /projects/[id]/work; /projects/[id]/changes
+
+A project's Work page lists a short summary of Milestones and Task outputs with links; the output counts open Deliverables filtered to missing, awaiting review, changes requested or approved. The older team-level deliverables are now Work packages: work the Project Manager gives to a project team. Feedback linked to an activation that was removed stays readable and says Activation removed. The Files & client plan link on Work opens the project's files and client plan.
+
+1. Open the project's Work page and read Milestones and Task outputs.
+2. Press a count to open the matching Deliverables list.
+3. Open Work packages to see what each team was given.
