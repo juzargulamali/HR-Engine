@@ -117,7 +117,7 @@ await step("set the next action and mark Meeting booked", async () => {
 await step("the assignee creates a REAL inquiry from the outreach: pre-filled, then Inquiry raised, history kept", async () => {
   await emp.getByRole("link", { name: "Create inquiry" }).click();
   await emp.waitForURL(/\/sales\/new\?/, { timeout: 15000 });
-  eq(await emp.locator("#enq-agency").inputValue(), orgId, "agency pre-filled");
+  eq(await emp.locator('input[name="agencyOrgId"]').inputValue(), orgId, "agency pre-filled"); eq(await emp.locator("#enq-agency").inputValue(), NAME, "agency shown by name"); // the search field shows the name; the chosen id is posted by the hidden input
   await emp.getByLabel("What is the enquiry?").fill("Fictional LED wall for the Prospect Studio launch");
   await emp.locator("#enq-source").selectOption("agency_call");
   await emp.locator("#enq-next-title").fill("Send the quote"); await emp.locator("#enq-next-date").fill("2027-01-25");

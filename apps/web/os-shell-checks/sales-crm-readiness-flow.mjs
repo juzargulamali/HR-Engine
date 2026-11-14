@@ -54,8 +54,10 @@ await step("emp@ (Sales owner) creates the enquiry on the screen and the referen
   await go("/sales/new");
   await page.getByLabel("What is the enquiry?").fill("Fictional interactive floor for the harbour launch");
   await page.getByLabel("Where did it come from?").selectOption("agency_call");
-  await page.locator("select").filter({ has: page.locator("option", { hasText: "Fictional Harbour Client" }) }).first().selectOption({ label: "Fictional Harbour Client" });
+  // End client is a search-as-you-type field: type part of the name, then choose the match.
+  const endClient = page.getByRole("combobox", { name: /^End client/ }); await endClient.click(); await endClient.fill("harbour"); await page.getByRole("option", { name: /Fictional Harbour Client/ }).click();
   await page.getByLabel("Next action").fill("Call the client to qualify the brief"); await page.getByLabel("Budget or value").fill("90000");
+  await page.getByLabel("Time (Dubai)").fill("23:59"); // late today, so the follow-up is "due today" (not overdue) whatever time of day the check runs
   await page.getByRole("button", { name: /record enquiry/i }).click(); await page.waitForURL(/\/sales\/opportunities\/[0-9a-f-]{36}$/, { timeout: 20000 });
   oppUrl = page.url(); OPP = oppUrl.split("/").pop();
   await page.waitForFunction(() => /OPP-UAE-\d{4}-0001/.test(document.querySelector("main").innerText));
@@ -286,7 +288,7 @@ await step("the assigned PM (mgr@) accepts with a double click: exactly ONE proj
   await go("/projects/handovers");
   const btn = page.getByRole("button", { name: /^accept/i }).first();
   await Promise.all([page.waitForURL(/\/projects\/[0-9a-f-]{36}/, { timeout: 25000 }), btn.dblclick()]);
-  const P = page.url().split("/").pop();
+  const P = page.url().match(/\/projects\/([0-9a-f-]{36})/)[1]; // accepting lands on the new project's plan (…/delivery?from=handover)
   if (sql("select count(*) from proj_projects") !== "1" || sql("select count(*) from proj_handovers where project_id is not null") !== "1") throw new Error("not exactly one project");
   if (sql("select status from proj_handovers") !== "accepted") throw new Error("not accepted");
   const again = asDb(4, `select proj_accept_handover('${HANDOVER}')`);
@@ -303,7 +305,7 @@ await step("Reports: readable source names (never the stored id) and the counts;
   const t = flat(await page.locator("main").innerText());
   if (!/Agency call \(outbound\)\s*1/.test(t)) throw new Error("readable source name missing");
   if (/agency_call/.test(t)) throw new Error("the stored id is shown");
-  if (!/n = 1 enquiries/.test(t) || !/Won\s*1/.test(t)) throw new Error(`counts: ${t.slice(0, 600)}`);
+  if (!/Enquiries by source 1 enquiry, /.test(t) || !/Won\s*1/.test(t)) throw new Error(`counts: ${t.slice(0, 600)}`);
   if (/Could not load|This report is incomplete/.test(t)) throw new Error("a card failed on a clean read");
   await page.getByRole("heading", { name: "Enquiries by source" }).scrollIntoViewIfNeeded(); await page.evaluate(() => window.scrollBy(0, -140));
   await shot("4-reports");

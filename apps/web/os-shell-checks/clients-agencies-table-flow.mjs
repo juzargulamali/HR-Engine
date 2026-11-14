@@ -66,10 +66,13 @@ await step("table: one row per organisation, the four badges with their words, a
   await expectBadge("Fictional Harbour Studio", "Won work"); // an old win, but an open enquiry exists: not Dormant
   await expectBadge("Fictional Lotus Hospitality", "Dormant"); // won 200 days ago, nothing open: Dormant beats Won work
   // twin-role enquiry counted once: 2 enquiries (won + new + twin new = 3). Aurora has won, new and the twin = 3
-  const cells = await rowFor("Fictional Aurora Events").locator("td").allInnerTexts();
-  eq(cells[3].trim(), "3", "Aurora enquiries (the twin-role enquiry counts once)"); eq(cells[4].trim(), "1", "Aurora won");
-  if (!/not quotes Enginious sent/.test(await page.locator("main").innerText())) throw new Error("the Enquiries note is not visible");
-  if (!/Dormant = last enquiry 90\+ days ago and no open enquiry/.test(await page.locator("main").innerText())) throw new Error("the 90-day rule is not shown");
+  // Cells are found by their column name (data-label), so a new column never shifts the check.
+  const cell = async (name, col) => (await rowFor(name).locator(`td[data-label="${col}"]`).innerText()).trim();
+  eq(await cell("Fictional Aurora Events", "Enquiries"), "3", "Aurora enquiries (the twin-role enquiry counts once)"); eq(await cell("Fictional Aurora Events", "Won enquiries"), "1", "Aurora won");
+  // What the column counts and the 90-day rule are behind the ⓘ beside the Enquiries and Relationship headings.
+  const hint = async (testId) => { await page.getByTestId(testId).click(); const t = (await page.getByRole("tooltip").last().innerText()).replace(/\s+/g, " "); await page.keyboard.press("Escape"); return t; };
+  if (!/not quotes Enginious sent/.test(await hint("info-hint-enquiries-column"))) throw new Error("the Enquiries note is not behind its ⓘ");
+  if (!/Dormant: The newest linked enquiry was recorded 90 or more days ago .* and no linked enquiry is open/.test(await hint("info-hint-relationship-column"))) throw new Error("the 90-day rule is not behind the Relationship ⓘ");
   await shot("1-desktop-table.png");
 });
 await step("sorting: name A-Z by default, click headers, aria-sort, direction, URL, missing dates last", async () => {
@@ -77,15 +80,15 @@ await step("sorting: name A-Z by default, click headers, aria-sort, direction, U
   eq(await page.locator("th", { hasText: /^Name/ }).getAttribute("aria-sort"), "ascending", "Name aria-sort");
   await page.locator("thead").getByRole("link", { name: /Last enquiry/ }).click(); await page.waitForURL(/sort=last/);
   eq(await page.locator("th", { hasText: "Last enquiry" }).getAttribute("aria-sort"), "descending", "Last enquiry aria-sort");
-  const dates = await page.locator("tbody tr td:nth-child(6)").allInnerTexts();
+  const dates = await page.locator('tbody tr td[data-label="Last enquiry"]').allInnerTexts();
   const none = dates.map((d, i) => (d.trim() === "None" ? i : -1)).filter((i) => i >= 0);
   if (!none.length || none[0] !== dates.length - none.length) throw new Error("accounts without an enquiry are not last: " + dates.join("|"));
   await page.locator("thead").getByRole("link", { name: /Last enquiry/ }).click(); await page.waitForURL(/dir=asc/);
   eq(await page.locator("th", { hasText: "Last enquiry" }).getAttribute("aria-sort"), "ascending", "toggled");
-  const d2 = await page.locator("tbody tr td:nth-child(6)").allInnerTexts();
+  const d2 = await page.locator('tbody tr td[data-label="Last enquiry"]').allInnerTexts();
   eq(d2.slice(-none.length).every((d) => d.trim() === "None"), true, "None still last when ascending");
   await page.locator("thead").getByRole("link", { name: /^Enquiries/ }).click(); await page.waitForURL(/sort=enquiries/);
-  const counts = (await page.locator("tbody tr td:nth-child(4)").allInnerTexts()).map((t) => Number(t.trim()));
+  const counts = (await page.locator('tbody tr td[data-label="Enquiries"]').allInnerTexts()).map((t) => Number(t.trim()));
   if (JSON.stringify(counts) !== JSON.stringify([...counts].sort((a, b) => b - a))) throw new Error("Enquiries not descending: " + counts);
 });
 await step("quick filters: counts, one at a time, kept in the address, reset with All, Export filtered keeps it", async () => {

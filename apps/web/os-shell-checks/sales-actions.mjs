@@ -10,6 +10,11 @@ const text = async () => (await page.locator("body").innerText()).replace(/\s+/g
 const main = async () => (await page.locator("main").innerText()).replace(/\s+/g, " ");
 const tab = (name) => page.getByRole("tab", { name }).or(page.getByText(name, { exact: true })).first().click();
 const seen = (re, ms = 10000) => page.waitForFunction((src) => new RegExp(src).test(document.querySelector("main").innerText), re.source, { timeout: ms });
+// Agency and End client are search-as-you-type fields: type part of the name, then choose the match (typing alone selects nothing).
+const pickOrg = async (scope, label, typed, option) => { const f = scope.getByRole("combobox", { name: label }); await f.click(); await f.fill(typed); await page.getByRole("option", { name: option }).first().click(); };
+// The enquiry page has ONE main button, Log activity and a More menu: every other action (move stage, hold, reopen) is an item of that menu.
+const more = async (item) => { await page.getByRole("group", { name: "Enquiry actions" }).getByRole("button", { name: "More", exact: true }).click(); await page.getByRole("menuitem", { name: item }).click(); };
+const moveStage = () => more(/^Move to another stage/);
 const closed = () => page.waitForFunction(() => !document.querySelector("dialog[open]"));
 
 await step("add organisation (agency)", async () => {
@@ -27,7 +32,7 @@ await step("create enquiry (forced next action, reference issued)", async () => 
   await page.goto(`${BASE}/sales/new`, { waitUntil: "networkidle" });
   await page.getByLabel("What is the enquiry?").fill("Interactive floor projection for showroom launch");
   await page.getByLabel("Where did it come from?").selectOption("agency_call");
-  await page.locator("select").filter({ has: page.locator("option", { hasText: "Zeta Media LLC" }) }).first().selectOption({ label: "Zeta Media LLC" });
+  await pickOrg(page, /^Agency/, "zeta", /Zeta Media LLC/);
   await page.getByLabel("Next action").fill("Call Hana to qualify the brief"); await page.getByLabel("Budget or value").fill("170000");
   await page.getByRole("button", { name: /record enquiry/i }).click(); await page.waitForURL(/\/sales\/opportunities\/[0-9a-f-]{36}$/, { timeout: 15000 });
   url = page.url(); await seen(/OPP-UAE-\d{4}-0001/); // the page renders after the redirect: wait for the issued reference
@@ -37,7 +42,7 @@ await step("create enquiry through Quick Add (agency only, short form) lands on 
   await page.getByRole("button", { name: /^add enquiry$/i }).first().click();
   const d = page.getByRole("dialog", { name: /add an enquiry/i }); await d.waitFor();
   await d.getByLabel("What is the enquiry?").fill("Quick-added lobby screen");
-  await d.getByLabel("Agency", { exact: true }).selectOption({ label: "Zeta Media LLC" });
+  await pickOrg(d, /^Agency/, "zeta", /Zeta Media LLC/);
   await d.getByLabel("Where did it come from?").selectOption("website");
   await d.getByLabel("Next action").fill("Call to qualify"); await d.getByRole("button", { name: /^add enquiry$/i }).click();
   await page.waitForURL(/open=[0-9a-f-]{36}/, { timeout: 15000 }); await page.getByRole("dialog", { name: /quick-added lobby screen/i }).waitFor({ timeout: 15000 });
@@ -52,11 +57,11 @@ await step("completing the only follow-up demands the next action", async () => 
   await dialog().getByRole("button", { name: /^complete$/i }).click(); await page.getByText("Send two concept options").first().waitFor({ timeout: 10000 });
 });
 await step("move stage to Qualified", async () => {
-  await page.getByRole("button", { name: /^move stage$/i }).first().click(); await dialog().getByLabel("Move to").selectOption({ label: "Qualified" });
+  await moveStage(); await dialog().getByLabel("Move to").selectOption({ label: "Qualified" });
   await dialog().getByRole("button", { name: /^move stage$/i }).click(); await closed(); if (sql(`select stage from crm_opportunities where id='${oppId()}'`) !== "qualified") throw new Error("stage not saved");
 });
 await step("hold needs reason + review date, resume needs a next action", async () => {
-  await page.getByRole("button", { name: /put on hold/i }).first().click();
+  await more(/^Put on hold/);
   const rs = dialog().getByLabel(/reason/i).first(); if ((await rs.evaluate((e) => e.tagName)) === "SELECT") await rs.selectOption({ index: 1 }); else await rs.fill("Client postponed the event"); await dialog().getByLabel(/review date/i).fill("2026-11-20");
   await dialog().getByRole("button", { name: /put on hold|hold/i }).last().click(); await closed(); await seen(/On hold/);
   await page.getByRole("button", { name: /resume/i }).first().click(); await dialog().getByLabel(/next action/i).fill("Check in with Hana"); await dialog().getByLabel(/^date/i).fill("2026-11-21");
@@ -64,7 +69,7 @@ await step("hold needs reason + review date, resume needs a next action", async 
 });
 await step("add a note", async () => {
   await tab("Activity & history"); await page.getByLabel(/what happened|note|details/i).first().fill("Hana confirmed the venue is Dubai Mall atrium.");
-  await page.getByRole("button", { name: /add note|save note|add activity|add/i }).first().click(); await page.getByText("Hana confirmed the venue is Dubai Mall atrium.").first().waitFor({ timeout: 10000 });
+  await page.getByRole("button", { name: /^add to timeline$/i }).first().click(); await seen(/Hana confirmed the venue is Dubai Mall atrium\./);
 });
 await step("availability: request then record the check (founder)", async () => {
   await tab("Commercial");
@@ -82,16 +87,17 @@ await step("link: https accepted, http refused", async () => {
 });
 await step("proposal v1: draft, mark sent, then move to Proposal sent", async () => {
   await page.goto(url, { waitUntil: "networkidle" }); await tab("Proposals & files");
+  await page.getByLabel("No document yet").check(); // a version needs an explicit choice: upload, a file already added, or no document yet
   await page.getByRole("button", { name: /add version 1 as a draft/i }).click(); await page.getByText(/Draft/).first().waitFor({ timeout: 10000 });
   await page.getByRole("button", { name: /mark.*sent|record.*sent/i }).first().click(); if (await dialog().count()) await dialog().getByRole("button", { name: /save|record|mark/i }).last().click(); await page.getByText(/Sent\b/).first().waitFor({ timeout: 10000 });
-  await page.getByRole("button", { name: /^move stage$/i }).first().click(); await dialog().getByLabel("Move to").selectOption({ label: "Proposal sent" }); await dialog().getByRole("button", { name: /^move stage$/i }).click(); await closed();
+  await moveStage(); await dialog().getByLabel("Move to").selectOption({ label: "Proposal sent" }); await dialog().getByRole("button", { name: /^move stage$/i }).click(); await closed();
   if (sql(`select stage from crm_opportunities where id='${oppId()}'`) !== "proposal_sent") throw new Error("not Proposal sent");
 });
 await step("Quote sent refused until the Zoho quote reference is saved, then allowed", async () => {
-  await page.getByRole("button", { name: /^move stage$/i }).first().click(); await dialog().getByLabel("Move to").selectOption({ label: "Quote sent" });
+  await moveStage(); await dialog().getByLabel("Move to").selectOption({ label: "Quote sent" });
   const disabled = await dialog().getByRole("button", { name: /^move stage$/i }).isDisabled(); await dialog().getByRole("button", { name: /^cancel$/i }).click(); if (!disabled) throw new Error("not blocked");
   await tab("Commercial"); await page.getByLabel(/Quote reference/i).fill("QT-1001"); await page.getByRole("button", { name: /save references/i }).click(); await page.waitForTimeout(800);
-  await page.getByRole("button", { name: /^move stage$/i }).first().click(); await dialog().getByLabel("Move to").selectOption({ label: "Quote sent" }); await dialog().getByRole("button", { name: /^move stage$/i }).click(); await closed();
+  await moveStage(); await dialog().getByLabel("Move to").selectOption({ label: "Quote sent" }); await dialog().getByRole("button", { name: /^move stage$/i }).click(); await closed();
   if (sql(`select stage from crm_opportunities where id='${oppId()}'`) !== "quote_sent") throw new Error("not Quote sent");
 });
 await step("contacts: add an existing shared contact with a role", async () => {
@@ -127,7 +133,7 @@ await step("close as won with PO evidence, then prepare handover", async () => {
   if (!/Project Manager/i.test(await main())) throw new Error("handover page not rendered");
 });
 await step("founder reopens with reason + new next action; closure history kept", async () => {
-  await page.goto(url, { waitUntil: "networkidle" }); await page.getByRole("button", { name: /^reopen/i }).first().click();
+  await page.goto(url, { waitUntil: "networkidle" }); await more(/^Reopen/);
   await dialog().getByLabel("Why is it being reopened?").fill("Client asked to revise the scope"); await dialog().getByLabel(/what needs to happen/i).fill("Call Hana about the revised scope"); await dialog().getByLabel(/^date/i).first().fill(new Date(Date.now() + 2 * 864e5).toISOString().slice(0, 10)); // a future date in Dubai, whatever day the check runs on
  
   await dialog().getByRole("button", { name: /reopen/i }).last().click(); await closed();
