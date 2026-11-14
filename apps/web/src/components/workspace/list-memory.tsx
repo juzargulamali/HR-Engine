@@ -23,10 +23,10 @@ export function safeListHref(stored: string | null, fallback: string): string {
   return stored === base || stored.startsWith(`${base}?`) ? stored : fallback;
 }
 
-/** The address a list is remembered by: its filters, search, view and sort, but never an open record (`task`, `version`), so coming back from a record's own page lands on the list, not on the panel again. */
+/** The address a list is remembered by: its filters, search, view and sort, but never an open record (`task`, `version`, the side panel's `open`) or a one-off row marker (`focus`), so coming back from a record's own page lands on the list, not on the panel again. */
 export function listAddress(pathname: string, search: string): string {
   const p = new URLSearchParams(search);
-  p.delete("task"); p.delete("version");
+  p.delete("task"); p.delete("version"); p.delete("open"); p.delete("focus");
   const qs = p.toString();
   return qs ? `${pathname}?${qs}` : pathname;
 }

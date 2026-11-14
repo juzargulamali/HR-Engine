@@ -77,7 +77,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
 
   const header = (
     <>
-      <PageHeader title="Follow-ups" actions={<QuickAddEnquiry />} />
+      <PageHeader title="Follow-ups" actions={<QuickAddEnquiry companyId={companyId} />} />
       {companies.length > 1 ? (
         <CompanySwitch companies={companies} current={companyId} from={companyId ? "context" : undefined} hrefFor={(id) => here({ company: id, open: null })} all={{ href: here({ company: null, open: null }), active: !companyId }} />
       ) : companies.length === 1 ? (

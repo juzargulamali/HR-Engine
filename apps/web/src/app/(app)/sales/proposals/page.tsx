@@ -21,7 +21,9 @@ export const metadata = { title: "Proposals & quotes" };
 
 /** The enquiry's tab that holds its proposal versions and files (the tab id in opportunities/[id]/page.tsx). A row opens the enquiry there, not on its overview. */
 const PROPOSALS_TAB = "proposals";
-const enquiryHref = (opportunityId: string) => `/sales/opportunities/${opportunityId}?tab=${PROPOSALS_TAB}`;
+/** An estimate row opens the enquiry's Estimates tab, where estimates are finalised and recorded as sent. */
+const ESTIMATES_TAB = "quotations";
+const enquiryHref = (opportunityId: string, estimate?: unknown) => `/sales/opportunities/${opportunityId}?tab=${estimate ? ESTIMATES_TAB : PROPOSALS_TAB}`;
 
 type Status = CrmProposalRow["status"];
 const STATUSES: { id: Status; label: string }[] = [
@@ -157,11 +159,11 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
               </TableHeader>
               <TableBody>
                 {rows.map((r) => (
-                  <ClickableRow key={r.proposal.id} href={r.opportunity ? enquiryHref(r.opportunity.opp.id) : "/sales/proposals"} className="align-top">
+                  <ClickableRow key={r.proposal.id} href={r.opportunity ? enquiryHref(r.opportunity.opp.id, r.estimate) : "/sales/proposals"} className="align-top">
                     <TableCell className="min-w-0 max-w-xs">
                       {r.opportunity ? (
                         <>
-                          <Link href={enquiryHref(r.opportunity.opp.id)} title={r.opportunity.opp.title} className="break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
+                          <Link href={enquiryHref(r.opportunity.opp.id, r.estimate)} title={r.opportunity.opp.title} className="break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
                           <p className="text-sm text-muted-foreground">{r.opportunity.opp.reference}{showCompany ? ` · ${r.opportunity.companyName}` : ""}</p>
                         </>
                       ) : <span className="text-muted-foreground">Enquiry not available</span>}
@@ -180,10 +182,10 @@ export default async function ProposalsPage({ searchParams }: { searchParams: Pr
 
           <ul className="divide-y divide-border rounded-xl border border-border md:hidden">
             {rows.map((r) => (
-              <ClickableCard as="li" key={r.proposal.id} href={r.opportunity ? enquiryHref(r.opportunity.opp.id) : "/sales/proposals"} className="space-y-1.5 px-4 py-3 text-sm">
+              <ClickableCard as="li" key={r.proposal.id} href={r.opportunity ? enquiryHref(r.opportunity.opp.id, r.estimate) : "/sales/proposals"} className="space-y-1.5 px-4 py-3 text-sm">
                 <div className="flex items-start justify-between gap-2">
                   {r.opportunity ? (
-                    <Link href={enquiryHref(r.opportunity.opp.id)} className="min-w-0 break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
+                    <Link href={enquiryHref(r.opportunity.opp.id, r.estimate)} className="min-w-0 break-words font-medium underline-offset-2 hover:underline">{r.opportunity.opp.title}</Link>
                   ) : <span className="text-muted-foreground">Enquiry not available</span>}
                   <span className="flex shrink-0 items-center gap-1.5"><span className="font-medium tabular-nums">v{r.proposal.version}</span><StatusBadge status={r.proposal.status} estimate={r.estimate} /></span>
                 </div>
