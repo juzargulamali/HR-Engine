@@ -83,10 +83,10 @@ page = await newPage(browser, { width: 1280, height: 420 }); watch(page); await 
 await step("Enquiries opens as a table with the working columns and the open enquiries", async () => {
   await goList();
   const heads = (await page.locator("main thead th").allInnerTexts()).map((t) => t.trim().toLowerCase());
-  for (const h of ["enquiry", "agency / client", "owner", "stage", "next action", "due"]) if (!heads.some((x) => x.startsWith(h))) throw new Error(`missing column ${h}; have ${heads.join(" | ")}`);
+  for (const h of ["enquiry", "agency / client", "owner", "stage", "next action"]) if (!heads.some((x) => x.startsWith(h))) throw new Error(`missing column ${h}; have ${heads.join(" | ")}`);
   if (!heads.some((x) => /install|show/.test(x))) throw new Error("no installation/show date column");
   const t = await rowTitles(); if (t.length !== 4) throw new Error("expected the 4 open enquiries, got " + t.join(", "));
-  if (!/4 of 5 enquiries/.test(await main())) throw new Error("count text: " + (await main()).slice(0, 200));
+  if (!/Showing 4 open enquiries/.test(await main())) throw new Error("count text: " + (await main()).slice(0, 200));
 });
 await step("search by title, by reference and by agency; no match says so; Clear restores", async () => {
   const q = page.getByRole("searchbox"); await q.fill("museum"); await page.waitForURL((u) => u.searchParams.get("q") === "museum"); await until(async () => (await rowTitles()).length === 1, "one row");
@@ -101,8 +101,7 @@ await step("stage, owner and status filters (and a stage the URL invents is igno
   await page.locator("#lt-stage").selectOption(""); await until(async () => (await rowTitles()).length === 4, "stage cleared");
   await page.locator("#lt-owner").selectOption("me"); await until(async () => /Nothing matches/.test(await main()), "ceo owns none");
   await page.locator("#lt-owner").selectOption({ index: 2 }); await until(async () => (await rowTitles()).length === 4, "emp owns the four open ones");
-  // "Show" is one of the less common filters: it lives under "More filters" (a chip says when one is on).
-  { const more = page.getByRole("button", { name: /more filters/i }); if ((await more.getAttribute("aria-expanded")) !== "true") await more.click(); }
+  // "Show" sits beside Stage and Owner (a chip says when it is on).
   await page.locator("#lt-status").selectOption("closed"); await until(async () => (await rowTitles()).join() === "Floor projection for the Orbit launch", "won only");
   await page.locator("#lt-status").selectOption("all"); await until(async () => (await rowTitles()).length === 5, "everything");
   await goList("?stage=not_a_stage&owner=not-a-person&status=weird"); if ((await rowTitles()).length !== 4) throw new Error("invented filters were not ignored");

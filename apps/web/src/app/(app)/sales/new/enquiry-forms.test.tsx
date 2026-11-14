@@ -147,6 +147,7 @@ describe("the full form", () => {
     expect(field<HTMLSelectElement>("Where did it come from?").value).toBe("website");
     fireEvent.submit(form);
     await waitFor(() => expect(createOpportunity).toHaveBeenCalledTimes(2));     // the retry is one more send, not two
+    await act(async () => { answer({ error: "Sales did not answer." }); });      // let the retry finish: an unfinished save would hold up every later one
   });
   it("without an agency or end client nothing is sent and it says why", () => {
     full({ id: UAE, from: "remembered" });
