@@ -150,7 +150,7 @@ const pickByText = async (scope, labelText, optionText) => { const sel = scope.g
 await as("mgr@e2e.local");
 await step("PM: create the Programming team with lead@ as head (head is added as a member)", async () => {
   await go(`/projects/${P}/people`);
-  await page.getByRole("button", { name: /add department team/i }).first().click();
+  await page.getByRole("button", { name: /add project team/i }).first().click();
   await dialog().getByLabel(/name/i).first().fill("Programming");
   await dialog().locator("select").first().selectOption({ label: "lead" });
   await dialog().getByRole("button", { name: /save team/i }).click(); await closed();

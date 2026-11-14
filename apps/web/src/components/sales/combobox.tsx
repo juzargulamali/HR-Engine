@@ -136,7 +136,10 @@ export function SearchCombobox({
         ) : null}
       </div>
       {open && !disabled ? (
-        <ul ref={list} id={listId} role="listbox" aria-label={`${label} matches`} className="absolute z-30 mt-1 max-h-72 w-full overflow-auto rounded-md border border-border bg-raised p-1 text-foreground shadow-[var(--shadow-pop)]">
+        // With matches the list floats over what follows. With NO match it stays in the flow instead: its message points at the button under the field
+        // ("add it below"), and a floating box would cover that very button.
+        <ul ref={list} id={listId} role="listbox" aria-label={`${label} matches`} data-empty={matches.length === 0 ? "true" : undefined}
+          className={cn("mt-1 max-h-72 w-full overflow-auto rounded-md border border-border bg-raised p-1 text-foreground", matches.length === 0 ? "relative" : "absolute z-30 shadow-[var(--shadow-pop)]")}>
           {matches.length === 0 ? (
             <li role="presentation" className="px-2 py-2 text-sm text-muted-foreground">{emptyText ? emptyText(text.trim()) : `Nothing matches “${text.trim()}”.`}</li>
           ) : matches.map((o, i) => (
