@@ -78,3 +78,23 @@ One shared value per account, **1 to 5 (5 highest) or Unrated**, the team's own 
 - Only events and editions can be imported (the calendar import). Observations, agencies and enquiry links have no import; nothing here is exported.
 - An archived event or edition cannot be restored from the screen (and import never reopens one); there is no screen or function that deletes an event, edition or observation-bearing edition.
 - The directory's per-company columns follow the working company (see `sales-clients-and-agencies.md` section 2.1); a per-company breakdown of owners is not shown.
+
+## 6. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+
+Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+
+Where a row of sections 3.1, 3.2, 3.4 or 3.5 differs from this section on layout or labels, this section wins. No database function changed.
+
+| Point | Behaviour | Source |
+|---|---|---|
+| Whose enquiries are counted | The events are shared; the enquiry figures are the viewer's, for the **active Sales company** shown in the bar above the list (`sales-enquiries.md` section 9.1) or, by choice, **All my companies** (`?scope=all`, only for a person with more than one company). With several companies and none to assume the events are still listed and the figures are left out until a company is chosen. Every link between the Events pages carries the company or `scope=all`, so the event page counts for the same company. The figures and the drill-down lists use the same scope | `eventsScope`, `scopeParams`, `address` (`sales/events/scope.ts`); `scope.test.ts` |
+| Three words, said the same everywhere | **Event** (the recurring show, added once with its first edition), **edition** (one dated occurrence; enquiries and observations link to an edition), **next edition** (the following occurrence; earlier editions are never changed) | `EVENT_WORDS` (`event-forms.tsx`) |
+| **Add event** | A new event together with its first edition, in one save (unchanged); the new event opens with that edition selected | `AddEventButton` |
+| **Add edition** (list) / **Add first edition** / **Add next edition** (event page) | Three cases of one dialog. Add next edition starts with the place of the latest edition and **leaves the dates empty on purpose** (a guessed date in a required field is easily saved by mistake; open owner decision 18). The database refuses a second edition of the same event starting on the same date | `EditionButton`, `addEditionLabel` |
+| **More** menus | On the event: **Edit event** (name, kind, website, note) and **Archive event…**. On an edition row: **Edit dates and place** and **Archive edition…** | `EventMenu`, `EditionMenu` |
+| Archive dialog | Says before anything happens: what happens (marked Archived, no longer offered for new enquiry links or observations), what stays (nothing is deleted; history and links stay; tick Include archived to see it) and that it cannot be undone from this screen and who may do it (the person who added it, or a founder; the database decides). The words are the same whatever is attached, so they never reveal an enquiry the person cannot see. A failed archive says to reload before trying again | `ArchiveDialog` (`event-forms.tsx`) |
+| Pager on the list | 100 editions a page: "Showing 1-100 of N editions." with Previous 100 / Next N | `PAGE_SIZE` (`sales/events/page.tsx`) |
+| Event page order | 1. **Editions** (the edition in focus with venue and dates, then every edition with the enquiry figures of the chosen company); 2. **Enquiries linked to <edition>** (exactly those behind the figures); the **Delivery projects** card; 3. **Who exhibited, and with which agency**; 4. **Agencies to contact for <edition>**. The back link returns to the list as it was left (filters, List or Calendar and its month) | `sales/events/[id]/page.tsx` |
+| Import events | The page says the import goes into the one shared calendar, so no company is chosen; the company the person came from is only carried through for the back link and "View Events & Exhibitions" | `events/import/page.tsx`, `import-flow.tsx` |
+
+Tests: `sales/events/page.test.tsx`, `events/[id]/page.test.tsx`, `event-forms.test.tsx`, `events/import/import-flow.test.tsx`, `scope.test.ts`.

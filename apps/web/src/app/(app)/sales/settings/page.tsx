@@ -12,7 +12,8 @@ import { getCrmContext, type CrmCompanyInfo, type CrmContext } from "@/lib/crm/c
 import { createClient } from "@/lib/supabase/server";
 import { SECTION, settingsBlockers } from "./blockers";
 import { VatChoices, type VatChoiceView } from "./quotation-defaults";
-import { APPROVAL_POLICY_EXPLANATION, APPROVAL_POLICY_LABEL, SettingsForm, type SettingsInitial } from "./settings-form";
+import { APPROVAL_POLICY_EXPLANATION, APPROVAL_POLICY_LABEL } from "./approval-policy";
+import { SettingsForm, type SettingsInitial } from "./settings-form";
 
 export const metadata = { title: "Sales settings" };
 

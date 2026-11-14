@@ -119,3 +119,14 @@ Page images of the new outputs (fictional data): `docs/enginious-os/screenshots/
 * **Cleaner storage of the format and the notes:** the marker lives in `terms_label` and Assumptions / Next steps in `terms`. A migration adding a `doc_format` column and structured note columns would replace both; not needed for correctness.
 * Discount line, moving an item between sections, VAT choice management screen: deferred.
 * Automatic email of an estimate: not in v1.
+
+## 5. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+
+Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+
+Words and layout of the enquiry's **Estimates** tab only (`opportunities/[id]/quotations-panel.tsx`); no rule, function or export changed. Section 2.1 otherwise stands.
+
+* The tab now opens with three numbered steps that are always visible: **1. Create draft** ("Starts an editable draft with a new reference. Nothing is sent, reserved or promised."), **2. Finalise** ("Makes a frozen copy: a finalised version cannot be edited again (a change needs a new revision). Nothing is sent."), **3. Record as sent** ("After you have sent a finalised estimate to the client yourself, record it as sent here. It only records the date: nothing is emailed from here.").
+* A draft row offers "Continue the draft, then finalise" to the owner or a founder while the enquiry is open. The **New estimate** panel is labelled "Step 1".
+* The enquiry summary proposes **Record estimate as sent** as the main button when a finalised estimate is not recorded as sent (`primary-action.ts`), and a finalised estimate row in the proposal list points to this tab (`proposals-panel.tsx`).
+* The Proposals & quotes register opens an estimate row on this tab (`sales/proposals/page.tsx`).

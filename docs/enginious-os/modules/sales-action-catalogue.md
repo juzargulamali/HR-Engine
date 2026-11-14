@@ -38,16 +38,16 @@ Shared meanings:
 #### `sales.enquiry.create`
 | Field | Entry |
 |---|---|
-| (1) Reached | `createOpportunity` (`apps/web/src/lib/actions/crm.ts`) from Quick add and `/sales/new`; function `crm_create_opportunity` (`20261115000200_crm_workflow_functions.sql`) |
+| (1) Reached | `createOpportunity` (`apps/web/src/lib/actions/crm.ts`) from Quick add and `/sales/new`; function `crm_create_opportunity` (`20261115000200_crm_workflow_functions.sql`). **Sales & CRM upgrade (2026-11-14, draft PR #96, not merged, code read at `d016c28`):** both forms start in the active Sales company and never on the first by name ([enquiries 9.1, 9.3](./sales-enquiries.md)) |
 | (2) Record | New `crm_opportunities` row; identified afterwards by the returned id and the reference `OPP-<code>-<year>-<nnnn>` |
 | (3) Inputs | Company, title (1 to 200), source (one of 8, [enquiries 3.3](./sales-enquiries.md#33-dropdown-options-and-where-they-come-from)), agency or end client (at least one, role-aware), next action title and date (time default 10:00 Dubai, type), optional owner, dates, location, technologies (name and whole quantity at least 1), value (zero or more), currency (3 letters), brief, scope, waiting on, contacts |
-| (4) Permissions | Any Sales grant for the company; another owner needs `assign_owner` and that person needs an active grant; refused: no grant, no settings row ("CRM settings ... not configured"), agency or client lacking the role (trigger `crm_opportunities_party_roles`), invalid technologies |
-| (5) Starting states | None (creates). Company must have a `crm_company_settings` row |
+| (4) Permissions | Any Sales grant for the company; another owner needs `assign_owner` and that person needs an active grant; refused: no grant, no settings row ("CRM settings ... not configured"), agency or client lacking the role (trigger `crm_opportunities_party_roles`), invalid technologies. **2026-11-14 branch, refused by the server action before the database is called:** a company the person holds no Sales access to ("You do not have Sales access to that company, so the enquiry was not saved."); a company with no Sales settings; an access list that could not be read (nothing is saved; it is never treated as no access). The database repeats the access and settings checks |
+| (5) Starting states | None (creates). Company must have a `crm_company_settings` row. **2026-11-14 branch:** when the form carries an outreach (`outreachId`), that outreach must not already have an enquiry: the action reads `crm_outreach.opportunity_id` as the signed-in person first and, if one is set, creates nothing and returns that enquiry's id ("This outreach already has an enquiry, so a second one was not created."); if the check itself fails nothing is saved. An outreach the person cannot read comes back as no row and the create goes ahead |
 | (6) Changes | `crm_opportunities` (stage `new`), `crm_reference_counters`, `crm_opportunity_contacts`, one open `crm_follow_ups` row for the owner |
 | (7) Side effects | Event `created`; optional `crm_outreach_link_inquiry` when started from Outreach (its refusal leaves the enquiry in place); the new next action appears in the owner's Follow-ups and can later raise reminders |
 | (8) Verify | `/sales/opportunities?open=<id>` or the page: reference, stage New enquiry, owner, one open follow-up, timeline "Enquiry created." |
 | (9) STOP | No. Ask if a similar enquiry warning appears ("This may be the same enquiry"): the person decides |
-| (10) Retry | **Duplicate risk**: each call makes another enquiry and consumes a reference number; no idempotency key. (The JARVIS door, 3.9, is idempotent per confirmation id.) After an ambiguous failure search the list for the title and organisation first |
+| (10) Retry | **Duplicate risk**: each call makes another enquiry and consumes a reference number; no idempotency key (still true on the 2026-11-14 branch: only the outreach case above is protected; open owner decision 14 in `../05-data-tests-and-release-ledger.md` section D). (The JARVIS door, 3.9, is idempotent per confirmation id.) After an ambiguous failure search the list for the title and organisation first |
 | (11) Surface | UI over DB function |
 
 #### `sales.enquiry.edit_details`
@@ -89,7 +89,7 @@ Shared meanings:
 | (4) Permissions | **Any Sales grant** of the company (not only the owner); completing a follow-up needs the follow-up actor rule |
 | (5) Starting states | Not Lost ("A lost opportunity can no longer be updated"); an activity cannot be dated in the future (the app dates it now) |
 | (6) Changes | New `crm_activities` row; first call, email or meeting sets `first_response_at`; optional follow-up done and/or a new follow-up |
-| (7) Side effects | Completing writes an internal note "Follow-up done: ..."; a refused second step is reported as a partial result (the first part stays) |
+| (7) Side effects | Completing writes an internal note "Follow-up done: ..."; a refused second step is reported as a partial result (the first part stays). **2026-11-14 branch (draft PR #96):** when the activity completes a follow-up and its kind is **Note**, `crm_add_activity` is NOT called: the completion's own internal note already holds the same words, so no second Note row is written (a call, email, meeting or client response is still written). A note the person meant as non-internal is therefore kept only as the internal system note (open owner decision 17). The timeline shows a completion once either way (display only, [enquiries 9.5](./sales-enquiries.md)) |
 | (8) Verify | Timeline shows the activity; Follow-ups shows the next step |
 | (9) STOP | No |
 | (10) Retry | **Duplicate risk** (another timeline row each time); partial success possible: read the timeline and follow-ups first |
@@ -235,7 +235,7 @@ Shared meanings:
 #### `sales.enquiry.move_stage`
 | Field | Entry |
 |---|---|
-| (1) Reached | `moveStage` (`crm.ts`); `crm_move_stage`; Move stage dialog, panel menu, board drag |
+| (1) Reached | `moveStage` (`crm.ts`); `crm_move_stage`; Move stage dialog, panel menu, board drag. **2026-11-14 branch (draft PR #96):** on the enquiry page the dialog opens from the summary's More menu or its main button; on the board a move into Proposal sent, Estimate sent or Quote sent is checked first and, when the evidence is missing, the action is not called at all ([pipeline 2.2](./sales-pipeline-and-stages.md)). The database rule is unchanged |
 | (2) Record | `crm_opportunities` by id and version |
 | (3) Inputs | Target working stage (one step back or any forward) |
 | (4) Permissions | Owner/founder |
@@ -417,16 +417,16 @@ Shared meanings:
 #### `sales.reminder.mark_read`
 | Field | Entry |
 |---|---|
-| (1) Reached | `markRemindersRead` (`crm.ts`); `crm_mark_reminder_read` |
+| (1) Reached | `markRemindersRead` (`crm.ts`); `crm_mark_reminder_read`; buttons Dismiss and Mark all read on Follow-ups (`sales/mark-reminders-read.tsx`) |
 | (2) Record | The person's own `crm_reminders` rows |
-| (3) Inputs | One reminder id, or none for all |
+| (3) Inputs | One reminder id, **or several (2026-11-14 branch, draft PR #96: one database call per id, at most 100, duplicates removed)**, or none for all. An empty list marks nothing (it never widens to all). Dismiss on Follow-ups passes every unread row behind the one reminder shown for a follow-up ([follow-ups 7](./sales-followups.md)) |
 | (4) Permissions | Own rows only |
 | (5) Starting states | Unread rows |
 | (6) Changes | `read_at` |
 | (7) Side effects | None |
-| (8) Verify | Reminders card count |
+| (8) Verify | Reminders card count. The action now returns `{ error, marked, failed }`: a partial failure is reported ("Only partly dismissed: X of Y reminder records were marked read. Try again to clear the rest."), never swallowed |
 | (9) STOP | No |
-| (10) Retry | Idempotent |
+| (10) Retry | Idempotent (a retry after a partial failure marks the rest) |
 | (11) Surface | UI over DB function |
 
 #### `sales.handover_notice.dismiss`
@@ -453,7 +453,7 @@ Added 2026-11-12 (merged as PR #86, merge `5b75ade`; commit `d9e8338`, read at `
 |---|---|
 | (1) Reached | `addProposal` (`crm.ts`); `crm_add_proposal` |
 | (2) Record | New `crm_proposals` row on an enquiry (version assigned) |
-| (3) Inputs | Note, optional file already on this enquiry |
+| (3) Inputs | Note, optional file already on this enquiry. **2026-11-14 branch (draft PR #96):** the form can upload the document in the same step; that is two writes, `sales.enquiry.upload_file` then this action, and a retry after the second fails reuses the uploaded file ([proposals 5.1](./sales-proposals-and-zoho.md)) |
 | (4) Permissions | Owner/founder |
 | (5) Starting states | Enquiry not Won/Lost |
 | (6) Changes | `crm_proposals` (status `draft`) |
@@ -1255,4 +1255,6 @@ After a handover is submitted, the next steps are Projects screens and functions
 * **68 actions** catalogued in section 3 (plus one enabled JARVIS action and six disabled ones in section 3.9, counted separately: they sit on top of the actions below) (enquiries, contacts and files 13; stage changes 6; follow-ups, reminders and the handover notice 8, with `sales.handover_notice.dismiss` added 2026-11-12; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 12, with `sales.estimate.record_sent` added 2026-11-11; Operations planning 3, section 3.10, added 2026-11-12 on branch `claude/projects-phase-2b-operations`). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
 * **Flagged stop-and-ask: 34** (25 unconditional, `sales.estimate.record_sent` added 2026-11-11; 9 conditional, `sales.ops.set_planning` added 2026-11-12: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`, `sales.ops.set_planning`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
 * **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 45 (68 less the 23 above; the three Operations planning actions and `sales.handover_notice.dismiss` are among them; this line read 40 while the total was 64, one short since `sales.estimate.record_sent` was added, and 44 while the total was 67) are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
+* **Recount, 2026-11-14 (Sales & CRM upgrade, draft PR #96, not merged; code read at `d016c28`): still 68 actions** (`#### \`sales.` headings counted: 13 + 6 + 8 + 9 + 4 + 4 + 9 + 12 + 3). The upgrade adds **no** action that changes data: it changes how existing actions are reached and worded, and four entries were edited in place (`sales.enquiry.create`: two refusals before the database and the outreach guard; `sales.enquiry.add_activity`: no second Note on a completion; `sales.reminder.mark_read`: several ids and a reported partial failure; `sales.proposal.add_version`: upload in the same step). The active Sales company is a browser cookie (`sales_company`), not a record, and is not an action. Stop-and-ask (34) and not-safely-retryable (23) are unchanged: `sales.enquiry.create` stays a duplicate risk. No migration, no SQL. **A documented function is still not an approved tool.**
+* **Gap named 2026-11-14:** the Events & Exhibitions actions (add an event with its first edition, add or edit an edition, edit an event, archive an event or edition, record an observation, import events, set the outreach priority) have **no entries in this catalogue**; they are described only in [`sales-events-and-exhibitions.md`](./sales-events-and-exhibitions.md). They were not added in this pass because their functions were not re-read (`Unverified`); a worker must treat them as not catalogued and stop and ask.
 * **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).

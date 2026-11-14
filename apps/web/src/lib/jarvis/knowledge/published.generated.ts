@@ -27,7 +27,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open the home page of Enginious OS (My Day).",
       "Read Needs me first. Each line opens the screen where you act.",
       "Operations Managers: on the Operations card, press the number under Waiting for a decision to open that list in Operations.",
-      "Press an installation or the most urgent issue to open that project or record."
+      "Press an installation or the most urgent issue to open that project or record.",
+      "The Task & milestone health card counts your live projects as Blocked, At risk or On track from their tasks and milestones only. Press the i beside its title for the rule."
     ],
     "links": [
       {
@@ -508,7 +509,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Read Needs you and open a line to go to that task or record.",
       "For equipment, the Project Manager opens Equipment to review a draft and submit it; nothing is submitted for you.",
       "If the line says Import failed, press Import the handover equipment to try again, or open Equipment.",
-      "Use Recent activity and Go to for the timeline, files, dependencies and site bookings."
+      "Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Go to also offers Handover brief and, if you have Sales access, Sales enquiry."
     ],
     "links": [
       {
@@ -572,7 +573,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open the handover from My Day, or open Handovers.",
       "Read the brief.",
-      "Press Accept handover to create the project with you as Project Manager; it opens on the project's Work page.",
+      "Press Accept handover to create the project with you as Project Manager; it opens on the project's Project Plan, and Sales is told in the app.",
       "Or press Ask Sales a question; the handover goes back to Sales and you are told when they resubmit.",
       "If you press Accept twice, the same project opens: a second one is never created."
     ],
@@ -2024,14 +2025,17 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "work overview",
       "next on site",
       "needs attention",
-      "recent changes on a project"
+      "recent changes on a project",
+      "recent activity on a project",
+      "handover brief",
+      "sales enquiry of a project"
     ],
-    "summary": "The top of a project's Work page lists the next thing happening on site, what is missing or waiting, who can act on it, and the latest changes.",
+    "summary": "The top of a project's Work page lists the next thing happening on site and what is missing or waiting, with who can act on it. The latest changes are in one Recent activity list beside the tasks.",
     "steps": [
       "Open the project's Work page.",
       "Next on site gives the next activity with its time, place, owner and whether it is confirmed.",
       "Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.",
-      "Recent changes links to the full History."
+      "Recent activity lists the latest changes to dates, status and people together with new output versions, review decisions and site changes, newest first. Full history opens History."
     ],
     "links": [
       {
@@ -2580,10 +2584,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "what is overdue",
       "overdue actions"
     ],
-    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company, or \"What needs my attention today?\" for everything.",
+    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are in Dubai time. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company, or \"What needs my attention today?\" for everything.",
     "steps": [
-      "Open Follow-ups in Sales. Overdue items are listed first.",
-      "Open the enquiry from the item, do the work, then complete or reschedule the follow-up."
+      "Open Follow-ups in Sales and press the Overdue card to see only what is overdue. Show all to-do brings the whole list back.",
+      "Do the work, then press Complete on the row to record what happened and plan the next action.",
+      "If it only needs a new date, press Reschedule and choose Tomorrow, In 2 days, Next week or your own date. The new due date is shown before you save."
     ],
     "links": [
       {
@@ -2723,13 +2728,13 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "create event or edition",
       "add a missing event"
     ],
-    "summary": "Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The list shows 100 at a time (Previous and Next). The chips above it show My open enquiries, Overdue, Due today, Awaiting first response and No next action; each number is how many enquiries that chip will show.",
+    "summary": "Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. The list says how many enquiries it shows and why the rest are hidden, and Clear filters brings back your open enquiries.",
     "steps": [
       "Open Enquiries in Sales.",
-      "Press Add enquiry.",
-      "Fill in the title, the source, the agency and/or end client, and what happens next and when.",
+      "Press Add enquiry and check the company.",
+      "Fill in What is the enquiry?, the source, the agency and/or end client, and what happens next and when. Open the full form keeps what you typed.",
       "If the enquiry is for a show, choose it in Event / Exhibition: the event start and end are filled from that edition and you can still change them. Dates you typed first are kept. If the show or its edition is not listed, press Create event or edition under the field; what you have typed stays as it is.",
-      "Save. The enquiry opens so you can add more details."
+      "Save. You return to the list you started from with the new enquiry open beside it; the full form opens the enquiry's own page."
     ],
     "links": [
       {
@@ -2768,11 +2773,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "handover accepted notice",
       "remove handover accepted"
     ],
-    "summary": "The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up. The Handover card on the page also tells you when a Project Manager has accepted your handover.",
+    "summary": "The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. View only means the follow-up belongs to someone else. With several companies the page shows them all unless you choose one.",
     "steps": [
-      "Open Follow-ups in Sales to see what is due.",
-      "To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).",
-      "Choose what to do, the date and who it is for.",
+      "Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.",
+      "Press Complete to record what happened and plan the next action, or Reschedule to move the due time.",
+      "To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.",
       "A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days."
     ],
     "links": [
@@ -2800,6 +2805,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "log a meeting",
       "add update",
       "add an update",
+      "log activity button",
+      "main button on an enquiry",
+      "more menu",
       "activity",
       "record a call",
       "note on an enquiry",
@@ -2815,13 +2823,13 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "pick up an enquiry",
       "where does it stand"
     ],
-    "summary": "Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. To pick up someone else's enquiry, read the three cards at the top: Next action, Where it stands and Latest activity.",
+    "summary": "Activities are the enquiry's diary. Log one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. Logging only records it: nothing is sent to the client. To pick up someone else's enquiry, read the summary at the top: the next action, the one main button, what is in the way, and where it stands.",
     "steps": [
       "Open the enquiry.",
-      "Press Add update.",
-      "Choose the type (call, email, meeting, note or client response) and write what happened.",
+      "Press Log activity at the top.",
+      "Choose the kind (call, email, meeting, note or client response) and write what happened. If it was one of the planned follow-ups, choose it and your words become its outcome.",
       "Turn on Plan the next step if you want a follow-up created at the same time.",
-      "To read what happened, open Activity & history. All activity shows everything in order; Comments and notes shows only what people wrote. Lines the app recorded (stage changes, follow-ups, estimates recorded as sent, handover) are marked as such."
+      "To read what happened, open Activity & history. All shows everything; People's updates shows what people wrote; System shows what the app recorded. A completed follow-up appears once."
     ],
     "links": [
       {
@@ -2852,8 +2860,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "The enquiry's owner, or a Sales founder, can edit its details while it is open. Once it is Won only a founder can change the value, and a Lost enquiry cannot be edited.",
     "steps": [
       "Open the enquiry.",
-      "Press Edit details.",
-      "Change what you need and save. If someone else changed it first you will be asked to reload.",
+      "Open More at the top and choose Edit details, or use Edit details on the Scope & dates tab.",
+      "Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated.",
       "Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too."
     ],
     "links": [
@@ -2891,8 +2899,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent and Estimate sent sit side by side: an enquiry can reach either, or both. Proposal sent needs a proposal recorded as sent, Estimate sent needs an estimate recorded as sent (Estimates tab), and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.",
     "steps": [
       "Open the enquiry (or use the Board view of Enquiries).",
-      "Choose Move to another stage and pick the stage.",
-      "If the stage needs something first, the screen says what."
+      "Open More at the top, choose Move to another stage and pick the stage. Put on hold, Resume and Reopen are in the same menu.",
+      "If the stage needs something first, the screen says what. On the Board the card stays where it was and shows a link to the tab where you record it."
     ],
     "links": [
       {
@@ -2932,12 +2940,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "open project",
       "pm asked a question"
     ],
-    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the enquiry shows a Delivery handover card: Handover needed, Waiting for PM assignment, Waiting for PM acceptance, PM asked a question, or Project created, with who has it next. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.",
+    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. Contacts, prices and files stay in Sales, and your notes stay on the brief for the Project Manager to read. JARVIS does not close, reopen or hand over enquiries.",
     "steps": [
       "Open the enquiry.",
-      "Choose the Won or Lost action and fill in the form.",
-      "After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit. A new brief starts with the linked event in Notes for the Project Manager, because the Project Manager cannot see Sales events; keep or edit it.",
-      "When it says Project created, Open project takes you to the delivery project if you have access to it.",
+      "Open More at the top, choose Close as won or Close as lost, and fill in the form.",
+      "After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Put the site contact in the notes.",
+      "Submit it, or answer the Project Manager's question and resubmit. When the project exists, Open project takes you to it if you have access.",
       "The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet."
     ],
     "links": [
@@ -2973,9 +2981,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "summary": "Clients & Agencies holds every organisation. Search first so you do not add the same one twice. An organisation can be an agency, a direct client, an end client or a technology company, and an enquiry's agency and end-client boxes offer only organisations with the matching role.",
     "steps": [
-      "Open Clients & Agencies and search by name. The search and the filters apply as you type or choose; More filters holds country, lead source and exhibition.",
-      "If it is not there, add it with its roles (and country and website if you know them).",
-      "To add many at once, use Import from Excel."
+      "Open Clients & Agencies and check the company named above the list: owners and enquiry figures are shown for that company. Search by name; More filters holds country, lead source and exhibition.",
+      "The list shows 100 accounts a page; use Next page for more.",
+      "If it is not there, press Add account and give its roles (and country and website if you know them).",
+      "To add many at once, open Import and export and choose Import from Excel. The preview says what will be created, updated and skipped before you confirm."
     ],
     "links": [
       {
@@ -3095,7 +3104,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press Record an observation, choose the edition and the exhibitor, then the agency (or Agency unknown).",
       "Read Who exhibited, and with which agency to compare the years.",
       "Under Agencies to contact, set the outreach priority and open the account to start outreach or a follow-up.",
-      "Press Add first edition on an event that has none yet, or Add next edition when the next dates are known. Archive keeps the history; nothing is deleted."
+      "Press Add first edition on an event that has none yet, or Add next edition when the next dates are known: it starts with the last place and you enter the dates. Edit and Archive are under More; archiving keeps the history and deletes nothing."
     ],
     "links": [
       {
@@ -3161,11 +3170,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "re-engage a client",
       "assign outreach"
     ],
-    "summary": "Outreach is your list of accounts to approach before any enquiry exists. Each card shows the objective, the target date, the last contact and the next action, with overdue ones marked. It never creates an enquiry by itself; you create one from the account when the client is ready.",
+    "summary": "Outreach is your list of accounts to approach before any enquiry exists. Each row shows the account, its contact, the owner, the next action with its due date, and where it stands in words: overdue, due today, waiting for reply or enquiry raised. Logging an activity only records it; nothing is sent to the client. It never creates an enquiry by itself.",
     "steps": [
-      "Open Outreach in Sales to see what is assigned to you.",
-      "Open an account from its card to log what you did and set the next action.",
-      "Choose a status or tick Overdue only to decide what to do first: the list changes as soon as you choose, and Clear removes the filters.",
+      "Open Outreach in Sales and check the company named above the list.",
+      "Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.",
+      "Choose a status or tick Overdue only to decide what to do first.",
+      "When the client is ready, open the account and press Create inquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.",
       "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
     ],
     "links": [
@@ -3196,10 +3206,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "response time",
       "statistics"
     ],
-    "summary": "Sales reports are read-only pages of figures with their definitions. If a card cannot be loaded it says so instead of showing zero.",
+    "summary": "Sales reports are read-only figures in two groups. Current pipeline and follow-ups is as of now and does not change with the dates. Results for the selected period counts only what was logged or closed between the dates. Under each title a line says how many records, which company and which period the figure rests on. If a card cannot be loaded it says so instead of showing zero.",
     "steps": [
       "Open Reports in Sales.",
-      "Choose the period, and the company if you have access to more than one."
+      "Choose the company above the report (or All my companies), then the period.",
+      "Press the i beside a title for its definition. A number that is a link opens exactly those enquiries."
     ],
     "links": [
       {
@@ -3225,9 +3236,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "vat choices",
       "settings"
     ],
-    "summary": "Each company's Sales settings (reference code, currency, response target, working calendar, duplicate window, owner e-mail, approval policy and the estimate VAT choices) are kept on one page, for people who manage Sales settings or are founders.",
+    "summary": "Sales settings are shown for one company at a time, in three parts: Response targets, Commercial approval, and Estimates & VAT with the VAT choices. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.",
     "steps": [
-      "Open Settings in Sales (under Manage in the menu)."
+      "Open Settings in Sales (under Manage in the menu) and choose the company above the page.",
+      "Follow a link in the list at the top to the setting that needs filling in.",
+      "Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes."
     ],
     "links": [
       {
@@ -3271,6 +3284,77 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/sales/opportunities/[id]"
+    ]
+  },
+  {
+    "id": "sales-company",
+    "area": "sales",
+    "title": "The company you are working in, in Sales",
+    "keywords": [
+      "which company",
+      "wrong company",
+      "change company in sales",
+      "choose a company",
+      "all my companies",
+      "company bar",
+      "sales company",
+      "switch company",
+      "why this company"
+    ],
+    "summary": "Sales pages and the Add enquiry forms work in one company, named above each page. It is the company of what you have open, else the one you used last in Sales, else the company you are employed by. If you have several and none of these applies, the page asks you to choose and shows nothing until you do. Follow-ups, Enquiries, Events and Reports can also show All my companies.",
+    "steps": [
+      "Look at Company above the list. Press the i beside it to see why that company is shown.",
+      "Press another company to change it. The next Sales page and Add enquiry open in the company you chose.",
+      "If the page says Choose a company, press one to see its records."
+    ],
+    "links": [
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      },
+      {
+        "label": "Reports",
+        "href": "/sales/reports"
+      }
+    ],
+    "screens": [
+      "/sales/reports"
+    ]
+  },
+  {
+    "id": "sales-proposal-version",
+    "area": "sales",
+    "title": "Add a proposal version",
+    "keywords": [
+      "add proposal",
+      "proposal version",
+      "upload a proposal",
+      "proposal document",
+      "record proposal as sent",
+      "proposal accepted",
+      "proposals and quotes",
+      "proposal register",
+      "new version of a proposal"
+    ],
+    "summary": "A proposal is made outside Enginious OS and kept on the enquiry as a file or link, one version at a time. The owner of the enquiry or a Sales founder adds versions. Sent is a date you record after sending it yourself; it is not an approval, and Accepted is not a win. Proposals & quotes lists every version across enquiries with its next action.",
+    "steps": [
+      "Open the enquiry and go to Proposals & files.",
+      "Under Add version, write what changed and choose Upload a new file, Use a file already added or No document yet.",
+      "Press Add version as a draft. If the file went up but the version did not, press Retry: the file is not uploaded again.",
+      "After you send it to the client, press Record as sent on that version; record it as accepted when the client accepts it."
+    ],
+    "links": [
+      {
+        "label": "Proposals & quotes",
+        "href": "/sales/proposals"
+      },
+      {
+        "label": "Enquiries",
+        "href": "/sales/opportunities"
+      }
+    ],
+    "screens": [
+      "/sales/proposals"
     ]
   }
 ];

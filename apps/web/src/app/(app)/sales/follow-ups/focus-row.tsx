@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
-
-/** The id a follow-up's row carries on the Follow-ups page, so a link with `?focus=<id>` can be scrolled to. */
-export const followUpRowId = (id: string) => `follow-up-${id}`;
+import { followUpRowId } from "./row-id";
 
 /**
  * Brings the follow-up named in the address (`?focus=<id>`, from a reminder or from My Day) into view. The row is already marked in words and colour by

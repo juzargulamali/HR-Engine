@@ -53,3 +53,22 @@ My Day "Sales pipeline" widget and counts (`lib/my-day/attention.ts`, `lib/crm/m
 1. **Fixed (PR #68, merged as `ca3e4483ce4745e359ddb3377b52748175f3881f`):** the Enquiries by source card printed the stored source id; it now prints the readable name.
 2. **Fixed (same branch):** the `crm_closures` read ignored its error; also `loadFollowUps` (shared with the Follow-ups page) ignored the errors of its enquiry and organisation reads and would silently drop follow-ups: both now fail the read (the Reports Follow-ups card and the Follow-ups page say "Could not load"). The ignored closures read is on the **Won and lost** card (the reopened-closures sentence), not on the source card.
 3. Won value uses the enquiry's current `value`; a founder's later value edit on a Won enquiry therefore changes past figures (the closure keeps `value_at_close`, which the card does not use).
+
+## 7. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+
+Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+
+Words, grouping and links only: **no calculation changed** (`lib/crm/reports.ts` gained labels and helpers; the comment there says "nothing here changes a calculation"). Where sections 2 and 3 differ from this section on layout or titles, this section wins.
+
+| Point | Behaviour | Source |
+|---|---|---|
+| Company | The company bar above the report: the active Sales company (`sales-enquiries.md` section 9.1), with **All my companies** for a person who holds several. With several and none to assume nothing is loaded: "Choose a company above to see the reports." | `pickSalesCompany`, `CompanySwitch`, `ChooseCompanyNotice` (`sales/reports/page.tsx`) |
+| Two groups | **Current pipeline and follow-ups** ("As of now. The dates above do not change these figures."): Open pipeline by stage, Open pipeline by owner, Follow-ups. **Results for the selected period** ("Only what was logged or closed between the dates above (Dubai dates)."): Timeliness, Won and lost, Lost reasons, Enquiries by source, Won value, Won value against invoice and payment references | `REPORT_GROUPS`, `REPORT_TEXT` |
+| Definitions | Each report's definition is behind the ⓘ beside its title | `REPORT_TEXT` |
+| Scope line | Under each title, what the figure rests on: "<count> <thing>, <company>, <period or as of now>", and the currencies (each on its own line; never added together) | `scopeLine`, `periodText`, `currenciesOf` |
+| One timeliness notice | When a company has no response target or working calendar, ONE notice at the top names each such company with a link to its settings ("Set response targets for <company>" or "See response targets ..."; opens `/sales/settings?company=<id>#response-targets`). The Timeliness card then says "Not configured (see the notice at the top of this page). Only elapsed times are shown." | `timelinessByCompany`; `page.tsx` |
+| Count links | A count is a link to the Enquiries list only where that list can show exactly the same set: one company, a complete read, and a filter the list has (a stage, or an owner with the default Show = open). The period figures (won, lost, sources) are not linked, because the list has no date or source filter; nothing is linked under All my companies | `page.tsx` (comment above `report-count-link`) |
+| Period | The dates in words with "(Dubai dates)"; **Last 90 days** resets the period | `page.tsx` |
+| Failed reads | Unchanged rule: "This report is incomplete. Could not load: ..." and each affected card says so | section 4 |
+
+Tests: `sales/reports/page.test.tsx`, `lib/crm/reports-labels.test.ts`.

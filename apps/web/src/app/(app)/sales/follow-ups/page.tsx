@@ -31,7 +31,8 @@ import type { CrmReminderRow } from "@/types/crm";
 import { cn } from "@/lib/utils";
 import { EnquirySidePanel } from "../_panel/enquiry-panel";
 import { MarkRemindersReadButton } from "../mark-reminders-read";
-import { FocusRow, followUpRowId } from "./focus-row";
+import { FocusRow } from "./focus-row";
+import { followUpRowId } from "./row-id";
 
 export const metadata = { title: "Follow-ups" };
 

@@ -91,3 +91,37 @@ What the Quote sent gate does NOT check: that the quote exists in Zoho, that its
 1. **Fixed (migration `20261222000100`, applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)):** `crm_upsert_zoho_reference` had no stage check and overwrote all fields. Now: merge, omitted-versus-clear, row lock, stale-field check, Lost refused (section 2.3). **Owner decision B (implemented in the same unapplied migration):** the quote reference cannot be cleared once the enquiry has reached Quote sent (stages `quote_sent`, `negotiation`, `won`, and on hold from the first two); a correction to another value is allowed. The new app has no write fallback: with the old database, Zoho saving is unavailable by design. The OLD app against the migrated database can still overwrite another person's concurrent edit of a field (nonblank values win) and cannot clear a field: documented residual risk for the cutover window, `../../sales-crm-write-rules-deployment.md`.
 2. **Fixed (same migration):** `crm_set_proposal_status` for `superseded` did not check the starting status; it now allows only `draft` or `sent` (section 1).
 3. The Zoho quote reference gate is satisfied by any non-blank text.
+
+## 5. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+
+Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+
+Where a row of sections 1, 1.1 or 2 differs from this section, this section wins. The database functions are unchanged.
+
+### 5.1 Add a proposal version with its document (`proposal-forms.tsx`, `use-crm-upload.ts`, `proposals-panel.tsx`, `helpers.ts`)
+
+| Control | What it does | Behind it |
+|---|---|---|
+| Panel **Add version N** | One form: "What changed" (a note) and **Proposal document** with three choices: **Upload a new file**, **Use a file already added**, **No document yet**. Button "Add version N as a draft". The line "Records a draft version. Nothing is sent to the client from here." stays on the form | `AddProposalForm` -> `addProposal` -> `crm_add_proposal` |
+| Upload a new file | The same private, checked upload as Files and links (name, type and size checked in the browser and again by the server; the bytes go to the private quarantine bucket; the server checks what arrived before the file is registered), so the file is also listed under Files and links. Progress words: "Checking the file…", "Uploading privately…", "Checking the file's contents…" | `useCrmUpload`, `uploadCrmFile` -> `prepareCrmUpload`, `finalizeCrmUpload` (`lib/actions/crmFiles.ts`) |
+| Two writes, and the retry | The file is written first, then the version. If the file went up and the version did not, the form says "The file was uploaded. Adding the version did not finish." and the button becomes "Retry adding version N": **the retry reuses the uploaded file; it is never uploaded twice**. "Use a different file" drops it from the form (the file itself stays under Files and links). If the server did not say which file it registered, the form switches to "Use a file already added" and says so | `uploaded`, `versionPending` in `AddProposalForm` |
+| Next step beside each version | A sentence from the recorded status only: a draft: "Send it to the client yourself, then record it as sent here." (an estimate: "Finish the estimate and finalise it" or "... record it as sent on the Estimates tab."); sent: "Record it as accepted when the client accepts it, or add a new version if they ask for changes."; accepted and not yet won: "The client accepted it. Winning still needs a purchase order or an authorised email (Close as won, under More)." It never says a client replied or that something was sent | `proposalNextStep` (`helpers.ts`); `helpers.test.ts` |
+| Link **Proposals & quotes register** | On the panel heading; opens `/sales/proposals?company=<id>` | `proposals-panel.tsx` |
+
+Tests: `opportunities/[id]/proposal-forms.test.tsx`. The storage side of the upload needs a running stack: `Unverified`.
+
+### 5.2 The register `/sales/proposals` (`sales/proposals/page.tsx`, `loadProposals` in `lib/crm/data.ts`)
+
+Heading **Proposals & quotes** with an ⓘ ("Sent means someone recorded that it went to the client: nothing is sent from here, and it does not mean anyone approved it"). Columns: Enquiry, Version and status, **Next action** (the enquiry's next follow-up and its due time; "No follow-up planned on the enquiry" in amber; "None: the enquiry is won/lost", "None: replaced by a newer version", "None: the enquiry is on hold"), Sent, File or link, Owner. **A row opens the enquiry on its Proposals & files tab; an estimate row opens the Estimates tab** (it used to open the enquiry's first tab). The read is bounded to the newest 500 versions (`PROPOSALS_LIMIT`); when it comes back full the page says "Showing the latest 500 versions. Older ones are not listed or counted here: open the enquiry to see all of its versions." The proposal files are now read by the ids the versions point at, in chunks, instead of one unranged read (which stopped at the data service's own cap and showed "No file attached" for the rest). A failed read says "Could not load proposals and quotes". Tests: `sales/proposals/page.test.tsx`.
+
+### 5.3 Commercial tab (`commercial-panel.tsx`, `commercial-forms.tsx`)
+
+The three blocks are numbered and each says what blocks its action, beside the action:
+
+| Block | Blocker or state said in words | Source of the rule |
+|---|---|---|
+| **1. Equipment availability** | "Needs repeating." when the dates, technologies or quantities changed after the last check; "Already requested: it cannot be requested again until the result is recorded."; "Only the owner (X) or a founder can request a check."; "Recording the result: only a founder, or someone they gave the permission to. The owner cannot on their own." | `crm_request_availability`, `crm_record_availability` (section 2.1) |
+| **2. Internal approval** | Policy not set: "Requesting approval is blocked: the founders have not set a commercial approval rule for this company yet ..."; policy Not required: "Nothing to request ... Nothing here counts as approved."; a request waiting: "Waiting for a founder's decision (a new request cannot be made until this one is decided)" | `crm_request_approval`, `crm_decide_approval` (section 2.2) |
+| **3. Zoho Books references** | "Typed in by hand from Zoho Books. Nothing syncs: this system does not read from Zoho Books or write to it." Before Quote sent: "Quote sent is blocked: the enquiry cannot be moved to Quote sent until the Zoho Books quote reference is saved here.", or "A quote reference is on record, so the enquiry can be moved to Quote sent." | `crm_move_stage` gate (`20261228000100`), section 2.3 |
+
+The tab opens with "Three separate facts, each with its own state and action ... None of them stands for another." The Overview tab's **Commercial status** panel says the same and links here. Rules, permissions and functions are unchanged.

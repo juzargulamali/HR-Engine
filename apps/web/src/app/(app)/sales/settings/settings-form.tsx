@@ -14,8 +14,9 @@ import { Panel } from "@/components/projects/parts";
 import { Field } from "@/components/sales/action-form";
 import { confirmDiscard, useUnsavedChanges } from "@/components/workspace/unsaved";
 import { SECTION } from "./blockers";
+import { APPROVAL_POLICY_EXPLANATION, APPROVAL_POLICY_LABEL, type ApprovalPolicyValue } from "./approval-policy";
 
-export type ApprovalPolicyValue = "not_configured" | "not_required" | "required";
+export type { ApprovalPolicyValue };
 
 export interface SettingsInitial {
   referenceCode: string;
@@ -30,18 +31,6 @@ export interface SettingsInitial {
   approvalPolicy: ApprovalPolicyValue;
   approvalNote: string;
 }
-
-export const APPROVAL_POLICY_LABEL: Record<ApprovalPolicyValue, string> = {
-  not_configured: "Not configured (nobody has decided yet)",
-  not_required: "Not required",
-  required: "Required",
-};
-
-export const APPROVAL_POLICY_EXPLANATION: Record<ApprovalPolicyValue, string> = {
-  not_configured: "Nobody has decided yet. Until a policy is set, nothing can be approved, and no proposal will show as approved.",
-  not_required: "A founder has decided proposals do not need internal approval before they are sent.",
-  required: "Proposals need a founder's recorded approval before they are treated as approved.",
-};
 
 const WEEKDAYS: { value: number; label: string }[] = [
   { value: 1, label: "Mon" }, { value: 2, label: "Tue" }, { value: 3, label: "Wed" }, { value: 4, label: "Thu" },
