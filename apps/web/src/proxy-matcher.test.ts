@@ -13,3 +13,9 @@ describe("proxy matcher", () => {
     for (const p of ["/os-preview", "/os-preview/sales", "/os-preview/sales/opportunities/OPP-2026-0041"]) expect(re.test(p)).toBe(false);
   });
 });
+
+describe("proxy matcher and the office board", () => {
+  it("runs for the board and its refresh route, so a display identity is always checked", () => {
+    for (const p of ["/tv", "/api/tv/board"]) expect(re.test(p)).toBe(true);
+  });
+});

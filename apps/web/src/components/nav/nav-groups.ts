@@ -253,6 +253,7 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
           links: [
             { href: "/operations", label: "Overview", iconKey: "operations" },
             { href: "/operations/upcoming", label: "Upcoming Work", iconKey: "operations" },
+            { href: "/operations/office-board", label: "Office board", iconKey: "operations" },
           ],
         },
       ],

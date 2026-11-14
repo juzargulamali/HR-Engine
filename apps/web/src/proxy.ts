@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { configurationErrorPage, missingSettings } from "@/lib/config-check";
+import { displayMayReach, isDisplayUser, TV_PATH } from "@/lib/operations-tv/gate";
 
 // /set-password and /reset-password must stay public: they're where an
 // invite/recovery email lands before the recipient has any session cookie
@@ -64,6 +65,14 @@ export async function proxy(request: NextRequest) {
     // The query string comes back too: a scanned label (/inventory/scan?c=CODE) opens its record after sign-in.
     loginUrl.searchParams.set("next", request.nextUrl.pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
+  }
+
+  // An office-board display identity (app_metadata.ops_tv) reaches only the board, its refresh route and sign-in. Anything else goes back to the board;
+  // the API answers 403 rather than redirecting. The database refuses such an account on its own as well (no employee record, no grant).
+  if (user && isDisplayUser(user)) {
+    const path = request.nextUrl.pathname;
+    if (path.startsWith("/api/") && !displayMayReach(path)) return new NextResponse(JSON.stringify({ error: "forbidden" }), { status: 403, headers: { "content-type": "application/json", "cache-control": "no-store, private" } });
+    if (path === "/login" || !displayMayReach(path)) return NextResponse.redirect(new URL(TV_PATH, request.url));
   }
 
   if (user && request.nextUrl.pathname === "/login") {

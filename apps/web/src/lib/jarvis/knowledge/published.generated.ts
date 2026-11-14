@@ -2379,6 +2379,146 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "projects-office-board-add-display",
+    "area": "projects",
+    "title": "Add an office TV display",
+    "keywords": [
+      "office screen",
+      "office tv",
+      "operations screen",
+      "add a display",
+      "tv sign-in",
+      "display password",
+      "wall screen",
+      "operations tv"
+    ],
+    "summary": "The office screen is a read-only screen for the office TV. It needs its own sign-in, made by an Operations Manager (or a founder) for one company. The sign-in can open the screen and nothing else.",
+    "steps": [
+      "Open Operations, then Office board, and choose the company.",
+      "Press Add a display. Enter a name such as Office TV, an e-mail address that nobody else uses for signing in, and the office time zone.",
+      "Press Create display. The e-mail and a long password appear once. Copy the password now: it cannot be looked up later, and it must not be pasted into chat or a ticket.",
+      "On the TV's browser, open the app's sign-in page and sign in with that e-mail and password. It goes straight to the screen. Bookmark the screen and set the browser to open it when it starts.",
+      "Back on Office board, the display is listed as Active with the time it was last seen."
+    ],
+    "links": [
+      {
+        "label": "Office board",
+        "href": "/operations/office-board"
+      },
+      {
+        "label": "Operations Overview",
+        "href": "/operations"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
+    "id": "projects-office-board-revoke-display",
+    "area": "projects",
+    "title": "Take an office TV display out of service",
+    "keywords": [
+      "revoke display",
+      "office screen",
+      "office tv lost",
+      "stop the tv",
+      "display password reset",
+      "remove tv sign-in",
+      "operations tv"
+    ],
+    "summary": "Revoking a display stops it at once. The screen clears on the TV within about a minute and says why. A revoked display cannot be switched back on.",
+    "steps": [
+      "Open Operations, then Office board, and go to the display's row.",
+      "Press Revoke and confirm. The row now reads Revoked.",
+      "If the page says the sign-in could not be blocked, press Retry sign-in block. The screen is already refused in the meantime.",
+      "For a new password, or a new TV, revoke the old display and add a new one: there is no password reset for a display."
+    ],
+    "links": [
+      {
+        "label": "Office board",
+        "href": "/operations/office-board"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
+    "id": "projects-office-board-read",
+    "area": "projects",
+    "title": "Read the office TV screen",
+    "keywords": [
+      "office tv",
+      "operations tv",
+      "wall screen",
+      "next on site",
+      "who is going",
+      "what could hold it up",
+      "crew missing",
+      "call time pending",
+      "shipment arrival after setup",
+      "start unconfirmed",
+      "stale"
+    ],
+    "summary": "The office screen answers three questions at a glance: what is happening on site next, who is going, and what could hold it up. It only reads what the team already recorded; nothing on it can be changed.",
+    "steps": [
+      "The dark column on the left, Next on site, covers installation, event and dismantle days and key shipments in date order: the date and time first, then the venue and who is going, then what could hold it up. It stays in place while the projects rotate.",
+      "The light table, Active projects, has a row for each project with its next runs (Run 1, Run 2 and so on), the venue and the people going, and the most important blocker. A project with nothing booked says No scheduled site work. Handovers waiting for a Project Manager to accept sit in a small group underneath.",
+      "Amber with words means attention: Crew missing (nobody is assigned to the run), Call time pending (someone has no call time), Shipment arrival after setup (the equipment arrives after setup starts), Start unconfirmed (the date passed and nobody recorded that work began), Not ready, Readiness not recorded. Teal marks the next activity. Started appears only when the Project Manager recorded the start.",
+      "Last updated gives the time the screen was read. If it could not refresh, a Stale bar keeps the last good screen and says as of when. If the sign-in ends or is revoked, the screen clears and says why.",
+      "On a phone the same information is a vertical agenda with project cards, and it scrolls at your own pace; the pages do not rotate."
+    ],
+    "links": [
+      {
+        "label": "Operations Overview",
+        "href": "/operations"
+      },
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
+    "id": "projects-office-board-change",
+    "area": "projects",
+    "title": "Change something that appears on the office TV screen",
+    "keywords": [
+      "office screen",
+      "update the screen",
+      "change a date",
+      "crew assignment",
+      "equipment request",
+      "refresh",
+      "tv not updated"
+    ],
+    "summary": "Nothing is typed into the screen. A Project Manager changes the date, the crew or the equipment request once, in the place they already use, and the screen picks it up on its next refresh, within about a minute.",
+    "steps": [
+      "Open the project and its Site schedule. Change the date or time with Edit, or press Crew to assign people and set each call time.",
+      "To record that work began, press Record started on the activity. Until then a passed date reads Start unconfirmed.",
+      "For equipment, open the project's Equipment tab and progress the request there. The screen reports the request's own state.",
+      "Wait about a minute. Last updated on the screen advances and the change appears under the same run.",
+      "If it does not appear, make sure that the screen is not marked Stale, and that the change was saved on the project."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      },
+      {
+        "label": "Operations Overview",
+        "href": "/operations"
+      }
+    ],
+    "screens": [
+      "/operations"
+    ]
+  },
+  {
     "id": "sales-overview",
     "area": "sales",
     "title": "How Sales & CRM works",

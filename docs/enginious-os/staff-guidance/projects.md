@@ -876,3 +876,66 @@ Files and client plan reads in three steps: Choose what the client sees, Preview
 2. Tick or untick items under Choose what the client sees and press Save what the client sees.
 3. Read the Preview, then issue a version when it is right.
 4. Open any earlier issued version from the list; it stays as it was issued.
+
+## Add an office TV display
+- id: projects-office-board-add-display
+- area: projects
+- status: published
+- keywords: office screen; office tv; operations screen; add a display; tv sign-in; display password; wall screen; operations tv
+- links: Office board -> /operations/office-board; Operations Overview -> /operations
+- screens: /operations
+
+The office screen is a read-only screen for the office TV. It needs its own sign-in, made by an Operations Manager (or a founder) for one company. The sign-in can open the screen and nothing else.
+
+1. Open Operations, then Office board, and choose the company.
+2. Press Add a display. Enter a name such as Office TV, an e-mail address that nobody else uses for signing in, and the office time zone.
+3. Press Create display. The e-mail and a long password appear once. Copy the password now: it cannot be looked up later, and it must not be pasted into chat or a ticket.
+4. On the TV's browser, open the app's sign-in page and sign in with that e-mail and password. It goes straight to the screen. Bookmark the screen and set the browser to open it when it starts.
+5. Back on Office board, the display is listed as Active with the time it was last seen.
+
+## Take an office TV display out of service
+- id: projects-office-board-revoke-display
+- area: projects
+- status: published
+- keywords: revoke display; office screen; office tv lost; stop the tv; display password reset; remove tv sign-in; operations tv
+- links: Office board -> /operations/office-board
+- screens: /operations
+
+Revoking a display stops it at once. The screen clears on the TV within about a minute and says why. A revoked display cannot be switched back on.
+
+1. Open Operations, then Office board, and go to the display's row.
+2. Press Revoke and confirm. The row now reads Revoked.
+3. If the page says the sign-in could not be blocked, press Retry sign-in block. The screen is already refused in the meantime.
+4. For a new password, or a new TV, revoke the old display and add a new one: there is no password reset for a display.
+
+## Read the office TV screen
+- id: projects-office-board-read
+- area: projects
+- status: published
+- keywords: office tv; operations tv; wall screen; next on site; who is going; what could hold it up; crew missing; call time pending; shipment arrival after setup; start unconfirmed; stale
+- links: Operations Overview -> /operations; Projects -> /projects
+- screens: /operations
+
+The office screen answers three questions at a glance: what is happening on site next, who is going, and what could hold it up. It only reads what the team already recorded; nothing on it can be changed.
+
+1. The dark column on the left, Next on site, covers installation, event and dismantle days and key shipments in date order: the date and time first, then the venue and who is going, then what could hold it up. It stays in place while the projects rotate.
+2. The light table, Active projects, has a row for each project with its next runs (Run 1, Run 2 and so on), the venue and the people going, and the most important blocker. A project with nothing booked says No scheduled site work. Handovers waiting for a Project Manager to accept sit in a small group underneath.
+3. Amber with words means attention: Crew missing (nobody is assigned to the run), Call time pending (someone has no call time), Shipment arrival after setup (the equipment arrives after setup starts), Start unconfirmed (the date passed and nobody recorded that work began), Not ready, Readiness not recorded. Teal marks the next activity. Started appears only when the Project Manager recorded the start.
+4. Last updated gives the time the screen was read. If it could not refresh, a Stale bar keeps the last good screen and says as of when. If the sign-in ends or is revoked, the screen clears and says why.
+5. On a phone the same information is a vertical agenda with project cards, and it scrolls at your own pace; the pages do not rotate.
+
+## Change something that appears on the office TV screen
+- id: projects-office-board-change
+- area: projects
+- status: published
+- keywords: office screen; update the screen; change a date; crew assignment; equipment request; refresh; tv not updated
+- links: Projects -> /projects; Operations Overview -> /operations
+- screens: /operations
+
+Nothing is typed into the screen. A Project Manager changes the date, the crew or the equipment request once, in the place they already use, and the screen picks it up on its next refresh, within about a minute.
+
+1. Open the project and its Site schedule. Change the date or time with Edit, or press Crew to assign people and set each call time.
+2. To record that work began, press Record started on the activity. Until then a passed date reads Start unconfirmed.
+3. For equipment, open the project's Equipment tab and progress the request there. The screen reports the request's own state.
+4. Wait about a minute. Last updated on the screen advances and the change appears under the same run.
+5. If it does not appear, make sure that the screen is not marked Stale, and that the change was saved on the project.
