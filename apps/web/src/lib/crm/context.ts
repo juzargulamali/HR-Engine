@@ -28,6 +28,11 @@ export interface CrmContext {
   people: CrmPerson[];
   personName: (id: string | null | undefined) => string;
   companyName: (id: string) => string;
+  /**
+   * The company the person is employed by, when it is one of `companies` (a reliable default for forms; see lib/crm/active-company.ts). Null when they
+   * have no employee record, are employed by a company they hold no Sales access to, or the lookup failed (then nothing is assumed).
+   */
+  homeCompanyId?: string | null;
   /** True when the grants could not be read (the data service did not answer): nothing is granted, and the page says it could not load rather than "no access". */
   loadFailed?: boolean;
 }
@@ -59,10 +64,12 @@ export const getCrmContext = cache(async (): Promise<CrmContext | null> => {
   }
 
   const companyIds = grants.map((g) => g.companyId);
-  const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: peopleRows, error: peopleError }] = await Promise.all([
+  const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: peopleRows, error: peopleError }, { data: employeeRow }] = await Promise.all([
     supabase.from("companies").select("id, legal_name, country_code").in("id", companyIds).order("legal_name"),
     supabase.from("crm_company_settings").select("*").in("company_id", companyIds),
     supabase.rpc("crm_people"),
+    // The person's own employing company: only a default for the active company. A failed or empty read means "no default", never an error for the page.
+    supabase.from("employees").select("company_id").eq("user_id", session.userId).is("deleted_at", null).maybeSingle(),
   ]);
   // A failed read here would show "no Sales settings", an empty company list or "Former colleague": say it could not load instead.
   if (companyError || settingsError || peopleError) return { userId: session.userId, fullName: session.fullName, grants: [], companies: [], people: [], personName: () => "Unknown", companyName: () => "Unknown", loadFailed: true };
@@ -89,5 +96,6 @@ export const getCrmContext = cache(async (): Promise<CrmContext | null> => {
     people,
     personName: (id) => (id ? (nameById.get(id) ?? (id === session.userId ? (session.fullName ?? "You") : "Former colleague")) : "Nobody"),
     companyName: (id) => companyById.get(id) ?? "Unknown company",
+    homeCompanyId: employeeRow?.company_id && companyById.has(employeeRow.company_id) ? employeeRow.company_id : null,
   };
 });
