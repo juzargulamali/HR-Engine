@@ -21,8 +21,8 @@ select item, result from (
          case when (select prosrc from pg_proc where oid = to_regprocedure('public.proj_readiness_eval(uuid, text, uuid)')) like '%v.status = ''approved''%'
                    and (select prosrc from pg_proc where oid = to_regprocedure('public.proj_readiness_eval(uuid, text, uuid)')) not like '%status = ''done''%'
                    and to_regprocedure('public.proj_readiness_run_area(uuid, text)') is not null and to_regprocedure('public.proj_readiness_project_area(uuid, text)') is not null then 'OK' else 'FAIL' end
-  union all select 5, 'the crew notice triggers exist (a confirmed date or venue moving, and a personal call time moving)',
-         case when exists (select 1 from pg_trigger where tgname = 'trg_proj_site_activity_moved' and not tgisinternal) and exists (select 1 from pg_trigger where tgname = 'trg_proj_site_call_moved' and not tgisinternal) then 'OK' else 'FAIL' end
+  union all select 5, 'the crew notice triggers exist (a confirmed date or venue moving, a personal call time or its zone moving, and the project venue, dates or zone moving under an activity that inherits them)',
+         case when exists (select 1 from pg_trigger where tgname = 'trg_proj_site_activity_moved' and not tgisinternal) and exists (select 1 from pg_trigger where tgname = 'trg_proj_site_call_moved' and not tgisinternal) and exists (select 1 from pg_trigger where tgname = 'trg_proj_site_project_details_moved' and not tgisinternal) then 'OK' else 'FAIL' end
   union all select 6, 'no activity is recorded as started in the future',
          case when not exists (select 1 from proj_plan_items where actual_started_at > now() + interval '1 hour') then 'OK' else 'FAIL' end
   union all select 7, 'information: activities with an explicit start record / assignments that would read project-header dates only (no own date)',

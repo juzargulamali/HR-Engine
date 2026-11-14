@@ -194,6 +194,61 @@ describe("Projects Phase 2 follow-up 3: one site activity, told the same way eve
     await admin(`delete from proj_site_crew where plan_item_id in ('${act}', '${other}'); delete from proj_plan_items where id in ('${act}', '${other}'); delete from notifications where type = 'project_site_change'`);
   });
 
+  it("crew are told when the PROJECT's venue, header dates or zone move under an activity that inherits them, and when only a call time's zone moves; own values are never reported as inherited", async () => {
+    await admin(`delete from notifications where type = 'project_site_change'`);
+    const PI = await proj("UAE-P-2027-0902", "Fictional inherit job", { install: day(10), ev1: day(12), ev2: day(13), location: "Project Hall" });
+    const setup = await activity(U.pm, PI, { activity_kind: "setup", title: "Inheriting setup", activity_state: "tentative" });                   // no venue, no date: it reads the project's
+    const own = await activity(U.pm, PI, { activity_kind: "show", title: "Own venue show", activity_state: "confirmed", start_date: day(12), end_date: day(12), location: "Own Hall" });
+    await admin(`update proj_plan_items set activity_state = 'confirmed', confirmed_at = now(), confirmed_by = '${U.pm}' where id = '${setup}'`);   // the save refuses to confirm an undated activity; a legacy or edited row can still be one
+    const tent = await activity(U.pm, PI, { activity_kind: "mockup", title: "Tentative inheriting", activity_state: "tentative" });
+    await crew(setup, [{ user_id: U.tech, role: "installation", call_local: `${day(10)}T07:30` }]);
+    await crew(own, [{ user_id: U.tech2, role: "installation" }]);
+    await crew(tent, [{ user_id: U.member, role: "standby" }]);
+    await admin(`delete from notifications where type = 'project_site_change'`);
+    // the project venue moves: only the confirmed activity that INHERITS it is told
+    await admin(`update proj_project_details set location = 'Project Hall B' where project_id = '${PI}'`);
+    const v = await notes(U.tech);
+    expect(v, JSON.stringify(v)).toHaveLength(1);
+    expect((v[0]!.payload.changes as Row[])[0]).toMatchObject({ field: "venue", from: "Project Hall", to: "Project Hall B" });
+    expect(await notes(U.tech2)).toHaveLength(0);                                                                                       // its own venue did not change
+    expect(await notes(U.member)).toHaveLength(0);                                                                                      // tentative work is not announced
+    // the header installation date moves under the one setup that borrows it
+    await admin(`update proj_project_details set install_start = '${day(11)}' where project_id = '${PI}'`);
+    const d = (await notes(U.tech))[0]!.payload.changes as Row[];
+    expect(d.map((c) => c.field).sort()).toEqual(["date", "venue"]);                                                                     // merged into the unread notice
+    expect(d.find((c) => c.field === "date")).toMatchObject({ from: expect.stringContaining(day(10).slice(0, 4)), to: expect.stringContaining(day(11).slice(0, 4)) });
+    // a second setup means the header date is no longer borrowed: moving it tells nobody
+    await admin(`update notifications set read_at = now() where type = 'project_site_change'`);
+    const second = await activity(U.pm, PI, { activity_kind: "setup", title: "Second setup", activity_state: "tentative" });
+    await admin(`update proj_project_details set install_start = '${day(14)}' where project_id = '${PI}'`);
+    expect((await notes(U.tech)).filter((n) => !(n.payload as Row).read_at && true).length).toBeGreaterThan(0);                           // (the read one stays)
+    expect(await admin(`select 1 from notifications where user_id = '${U.tech}' and type = 'project_site_change' and read_at is null`)).toHaveLength(0);
+    await admin(`delete from proj_site_crew where plan_item_id = '${second}'; delete from proj_plan_items where id = '${second}'`);
+    // a call time's ZONE moves with the same instant: the clock time the person sees changes, so they are told, each side read in the zone it carried
+    await admin(`update notifications set read_at = now() where type = 'project_site_change'`);
+    await admin(`update proj_site_crew set call_tz = 'Asia/Riyadh' where plan_item_id = '${setup}' and user_id = '${U.tech}'`);
+    const z = await admin<{ payload: Row }>(`select payload from notifications where user_id = '${U.tech}' and type = 'project_site_change' and read_at is null`);
+    expect(z, JSON.stringify(z)).toHaveLength(1);
+    const zc = (z[0]!.payload.changes as Row[]).find((c) => c.field === "call time")!;
+    expect(zc.from).toContain("Asia/Dubai"); expect(zc.to).toContain("Asia/Riyadh"); expect(zc.from).not.toBe(zc.to);
+    // the same zone change through the crew dialog's own function: the same local clock text, a different zone, an instant that moved: from is read in the OLD zone
+    await admin(`update notifications set read_at = now() where type = 'project_site_change'; update proj_site_crew set call_tz = 'Asia/Dubai' where plan_item_id = '${setup}' and user_id = '${U.tech}'; update notifications set read_at = now() where type = 'project_site_change'`);
+    await admin(`update proj_plan_items set tz = 'Asia/Riyadh' where id = '${setup}'`);                                                    // the activity's own zone changes (its save needs a date; this fixture has none)
+    await call(U.pm, `proj_set_site_crew('${setup}', ${j([{ user_id: U.tech, role: "installation", call_local: `${day(11)}T07:30` }])}, null)`);
+    const r = (await admin<{ payload: Row }>(`select payload from notifications where user_id = '${U.tech}' and type = 'project_site_change' and read_at is null`));
+    expect(r).toHaveLength(1);
+    const rc = (r[0]!.payload.changes as Row[]).find((c) => c.field === "call time")!;
+    expect(rc.from).toContain("Asia/Dubai"); expect(rc.to).toContain("Asia/Riyadh");
+    // a call time with NO zone of its own follows the project's zone: moving it moves what the person reads
+    await admin(`update notifications set read_at = now() where type = 'project_site_change'; update proj_plan_items set tz = null where id = '${setup}'; update proj_site_crew set call_tz = null where plan_item_id = '${setup}'; update notifications set read_at = now() where type = 'project_site_change'`);
+    await admin(`update proj_project_details set site_timezone = 'Asia/Karachi' where project_id = '${PI}'`);
+    const k = await admin<{ payload: Row }>(`select payload from notifications where user_id = '${U.tech}' and type = 'project_site_change' and read_at is null`);
+    expect(k, JSON.stringify(k)).toHaveLength(1);
+    const kc = (k[0]!.payload.changes as Row[]).find((c) => c.field === "call time")!;
+    expect(kc.from).toContain("Asia/Dubai"); expect(kc.to).toContain("Asia/Karachi");
+    await admin(`delete from proj_site_crew where plan_item_id in ('${setup}', '${own}', '${tent}'); delete from proj_plan_items where id in ('${setup}', '${own}', '${tent}'); delete from notifications where type = 'project_site_change'`);
+  });
+
   it("another company cannot record a start or read this project's activities", async () => {
     const a = await activity(U.pm, P, { activity_kind: "setup", title: "Setup (guard)", activity_state: "tentative", start_date: day(5), end_date: day(5) });
     await expect(call(U.outsider, `proj_record_site_start('${a}', null, null)`)).rejects.toThrow();

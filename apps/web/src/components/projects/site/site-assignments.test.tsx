@@ -87,4 +87,15 @@ describe("My Day: On site next", () => {
     render(<SiteAssignmentsCard rows={[card()]} />);
     expect(screen.getByTestId("my-day-site-phase").textContent).toBe("Tentative Setup on 11 Nov (from the project header)");
   });
+
+  it("says a briefing changed, with the previous and new values and a link to it, because a site-only technician has no notification bell; nothing for an unchanged activity", () => {
+    const row = card();
+    render(<SiteAssignmentsCard rows={[row]} changes={{ [row.activity_id]: [{ field: "venue", from: "Hall 3", to: "Hall 4" }, { field: "call time", from: "07 Dec 2026 07:30 Asia/Dubai", to: "07 Dec 2026 07:30 Asia/Riyadh" }] }} />);
+    const note = screen.getByTestId("my-day-site-changed");
+    expect(note.textContent).toMatch(/Changed: venue · Hall 3 → Hall 4; call time · 07 Dec 2026 07:30 Asia\/Dubai → 07 Dec 2026 07:30 Asia\/Riyadh/);
+    expect(within(note).getByRole("link", { name: /See your briefing/ }).getAttribute("href")).toBe(`/site-assignments?activity=${row.activity_id}`);
+    cleanup();
+    render(<SiteAssignmentsCard rows={[row]} changes={{ "22222222-2222-4222-8222-222222222222": [{ field: "venue", from: "a", to: "b" }] }} />);
+    expect(screen.queryByTestId("my-day-site-changed")).toBeNull();
+  });
 });

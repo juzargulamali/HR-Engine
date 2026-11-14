@@ -8,6 +8,16 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | Projects & Tasks Finish Phase 2, follow-up (same draft PR into `main`, not merged; kept in draft): crew notices that were missed, My Day for site-only technicians, compatibility and baseline checks
+
+* `20270109000100` is **still not applied** on hosted and was edited in place (never applied; `20270106000100`, `20270107000100`, `20270108000100` are applied and untouched). **The pinned SQL changed:** the migration, the verify pack (row 5 now requires the new trigger) and the rollback (drops it); the preflight is unchanged. Pinned links in the PR body move to the new head.
+* **Notices fixed:** a call time's zone changing with the same instant now tells the person (each side read in its own zone); an activity-zone change tells crew whose call time has no zone of its own; the activity notice compares the venue the crew actually read; **new trigger** `trg_proj_site_project_details_moved` tells the crew of confirmed activities that inherit a changed project venue, installation / event date or zone. One unread notice per person per activity.
+* **My Day:** "On site next" shows "Changed: field · from → to" and "See your briefing" for site-only technicians, who have no notification bell.
+* **Compatibility:** the previously deployed build (`e463b2d`) works against the migrated schema in isolation but loses the project-wide readiness line and the change wording; apply the migration and deploy this build together.
+* **Tests:** RLS `proj-phase2-site-state.rls.test.ts` 8 of 8; new `project-phase2-notices-flow.mjs` 5 of 5 (both builds); `project-phase2-queues-flow.mjs` 10 of 10 (reviewer's My Day with two and three versions and an assigned reviewer; no code fix needed); `projects-workspace.mjs` 40 of 40 after updating 13 stale assertions (12 already failing at `e463b2d`, one caused by the intended `?from=my-work` link); `seed/scenario.sh` task date made relative.
+* Files updated: `docs/projects-phase-2-scope.md` (15.5), `docs/launch-refinement-install-order.md` (row 37), `05-data-tests-and-release-ledger.md`, `modules/projects-phase-2-deliverables-and-site.md` (section 13), `staff-guidance/projects.md`.
+* Remaining exceptions and their dependencies: `docs/projects-phase-2-scope.md` 15.5. Hosted status: owner steps; signed-in Preview QA not run by Claude.
+
 ### 2026-11-15 | Projects & Tasks Finish Phase 2 (same draft PR into `main`, not merged; kept in draft for signed-in QA): one site story everywhere, actionable queues, simpler day-to-day
 
 * Owner-reported (not run by Claude): `20270106000100`, `20270107000100` and `20270108000100` are applied on hosted; none is edited.

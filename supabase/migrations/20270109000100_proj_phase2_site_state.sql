@@ -9,7 +9,8 @@
 --  3. proj_site_assignment_json is the ONE shape of "what this person sees for this assignment": the technician read and the Project Manager's preview of it both use it (so the preview is exact),
 --     and it adds the phase, the named contact (site lead, else Project Manager) and what reporting detail is still missing. A tentative assignment stays visible while it is open.
 --  4. proj_site_activities_read: the dated site activities of a company's live projects (or one project), once each, for Operations, Calendar and Work: bounded, under the viewer's own access.
---  5. Crew are told when a CONFIRMED date or venue moves, or a personal call time moves: triggers write a notice (previous and new values) to the affected assignments only.
+--  5. Crew are told when a CONFIRMED date or venue moves, or a personal call time moves (its time OR its zone, when the clock time the person sees changes), and when the PROJECT's own venue, header
+--     dates or time zone move under an activity that inherits them: triggers write one notice (previous and new values, read in the zone each side carried) to the affected assignments only.
 
 -- 1. The explicit record of a start.
 alter table proj_plan_items add column if not exists actual_started_at timestamptz;
@@ -305,15 +306,23 @@ $$;
 
 create or replace function proj_site_activity_moved()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare v_proj proj_projects; u record; v_old text; v_new text;
+declare v_proj proj_projects; d proj_project_details; u record; v_old text; v_new text; v_ov text; v_nv text; v_otz text; v_ntz text;
 begin
   if new.plan <> 'site' or old.activity_state <> 'confirmed' then return new; end if;
   select * into v_proj from proj_projects where id = new.project_id;
+  select * into d from proj_project_details where project_id = new.project_id;
   v_old := proj_site_when_text(old.start_date, old.end_date, old.starts_at, old.ends_at, old.tz); v_new := proj_site_when_text(new.start_date, new.end_date, new.starts_at, new.ends_at, new.tz);
-  for u in select distinct user_id from proj_site_crew where plan_item_id = new.id loop
+  -- the venue the crew read is the activity's own, else the project's: compare THAT, so clearing an own venue that equals the project's says nothing
+  v_ov := coalesce(nullif(btrim(coalesce(old.location, '')), ''), nullif(btrim(coalesce(d.location, '')), ''), 'not recorded');
+  v_nv := coalesce(nullif(btrim(coalesce(new.location, '')), ''), nullif(btrim(coalesce(d.location, '')), ''), 'not recorded');
+  v_otz := coalesce(old.tz, d.site_timezone, 'UTC'); v_ntz := coalesce(new.tz, d.site_timezone, 'UTC');
+  for u in select user_id, call_at, call_tz from proj_site_crew where plan_item_id = new.id loop
     if v_old <> v_new then perform proj_site_notify_change(new.project_id, u.user_id, new.id, new.title, new.run_label, v_proj.name, jsonb_build_object('field', 'date', 'from', v_old, 'to', v_new)); end if;
-    if old.location is distinct from new.location then
-      perform proj_site_notify_change(new.project_id, u.user_id, new.id, new.title, new.run_label, v_proj.name, jsonb_build_object('field', 'venue', 'from', coalesce(old.location, 'not recorded'), 'to', coalesce(new.location, 'not recorded')));
+    if v_ov <> v_nv then perform proj_site_notify_change(new.project_id, u.user_id, new.id, new.title, new.run_label, v_proj.name, jsonb_build_object('field', 'venue', 'from', v_ov, 'to', v_nv)); end if;
+    -- a call time with no zone of its own is read in the activity's zone: moving the zone moves the clock time the person sees
+    if u.call_at is not null and u.call_tz is null and v_otz <> v_ntz then
+      perform proj_site_notify_change(new.project_id, u.user_id, new.id, new.title, new.run_label, v_proj.name, jsonb_build_object('field', 'call time',
+        'from', to_char(u.call_at at time zone v_otz, 'DD Mon YYYY HH24:MI') || ' ' || v_otz, 'to', to_char(u.call_at at time zone v_ntz, 'DD Mon YYYY HH24:MI') || ' ' || v_ntz));
     end if;
   end loop;
   return new;
@@ -325,15 +334,17 @@ create trigger trg_proj_site_activity_moved after update of start_date, end_date
 
 create or replace function proj_site_call_moved()
 returns trigger language plpgsql security definer set search_path = public as $$
-declare i proj_plan_items; v_proj proj_projects; v_old text; v_new text; v_tz text;
+declare i proj_plan_items; v_proj proj_projects; v_old text; v_new text; v_site_tz text; v_otz text; v_ntz text;
 begin
   select * into i from proj_plan_items where id = new.plan_item_id;
   -- told when an existing call time moves, or any call time on a confirmed activity changes; a first call time on a tentative activity is not a "move"
   if not (old.call_at is not null or i.activity_state = 'confirmed') then return new; end if;
   select * into v_proj from proj_projects where id = new.project_id;
-  v_tz := coalesce(new.call_tz, i.tz, (select site_timezone from proj_project_details where project_id = new.project_id), 'UTC');
-  v_old := case when old.call_at is null then 'not set' else to_char(old.call_at at time zone v_tz, 'DD Mon YYYY HH24:MI') || ' ' || v_tz end;
-  v_new := case when new.call_at is null then 'not set' else to_char(new.call_at at time zone v_tz, 'DD Mon YYYY HH24:MI') || ' ' || v_tz end;
+  select site_timezone into v_site_tz from proj_project_details where project_id = new.project_id;
+  -- each side is read in the zone it carried, because a zone-only change (same instant, different clock time) is a change the person sees
+  v_otz := coalesce(old.call_tz, i.tz, v_site_tz, 'UTC'); v_ntz := coalesce(new.call_tz, i.tz, v_site_tz, 'UTC');
+  v_old := case when old.call_at is null then 'not set' else to_char(old.call_at at time zone v_otz, 'DD Mon YYYY HH24:MI') || ' ' || v_otz end;
+  v_new := case when new.call_at is null then 'not set' else to_char(new.call_at at time zone v_ntz, 'DD Mon YYYY HH24:MI') || ' ' || v_ntz end;
   if v_old = v_new then return new; end if;
   perform proj_site_notify_change(new.project_id, new.user_id, i.id, i.title, i.run_label, v_proj.name, jsonb_build_object('field', 'call time', 'from', v_old, 'to', v_new));
   return new;
@@ -341,11 +352,60 @@ end;
 $$;
 drop trigger if exists trg_proj_site_call_moved on proj_site_crew;
 create trigger trg_proj_site_call_moved after update of call_at, call_tz on proj_site_crew
-  for each row when (old.call_at is distinct from new.call_at) execute function proj_site_call_moved();
+  for each row when (old.call_at is distinct from new.call_at or old.call_tz is distinct from new.call_tz) execute function proj_site_call_moved();
+
+-- The project's own venue, installation / event dates and time zone are INHERITED by activities that carry none of their own (the briefing reads them through proj_activity_effective), so
+-- moving one of them moves what the crew of every CONFIRMED activity that inherits it reads. Only activities that really inherit it are told, and only when what they read changes.
+create or replace function proj_site_project_details_moved()
+returns trigger language plpgsql security definer set search_path = public as $$
+declare v_proj proj_projects; i record; u record; v_ov text; v_nv text; v_os date; v_oe date; v_ns date; v_ne date; v_old text; v_new text;
+begin
+  select * into v_proj from proj_projects where id = new.project_id;
+  for i in select * from proj_plan_items where project_id = new.project_id and plan = 'site' and activity_state = 'confirmed' and status not in ('done', 'cancelled') loop
+    -- venue: only an activity with no venue of its own reads the project's
+    v_ov := coalesce(nullif(btrim(coalesce(old.location, '')), ''), 'not recorded'); v_nv := coalesce(nullif(btrim(coalesce(new.location, '')), ''), 'not recorded');
+    if nullif(btrim(coalesce(i.location, '')), '') is null and v_ov <> v_nv then
+      for u in select distinct user_id from proj_site_crew where plan_item_id = i.id loop
+        perform proj_site_notify_change(i.project_id, u.user_id, i.id, i.title, i.run_label, v_proj.name, jsonb_build_object('field', 'venue', 'from', v_ov, 'to', v_nv));
+      end loop;
+    end if;
+    -- date: an activity with no date of its own borrows the header date only when it is the one activity of its kind (the same rule as proj_activity_effective)
+    if i.start_date is null and i.starts_at is null and i.activity_kind in ('setup', 'show')
+       and (select count(*) from proj_plan_items x where x.project_id = i.project_id and x.plan = 'site' and x.activity_kind = i.activity_kind and x.status <> 'cancelled') = 1 then
+      if i.activity_kind = 'setup' then v_os := old.install_start; v_oe := old.install_start; v_ns := new.install_start; v_ne := new.install_start;
+      else v_os := old.event_start; v_oe := coalesce(old.event_end, old.event_start); v_ns := new.event_start; v_ne := coalesce(new.event_end, new.event_start); end if;
+      v_old := proj_site_when_text(v_os, v_oe, null, null, null); v_new := proj_site_when_text(v_ns, v_ne, null, null, null);
+      if v_old <> v_new then
+        for u in select distinct user_id from proj_site_crew where plan_item_id = i.id loop
+          perform proj_site_notify_change(i.project_id, u.user_id, i.id, i.title, i.run_label, v_proj.name, jsonb_build_object('field', 'date', 'from', v_old, 'to', v_new));
+        end loop;
+      end if;
+    end if;
+    -- zone: an activity with no zone of its own is read in the project's; its own times and the call times with no zone of their own then show a different clock time
+    if old.site_timezone is distinct from new.site_timezone and i.tz is null then
+      if i.starts_at is not null then
+        v_old := proj_site_when_text(i.start_date, i.end_date, i.starts_at, i.ends_at, old.site_timezone); v_new := proj_site_when_text(i.start_date, i.end_date, i.starts_at, i.ends_at, new.site_timezone);
+        for u in select distinct user_id from proj_site_crew where plan_item_id = i.id loop
+          perform proj_site_notify_change(i.project_id, u.user_id, i.id, i.title, i.run_label, v_proj.name, jsonb_build_object('field', 'date', 'from', v_old, 'to', v_new));
+        end loop;
+      end if;
+      for u in select user_id, call_at from proj_site_crew where plan_item_id = i.id and call_at is not null and call_tz is null loop
+        perform proj_site_notify_change(i.project_id, u.user_id, i.id, i.title, i.run_label, v_proj.name, jsonb_build_object('field', 'call time',
+          'from', to_char(u.call_at at time zone old.site_timezone, 'DD Mon YYYY HH24:MI') || ' ' || old.site_timezone, 'to', to_char(u.call_at at time zone new.site_timezone, 'DD Mon YYYY HH24:MI') || ' ' || new.site_timezone));
+      end loop;
+    end if;
+  end loop;
+  return new;
+end;
+$$;
+drop trigger if exists trg_proj_site_project_details_moved on proj_project_details;
+create trigger trg_proj_site_project_details_moved after update of location, install_start, event_start, event_end, site_timezone on proj_project_details
+  for each row when (old.location is distinct from new.location or old.install_start is distinct from new.install_start or old.event_start is distinct from new.event_start
+                     or old.event_end is distinct from new.event_end or old.site_timezone is distinct from new.site_timezone) execute function proj_site_project_details_moved();
 
 revoke all on function proj_record_site_start(uuid, timestamptz, text), proj_clear_site_start(uuid), proj_site_phase_json(uuid), proj_readiness_eval(uuid, text, uuid), proj_readiness_words(text, integer, integer),
   proj_readiness_project_area(uuid, text), proj_readiness_run_area(uuid, text), proj_activity_readiness_effective(uuid), proj_site_assignment_json(uuid, uuid), proj_my_site_assignments(),
   proj_preview_site_assignment(uuid, uuid), proj_site_briefing(uuid), proj_site_activities_read(uuid, uuid, integer), proj_site_when_text(date, date, timestamptz, timestamptz, text),
-  proj_site_activity_moved(), proj_site_call_moved(), proj_site_notify_change(uuid, uuid, uuid, text, text, text, jsonb) from public, anon, authenticated;
+  proj_site_activity_moved(), proj_site_call_moved(), proj_site_project_details_moved(), proj_site_notify_change(uuid, uuid, uuid, text, text, text, jsonb) from public, anon, authenticated;
 grant execute on function proj_record_site_start(uuid, timestamptz, text), proj_clear_site_start(uuid), proj_my_site_assignments(), proj_preview_site_assignment(uuid, uuid), proj_site_briefing(uuid),
   proj_site_activities_read(uuid, uuid, integer) to authenticated;

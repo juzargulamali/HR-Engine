@@ -28,7 +28,7 @@ import { DeliveryWeekCard } from "@/components/my-day/delivery-week";
 import { HrAttention, HrStatCards, TeamDistribution } from "@/components/my-day/hr-section";
 import { MyWorkToday } from "@/components/my-day/my-work-today";
 import { SiteAssignmentsCard } from "@/components/my-day/site-assignments-card";
-import { loadSiteAssignments } from "@/lib/my-day/site-assignments";
+import { loadSiteAssignments, loadSiteChanges } from "@/lib/my-day/site-assignments";
 import { NextDispatch } from "@/components/my-day/next-dispatch";
 import { PeopleToday } from "@/components/my-day/people-today";
 import { ProjectHealth } from "@/components/my-day/project-health";
@@ -86,6 +86,7 @@ export default async function DashboardPage() {
   const now = new Date();
   // The person's own site assignments (a scoped read that works for someone who is not on the project at all).
   const siteAssignments = await loadSiteAssignments();
+  const siteChanges = Array.isArray(siteAssignments) && siteAssignments.length > 0 ? await loadSiteChanges(session.userId) : {};
   // Anchors every CROSS-COMPANY aggregate below (upcoming holidays, who's on
   // leave today, the 30-day lookahead horizon) to Dubai — Enginious's own
   // reference timezone for anything that isn't scoped to one specific
@@ -468,7 +469,7 @@ export default async function DashboardPage() {
         <div className={cn("contents xl:min-w-0", hasLeft ? "xl:flex xl:flex-col xl:gap-4" : "xl:grid xl:grid-cols-3 xl:items-start xl:gap-4")}>
           <div className="order-1 min-w-0 xl:order-none"><DecisionsCard attention={attention} other={alsoOpen} waiting={waitingItems} /></div>
           {hasProjects && myWork !== null ? <div className="order-2 min-w-0 xl:order-none"><MyWorkToday work={myWork} /></div> : null}
-          <div className="order-2 min-w-0 empty:hidden xl:order-none"><SiteAssignmentsCard rows={siteAssignments} /></div>
+          <div className="order-2 min-w-0 empty:hidden xl:order-none"><SiteAssignmentsCard rows={siteAssignments} changes={siteChanges} /></div>
           {session.employeeId ? <div className="order-3 min-w-0 xl:order-none"><AttendanceClockCard employeeId={session.employeeId} /></div> : null}
           {showHrView && live !== null ? <div className="order-4 min-w-0 xl:order-none"><PeopleToday live={live} /></div> : null}
           {equipment !== null ? <div className="order-7 min-w-0 xl:order-none"><NextDispatch equipment={equipment} /></div> : null}

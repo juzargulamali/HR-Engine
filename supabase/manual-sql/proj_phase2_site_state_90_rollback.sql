@@ -14,6 +14,8 @@ end $$;
 
 drop trigger if exists trg_proj_site_activity_moved on proj_plan_items;
 drop trigger if exists trg_proj_site_call_moved on proj_site_crew;
+drop trigger if exists trg_proj_site_project_details_moved on proj_project_details;
+drop function if exists proj_site_project_details_moved();
 drop function if exists proj_site_activity_moved();
 drop function if exists proj_site_call_moved();
 drop function if exists proj_site_notify_change(uuid, uuid, uuid, text, text, text, jsonb);

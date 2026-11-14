@@ -102,6 +102,63 @@ await step("the reviewer requests changes with feedback; every view follows (PM 
   if (/Outputs awaiting approval\s*1/.test(await body())) throw new Error("the counter still counts the version as awaiting");
 });
 
+let V2 = "", V3 = "";
+const submitVersion = async (name) => {
+  await as("mgr"); await page.goto(taskUrl(T1), { waitUntil: "networkidle" });
+  await page.getByTestId("output-submit-open").click(); await dialog().waitFor();
+  await dialog().getByRole("tab", { name: "Add a link" }).click();
+  await dialog().getByLabel("Link (https://)").fill(`https://docs.example.com/${name}`); await dialog().getByLabel("Name for the link (optional)").fill(name);
+  await dialog().getByTestId("output-submit-go").click();
+};
+await step("two versions: after changes were requested on v1 the PM submits v2; the reviewer's My Day and the Operations queue link to the exact PENDING version (v2), never to v1", async () => {
+  await submitVersion("moodboard-v2");
+  await until(() => db(`select count(*) from proj_task_output_versions where task_id = '${T1}'`) === "2");
+  V2 = db(`select id from proj_task_output_versions where task_id = '${T1}' and version_no = 2`);
+  await as("admin"); await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.locator(`a[href*="task=${T1}&version=${V2}"]`).first().waitFor({ timeout: 20000 });
+  if (await page.locator(`a[href*="version=${V1}"]`).count()) throw new Error("My Day still links the version that already has a decision");
+  await page.goto(`${BASE}/operations?company=${CO}`, { waitUntil: "networkidle" });
+  await page.locator(`a[href*="task=${T1}&version=${V2}"]`).first().waitFor();
+  if (await page.locator(`a[href*="version=${V1}"]`).count()) throw new Error("the Operations queue links the decided version");
+  await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.locator(`a[href*="task=${T1}&version=${V2}"]`).first().click();
+  await page.waitForURL(new RegExp(`task=${T1}&version=${V2}`));
+  await page.getByTestId("output-review-open").waitFor();
+  const st = (await page.getByTestId("output-version-state-2").first().innerText()).replace(/\s+/g, " ");
+  if (!/Awaiting/.test(st)) throw new Error(`the opened version reads: ${st}`);
+  await page.screenshot({ path: `${SHOTS}/reviewer-my-day-v2.png`, fullPage: true });
+});
+
+await step("an old link to v1 opens v1 as history and offers no decision; and a v3 submitted while v2 still waits moves the reviewer's links to v3", async () => {
+  await page.goto(taskUrl(T1, V1), { waitUntil: "networkidle" });
+  const old = (await page.getByTestId("task-output").innerText()).replace(/\s+/g, " ");
+  if (!/Version 1 is no longer the current one/.test(old)) throw new Error(`the old link does not say it is not current: ${old.slice(0, 220)}`);
+  if (db(`select status from proj_task_output_versions where id = '${V1}'`) !== "changes_requested") throw new Error("opening the old link changed v1's decision");
+  await submitVersion("moodboard-v3");
+  await until(() => db(`select count(*) from proj_task_output_versions where task_id = '${T1}'`) === "3");
+  V3 = db(`select id from proj_task_output_versions where task_id = '${T1}' and version_no = 3`);
+  const states = db(`select string_agg('v' || version_no || '=' || status, ',' order by version_no) from proj_task_output_versions where task_id = '${T1}'`);
+  await as("admin"); await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  await page.locator(`a[href*="task=${T1}&version=${V3}"]`).first().waitFor({ timeout: 20000 });
+  const stale = await page.locator(`a[href*="version=${V1}"], a[href*="version=${V2}"]`).count();
+  if (stale) throw new Error(`My Day still links a superseded or decided version (${states})`);
+  await page.locator(`a[href*="task=${T1}&version=${V3}"]`).first().click();
+  await page.waitForURL(new RegExp(`version=${V3}`)); await page.getByTestId("output-review-open").waitFor();
+});
+
+await step("an ASSIGNED reviewer: the PM assigns Olga to v3; only Olga's My Day says 'assigned to you' and links the exact pending version; Omar (not assigned) no longer sees it as his", async () => {
+  asDb(4, `select proj_assign_output_reviewer('${V3}', '${U}1')`);
+  await as("hr1"); await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  const link = page.locator(`a[href*="task=${T1}&version=${V3}"]`).first(); await link.waitFor({ timeout: 20000 });
+  if (!/Operations review assigned to you/i.test(await body())) throw new Error("My Day does not say the review is assigned to Olga");
+  if (await page.locator(`a[href*="version=${V1}"], a[href*="version=${V2}"]`).count()) throw new Error("Olga's My Day links a version that already has a decision or was replaced");
+  await link.click(); await page.waitForURL(new RegExp(`version=${V3}`)); await page.getByTestId("output-review-open").waitFor();
+  await as("admin"); await page.goto(`${BASE}/`, { waitUntil: "networkidle" });
+  // the Operations summary may still list the company's waiting reviews for visibility; what is NOT his is the entry in "what needs me"
+  if (/Operations review (assigned to you|waiting: take it)/i.test(await body())) throw new Error("a reviewer who was not assigned is told this review is his to take");
+  await page.screenshot({ path: `${SHOTS}/reviewer-assigned-other.png`, fullPage: true });
+});
+
 await step("the Projects list shows the next commitment (or who sets it), Manage team and the Table/Board switch", async () => {
   await as("mgr"); await page.goto(`${BASE}/projects`, { waitUntil: "networkidle" });
   const e = (await page.getByTestId(`project-next-${EMPTY}`).first().innerText()).replace(/\s+/g, " ");

@@ -2293,9 +2293,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "notification",
       "site assignment changed"
     ],
-    "summary": "When a confirmed activity moves to another date or venue, or a person's own call time changes, the people assigned get one notice with the previous and new values and a link to their briefing. Only affected assignments are told. Opening the briefing does not mark the notice read.",
+    "summary": "When a confirmed activity moves to another date or venue, or a person's own call time or its zone changes, the people assigned get one notice with the previous and new values and a link to their briefing. The same happens when the project's own venue, dates or zone change under an activity that uses them. Only affected assignments are told. My Day shows the change on On site next, and opening the briefing does not mark the notice read.",
     "steps": [
-      "Open the notice, or My site assignments.",
+      "Open the notice, My Day (On site next) or My site assignments.",
       "Find the card with Changed: the field, the old value and the new value.",
       "Check call time, venue and the named contact, and ask the contact if anything is unclear."
     ],
