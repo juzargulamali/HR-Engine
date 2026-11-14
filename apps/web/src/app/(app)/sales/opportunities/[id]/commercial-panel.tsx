@@ -1,3 +1,4 @@
+import { crmStageStep } from "@enginious-hr/domain";
 import { ApprovalBadge, AvailabilityBadge } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { Alert } from "@/components/ui/alert";
@@ -12,17 +13,25 @@ import { anyFailed, type OppView } from "./view";
 const AVAILABILITY_RESULT = { confirmed: "Available for the dates and quantities it covered", unavailable: "Not available", awaiting: "", unverified: "" } as const;
 const APPROVAL_STATE = { pending: "Waiting for a founder's decision", approved: "Approved", changes_requested: "Changes requested" } as const;
 
-/** Equipment availability, commercial approval and Zoho Books references: three separate things, never merged into one "confirmed". */
+const BLOCKED = "text-sm font-medium text-[hsl(var(--os-amber))]";
+
+/**
+ * Equipment availability, internal approval and Zoho Books references: three separate facts, never merged into one "confirmed". Each has its own state and
+ * its own action, and what blocks an action is said beside it.
+ */
 /** `compact` stacks the sections (for the narrow side panel, where a viewport breakpoint would squeeze columns). */
 export function CommercialPanel({ view, compact = false }: { view: OppView; compact?: boolean }) {
   return (
-    <div className={compact ? "space-y-6" : "grid gap-6 lg:grid-cols-2"}>
-      <div className="space-y-6">
-        <AvailabilitySection view={view} />
-      </div>
-      <div className="space-y-6">
-        <ApprovalSection view={view} />
-        <ZohoSection view={view} />
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground">Three separate facts, each with its own state and action: whether the equipment is available, whether a founder approved the commercial terms, and the Zoho Books references. None of them stands for another.</p>
+      <div className={compact ? "space-y-6" : "grid gap-6 lg:grid-cols-2"}>
+        <div className="space-y-6">
+          <AvailabilitySection view={view} />
+        </div>
+        <div className="space-y-6">
+          <ApprovalSection view={view} />
+          <ZohoSection view={view} />
+        </div>
       </div>
     </div>
   );
@@ -35,12 +44,12 @@ function AvailabilitySection({ view }: { view: OppView }) {
   const stale = display === "needs_recheck";
   const checked = opp.availability_state === "confirmed" || opp.availability_state === "unavailable";
   return (
-    <Panel title="Equipment availability" description="A dated check that the technology is free for these dates and quantities. It is not a stock reservation, and it is not the client's commercial confirmation.">
+    <Panel title="1. Equipment availability" hint="A dated check that the technology is free for these dates and quantities. It is not a stock reservation, and it is not the client's commercial confirmation. The owner or a founder requests it; a founder, or someone they gave the permission to, records the result.">
       <div className="space-y-4">
         <AvailabilityBadge state={display} />
         {display === "unverified" ? <Muted>Nobody has checked yet.</Muted> : null}
         {display === "awaiting" ? <p className="text-sm">Check requested by {ctx.personName(opp.availability_requested_by)} on {formatDateTime(opp.availability_requested_at)}. Waiting for someone allowed to record it.</p> : null}
-        {stale ? <Alert variant="warning"><strong>Needs repeating.</strong> The dates, technologies or quantities changed after the last check, so it no longer applies to what is now being offered.</Alert> : null}
+        {stale ? <Alert variant="warning" role="status"><strong>Needs repeating.</strong> The dates, technologies or quantities changed after the last check, so it no longer applies to what is now being offered.{canEdit && isOpen ? " Request a new check below." : ""}</Alert> : null}
         {checked ? (
           <dl className="space-y-3 border-t border-border/70 pt-3">
             <Fact label={stale ? "The last check said" : "Result"}>{AVAILABILITY_RESULT[opp.availability_state]}</Fact>
@@ -58,15 +67,18 @@ function AvailabilitySection({ view }: { view: OppView }) {
         {isOpen ? (
           <div className="flex flex-wrap items-start gap-2 border-t border-border/70 pt-3">
             {canEdit && opp.availability_state !== "awaiting" ? <RequestAvailabilityButton opportunityId={opp.id} recheck={checked} /> : null}
-            {canEdit && opp.availability_state === "awaiting" ? <Muted>Already requested.</Muted> : null}
+            {canEdit && opp.availability_state === "awaiting" ? <Muted>Already requested: it cannot be requested again until the result is recorded.</Muted> : null}
+            {!canEdit ? <Muted>Only the owner ({view.ownerName}) or a founder can request a check.</Muted> : null}
             {canConfirm ? <ConfirmAvailabilityButton opportunityId={opp.id} recheck={checked} /> : null}
           </div>
         ) : null}
-        {isOpen && !canConfirm ? <p className="text-sm text-muted-foreground">Only a founder, or someone they gave the permission to, can record the result. The owner cannot on their own.</p> : null}
+        {isOpen && !canConfirm ? <p className="text-sm text-muted-foreground">Recording the result: only a founder, or someone they gave the permission to. The owner cannot on their own.</p> : null}
       </div>
     </Panel>
   );
 }
+
+const APPROVAL_HINT = "An internal decision by a founder, recorded under their name. Sending a proposal is a separate fact and never counts as approval. Whether approval is required is the company's rule, set by the founders in Sales settings.";
 
 function ApprovalSection({ view }: { view: OppView }) {
   const { detail, opp, ctx, policy, isOpen, canEdit, canDecide } = view;
@@ -76,23 +88,24 @@ function ApprovalSection({ view }: { view: OppView }) {
   if (anyFailed(view, "approvals", "proposals")) {
     // Request and Decide depend on the approval history and the newest proposal version: neither is offered when they could not be read.
     return (
-      <Panel title="Commercial approval" description="An internal decision by a founder. Sending a proposal is a separate fact and never counts as approval.">
+      <Panel title="2. Internal approval" hint={APPROVAL_HINT}>
         <LoadError what="the approval history" retryHref={`/sales/opportunities/${opp.id}?tab=commercial`} note="Nobody can request or decide an approval here until it loads." />
       </Panel>
     );
   }
   const versionOf = (proposalId: string | null) => detail.proposals.find((p) => p.id === proposalId)?.version;
   return (
-    <Panel title="Commercial approval" description="An internal decision by a founder. Sending a proposal is a separate fact and never counts as approval.">
+    <Panel title="2. Internal approval" hint={APPROVAL_HINT}>
       <div className="space-y-4">
         <ApprovalBadge policy={policy} latest={latest ? { state: latest.state } : null} />
-        {policy === "not_configured" ? <p className="text-sm text-muted-foreground">The founders have not set a commercial approval rule for this company yet, so nothing can be requested or approved. A founder sets it in Sales settings.</p> : null}
-        {policy === "not_required" ? <p className="text-sm text-muted-foreground">The founders decided commercial approval is not required for this company. Nothing here counts as approved.</p> : null}
+        {/* The company's approval rule decides whether anything can be requested at all (crm_request_approval refuses otherwise): said where the button would be. */}
+        {policy === "not_configured" ? <p className={BLOCKED}>Requesting approval is blocked: the founders have not set a commercial approval rule for this company yet, so nothing can be requested or approved. A founder sets it in Sales settings.</p> : null}
+        {policy === "not_required" ? <p className="text-sm text-muted-foreground">Nothing to request: the founders decided commercial approval is not required for this company. Nothing here counts as approved.</p> : null}
         {policy === "required" ? (
           <div className="space-y-3">
             {pending ? (
               <div className="rounded-md border border-border p-3 text-sm">
-                <p className="font-medium">Waiting for a founder&apos;s decision</p>
+                <p className="font-medium">Waiting for a founder&apos;s decision <span className="font-normal text-muted-foreground">(a new request cannot be made until this one is decided)</span></p>
                 <p className="mt-0.5 text-sm text-muted-foreground">Requested by {ctx.personName(pending.requested_by)} on {formatDateTime(pending.requested_at)}{versionOf(pending.proposal_id) ? ` for proposal version ${versionOf(pending.proposal_id)}` : ""}.</p>
                 <div className="mt-2">
                   {canDecide ? <DecideApprovalButton approvalId={pending.id} opportunityId={opp.id} /> : <p className="text-sm text-muted-foreground">Only a founder can decide.</p>}
@@ -130,23 +143,34 @@ function ApprovalSection({ view }: { view: OppView }) {
   );
 }
 
+const ZOHO_BY_HAND = "Typed in by hand from Zoho Books. Nothing syncs: this system does not read from Zoho Books or write to it.";
+
 function ZohoSection({ view }: { view: OppView }) {
   const { detail, opp, canEdit, isLost } = view;
   const z = detail.zoho;
   if (anyFailed(view, "zoho")) {
     return (
-      <Panel title="Zoho Books references" description="References entered by hand. Zoho Books remains the accounting record: this system does not read from it or write to it.">
+      <Panel title="3. Zoho Books references" description={ZOHO_BY_HAND}>
         <LoadError what="the Zoho Books references" retryHref={`/sales/opportunities/${opp.id}?tab=commercial`} note="They are not blank: they could not be read, so the form is not offered." />
       </Panel>
     );
   }
   const paid = z?.paid_amount == null ? null : Number(z.paid_amount);
+  // Quote sent needs the reference only while the enquiry is still before that stage.
+  const step = crmStageStep(opp.stage_before_hold && opp.stage === "on_hold" ? opp.stage_before_hold : opp.stage);
+  const beforeQuoteSent = step !== null && step < (crmStageStep("quote_sent") ?? 0);
   const values = {
     quoteRef: z?.quote_ref ?? null, quoteSentOn: z?.quote_sent_on ?? null, invoiceRef: z?.invoice_ref ?? null,
     invoiceIssuedOn: z?.invoice_issued_on ?? null, paymentReceivedOn: z?.payment_received_on ?? null, paidAmount: paid,
   };
   return (
-    <Panel title="Zoho Books references" description="References entered by hand. Zoho Books remains the accounting record: this system does not read from it or write to it.">
+    <Panel title="3. Zoho Books references" description={ZOHO_BY_HAND} hint="A quote sent, an invoice issued and a payment received are three separate facts, each typed in from Zoho Books. Zoho Books remains the accounting record.">
+      {/* crm_move_stage refuses Quote sent without a non-empty quote reference (migration 20261228000100): said beside the field that unblocks it. */}
+      {beforeQuoteSent ? (
+        values.quoteRef?.trim()
+          ? <p className="mb-3 text-sm text-muted-foreground">A quote reference is on record, so the enquiry can be moved to Quote sent.</p>
+          : <p className={`mb-3 ${BLOCKED}`}>Quote sent is blocked: the enquiry cannot be moved to Quote sent until the Zoho Books quote reference is saved here.</p>
+      ) : null}
       {canEdit && !isLost ? (
         <ZohoForm opportunityId={opp.id} values={values} currency={opp.currency} />
       ) : (

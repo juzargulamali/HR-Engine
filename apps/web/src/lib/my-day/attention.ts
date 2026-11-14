@@ -204,6 +204,15 @@ export function projectDecisionCandidates(d: Pick<ProjectsAttention, "handoverLi
   ];
 }
 
+/**
+ * Where a Sales follow-up item leads: the Follow-ups tab narrowed to its group (Overdue or Today) and, when the item is about one follow-up, that row
+ * (`focus`), which the page scrolls to and marks. Without an id the link is the group alone.
+ */
+export function salesFollowUpHref(kind: "overdue" | "due_today", followUpId?: string): string {
+  const view = kind === "overdue" ? "overdue" : "today";
+  return `/sales/follow-ups?view=${view}${followUpId ? `&focus=${encodeURIComponent(followUpId)}` : ""}`;
+}
+
 /** Sales follow-ups that are overdue or due today and enquiries without a first response. One item per follow-up; an enquiry shares its key with its handover rows. */
 export function salesCandidates(data: Pick<SalesToday, "attention">, formatDate: (d: string) => string): AttentionCandidate[] {
   const out: AttentionCandidate[] = [];
@@ -212,7 +221,7 @@ export function salesCandidates(data: Pick<SalesToday, "attention">, formatDate:
       out.push({
         key: a.followUpId ? `followup:${a.followUpId}` : `followup:${a.opportunityId}:${a.at ?? ""}:${a.detail}`, source: "sales", icon: a.kind === "overdue" ? AlarmClock : CalendarClock, title: a.title, context: a.reference,
         what: `${a.kind === "overdue" ? "Follow-up overdue" : "Follow-up due today"}: ${a.detail}`, when: a.kind === "overdue" ? `Overdue since ${a.at ? formatDate(a.at) : "earlier"}` : "Due today",
-        tier: a.kind === "overdue" ? 0 : 1, at: a.at, href: a.kind === "overdue" ? "/sales/follow-ups" : "/sales/follow-ups?view=today",
+        tier: a.kind === "overdue" ? 0 : 1, at: a.at, href: salesFollowUpHref(a.kind, a.followUpId),
       });
     } else if (a.kind === "no_first_response") {
       out.push({ key: `opp:${a.opportunityId}`, source: "sales", icon: Inbox, title: a.title, context: a.reference, what: "Enquiry awaiting a first response", tier: 2, at: null, href: `/sales/opportunities/${a.opportunityId}` });

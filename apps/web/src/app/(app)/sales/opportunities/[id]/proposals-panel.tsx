@@ -5,7 +5,8 @@ import { LoadError } from "@/components/workspace/states";
 import { formatDate } from "@/components/sales/format";
 import { loadEstimateMarks } from "@/lib/crm/data";
 import { estimateNoteText } from "@/lib/crm/quotations/wording";
-import { fileDisplayName, PROPOSAL_STATUS_LABELS, proposalActions } from "./helpers";
+import { TabLink } from "./detail-tabs";
+import { fileDisplayName, PROPOSAL_STATUS_LABELS, proposalActions, proposalNextStep } from "./helpers";
 import { Muted, Panel } from "./parts";
 import { AddProposalForm, ProposalStatusButton } from "./proposal-forms";
 import { anyFailed, type OppView } from "./view";
@@ -32,9 +33,10 @@ export async function ProposalsPanel({ view }: { view: OppView }) {
   const latestSentId = detail.proposals.find((p) => sentOrAccepted(p.status))?.id ?? null;
   return (
     <div className="space-y-6">
-      <Panel title="Proposal versions" description="Newest first. The version number is assigned automatically. Estimates built in the app also appear under Estimates.">
+      <Panel title="Proposal versions" hint="Newest first. The version number is assigned automatically. A proposal is built elsewhere (Canva, Word) and kept here as a file or link. “Sent” is a dated fact you record after sending it yourself, never an approval; “accepted” is the client's acceptance, never the win itself. Estimates built in the app also appear here and under Estimates."
+        actions={<Link href={`/sales/proposals?company=${opp.company_id}`} className="text-sm font-medium underline underline-offset-2">Proposals &amp; quotes register</Link>}>
         {detail.proposals.length === 0 ? (
-          <Muted>No proposal recorded yet.{canEdit && isOpen ? " Add the first version below once you have the document." : ""}</Muted>
+          <Muted>No proposal recorded yet.{canEdit && isOpen ? " Add the first version below: you can upload its document in the same step." : ""}</Muted>
         ) : (
           <ul className="divide-y divide-border/70">
             {detail.proposals.map((p) => {
@@ -43,6 +45,7 @@ export async function ProposalsPanel({ view }: { view: OppView }) {
               const base = canEdit ? proposalActions(p, opp.stage) : { send: false, accept: false, supersede: false };
               const actions = estimate ? { ...base, send: false } : base;
               const unapproved = policy === "required" && p.id === latestSentId && latestApproval?.state !== "approved";
+              const nextStep = proposalNextStep(p, { estimate, stage: opp.stage });
               return (
                 <li key={p.id} className="space-y-1.5 py-3 first:pt-0 last:pb-0">
                   <div className="flex flex-wrap items-center gap-2">
@@ -52,17 +55,24 @@ export async function ProposalsPanel({ view }: { view: OppView }) {
                     {p.id === latestSentId ? <Badge variant="outline">Latest sent</Badge> : null}
                   </div>
                   {p.note ? <p className="break-words text-sm">{estimate ? estimateNoteText(p.note) : p.note}</p> : null}
-                  {estimate ? <p className="text-sm"><Link href={`/sales/opportunities/${opp.id}/quotations/${p.id}`} className="underline-offset-2 hover:underline">Open the estimate</Link> <span className="text-muted-foreground">· an estimate is recorded as sent on the Estimates tab, not here</span></p> : null}
+                  {estimate ? <p className="text-sm"><Link href={`/sales/opportunities/${opp.id}/quotations/${p.id}`} className="underline-offset-2 hover:underline">Open the estimate</Link></p> : null}
                   <p className="break-words text-sm text-muted-foreground">
                     {file ? `Document: ${fileDisplayName(file)}` : "No document linked"} · added by {ctx.personName(p.created_by)} on {formatDate(p.created_at)}
                     {p.sent_on ? ` · recorded as sent on ${formatDate(p.sent_on)}` : ""}
                   </p>
-                  {unapproved ? <p className="text-sm text-warning">No founder approval on record for this opportunity. Recording a proposal as sent is not an approval.</p> : null}
-                  {actions.send || actions.accept || actions.supersede ? (
-                    <div className="flex flex-wrap gap-1.5">
-                      {actions.send ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="sent" /> : null}
-                      {actions.accept ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="accepted" /> : null}
-                      {actions.supersede ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="superseded" /> : null}
+                  {unapproved ? <p className="text-sm font-medium text-[hsl(var(--os-amber))]">No founder approval on record for this enquiry. Recording a proposal as sent is not an approval. <TabLink tab="commercial" href={`/sales/opportunities/${opp.id}?tab=commercial`} className="underline underline-offset-2">Commercial</TabLink></p> : null}
+                  {/* The version's next step and the buttons that do it, together. */}
+                  {nextStep || actions.send || actions.accept || actions.supersede ? (
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                      {nextStep ? <p className="min-w-0 text-sm"><span className="font-medium">Next:</span> {nextStep}</p> : null}
+                      {estimate && p.status === "draft" && estimate.finalised ? <TabLink tab="quotations" href={`/sales/opportunities/${opp.id}?tab=quotations`} className="text-sm font-medium underline underline-offset-2">Open Estimates</TabLink> : null}
+                      {actions.send || actions.accept || actions.supersede ? (
+                        <div className="flex flex-wrap gap-1.5">
+                          {actions.send ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="sent" /> : null}
+                          {actions.accept ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="accepted" /> : null}
+                          {actions.supersede ? <ProposalStatusButton proposalId={p.id} opportunityId={opp.id} version={p.version} status="superseded" /> : null}
+                        </div>
+                      ) : null}
                     </div>
                   ) : null}
                 </li>
@@ -72,7 +82,7 @@ export async function ProposalsPanel({ view }: { view: OppView }) {
         )}
       </Panel>
       {canEdit && isOpen ? (
-        <Panel title={`Add version ${nextVersion}`} description="Records a new draft. Nothing is sent to the client from here.">
+        <Panel title={`Add version ${nextVersion}`} hint="Upload the proposal document here, or use a file or link already on this enquiry. The upload is the same private, checked upload as under Files and links, so the file is listed there too.">
           <AddProposalForm opportunityId={opp.id} nextVersion={nextVersion} files={fileOptions} />
         </Panel>
       ) : !canEdit && isOpen ? (

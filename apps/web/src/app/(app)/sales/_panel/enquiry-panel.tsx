@@ -60,7 +60,8 @@ export async function EnquirySidePanel({ openId, closeHref }: { openId: string; 
     opp.title,
     <EnquiryPanelBody view={view} picker={picker} />,
     `${opp.reference}${ctx.companies.length > 1 ? ` · ${detail.item.companyName}` : ""}`,
-    `/sales/opportunities/${opp.id}`,
+    // Opened beside Follow-ups: the full page is told so, so its way back returns to Follow-ups (with the filters the person had) and not to Enquiries.
+    `/sales/opportunities/${opp.id}${closeHref.split("?")[0] === "/sales/follow-ups" ? "?from=follow-ups" : ""}`,
   );
 }
 

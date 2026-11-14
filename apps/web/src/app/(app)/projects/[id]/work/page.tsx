@@ -10,7 +10,7 @@ import { DeliverableStatusBadge, MilestoneStatusBadge } from "@/components/proje
 import { OsFilterBar } from "@/components/os/filter-bar";
 import { OsStatCard } from "@/components/os/stat-card";
 import { Fact, Muted, Panel } from "@/components/projects/parts";
-import { DeliverySummary, MilestoneStrip, NextOnSiteCard, ProjectPlanEntry, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
+import { DeliverySummary, mergeActivity, MilestoneStrip, NextOnSiteCard, ProjectPlanEntry, RecentActivity, WorkAttention, WorkShortcuts, type ActivityLine, type SummaryFact } from "@/components/projects/work-parts";
 import { ImportHandoverButton } from "@/components/inventory/planning/import-handover";
 import { loadEquipmentState } from "@/lib/projects/equipment-state";
 import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
@@ -48,7 +48,7 @@ import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
 import { NextOnSite, WorkOverviewAreas } from "@/components/projects/work-overview";
 import { describeSitePhase, type SitePhaseInfo } from "@/lib/projects/site-state";
-import type { SiteActivityRead } from "@/lib/projects/phase2/model";
+import { formatAt, recentText, type SiteActivityRead } from "@/lib/projects/phase2/model";
 import { WorkSummary } from "@/components/projects/work-summary";
 import { milestoneSummary, outputLines, outputSummary } from "@/lib/projects/work-summary";
 import { loadRegister } from "@/lib/projects/phase2/data";
@@ -196,7 +196,8 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     { label: "Equipment", value: eq.text, detail: eq.detail ?? null, tone: eq.tone, href: `/projects/${id}/equipment`, linkText: "Open Equipment" },
   ];
 
-  // ---- Recent activity preview: the newest change-log lines, each linked to where that record lives.
+  // ---- Recent activity preview: the newest change-log lines, each linked to where that record lives. Further down they are merged by time with the overview's output, review
+  // and site changes (a different, disjoint source: the change-log read above leaves those three record types out) into the page's one "Recent activity" block.
   const titleOf = (type: string, entityId: string): string | null =>
     type === "milestone" ? (ms.find((m) => m.id === entityId)?.title ?? null) : type === "deliverable" ? (dls.find((d) => d.id === entityId)?.title ?? null)
       : type === "plan_item" ? ((planItemRes.data ?? []).find((x) => x.id === entityId)?.title ?? null) : type === "external_dependency" ? ((depRes.data ?? []).find((x) => x.id === entityId)?.label ?? null) : null;
@@ -205,8 +206,20 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       : type === "booking" ? `/projects/${id}/plan?plan=site` : type === "member" ? `/projects/${id}/people` : `/projects/${id}/history`;
   const activity: ActivityLine[] = (logRes.data ?? []).map((l) => {
     const d = describeChange(l, { entityName: titleOf, nameOf: view.nameOf });
-    return { key: String(l.id), subject: d.subject, sentence: d.sentence, when: formatDateTime(l.created_at), who: l.actor_id ? view.nameOf(l.actor_id) : "Recorded by the system", href: sourceHref(l.entity_type) };
+    return { key: String(l.id), subject: d.subject, sentence: d.sentence, when: formatDateTime(l.created_at), who: l.actor_id ? view.nameOf(l.actor_id) : "Recorded by the system", href: sourceHref(l.entity_type), at: l.created_at };
   });
+
+  // ---- The way back to where the project came from. The accepted handover brief opens for anyone who can read it under Projects, Handovers; the enquiry opens only for
+  // someone whose own session can read it in Sales (row-level security answers: a row = access, no row = none), so neither is ever a dead link. A failed check offers no link.
+  const [briefProbe, enquiryProbe] = await Promise.all([
+    view.project.handover_id ? supabase.from("proj_handovers").select("id").eq("id", view.project.handover_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+    view.project.crm_opportunity_id ? supabase.from("crm_opportunities").select("id, reference").eq("id", view.project.crm_opportunity_id).maybeSingle() : Promise.resolve({ data: null, error: null }),
+  ]);
+  if (briefProbe.error || enquiryProbe.error) console.error("[projects] could not check the handover or enquiry link", briefProbe.error?.message ?? enquiryProbe.error?.message);
+  const origin = [
+    ...(briefProbe.data ? [{ href: `/projects/handovers?handover=${briefProbe.data.id}`, label: "Handover brief", hint: "The brief Sales handed over, kept as it was accepted." }] : []),
+    ...(enquiryProbe.data ? [{ href: `/sales/opportunities/${enquiryProbe.data.id}`, label: "Sales enquiry", note: `${enquiryProbe.data.reference}: where this project came from.` }] : []),
+  ];
 
   // ---- Direct entry points, each shown only with the fact that makes it relevant.
   const openDeps = (depRes.data ?? []).filter((d) => d.confirmation !== "confirmed");
@@ -217,6 +230,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     ...(depRes.error ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: "Could not load the dependencies just now. Open the site plan to see them." }] : []),
     ...(openDeps.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list`, label: "Dependencies", note: `${openDeps.length} not confirmed yet (waiting on another party).` }] : []),
     ...(upcomingBookings.length > 0 ? [{ href: `/projects/${id}/plan?plan=site&mode=list#bookings`, label: "Site bookings", note: `${upcomingBookings.length} upcoming.` }] : []),
+    ...origin,
   ];
   const feedbackOpen = (feedbackRes.data ?? []).filter((f) => f.status === "open" || f.status === "in_progress").length;
   const completions = completionRes.data ?? [];
@@ -322,6 +336,10 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     if (Array.isArray(phaseRows)) sitePhases = Object.fromEntries((phaseRows as SiteActivityRead[]).filter((r) => r?.id && r.phase).map((r) => [r.id, r.phase]));
   }
   const siteStateLabel = (a: { id: string }) => { const ph = sitePhases[a.id]; return ph ? describeSitePhase(ph).label : null; };
+  // The overview's recent changes (new output version, review decision, site schedule change), as lines of the same block. Still the five newest, as before.
+  const overviewActivity: ActivityLine[] = (overview?.recent ?? []).slice(0, 5).map((r, n) => ({ key: `o-${r.entity_id}-${r.at}-${n}`, subject: recentText(r), when: formatAt(r.at, overview?.tz), at: r.at }));
+  const recentLines = mergeActivity(activity, overviewActivity);
+  const recentFailed = [...(logRes.error ? ["the changes to dates, status and people"] : []), ...(overviewRes.state === "error" ? ["the output, review and site changes"] : [])];
 
   return (
     <div className="space-y-4">
@@ -355,7 +373,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
       )}
       <WorkSummary projectId={id} milestones={msSummary} milestonesHref={`${withParams(basePath, current, { ms: "1" })}#milestones`} outputs={outSummary} outputLines={outLines.lines} outputsMore={outLines.more} outputsFailed={registerRes.state === "error"} canManage={canManage}
         addMilestone={canManage ? <AddMilestoneButton projectId={id} /> : undefined} />
-      {overview ? <WorkOverviewAreas projectId={id} overview={overview} hideNext={!readOnly} stateLabel={siteStateLabel} /> : overviewRes.state === "error" ? <Alert variant="warning" role="status" data-testid="overview-load-error">Could not load the overview (next on site, what needs attention and recent changes). The tasks below are unaffected; reload to try again.</Alert> : null}
+      {overview ? <WorkOverviewAreas projectId={id} overview={overview} hideNext={!readOnly} stateLabel={siteStateLabel} /> : overviewRes.state === "error" ? <Alert variant="warning" role="status" data-testid="overview-load-error">Could not load the overview (next on site and what needs attention). The tasks below are unaffected; reload to try again.</Alert> : null}
 
       {/* Main column (about 72%) and a narrower right rail (about 28%); the rail's first card starts level with the summary cards. */}
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,72fr)_minmax(0,28fr)]">
@@ -429,7 +447,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
             href={`/projects/${id}/plan?plan=site`}
             when={bookingWhen}
           />}
-          <RecentActivity lines={activity} failed={!!logRes.error} historyHref={`/projects/${id}/history`} />
+          <RecentActivity lines={recentLines} failed={recentFailed} historyHref={`/projects/${id}/history`} />
           <WorkShortcuts items={shortcuts} />
           {details ? (
             <ProjectDetailsCard

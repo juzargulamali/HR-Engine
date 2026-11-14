@@ -56,7 +56,7 @@ await step("create: the multi-role organisation is offered as agency AND end cli
   for (const k of ["agency", "tech"]) if (c.includes(ID[k])) throw new Error(`client picker offers ${k}`);
 });
 await step("create: ONE organisation selected as agency and as end client saves one inquiry and no new organisation", async () => {
-  await page.getByLabel("Requirement").fill("Fictional Atlas pitch");
+  await page.getByLabel("What is the enquiry?").fill("Fictional Atlas pitch");
   await page.locator("#enq-source").selectOption("agency_call");
   await page.locator("#enq-agency").selectOption(ID.atlas); await page.locator("#enq-client").selectOption(ID.atlas);
   await page.locator("#enq-next-title").fill("Call to qualify the brief"); await page.locator("#enq-next-date").fill("2027-01-15");

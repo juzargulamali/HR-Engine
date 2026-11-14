@@ -52,7 +52,7 @@ let OPP = ""; let oppUrl = ""; let estimateId = "";
 await as("emp@e2e.local");
 await step("emp@ (Sales owner) creates the enquiry on the screen and the reference is OPP-<code>-<year>-<number>", async () => {
   await go("/sales/new");
-  await page.getByLabel("Requirement").fill("Fictional interactive floor for the harbour launch");
+  await page.getByLabel("What is the enquiry?").fill("Fictional interactive floor for the harbour launch");
   await page.getByLabel("Where did it come from?").selectOption("agency_call");
   await page.locator("select").filter({ has: page.locator("option", { hasText: "Fictional Harbour Client" }) }).first().selectOption({ label: "Fictional Harbour Client" });
   await page.getByLabel("Next action").fill("Call the client to qualify the brief"); await page.getByLabel("Budget or value").fill("90000");

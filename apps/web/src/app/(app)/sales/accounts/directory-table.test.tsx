@@ -1,7 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 afterEach(cleanup);
@@ -50,6 +50,10 @@ describe("directory table", () => {
     const enq = screen.getByRole("link", { name: /Enquiries/ });
     expect(enq.getAttribute("title")).toContain(ENQUIRIES_NOTE);
     expect(ENQUIRIES_NOTE).toBe("CRM enquiries linked to this account, not quotes Enginious sent");
+    // the longer explanation is behind the ⓘ beside the heading, a button of its own (not inside the sort link)
+    fireEvent.click(screen.getByTestId("info-hint-enquiries-column"));
+    expect(screen.getByRole("tooltip").textContent).toContain("An enquiry linked to the same account twice (for example as agency and as end client) counts once.");
+    expect(enq.querySelector("button")).toBeNull();
   });
   it("marks the sorted column with aria-sort (and none on the others)", () => {
     view(rows, { sort: { key: "last", dir: "desc" } });
@@ -113,7 +117,16 @@ describe("quick filters", () => {
     const on = screen.getByRole("link", { name: /Dormant\s*\(1\)/ });
     expect(on.getAttribute("href")).toBe("/x?rel=");
     expect(on.getAttribute("aria-current")).toBe("true");
-    expect(screen.getByText(/Dormant = last enquiry 90\+ days ago and no open enquiry/)).toBeTruthy();
+    // the definitions are no longer a paragraph under the chips: they open from the ⓘ beside the word
+    expect(screen.queryByText(/Dormant = last enquiry/)).toBeNull();
+    fireEvent.click(screen.getByTestId("info-hint-relationship-filters"));
+    const help = screen.getByRole("tooltip").textContent ?? "";
+    expect(help).toContain("Dormant: The newest linked enquiry was recorded 90 or more days ago (Dubai calendar days) and no linked enquiry is open.");
+    expect(help).toContain("Won work: At least one linked enquiry is recorded as won.");
+    expect(help).toContain("No enquiries recorded: No enquiry of this company names the account as its agency or its end client.");
+    // in the order the rules are tried (relationshipOf): none, dormant, won, no wins
+    expect(["1. No enquiries recorded", "2. Dormant", "3. Won work", "4. No wins yet"].map((t) => help.indexOf(t))).toEqual([...["1. No enquiries recorded", "2. Dormant", "3. Won work", "4. No wins yet"].map((t) => help.indexOf(t))].sort((a, b) => a - b));
+    expect(help.indexOf("1. No enquiries recorded")).toBeGreaterThan(-1);
   });
   it("when the figures could not load the filters are unavailable, say Could not load, and are not links", () => {
     render(<QuickFilters active="" counts={null} available={false} hrefFor={hrefFor} />);

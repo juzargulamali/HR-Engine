@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface DetailTab {
@@ -20,10 +20,39 @@ export function TabLink({ tab, href, className, children }: { tab: string; href:
   return <a href={href} className={className} onClick={(e) => { if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return; e.preventDefault(); window.dispatchEvent(new CustomEvent(DETAIL_TAB_EVENT, { detail: tab })); }}>{children}</a>;
 }
 
-/** Accessible tabs (arrow keys, Home/End) over server-rendered panels. */
-export function DetailTabs({ tabs, initial }: { tabs: DetailTab[]; initial: string }) {
+/** The page's address with `?tab=` set to this tab (left out for the first tab, which is what a plain address opens). Every other part of the address is kept. */
+export function tabAddress(href: string, tab: string, firstTab: string): string {
+  const u = new URL(href, "http://local");
+  if (tab === firstTab) u.searchParams.delete("tab");
+  else u.searchParams.set("tab", tab);
+  return `${u.pathname}${u.search}${u.hash}`;
+}
+
+/**
+ * Accessible tabs (arrow keys, Home/End) over server-rendered panels. With `syncAddress` (the enquiry's own page) the open tab is written to the address as
+ * `?tab=`, so a reload, the browser's Back from another page and a shared link all land on the same tab. The address is replaced in place, without a
+ * navigation: every panel stays mounted, so nothing typed in another tab is lost. The side panel on a list leaves it off (the list's address is its own).
+ */
+export function DetailTabs({ tabs, initial, syncAddress = false }: { tabs: DetailTab[]; initial: string; syncAddress?: boolean }) {
   const base = useId();
-  const [active, setActive] = useState(tabs.some((t) => t.id === initial) ? initial : (tabs[0]?.id ?? ""));
+  const [active, setActiveState] = useState(tabs.some((t) => t.id === initial) ? initial : (tabs[0]?.id ?? ""));
+  const first = tabs[0]?.id ?? "";
+  const setActive = useCallback((id: string) => {
+    setActiveState(id);
+    if (!syncAddress || typeof window === "undefined") return;
+    const next = tabAddress(window.location.href, id, first);
+    if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) window.history.replaceState(null, "", next); // null (not the router's own state object): the app router then takes the new address as its own, so a later refresh keeps it
+  }, [syncAddress, first]);
+  // Back or Forward to an address of this same page (for example after following an in-page anchor): show the tab that address names.
+  useEffect(() => {
+    if (!syncAddress) return undefined;
+    const onPop = () => {
+      const id = new URLSearchParams(window.location.search).get("tab") ?? first;
+      if (tabs.some((t) => t.id === id)) setActiveState(id);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [syncAddress, first, tabs]);
   const refs = useRef<Record<string, HTMLButtonElement | null>>({});
   const list = useRef<HTMLDivElement>(null);
   // A link elsewhere on the page ("Open the full activity", "Record estimate as sent") asks for a tab: switch to it and bring the tabs into view.
@@ -36,7 +65,7 @@ export function DetailTabs({ tabs, initial }: { tabs: DetailTab[]; initial: stri
     };
     window.addEventListener(DETAIL_TAB_EVENT, open);
     return () => window.removeEventListener(DETAIL_TAB_EVENT, open);
-  }, [tabs]);
+  }, [tabs, setActive]);
   const focusTab = (id: string | undefined) => {
     if (!id) return;
     setActive(id);

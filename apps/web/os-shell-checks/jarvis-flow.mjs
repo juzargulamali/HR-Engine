@@ -318,7 +318,7 @@ await step("JARVIS switched off again: the launcher disappears at once and ordin
   const t = flat(await page.locator("main").innerText());
   if (!t.includes(ref1) && !t.includes("Harbour launch LED tunnel")) throw new Error("the list does not show the enquiry");
   await go("/sales/new");
-  await page.getByLabel("Requirement").fill("Fictional enquiry through the ordinary form");
+  await page.getByLabel("What is the enquiry?").fill("Fictional enquiry through the ordinary form");
   await page.getByLabel("Where did it come from?").selectOption("agency_call");
   await page.locator("select").filter({ has: page.locator("option", { hasText: "Fictional Harbour Brands" }) }).first().selectOption({ label: "Fictional Harbour Brands" });
   await page.getByLabel("Next action", { exact: true }).fill("Call the client"); 

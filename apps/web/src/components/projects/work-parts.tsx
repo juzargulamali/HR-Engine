@@ -178,31 +178,40 @@ export function ProjectPlanEntry({ projectId, canManage }: { projectId: string; 
   );
 }
 
-export interface ActivityLine { key: string; subject: string; sentence: string; when: string; who: string; href: string }
+/** One line of the Recent activity block. `at` is the moment it was recorded (ISO), used only to put the two sources in one order; `href` is given only when the record has a page to open. */
+export interface ActivityLine { key: string; subject: string; sentence?: string; when: string; who?: string; href?: string; at: string }
+
+/** The two sources in one list, newest first. Nothing is dropped: each source arrives already bounded by its own read, so the block stays short. */
+export function mergeActivity(...sources: readonly (readonly ActivityLine[])[]): ActivityLine[] {
+  // Compared as moments, not as text: the two reads may write the same instant differently ("Z" or "+00:00", with or without fractions). A date that cannot be read sorts last.
+  const t = (l: ActivityLine) => { const n = Date.parse(l.at); return Number.isNaN(n) ? -Infinity : n; };
+  return sources.flat().sort((x, y) => t(y) - t(x));
+}
 
 /**
- * A short preview of what last changed on the project (dates, status, people), each with a link to where that record lives. It is the member-visible change log, not the
- * conversation: chat messages and task comments are never copied here. `failed` = the read failed (it then says so; an empty list would be a different statement).
+ * The ONE "Recent activity" block of the Work page: the project's change log (dates, status, people) and the output, review and site changes of the overview, merged by time, with one
+ * link to History. It is the member-visible record, not the conversation: chat messages and task comments are never copied here. `failed` names each part whose read failed: that part
+ * says it could not load while the other is still listed (an empty list would be a different statement).
  */
-export function RecentActivity({ lines, failed, historyHref }: { lines: readonly ActivityLine[]; failed: boolean; historyHref: string }) {
+export function RecentActivity({ lines, failed, historyHref }: { lines: readonly ActivityLine[]; failed: readonly string[]; historyHref: string }) {
   return (
     <section aria-label="Recent activity" className="os-card p-4" data-testid="recent-activity">
       <div className="mb-2 flex items-baseline justify-between gap-2">
-        <h2 className="font-heading text-base font-semibold">Recent activity</h2>
+        <h2 className="font-heading text-base font-semibold">Recent activity<InfoHint label="recent activity" className="ml-1">The latest changes to dates, status and people, new output versions, review decisions and site schedule changes, newest first. Chat messages and task comments are not listed here. History has the full record.</InfoHint></h2>
         <Link href={historyHref} className="text-[13px] font-medium text-accent underline-offset-4 hover:underline">Full history</Link>
       </div>
-      {failed ? <p className="text-sm text-destructive" role="alert">Could not load the recent activity. Reload to try again; the full record is on History.</p>
-        : lines.length === 0 ? <p className="text-sm text-muted-foreground">No change to dates, status or people is recorded yet.</p> : (
-          <ul className="space-y-2.5">
-            {lines.map((l) => (
-              <li key={l.key} className="text-sm">
-                <Link href={l.href} className="block break-words font-medium underline-offset-4 hover:underline">{l.subject}</Link>
-                <p className="break-words text-[13px] text-muted-foreground">{l.sentence}</p>
-                <p className="text-[13px] text-muted-foreground">{l.who} · {l.when}</p>
-              </li>
-            ))}
-          </ul>
-        )}
+      {failed.map((what) => <p key={what} className="mb-2 text-sm text-destructive" role="alert" data-testid="recent-activity-failed">Could not load {what}. Reload to try again; the full record is on History.</p>)}
+      {lines.length === 0 ? (failed.length === 0 ? <p className="text-sm text-muted-foreground">No change to dates, status or people, and no output version, review decision or site change, is recorded yet.</p> : null) : (
+        <ul className="space-y-2.5">
+          {lines.map((l) => (
+            <li key={l.key} className="text-sm">
+              {l.href ? <Link href={l.href} className="block break-words font-medium underline-offset-4 hover:underline">{l.subject}</Link> : <p className="break-words font-medium">{l.subject}</p>}
+              {l.sentence ? <p className="break-words text-[13px] text-muted-foreground">{l.sentence}</p> : null}
+              <p className="text-[13px] text-muted-foreground">{l.who ? `${l.who} · ` : ""}{l.when}</p>
+            </li>
+          ))}
+        </ul>
+      )}
     </section>
   );
 }

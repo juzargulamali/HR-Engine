@@ -2,15 +2,16 @@ import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-h
 import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
 import { todayInDubai } from "@/components/sales/format";
+import { LoadError } from "@/components/workspace/states";
+import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
+import { parseEnquiryPrefill } from "./enquiry-form-shared";
 import { NewEnquiryForm, type EnquiryCompany } from "./new-enquiry-form";
 
 export const metadata = { title: "New enquiry" };
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export default async function NewEnquiryPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await getCrmContext();
@@ -23,6 +24,15 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
     </div>
   );
 
+  // The access list could not be read: that is not the same as having no access.
+  if (ctx.loadFailed) {
+    return (
+      <div className="space-y-6">
+        {header}
+        <LoadError what="your Sales companies" retryHref="/sales/new" />
+      </div>
+    );
+  }
   if (ctx.companies.length === 0) {
     return (
       <div className="space-y-6">
@@ -32,18 +42,24 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
     );
   }
 
-  const { organisations } = await loadOrganisations();
+  const sp = await searchParams;
+  let organisations: Awaited<ReturnType<typeof loadOrganisations>>["organisations"];
+  try {
+    ({ organisations } = await loadOrganisations());
+  } catch (e) {
+    // Empty pickers would invite duplicate organisations: say it could not load instead of offering the form.
+    console.error("[crm] new enquiry: organisations load failed", e);
+    return (
+      <div className="space-y-6">
+        {header}
+        <LoadError what="the organisations" retryHref="/sales/new" />
+      </div>
+    );
+  }
   let editions: EditionOption[] = [];
   let events: EventChoice[] = [];
   let editionsFailed = false;
   try { ({ editions, events } = await loadEditionPicker()); } catch (e) { console.error("[crm] new enquiry: editions load failed", e); editionsFailed = true; }
-  // Opened from an account's Outreach section: the organisation and company are pre-filled and the outreach is linked when the enquiry is saved.
-  const sp = await searchParams;
-  const one = (k: string) => (typeof sp[k] === "string" && UUID.test(sp[k] as string) ? (sp[k] as string) : "");
-  const fromOrg = organisations.find((o) => o.id === one("org"));
-  const prefill = fromOrg && ctx.companies.some((c) => c.id === one("company"))
-    ? { companyId: one("company"), org: { id: fromOrg.id, name: fromOrg.name, kind: fromOrg.kind, roles: fromOrg.roles }, outreachId: one("outreach") }
-    : null;
 
   const companies: EnquiryCompany[] = ctx.companies.map((c) => ({
     id: c.id,
@@ -54,6 +70,14 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
     canOpenSettings: isCrmFounder(ctx.grants, c.id) || canManageCrmSettings(ctx.grants, c.id),
     people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),
   }));
+  const contacts = organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })));
+  const today = todayInDubai();
+
+  // The address can carry starting values: from Quick Add's "Open the full form" (everything typed there) and from an account's Outreach section (the account, its
+  // company and the outreach to link once saved). Every id is checked against what this person was given; anything else is left out and named on the form.
+  const { values: prefill, ignored } = parseEnquiryPrefill(sp, { companies, organisations, editions, contacts, currentUserId: ctx.userId, today });
+  // The company in the address is the context; otherwise the company used last in Sales, then the person's own. With no reliable default the form asks.
+  const active = await pickSalesCompany(ctx, prefill.companyId || null);
 
   return (
     <div className="space-y-6">
@@ -64,11 +88,13 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
         editions={editions}
         events={events}
         editionsFailed={editionsFailed}
-        contacts={organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })))}
+        contacts={contacts}
         currentUserId={ctx.userId}
         currentUserName={ctx.fullName ?? "Me"}
-        today={todayInDubai()}
+        today={today}
+        activeCompany={{ id: active.company?.id ?? null, from: active.from }}
         prefill={prefill}
+        prefillIgnored={ignored}
       />
     </div>
   );

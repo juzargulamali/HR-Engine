@@ -60,6 +60,48 @@ export function inPeriod(iso: string | null | undefined, period: Period): boolea
 }
 
 // ----------------------------------------------------------------------------------------------------------------
+// Report labels and grouping (words only: nothing here changes a calculation)
+// ----------------------------------------------------------------------------------------------------------------
+
+export type ReportId = "pipeline_by_stage" | "pipeline_by_owner" | "follow_ups" | "timeliness" | "won_lost" | "lost_reasons" | "sources" | "won_value" | "won_references";
+
+/**
+ * The reports in two groups, so a figure that is "as of now" is never read as a result of the chosen dates:
+ * the current pipeline and follow-ups ignore the period; the results are for the period only.
+ */
+export const REPORT_GROUPS: readonly { id: "now" | "period"; title: string; basis: string; reports: readonly ReportId[] }[] = [
+  { id: "now", title: "Current pipeline and follow-ups", basis: "As of now. The dates above do not change these figures.", reports: ["pipeline_by_stage", "pipeline_by_owner", "follow_ups"] },
+  { id: "period", title: "Results for the selected period", basis: "Only what was logged or closed between the dates above (Dubai dates).", reports: ["timeliness", "won_lost", "lost_reasons", "sources", "won_value", "won_references"] },
+];
+
+/** Each report's title and its definition (shown behind the ⓘ beside the title). The definitions say what the functions below do; change them together. */
+export const REPORT_TEXT: Record<ReportId, { title: string; definition: string }> = {
+  pipeline_by_stage: { title: "Open pipeline by stage", definition: "Open opportunities now: the six working stages plus On hold. Each currency on its own line; never added together. “Without a value” counts the opportunities with no value recorded, so a total reads as “at least”." },
+  pipeline_by_owner: { title: "Open pipeline by owner", definition: "Open opportunities now, by the person who owns them, most first. Each currency on its own line; never added together." },
+  follow_ups: { title: "Follow-ups", definition: "Open follow-ups as of now, by when they are due (Dubai day). Done and cancelled follow-ups are not counted." },
+  timeliness: { title: "Timeliness", definition: "First response to enquiries logged in the period. The share within target needs both a response target and a working calendar, and is worked out per company (each has its own target and calendar, so companies are never blended). Elapsed time to first response is clock time, not working hours." },
+  won_lost: { title: "Won and lost", definition: "Closed in the period, by closing date. Won means a Won stage with purchase-order or authorised-email evidence. Win rate is won as a share of won plus lost; small numbers move it a lot. A closure that was later reopened is open again, so it is not counted." },
+  lost_reasons: { title: "Lost reasons", definition: "The opportunities lost in the period, by the reason recorded when they were closed, most frequent first." },
+  sources: { title: "Enquiries by source", definition: "Enquiries logged in the period, by where they came from. Sources that read the same are counted together." },
+  won_value: { title: "Won value", definition: "Commercially won in the period, per currency. Amounts in different currencies are never added together." },
+  won_references: { title: "Won value against invoice and payment references", definition: "Won value is a recorded sale. The invoice and payment columns are references typed in by hand on each opportunity. They are not read from Zoho Books and may be out of date." },
+};
+
+/** "1 Aug to 30 Oct 2026": a period in words (the year once when both dates share it). */
+export function periodText(period: Period): string {
+  const f = (d: string, year: boolean) => new Date(`${d}T00:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", ...(year ? { year: "numeric" } : {}), timeZone: "UTC" });
+  return `${f(period.from, period.from.slice(0, 4) !== period.to.slice(0, 4))} to ${f(period.to, true)}`;
+}
+
+/** "12 enquiries, Enginious UAE, 1 Aug to 30 Oct 2026": what a figure rests on, said beside it. `when` is the period in words, or "as of now". */
+export function scopeLine(count: number, one: string, many: string, company: string, when: string): string {
+  return `${count} ${count === 1 ? one : many}, ${company}, ${when}`;
+}
+
+/** The currencies a set of per-currency totals holds, A to Z. Empty when nothing carries a value. */
+export const currenciesOf = (...totals: Record<string, number>[]): string[] => [...new Set(totals.flatMap((t) => Object.keys(t)))].sort();
+
+// ----------------------------------------------------------------------------------------------------------------
 // Report inputs
 // ----------------------------------------------------------------------------------------------------------------
 

@@ -70,6 +70,18 @@ describe("duplicates: the same record from two sources counts once", () => {
     expect(buildAttention([ok("sales", salesCandidates({ attention: [f("f1"), f("f2")] }, fmt))]).count).toBe(2);
     expect(buildAttention([ok("sales", salesCandidates({ attention: [f("f1"), f("f1")] }, fmt))]).count).toBe(1);
   });
+  it("a Sales follow-up item links to its group on the Follow-ups tab and to the exact follow-up; without an id, to the group alone; an enquiry stays its own page", () => {
+    const f = (kind: "overdue" | "due_today", followUpId?: string) => ({ kind, opportunityId: "o1", reference: "ENQ-1", title: "Stand", detail: "Call", at: "2026-10-30T08:00:00Z", ...(followUpId ? { followUpId } : {}) });
+    const id = "6f1d2c3b-4a5e-4f60-8a7b-9c0d1e2f3a4b";
+    const hrefs = salesCandidates({ attention: [f("overdue", id), f("due_today", id), f("overdue"), f("due_today"), { kind: "no_first_response", opportunityId: "o9", reference: "ENQ-9", title: "Booth", detail: "", at: null }] }, fmt).map((c) => c.href);
+    expect(hrefs).toEqual([
+      `/sales/follow-ups?view=overdue&focus=${id}`,
+      `/sales/follow-ups?view=today&focus=${id}`,
+      "/sales/follow-ups?view=overdue",
+      "/sales/follow-ups?view=today",
+      "/sales/opportunities/o9",
+    ]);
+  });
 });
 
 describe("order: overdue first, then due today, then the rest by how long they have waited", () => {

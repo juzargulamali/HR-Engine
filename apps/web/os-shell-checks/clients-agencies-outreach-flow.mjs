@@ -118,7 +118,7 @@ await step("the assignee creates a REAL inquiry from the outreach: pre-filled, t
   await emp.getByRole("link", { name: "Create inquiry" }).click();
   await emp.waitForURL(/\/sales\/new\?/, { timeout: 15000 });
   eq(await emp.locator("#enq-agency").inputValue(), orgId, "agency pre-filled");
-  await emp.getByLabel("Requirement").fill("Fictional LED wall for the Prospect Studio launch");
+  await emp.getByLabel("What is the enquiry?").fill("Fictional LED wall for the Prospect Studio launch");
   await emp.locator("#enq-source").selectOption("agency_call");
   await emp.locator("#enq-next-title").fill("Send the quote"); await emp.locator("#enq-next-date").fill("2027-01-25");
   await emp.getByRole("button", { name: "Record enquiry" }).click();

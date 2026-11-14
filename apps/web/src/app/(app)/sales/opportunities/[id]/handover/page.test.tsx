@@ -41,7 +41,8 @@ vi.mock("../event-fact", () => ({ EventFact: ({ editionId }: { editionId: string
 let projectState: { installed: boolean; status: Record<string, unknown> | null; row: unknown };
 vi.mock("./project-handover", () => ({
   loadProjectHandover: async () => projectState,
-  ProjectHandoverPanel: ({ defaults, state }: { defaults: { siteTimezone: string; siteTimezoneNote?: string; notes?: string }; state: { failed?: boolean } }) => <div data-testid="brief" data-tz={defaults.siteTimezone} data-notes={defaults.notes ?? ""} data-failed={String(!!state.failed)}>{defaults.siteTimezoneNote}</div>,
+  ProjectHandoverPanel: ({ defaults, state, facts }: { defaults: { siteTimezone: string; siteTimezoneNote?: string; notes?: string }; state: { failed?: boolean }; facts?: { edition: string | null; contactCount: number | null; salesGaps?: string[] } }) =>
+    <div data-testid="brief" data-tz={defaults.siteTimezone} data-notes={defaults.notes ?? ""} data-failed={String(!!state.failed)} data-facts={JSON.stringify(facts ?? null)}>{defaults.siteTimezoneNote}</div>,
 }));
 
 import HandoverPage from "./page";
@@ -189,5 +190,22 @@ describe("Sales handover page", () => {
     expect(await render()).toContain("data-notes=\"Event / Exhibition: Fictional Expo Global · 2026 · Riyadh. The dates in this brief are this enquiry&#x27;s own.\"");
     editionFails = true;
     expect(await render()).toContain('data-notes=""');
+  });
+
+  it("hands the readiness block what the brief does not carry (contacts, edition, the enquiry's open points) and lists those points in one place only", async () => {
+    const facts = (html: string) => JSON.parse(/data-facts="([^"]*)"/.exec(html)![1]!.replace(/&quot;/g, '"').replace(/&#x27;/g, "'").replace(/&amp;/g, "&")) as { edition: string | null; contactCount: number | null; salesGaps: string[] };
+    let html = await render();
+    expect(facts(html)).toMatchObject({ edition: null, contactCount: 1 });
+    expect(facts(html).salesGaps).toContain("No accepted proposal is recorded.");
+    expect(html).not.toContain("to resolve before this is complete");             // with Projects installed the open points are in the readiness block, not in a second alert
+    expect(html).toContain("On the enquiry now (Sales only)");
+    // Contacts that could not be read are passed as unknown, never as none.
+    failedSections = ["contacts"];
+    html = await render();
+    expect(facts(html)).toMatchObject({ contactCount: null, salesGaps: [] });
+    // Without Projects & Tasks the Sales-only route keeps its own list of gaps.
+    failedSections = [];
+    projectState = { installed: false, status: null, row: null };
+    expect(await render()).toContain("to resolve before this is complete");
   });
 });

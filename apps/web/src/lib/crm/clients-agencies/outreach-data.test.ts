@@ -5,7 +5,7 @@ type Result = { data: unknown; error: { message: string } | null };
 let tables: Record<string, Result> = {};
 const builder = (res: Result) => {
   const b: Record<string, unknown> = {};
-  for (const m of ["select", "eq", "in", "order", "limit"]) b[m] = () => b;
+  for (const m of ["select", "eq", "in", "is", "order", "limit"]) b[m] = () => b;
   b.then = (resolve: (r: Result) => unknown) => resolve(res);
   return b;
 };
@@ -29,6 +29,18 @@ describe("a failed outreach read is an error, never 'no outreach'", () => {
     expect((await loadOutreach("c1"))[0]?.accountName).toBe("Fictional Co");
     tables = { crm_outreach: { data: [], error: null } };
     expect(await loadOutreach("c1")).toEqual([]);
+  });
+  it("lists the people recorded at each account, and a failed contacts read is 'could not load' (null), never 'no contact'", async () => {
+    const outreach = { data: [row], error: null };
+    const orgs = { data: [{ id: "g1", name: "Fictional Co" }], error: null };
+    tables = { crm_outreach: outreach, crm_organisations: orgs, crm_contacts: { data: [{ id: "k1", name: "Fictional Person", role_title: "Buyer", organisation_id: "g1" }], error: null } };
+    expect((await loadOutreach("c1"))[0]?.contacts).toEqual([{ id: "k1", name: "Fictional Person", role_title: "Buyer" }]);
+    tables = { crm_outreach: outreach, crm_organisations: orgs };
+    expect((await loadOutreach("c1"))[0]?.contacts).toEqual([]);
+    tables = { crm_outreach: outreach, crm_organisations: orgs, crm_contacts: boom };
+    const failed = await loadOutreach("c1");
+    expect(failed[0]?.accountName).toBe("Fictional Co");
+    expect(failed[0]?.contacts).toBeNull();
   });
   it("the account's outreach throws when its history cannot be read, and lists open outreach before closed", async () => {
     tables = { crm_outreach: { data: [row], error: null }, crm_outreach_events: boom };

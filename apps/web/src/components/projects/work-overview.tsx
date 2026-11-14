@@ -1,19 +1,20 @@
 import Link from "next/link";
-import { CalendarClock, History, TriangleAlert } from "lucide-react";
+import { CalendarClock, TriangleAlert } from "lucide-react";
 import { OsBadge } from "@/components/os/pills";
 import { Muted } from "@/components/projects/parts";
-import { activityWhen, ACTIVITY_KIND_LABELS, ATTENTION_KIND_LABELS, attentionHref, formatAt, pickAttention, recentText, type SiteActivity, type WorkOverview } from "@/lib/projects/phase2/model";
+import { activityWhen, ACTIVITY_KIND_LABELS, ATTENTION_KIND_LABELS, attentionHref, pickAttention, type SiteActivity, type WorkOverview } from "@/lib/projects/phase2/model";
 
 /**
- * Three concise areas at the top of the Work page, each linking to the records behind it (nothing here is a copy): Next on site (the next recorded activity, with its date or time window,
- * owner and Tentative / Confirmed state), Needs attention (what someone has to do, and who can) and Recent changes (a new output version, a review decision, a confirmed date).
+ * Two concise areas at the top of the Work page, each linking to the records behind it (nothing here is a copy): Next on site (the next recorded activity, with its date or time window,
+ * owner and Tentative / Confirmed state) and Needs attention (what someone has to do, and who can). The overview's recent changes (a new output version, a review decision, a confirmed
+ * date) are not drawn here: the page lists them in its one "Recent activity" block, merged with the change log, so the same page never has two near-identical lists.
  */
 export function WorkOverviewAreas({ projectId, overview, hideNext = false, stateLabel }: { projectId: string; overview: WorkOverview; hideNext?: boolean; stateLabel?: (a: SiteActivity) => string | null }) {
   const next = overview.next_on_site;
   const attention = overview.attention;
   const { shown, more } = pickAttention(attention);
   return (
-    <section aria-label="Project overview" className={hideNext ? "grid items-start gap-3 lg:grid-cols-2" : "grid items-start gap-3 lg:grid-cols-3"} data-testid="work-overview">
+    <section aria-label="Project overview" className={hideNext ? "grid items-start gap-3" : "grid items-start gap-3 lg:grid-cols-2"} data-testid="work-overview">
       {hideNext ? null : <NextOnSite projectId={projectId} next={next} tz={overview.tz} stateLabel={stateLabel} />}
 
       <div className="os-card p-4" data-testid="overview-attention">
@@ -30,21 +31,6 @@ export function WorkOverviewAreas({ projectId, overview, hideNext = false, state
             {more > 0 ? <li className="text-[13px] text-muted-foreground">And {more} more: open the Deliverables view or the site schedule.</li> : null}
           </ul>
         )}
-      </div>
-
-      <div className="os-card p-4" data-testid="overview-recent">
-        <h2 className="mb-2 flex items-center gap-2 font-heading text-base font-semibold"><History className="h-4 w-4 text-accent" aria-hidden /> Recent changes</h2>
-        {overview.recent.length === 0 ? <Muted>No new output version, review decision or site date has been recorded yet.</Muted> : (
-          <ul className="space-y-2">
-            {overview.recent.slice(0, 5).map((r, n) => (
-              <li key={`${r.entity_id}-${r.at}-${n}`} className="text-sm">
-                <p className="break-words">{recentText(r)}</p>
-                <p className="text-[13px] text-muted-foreground">{formatAt(r.at, overview.tz)}</p>
-              </li>
-            ))}
-          </ul>
-        )}
-        <Link href={`/projects/${projectId}/history`} className="mt-2 inline-block text-[13px] font-medium text-accent underline-offset-4 hover:underline">Full history</Link>
       </div>
     </section>
   );

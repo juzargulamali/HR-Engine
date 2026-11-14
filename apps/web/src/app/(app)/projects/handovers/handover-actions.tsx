@@ -10,7 +10,9 @@ import { ActionForm, Field } from "@/components/sales/action-form";
 
 export function AssignPmForm({ handoverId, people, current }: { handoverId: string; people: { id: string; name: string }[]; current: string | null }) {
   return (
-    <ActionForm action={assignHandoverPm} submitLabel={current ? "Change Project Manager" : "Assign Project Manager"}>
+    // Naming the first Project Manager is the one thing to do on a submitted handover, so it is the primary button. Changing one already named sits beside the Project
+    // Manager's own Accept, so it is secondary (outline): a brief never shows two primary buttons.
+    <ActionForm action={assignHandoverPm} submitLabel={current ? "Change Project Manager" : "Assign Project Manager"} pendingLabel="Assigning…" variant={current ? "outline" : "default"}>
       <input type="hidden" name="handoverId" value={handoverId} />
       <Field label="Project Manager" htmlFor={`pm-${handoverId}`} help="Only people with Projects access in this company can be chosen. They then accept the handover or ask Sales to clarify.">
         <Select id={`pm-${handoverId}`} name="pmUserId" defaultValue={current ?? ""} required>
@@ -36,12 +38,12 @@ export function HandoverDecision({ handoverId }: { handoverId: string }) {
           <p className="mt-1.5">The brief is kept as it was agreed: later changes in Sales do not overwrite it.</p>
         </InfoHint>
       </p>
-      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Project Plan.</p>
+      <p className="mt-0.5 text-sm text-muted-foreground">Accepting creates the project from this brief, with you as Project Manager, and opens its Project Plan. Sales is notified in the app. If you press it twice, or try again after a slow connection, the same project opens: a second one is never created.</p>
       {asking ? (
         <div className="mt-3">
           <ActionForm action={requestHandoverClarification} submitLabel="Send question to Sales" variant="outline" secondary={<button type="button" onClick={() => setAsking(false)} className="text-sm underline underline-offset-2">Cancel</button>}>
             <input type="hidden" name="handoverId" value={handoverId} />
-            <Field label="What do you need Sales to confirm?" htmlFor={`cl-${handoverId}`} hint="The handover goes back to Sales with your question. You are told when they resubmit.">
+            <Field label="What do you need Sales to confirm?" htmlFor={`cl-${handoverId}`} hint="The handover goes back to Sales with your question, and the enquiry's owner is notified in the app. You are told when they resubmit.">
               <Textarea id={`cl-${handoverId}`} name="note" rows={3} required autoFocus placeholder="Which hall, which hours, who confirms site access…" />
             </Field>
           </ActionForm>

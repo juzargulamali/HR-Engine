@@ -265,7 +265,7 @@ await step("the Work overview: next on site, what needs attention (with who can 
   const href = await page.getByTestId("attention-shipment_conflict").getByRole("link").first().getAttribute("href"); if (href !== `/projects/${PRJ}/plan?plan=site&mode=list#ship-${sh}`) throw new Error(`conflict link ${href}`);
   const hrefs = await page.getByTestId("attention-output_missing").getByRole("link").evaluateAll((els) => els.map((e) => e.getAttribute("href")));
   if (!hrefs.some((h) => new RegExp(`/projects/${PRJ}/work\\?task=${LOGO}`).test(h ?? ""))) throw new Error(`output links ${hrefs}`);
-  const rec = (await page.getByTestId("overview-recent").innerText()).replace(/\s+/g, " ");
+  const rec = (await page.getByTestId("recent-activity").innerText()).replace(/\s+/g, " ");
   if (!/added the shipment Equipment from Mumbai/.test(rec) || !/updated the crew of Setup/.test(rec) || !/Asia\/Dubai/.test(rec)) throw new Error(`recent: ${rec.slice(0, 300)}`);
   await page.getByTestId("attention-shipment_conflict").getByRole("link").first().click(); await page.waitForURL(/plan\?plan=site/); await page.waitForLoadState("networkidle");
   await page.getByTestId(`ship-conflict-${sh}`).waitFor({ timeout: 30000 }).catch(() => { throw new Error("the link did not land on the shipment"); });

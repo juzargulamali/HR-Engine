@@ -70,7 +70,7 @@ export function OpsPlanningPanel({ opp, canEdit, read }: { opp: OpsOpp; canEdit:
                 {planning.provisionalPm ? <span className="font-medium">{planning.provisionalPm}</span> : <span className="text-muted-foreground">Nobody named yet</span>}
                 <span className="mt-0.5 block text-sm text-muted-foreground">{OPS_PROVISIONAL_NOTE}</span>
               </Fact>
-              <Fact label="Risk">
+              <Fact label="Operational risk">
                 <Badge variant={RISK_BADGE[planning.risk]}>{OPS_RISK_LABELS[planning.risk]}</Badge>
                 {planning.riskNote ? <span className="mt-1 block whitespace-pre-wrap">{planning.riskNote}</span> : null}
               </Fact>
@@ -80,7 +80,8 @@ export function OpsPlanningPanel({ opp, canEdit, read }: { opp: OpsOpp; canEdit:
               </Fact>
             </dl>
             <div>
-              <p className="text-sm text-muted-foreground">Question from Operations</p>
+              {/* The same words Operations sees on its side of this exchange ("Question for Sales", "Sales answered"), so both read one conversation. */}
+              <p className="text-sm text-muted-foreground">Question for Sales</p>
               {planning.question ? (
                 <div className="mt-1 space-y-3">
                   <div className="rounded-md border border-border px-3 py-2 text-sm">
@@ -89,11 +90,11 @@ export function OpsPlanningPanel({ opp, canEdit, read }: { opp: OpsOpp; canEdit:
                   </div>
                   {planning.answer ? (
                     <div className="rounded-md border border-border px-3 py-2 text-sm">
-                      <p className="text-sm text-muted-foreground">Answer from Sales{planning.answeredAt ? `, ${formatDateTime(planning.answeredAt)}` : ""}</p>
+                      <p className="text-sm text-muted-foreground">Sales answered{planning.answeredAt ? ` ${formatDateTime(planning.answeredAt)}` : ""}</p>
                       <p className="mt-1 whitespace-pre-wrap break-words">{planning.answer}</p>
                     </div>
-                  ) : <p className="text-sm font-medium text-[hsl(var(--os-amber))]">Not answered yet.</p>}
-                  {canEdit && !lost ? <OpsAnswerForm {...target} current={planning.answer} /> : null}
+                  ) : <p className="text-sm font-medium text-[hsl(var(--os-amber))]">Not answered yet. Operations is waiting for this.</p>}
+                  {canEdit && !lost ? <OpsAnswerForm {...target} current={planning.answer} /> : !planning.answer && !lost ? <Muted>Only the owner of this enquiry or a Sales founder can answer.</Muted> : null}
                 </div>
               ) : <Muted className="mt-1">Operations has not asked anything.</Muted>}
             </div>

@@ -1,11 +1,14 @@
 import Link from "next/link";
+import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
-import { CRM_STAGES, crmSourceLabel, crmStageLabel } from "@enginious-hr/domain";
+import { CRM_STAGES, crmSourceLabel, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AvailabilityBadge, DueText, StageBadge } from "@/components/sales/badges";
+import { CompanySwitch } from "@/components/sales/company-switch";
 import { formatDate, formatMoney } from "@/components/sales/format";
 import { QuickAddEnquiry } from "@/components/sales/quick-add-enquiry";
 import { ClickableRow } from "@/components/workspace/clickable-row";
@@ -18,11 +21,12 @@ import { SortHead } from "@/components/workspace/sort-head";
 import { LoadError } from "@/components/workspace/states";
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { firstParam, nextSort, parseColumns, parseRecordId, parseSort, parseView, sortToParam, withParams } from "@/components/workspace/url-state";
+import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext } from "@/lib/crm/context";
-import { loadEnquiryList, type EnquiryList, type EnquiryListItem, type StageSummary } from "@/lib/crm/enquiry-list-data";
+import { loadEnquiryList, loadEnquiryScope, loadStageEvidence, type EnquiryList, type EnquiryListItem, type StageSummary } from "@/lib/crm/enquiry-list-data";
 import {
-  ENQUIRY_ALL_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_DEFAULT_COLUMNS, ENQUIRY_DEFAULT_SORT, ENQUIRY_SORT_KEYS, boardColumnFor, boardColumns, boardMoveTargets, ENQUIRY_NEEDS, parseNeed,
-  installOrShowDate, type EnquiryColumn, type EnquirySortKey,
+  ENQUIRY_ALL_COLUMNS, ENQUIRY_COLUMNS, ENQUIRY_DEFAULT_COLUMNS, ENQUIRY_DEFAULT_SORT, ENQUIRY_DEFAULT_VIEW, ENQUIRY_SORT_KEYS, boardColumnFor, boardColumns, boardMoveTargets, ENQUIRY_NEEDS, parseNeed,
+  enquiryCountSentence, enquiryFilterChips, enquiryRowAction, installOrShowDate, type EnquiryColumn, type EnquiryScopeCounts, type EnquirySortKey, type StageEvidence,
 } from "@/lib/crm/enquiry-list";
 import { organisationLabel, type OppStatusFilter } from "@/lib/crm/reports";
 import { canEditOpportunity } from "@enginious-hr/domain";
@@ -38,6 +42,9 @@ export const metadata = { title: "Enquiries" };
 const PAGE_SIZE = 100;
 const CARDS_PER_LANE = 25;
 const BASE = "/sales/opportunities";
+/** The address parameters that are filters. "Clear filters" removes exactly these; the company, the view, the sort and the columns stay. */
+const FILTER_KEYS = ["q", "stage", "owner", "mine", "status", "need"] as const;
+const cleared = (keys: readonly string[]): Record<string, null> => Object.fromEntries([...keys, "page", "open"].map((k) => [k, null]));
 
 type Params = Record<string, string | string[] | undefined>;
 
@@ -51,13 +58,19 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   const view = parseView(firstParam(sp, "view"));
   const q = firstParam(sp, "q").slice(0, 100);
   const stage = CRM_STAGES.some((s) => s.id === firstParam(sp, "stage")) ? firstParam(sp, "stage") : "";
-  const company = ctx.companies.some((c) => c.id === firstParam(sp, "company")) ? firstParam(sp, "company") : "";
+  // The company. `?company=<id>` (as in every saved link) shows that company; `?company=all` shows every company the person has; with neither, the list opens
+  // in the active Sales company (the one used last, then the person's own). With several companies and no reliable default it shows them all: nothing is
+  // assumed and nothing is hidden. A company the person has no Sales access to is ignored, and the database only returns what they may see in any case.
+  const multiCompany = ctx.companies.length > 1;
+  const active = await pickSalesCompany(ctx, firstParam(sp, "company"));
+  const allCompanies = multiCompany && (firstParam(sp, "company") === "all" || !active.company);
+  const company = allCompanies ? "" : (active.company?.id ?? "");
+  const companyName = company ? (active.company?.name ?? null) : null;
   const ownerRaw = firstParam(sp, "mine") === "1" ? "me" : firstParam(sp, "owner");
   const owner = ownerRaw === "me" ? "me" : ctx.people.some((p) => p.id === ownerRaw) ? ownerRaw : "";
   const statusParam = firstParam(sp, "status");
   const status: OppStatusFilter = statusParam === "closed" || statusParam === "all" ? statusParam : "open";
   const sort = parseSort(firstParam(sp, "sort"), ENQUIRY_SORT_KEYS, ENQUIRY_DEFAULT_SORT);
-  const multiCompany = ctx.companies.length > 1;
   const offered = ENQUIRY_ALL_COLUMNS.filter((c) => multiCompany || c !== "company");
   const cols = parseColumns(firstParam(sp, "cols"), offered, ENQUIRY_DEFAULT_COLUMNS);
   const need = parseNeed(firstParam(sp, "need"));
@@ -67,12 +80,20 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   const here = (patch: Record<string, string | null> = {}) => withParams(BASE, sp, patch);
 
   const header = (
-    <div className="flex flex-wrap items-center justify-between gap-3">
-      <h1 className="text-2xl font-semibold">Enquiries</h1>
-      <div className="flex flex-wrap items-center gap-2">
-        <MoreMenu label="Shared lists" items={[{ key: "clients", label: "Clients & contacts", href: "/sales/clients" }, { key: "proposals", label: "Proposals & quotes", href: "/sales/proposals" }]} />
-        <QuickAddEnquiry />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-semibold">Enquiries</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <MoreMenu label="Shared lists" items={[{ key: "clients", label: "Clients & contacts", href: "/sales/clients" }, { key: "proposals", label: "Proposals & quotes", href: "/sales/proposals" }]} />
+          {/* Add enquiry starts in the company this list is showing; with every company shown it uses the active company, or asks. */}
+          <QuickAddEnquiry companyId={company || null} />
+        </div>
       </div>
+      <CompanySwitch
+        companies={ctx.companies} current={company || null} from={company ? active.from : undefined}
+        hrefFor={(id) => here({ company: id, page: null, open: null })}
+        all={multiCompany ? { href: here({ company: "all", page: null, open: null }), active: allCompanies } : undefined}
+      />
     </div>
   );
 
@@ -102,7 +123,18 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   const rows = list.items;
   const total = list.total;
   const counts = list.needs;
-  const filterActive = !!(q || (view === "table" && stage) || company || owner || status !== "open" || need || handoverView);
+  // Anything beyond the company and Show narrows the list; the line above the list then says "match your filters" and the chips say which.
+  const narrowed = !handoverView && !!(q || (view === "table" && stage) || owner || need);
+  // Why the rest is not shown, exactly: only asked for when a company is chosen among several, something is hidden and no other filter is on. One more
+  // count-only read; if it fails the line says what the two counts above already prove.
+  const scope: EnquiryScopeCounts | null = company && multiCompany && !narrowed && !handoverView && total > list.matched ? await loadEnquiryScope(ctx, company) : null;
+  const sentence = enquiryCountSentence({ matched: list.matched, total, status, companyName, multiCompany, narrowed, handover: handoverView, scope });
+  const chips = enquiryFilterChips({
+    q, stageLabel: view === "table" && stage ? crmStageLabel(stage) : "", ownerLabel: owner === "me" ? "mine" : owner ? ctx.personName(owner) : "", status, need, handover: handoverView,
+  });
+  const clearHref = here(cleared(FILTER_KEYS));
+  const showsEverything = status === "all" && !company && chips.length <= 1;
+  const showAllHref = here({ ...cleared(FILTER_KEYS), status: "all", company: multiCompany ? "all" : null });
   // "My open enquiries" is exactly: mine, open, any stage, no other quick filter. It is shown as chosen only then, and choosing it sets exactly that.
   const myOpen = owner === "me" && status === "open" && !handoverView && !need && !(view === "table" && stage);
   const chip = "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-sm font-medium";
@@ -112,7 +144,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     <nav aria-label="Quick filters" className="flex flex-wrap items-center gap-2">
       <Link href={here(myOpen ? { owner: null, mine: null, page: null, open: null } : { owner: "me", mine: null, status: null, stage: null, need: null, page: null, open: null })} scroll={false} aria-current={myOpen ? "true" : undefined}
         className={cn(chip, myOpen ? on : off)}>My open enquiries</Link>
-      {/* These count, and narrow, what the search and the Stage, Owner, Show and Company filters match. They are not offered inside the handover view, whose rows are all won. */}
+      {/* These count, and narrow, what the search and the Stage, Owner, Show and Company choices match. They are not offered inside the handover view, whose rows are all won. */}
       {handoverView ? null : ENQUIRY_NEEDS.map((n) => (
         <Link key={n.id} href={here({ need: need === n.id ? null : n.id, page: null, open: null })} scroll={false} aria-current={need === n.id ? "true" : undefined} className={cn(chip, need === n.id ? on : off)}>
           <span className="os-dot" data-tone={counts[n.id] > 0 ? n.tone : "quiet"} aria-hidden />{n.label}<span className="tabular-nums text-foreground">{counts[n.id]}</span>
@@ -128,18 +160,48 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     </nav>
   );
 
+  // The company is chosen above the list (it is where the list is, not a filter), so the toolbar holds the three filters only and none is tucked away.
   const filters: ToolbarFilter[] = [
     ...(view === "table" ? [{ name: "stage", label: "Stage", value: stage, options: [{ value: "", label: "Any stage" }, ...CRM_STAGES.map((s) => ({ value: s.id, label: s.label }))] }] : []),
     { name: "owner", label: "Owner", value: owner, options: [{ value: "", label: "Anyone" }, { value: "me", label: "Mine" }, ...ctx.people.filter((p) => p.id !== ctx.userId).map((p) => ({ value: p.id, label: p.name }))] },
-    { name: "status", label: "Show", secondary: true, value: status === "open" ? "" : status, options: [{ value: "", label: "Open (includes on hold)" }, { value: "closed", label: "Won and lost" }, { value: "all", label: "Everything" }] },
-    ...(multiCompany ? [{ name: "company", label: "Company", secondary: true, value: company, options: [{ value: "", label: "All companies" }, ...ctx.companies.map((c) => ({ value: c.id, label: c.name }))] }] : []),
+    { name: "status", label: "Show", value: status === "open" ? "" : status, options: [{ value: "", label: "Open (includes on hold)" }, { value: "closed", label: "Won and lost" }, { value: "all", label: "Everything" }] },
   ];
 
   const toolbar = (
-    <ListToolbar search={{ value: q, placeholder: "Search title, reference, agency or client" }} filters={filters} clearHref={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null, need: null })}>
+    <ListToolbar search={{ value: q, placeholder: "Search title, reference, agency or client" }} filters={filters} resetKeys={["page"]}>
       <ViewSwitch current={view} tableHref={here({ view: null })} boardHref={here({ view: "board" })} boardLabel="Board" />
       {view === "table" ? <ColumnsMenu columns={ENQUIRY_COLUMNS.filter((c) => offered.includes(c.id))} selected={cols} defaults={ENQUIRY_DEFAULT_COLUMNS} /> : null}
     </ListToolbar>
+  );
+
+  // What the list is showing and why the rest is not, then the filters in use (each removable) and the one way back to the default.
+  const first = (pageNo - 1) * PAGE_SIZE + 1;
+  const result = (
+    <div className="space-y-2" data-testid="enquiry-result">
+      <p className="text-sm" role="status">
+        <span className="font-medium">{sentence.shown}</span>
+        {sentence.hidden ? <>{" "}<span className="text-muted-foreground">{sentence.hidden}</span></> : null}
+        {view === "table" && list.matched > rows.length ? <>{" "}<span className="text-muted-foreground">{rows.length === 0 ? "None on this page." : `Rows ${first} to ${first + rows.length - 1} are on this page.`}</span></> : null}
+        {sentence.hidden && !showsEverything ? <>{" "}<Link href={showAllHref} scroll={false} className="font-medium underline underline-offset-2">Show all</Link></> : null}
+        <InfoHint label="what is counted" className="ml-1">
+          Open means not won and not lost (on hold is open). The counts cover every enquiry you can see, not only the rows on this page. Choosing a stage shows that stage whatever Show says.
+        </InfoHint>
+      </p>
+      {chips.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <ul className="flex flex-wrap items-center gap-2" aria-label="Filters in use">
+            {chips.map((c) => (
+              <li key={c.id} className="inline-flex max-w-full items-center gap-1 rounded-full border border-[hsl(var(--primary)/0.45)] bg-[hsl(var(--primary)/0.14)] py-0.5 pl-2.5 pr-1 text-[13px] font-medium">
+                <span className="max-w-[16rem] truncate" title={c.label}>{c.label}</span>
+                <Link href={here(cleared(c.clear))} scroll={false} aria-label={`Remove filter: ${c.label}`} className="rounded-full p-1 text-muted-foreground hover:bg-secondary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><X className="h-3 w-3" aria-hidden /></Link>
+              </li>
+            ))}
+          </ul>
+          <Link href={clearHref} scroll={false} className="text-sm font-medium underline underline-offset-2">Clear filters</Link>
+          <span className="text-sm text-muted-foreground">Back to {ENQUIRY_DEFAULT_VIEW}{companyName ? ` in ${companyName}` : ""}.</span>
+        </div>
+      ) : null}
+    </div>
   );
 
   const panel = openId ? <EnquirySidePanel openId={openId} closeHref={here({ open: null })} /> : null;
@@ -154,18 +216,31 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     );
   }
 
+  // The board's cards that can move: their recorded evidence (sent proposal, sent estimate, Zoho quote reference), so a move the database would refuse says
+  // what is missing before it is sent. Null when it could not be read: the board then sends the move and shows the database's answer.
+  let evidence: Record<string, StageEvidence> | null = null;
+  if (view === "board" && rows.length > 0) {
+    const movable = rows.filter((i) => isCrmActive(i.opp.stage) && canEditOpportunity(ctx.grants, { companyId: i.opp.company_id, ownerId: i.opp.owner_id }, ctx.userId)).map((i) => i.opp.id);
+    evidence = await loadStageEvidence(movable);
+  }
+
   return (
     <div className="space-y-4">
       <RememberList section="enquiries" />
       {header}
       {toolbar}
       {quick}
+      {result}
       {rows.length === 0 ? (
-        <EmptyState title="Nothing matches" description="Clear a filter or search for something else." action={<Link href={here({ q: null, stage: null, owner: null, mine: null, status: null, company: null, need: null })} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Clear filters</Link>} />
+        <EmptyState
+          title={chips.length > 0 ? "Nothing matches" : sentence.shown.replace(/\.$/, "")}
+          description={chips.length > 0 ? "Remove a filter above, or clear them all." : sentence.hidden ?? "Add an enquiry to start."}
+          action={chips.length > 0 ? undefined : sentence.hidden && !showsEverything ? <Link href={showAllHref} scroll={false} className={buttonVariants({ variant: "outline", size: "sm" })}>Show all</Link> : undefined}
+        />
       ) : view === "board" ? (
-        <BoardView rows={rows} stages={list.stages} ctx={ctx} here={here} />
+        <BoardView rows={rows} stages={list.stages} ctx={ctx} here={here} evidence={evidence} />
       ) : (
-        <TableView rows={rows} matched={list.matched} total={total} pageNo={pageNo} cols={cols} sort={sort} here={here} openId={openId} filterActive={filterActive} />
+        <TableView rows={rows} matched={list.matched} pageNo={pageNo} cols={cols} sort={sort} here={here} openId={openId} />
       )}
       {panel}
     </div>
@@ -176,7 +251,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
 // Board
 // ---------------------------------------------------------------------------------------------------------------
 
-function BoardView({ rows, stages, ctx, here }: { rows: EnquiryListItem[]; stages: StageSummary[]; ctx: NonNullable<Awaited<ReturnType<typeof getCrmContext>>>; here: (patch?: Record<string, string | null>) => string }) {
+function BoardView({ rows, stages, ctx, here, evidence }: { rows: EnquiryListItem[]; stages: StageSummary[]; ctx: NonNullable<Awaited<ReturnType<typeof getCrmContext>>>; here: (patch?: Record<string, string | null>) => string; evidence: Record<string, StageEvidence> | null }) {
   const byDue = (a: EnquiryListItem, b: EnquiryListItem) => (a.nextFollowUp?.due_at ?? "9999").localeCompare(b.nextFollowUp?.due_at ?? "9999");
   // The lane's count and per-currency totals cover EVERY matching enquiry of that stage (from the database), not only the cards on the page.
   const columns = boardColumns().map((c) => {
@@ -193,6 +268,7 @@ function BoardView({ rows, stages, ctx, here }: { rows: EnquiryListItem[]; stage
     meta[i.opp.id] = {
       stage: i.opp.stage, version: i.opp.version, stageBeforeHold: i.opp.stage_before_hold,
       valueText: formatMoney(i.value, i.opp.currency), hasValue: i.value != null, openFollowUps: i.openFollowUps,
+      evidence: evidence?.[i.opp.id] ?? null,
     };
     return {
       id: i.opp.id,
@@ -206,18 +282,7 @@ function BoardView({ rows, stages, ctx, here }: { rows: EnquiryListItem[]; stage
           <PanelLink href={here({ open: i.opp.id })} className="break-words text-sm font-medium leading-snug underline-offset-2 hover:underline">{i.opp.title}</PanelLink>
           <p className="mt-0.5 break-words text-sm text-muted-foreground">{organisationLabel(i)}</p>
           <p className="mt-1 text-sm"><span className="text-muted-foreground">Owner </span>{i.ownerName}</p>
-          <div className="mt-1.5 text-sm">
-            {i.nextFollowUp ? (
-              <>
-                <p className="break-words font-medium">{i.nextFollowUp.title}</p>
-                <DueText dueAt={i.nextFollowUp.due_at} />
-              </>
-            ) : i.opp.stage === "won" || i.opp.stage === "lost" ? (
-              <span className="text-muted-foreground">Closed</span>
-            ) : (
-              <span className="font-medium text-[hsl(var(--os-amber))]">No next action planned</span>
-            )}
-          </div>
+          <div className="mt-1.5 text-sm"><NextAction item={i} /></div>
         </div>
       ),
     };
@@ -230,16 +295,33 @@ function BoardView({ rows, stages, ctx, here }: { rows: EnquiryListItem[]; stage
 // ---------------------------------------------------------------------------------------------------------------
 
 const BOARD_TONE: Record<string, BoardColumn["tone"]> = { new: undefined, qualified: "cyan", proposal_prep: "blue", proposal_sent: "blue", estimate_sent: "blue", quote_sent: "blue", negotiation: "cyan", on_hold: "amber", won: "green", lost: undefined };
-const SORTABLE: Partial<Record<EnquiryColumn, EnquirySortKey>> = { enquiry: "enquiry", party: "party", owner: "owner", stage: "stage", due: "due", dates: "dates", value: "value", created: "created" };
+// The Next action column sorts by when that action is due (the due time is inside the cell).
+const SORTABLE: Partial<Record<EnquiryColumn, EnquirySortKey>> = { enquiry: "enquiry", party: "party", owner: "owner", stage: "stage", next: "due", due: "due", dates: "dates", value: "value", created: "created" };
 
-function TableView({ rows, matched, total, pageNo, cols, sort, here, openId, filterActive }: {
-  rows: EnquiryListItem[]; matched: number; total: number; pageNo: number; cols: EnquiryColumn[]; sort: { key: EnquirySortKey; dir: "asc" | "desc" };
-  here: (patch?: Record<string, string | null>) => string; openId: string | null; filterActive: boolean;
+/**
+ * The next action and exactly when it is due, in one place. Late is red and due today is amber, each with the words; a working enquiry with no next action
+ * says so in amber, because nothing will remind anyone about it.
+ */
+function NextAction({ item: i }: { item: EnquiryListItem }) {
+  if (i.nextFollowUp) {
+    return (
+      <>
+        <span className="block break-words font-medium" title={i.nextFollowUp.title}>{i.nextFollowUp.title}</span>
+        <DueText dueAt={i.nextFollowUp.due_at} className="block whitespace-normal text-sm" />
+      </>
+    );
+  }
+  if (i.opp.stage === "won" || i.opp.stage === "lost") return <span className="text-muted-foreground">Closed: {crmStageLabel(i.opp.stage).toLowerCase()}</span>;
+  if (i.opp.stage === "on_hold") return <span className="text-muted-foreground">On hold</span>;
+  return <span className="font-medium text-[hsl(var(--os-amber))]">No next action planned</span>;
+}
+
+function TableView({ rows, matched, pageNo, cols, sort, here, openId }: {
+  rows: EnquiryListItem[]; matched: number; pageNo: number; cols: EnquiryColumn[]; sort: { key: EnquirySortKey; dir: "asc" | "desc" };
+  here: (patch?: Record<string, string | null>) => string; openId: string | null;
 }) {
-  // The rows arrive sorted and paged by the database; `matched` is every enquiry that matches, `total` every enquiry the person may see.
+  // The rows arrive sorted and paged by the database; `matched` is every enquiry that matches.
   const shown = rows;
-  const first = (pageNo - 1) * PAGE_SIZE + 1;
-  const last = first + rows.length - 1;
   const pages = Math.max(1, Math.ceil(matched / PAGE_SIZE));
   const label = (c: EnquiryColumn) => ENQUIRY_COLUMNS.find((x) => x.id === c)?.label ?? c;
   const pager = pages > 1 ? (
@@ -251,12 +333,7 @@ function TableView({ rows, matched, total, pageNo, cols, sort, here, openId, fil
   ) : null;
   return (
     <>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm text-muted-foreground" role="status">
-          {matched} of {total} enquiries{filterActive ? " match" : ""}{matched > rows.length ? `. Showing ${rows.length === 0 ? "none on this page" : `${first} to ${last}`}` : ""}
-        </p>
-        {pager}
-      </div>
+      {pager}
       <Table className={cn("min-w-[48rem]", listTable)}>
         <caption className="sr-only">Enquiries, sorted by {sort.key} {sort.dir === "asc" ? "ascending" : "descending"}</caption>
         <TableHeader>
@@ -269,6 +346,7 @@ function TableView({ rows, matched, total, pageNo, cols, sort, here, openId, fil
                 <TableHead key={c} scope="col">{label(c)}</TableHead>
               );
             })}
+            <TableHead scope="col"><span className="sr-only">Next step</span></TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -279,6 +357,7 @@ function TableView({ rows, matched, total, pageNo, cols, sort, here, openId, fil
                   <Cell column={c} item={i} href={here({ open: i.opp.id })} />
                 </TableCell>
               ))}
+              <TableCell className="whitespace-nowrap text-right"><RowActionLink item={i} /></TableCell>
             </ClickableRow>
           ))}
         </TableBody>
@@ -292,7 +371,7 @@ function cellClass(c: EnquiryColumn): string {
   switch (c) {
     case "enquiry": return "min-w-[11rem] max-w-[20rem]";
     case "party": return "min-w-[8rem]";
-    case "next": return "min-w-[9rem]";
+    case "next": return "min-w-[11rem] max-w-[18rem]";
     case "value": return "whitespace-nowrap text-right tabular-nums";
     case "owner": case "created": case "company": return "whitespace-nowrap";
     default: return "";
@@ -312,7 +391,7 @@ function Cell({ column, item: i, href }: { column: EnquiryColumn; item: EnquiryL
     case "party": return <span className="break-words">{i.agency || i.client ? organisationLabel(i) : <span className="text-muted-foreground">None recorded</span>}</span>;
     case "owner": return <>{i.ownerName}</>;
     case "stage": return <StageBadge stage={i.opp.stage} />;
-    case "next": return i.nextFollowUp ? <span className="break-words">{i.nextFollowUp.title}</span> : <span className="text-muted-foreground">{closed ? `Closed: ${crmStageLabel(i.opp.stage).toLowerCase()}` : i.opp.stage === "on_hold" ? "On hold" : "None planned"}</span>;
+    case "next": return <NextAction item={i} />;
     case "due": return i.nextFollowUp ? <DueText dueAt={i.nextFollowUp.due_at} className="whitespace-normal" /> : <span className="text-muted-foreground">—</span>;
     case "dates": {
       const d = installOrShowDate(i.opp);
@@ -324,4 +403,19 @@ function Cell({ column, item: i, href }: { column: EnquiryColumn; item: EnquiryL
     case "created": return <>{formatDate(i.opp.created_at)}</>;
     case "company": return <>{i.companyName}</>;
   }
+}
+
+/**
+ * The one action of a row: the enquiry's own page, opened at its next step. It is a link and changes nothing. The row (and the title) still open the side panel.
+ */
+function RowActionLink({ item: i }: { item: EnquiryListItem }) {
+  const a = enquiryRowAction(i);
+  return (
+    <Link
+      href={`${BASE}/${i.opp.id}${a.tab ? `?tab=${a.tab}` : ""}`} title={`${a.label}: opens ${i.opp.title}`}
+      className={cn(buttonVariants({ variant: "outline", size: "sm" }), a.tone === "red" && "border-[hsl(var(--os-red)/0.6)] text-[hsl(var(--os-red))]", a.tone === "amber" && "border-[hsl(var(--os-amber)/0.6)] text-[hsl(var(--os-amber))]")}
+    >
+      {a.label}<span className="sr-only">: {i.opp.title}</span>
+    </Link>
+  );
 }

@@ -62,10 +62,10 @@ console.log("\n=== CEO (ceo@): everything the CEO may see");
   // pipeline equals the Enquiries board; project status counts add up
   const pipe = await region(p, "Sales pipeline").getByRole("list", { name: "Open enquiries by stage" }).locator("li").evaluateAll((lis) => lis.map((l) => Number(l.innerText.trim().split(/\s+/).pop())));
   ok(pipe.reduce((a, b) => a + b, 0) === Number(asUser("ceo@e2e.local", "select count(*) from crm_opportunities where stage not in ('won','lost')")), "the pipeline stages add up to the open enquiries");
-  const stat = await region(p, "Project status by deadlines and blockers").getByRole("img").getAttribute("aria-label");
+  const stat = await region(p, "Task & milestone health by deadlines and blockers").getByRole("img").getAttribute("aria-label");
   const nums = [...stat.matchAll(/(\d+)/g)].map((m) => Number(m[1]));
   ok(nums.reduce((a, b) => a + b, 0) <= Number(await valueOf(p, "Today at a glance", "Active projects")) && nums.length === 3, `project status groups (${nums.join("/")}) never exceed the active projects`);
-  ok(/Blocked: a task is marked blocked\. At risk:/.test(await region(p, "Project status by deadlines and blockers").innerText()), "the rule behind the grouping is printed on the card");
+  ok(/Blocked: a task is marked blocked\. At risk:/.test(await region(p, "Task & milestone health by deadlines and blockers").innerText()), "the rule behind the grouping is printed on the card");
   ok((await region(p, "Delivery this week").locator("ul.md\\:sr-only li").count()) >= 1, "Delivery this week lists the scheduled projects (also as a reading list)");
 
   // layout: main column and rail, level at the top

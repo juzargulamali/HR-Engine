@@ -12,6 +12,7 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
+import { panelReturnHref } from "@/app/(app)/sales/new/enquiry-form-shared";
 import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
@@ -97,6 +98,15 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   const nextDue = dueIso(d.nextDate, d.nextTime);
   if (!nextDue) return { error: "The next action needs a valid date and time." };
 
+  // The company comes from the form, so it is checked here against the companies the person holds Sales access to before anything is sent. The database
+  // function checks the same thing again (crm_has_access, and that the company has Sales settings), so a changed request can never save to another company;
+  // this check only answers sooner and in plain words. An access list that could not be read saves nothing: it is never treated as "no access".
+  const ctx = await getCrmContext();
+  if (!ctx || ctx.loadFailed) return { error: "Your Sales access could not be checked, so the enquiry was not saved. Nothing you typed is lost: try again." };
+  const company = ctx.companies.find((c) => c.id === d.companyId);
+  if (!company) return { error: "You do not have Sales access to that company, so the enquiry was not saved. Choose one of your companies." };
+  if (!company.settings) return { error: `${company.name} has no Sales settings yet (reference code and default currency), so an enquiry cannot be recorded for it.` };
+
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("crm_create_opportunity", {
     p_company_id: d.companyId,
@@ -138,7 +148,9 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     if (linked.error) { console.error("[crm] event link after create refused", linked.error.message); linkFailed = true; }
   }
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
-  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
+  // Quick Add returns to the list it was opened from (Follow-ups or Enquiries, with its filters), and the new enquiry opens beside it.
+  const returnTo = formData.get("returnTo");
+  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? panelReturnHref(typeof returnTo === "string" ? returnTo : null, String(data)) : `/sales/opportunities/${data}`);
 }
 
 /** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */
@@ -476,6 +488,10 @@ export async function addActivity(_prev: ActionState, formData: FormData): Promi
       p_hold_reason: null, p_hold_review_date: null,
     });
     if (done.error) return fail(done.error.message);
+    // Completing a follow-up already writes its own note with these words ('Follow-up done: <title>. <outcome>', crm_complete_follow_up). A plain Note would be
+    // the same words a second time, so it is not written again. A call, email, meeting or client response IS still written: only that row carries what kind of
+    // contact it was, and the first call, email or meeting sets the first-response time. The timeline shows the completion once either way (timeline.ts).
+    if (d.kind === "note") { refresh(d.id); return { error: null }; }
     const logged = await supabase.rpc("crm_add_activity", { p_id: d.id, p_kind: d.kind, p_body: d.body, p_internal: d.internal === "on" });
     refresh(d.id);
     if (logged.error) return { error: null, warning: `The follow-up was completed${planNext ? " and the next step planned" : ""}, but the update could not be added to the timeline: ${friendlyCrmError(logged.error.message)}` };
@@ -747,8 +763,30 @@ export async function saveCrmSettings(_prev: ActionState, formData: FormData): P
   return { error: null };
 }
 
-export async function markRemindersRead(reminderId?: string): Promise<void> {
+export interface MarkRemindersReadResult { error: string | null; marked: number; failed: number }
+
+/**
+ * Marks reminders read. With no argument: all of the person's unread reminders (one call). With ids: those rows, one database call each, because
+ * crm_mark_reminder_read takes a single id; the Follow-ups page shows one reminder per follow-up and passes every row behind it, so dismissing the one
+ * shown never leaves its twin unread. The database only ever touches the caller's own rows. A refusal is reported, never swallowed: when some rows were
+ * marked and some were not, the message says how many.
+ */
+export async function markRemindersRead(reminderIds?: string | readonly string[]): Promise<MarkRemindersReadResult> {
   const supabase = await createClient();
-  await supabase.rpc("crm_mark_reminder_read", { p_reminder_id: reminderId ?? null });
+  // undefined means "all"; an empty list means nothing (it must never widen to "all").
+  const ids: (string | null)[] = reminderIds === undefined ? [null] : [...new Set(typeof reminderIds === "string" ? [reminderIds] : reminderIds)].slice(0, 100);
+  const results = await Promise.all(ids.map(async (id) => {
+    try {
+      const { data, error } = await supabase.rpc("crm_mark_reminder_read", { p_reminder_id: id });
+      return error ? { ok: false, n: 0 } : { ok: true, n: typeof data === "number" ? data : 0 };
+    } catch {
+      return { ok: false, n: 0 };
+    }
+  }));
+  const failed = results.filter((r) => !r.ok).length;
+  const marked = results.reduce((n, r) => n + r.n, 0);
   revalidatePath("/sales", "layout");
+  if (failed === 0) return { error: null, marked, failed };
+  if (failed === ids.length) return { error: reminderIds === undefined ? "The reminders could not be marked read. Try again." : "The reminder could not be dismissed. Try again.", marked, failed };
+  return { error: `Only partly dismissed: ${ids.length - failed} of ${ids.length} reminder records were marked read. Try again to clear the rest.`, marked, failed };
 }

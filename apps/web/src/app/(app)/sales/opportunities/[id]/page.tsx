@@ -1,30 +1,20 @@
 import Link from "next/link";
 import { BackLink } from "@/components/workspace/list-memory";
 import { notFound } from "next/navigation";
-import { crmAllowedMoves, crmStageLabel } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
-import { buttonVariants } from "@/components/ui/button";
-import { DueText, StageBadge } from "@/components/sales/badges";
-import { formatDate, formatMoney, todayInDubai } from "@/components/sales/format";
-import { NewFollowUpButton } from "@/components/sales/follow-up-dialogs";
+import { SalesCompanyMemory } from "@/components/sales/company-memory";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOpportunityDetailResult, loadOrganisations, type DetailSection } from "@/lib/crm/data";
-import { cn } from "@/lib/utils";
 import { ActivityPanel } from "./activity-panel";
-import { AssignOwnerButton } from "./assign-owner";
-import { HANDOVER_REOPENED_NOTICE, REOPEN_NOT_ALLOWED_NOTE } from "./closure-helpers";
+import { HANDOVER_REOPENED_NOTICE } from "./closure-helpers";
 import { buildContactPicker } from "./contact-helpers";
 import { CommercialPanel } from "./commercial-panel";
 import { DetailTabs, type DetailTab } from "./detail-tabs";
-import { EditDetailsButton } from "./edit-details";
 import { FilesPanel } from "./files-panel";
-import { stageMoveRequirement } from "./helpers";
 import { OverviewPanel } from "./overview-panel";
 import { ProposalsPanel } from "./proposals-panel";
 import { QuotationsPanel } from "./quotations-panel";
-import { ReopenButton } from "./reopen-dialog";
-import { ScopePanel, toEditable } from "./scope-panel";
-import { HoldButton, MoveStageButton, ResumeButton } from "./stage-actions";
+import { ScopePanel } from "./scope-panel";
 import { buildOppView } from "./view";
 import { EnquiryGuide } from "./enquiry-guide";
 import { Suspense } from "react";
@@ -32,11 +22,19 @@ import { LoadError } from "@/components/workspace/states";
 
 export const metadata = { title: "Opportunity" };
 
-const EVIDENCE = { purchase_order: "purchase order", authorised_email: "authorised email" } as const;
-const LINK_OUTLINE = cn(buttonVariants({ variant: "outline", size: "sm" }));
+/**
+ * Where "back" returns to: the list the person opened the enquiry from, as they left it (filters, search, sort and scroll are remembered per list by
+ * RememberList). A link from Follow-ups carries `?from=follow-ups`; anything else is the Enquiries list. Only these two names are ever used.
+ */
+const BACK = {
+  "follow-ups": { section: "follow-ups", fallback: "/sales/follow-ups", label: "Follow-ups" },
+  enquiries: { section: "enquiries", fallback: "/sales/opportunities", label: "Enquiries" },
+} as const;
 
-export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; event_link?: string }> }) {
-  const [{ id }, { tab, event_link: eventLink }] = await Promise.all([params, searchParams]);
+export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; event_link?: string; from?: string }> }) {
+  const [{ id }, { tab, event_link: eventLink, from }] = await Promise.all([params, searchParams]);
+  const back = from === "follow-ups" ? BACK["follow-ups"] : BACK.enquiries;
+  const backLink = <BackLink section={back.section} fallback={back.fallback}>{back.label}</BackLink>;
   const ctx = await getCrmContext();
   if (!ctx) return null;
   const result = await loadOpportunityDetailResult(ctx, id);
@@ -45,7 +43,7 @@ export default async function OpportunityPage({ params, searchParams }: { params
   if (result.kind !== "ok") {
     return (
       <div className="space-y-5">
-        <BackLink section="enquiries" fallback="/sales/opportunities">Enquiries</BackLink>
+        {backLink}
         <h1 className="text-2xl font-semibold">Enquiry</h1>
         {result.kind === "denied"
           ? <Alert variant="destructive" role="alert">You do not have access to this enquiry. If you think you should, ask the owner or a Sales founder.</Alert>
@@ -62,22 +60,12 @@ export default async function OpportunityPage({ params, searchParams }: { params
   }
   const view = buildOppView(ctx, detail, failed);
   const { item } = detail;
-  const { opp, canEdit, isActive, isHold, isWon, isLost, isOpen } = view;
-  const next = view.nextFollowUp;
-  const needsGateFacts = failed.has("proposals") || failed.has("zoho") || failed.has("estimateSends");
-  const hasSentProposal = detail.proposals.some((p) => p.status === "sent" || p.status === "accepted");
-  const hasQuoteRef = !!detail.zoho?.quote_ref?.trim();
-  const hasSentEstimate = detail.estimateSends.length > 0;
-  const moveOptions = crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, { hasSentProposal, hasQuoteRef, hasSentEstimate }) }));
-  const holdReviewPassed = !!opp.hold_review_date && opp.hold_review_date < todayInDubai();
-  const partyLabel = item.client ? "Client" : item.agency ? "Agency" : "Client";
-  const clientLine = item.client && item.agency ? `${item.client.name} via ${item.agency.name}` : (item.client?.name ?? item.agency?.name ?? "No client recorded");
+  const { opp } = view;
 
   const picker = organisations
     ? buildContactPicker(organisations.organisations, detail.contacts.map((c) => c.contact.id), item.agency?.id ?? item.client?.id ?? null, organisations.unassignedContacts)
     : null;
   const handoverKeptAfterReopen = !failed.has("handover") && !!detail.handover && opp.stage !== "won";
-  const reopenNote = !view.canReopen ? REOPEN_NOT_ALLOWED_NOTE : null;
 
   const tabs: DetailTab[] = [
     { id: "overview", label: "Overview", content: <OverviewPanel view={view} picker={picker} /> },
@@ -90,64 +78,17 @@ export default async function OpportunityPage({ params, searchParams }: { params
 
   return (
     <div className="space-y-5">
+      {/* The next Sales page (and Add enquiry) opens in this enquiry's company. */}
+      <SalesCompanyMemory companyId={opp.company_id} />
       <header className="space-y-3">
-        <BackLink section="enquiries" fallback="/sales/opportunities">Enquiries</BackLink>
-        <div className="os-card space-y-4 p-4 sm:p-5">
-          <div>
-          <p className="text-sm text-muted-foreground">{opp.reference} · {item.companyName}</p>
-          <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2">
-            <h1 className="min-w-0 break-words text-2xl font-semibold">{opp.title}</h1>
-            <StageBadge stage={opp.stage} />
-          </div>
-          <dl className="mt-3 grid gap-x-8 gap-y-2 text-sm sm:grid-cols-2 lg:grid-cols-4">
-            <div className="min-w-0"><dt className="text-sm text-muted-foreground">{partyLabel}</dt><dd className="break-words">{clientLine}</dd></div>
-            <div className="min-w-0"><dt className="text-sm text-muted-foreground">Owner</dt><dd className="break-words font-medium">{view.ownerName}</dd></div>
-            <div className="min-w-0"><dt className="text-sm text-muted-foreground">Value</dt><dd className="font-medium">{formatMoney(item.value, opp.currency)}</dd></div>
-            <div className="min-w-0"><dt className="text-sm text-muted-foreground">In this stage since</dt><dd>{formatDate(opp.stage_changed_at)}</dd></div>
-          </dl>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-4" role="group" aria-label="Opportunity actions">
-            {canEdit && isActive ? (
-              <>
-                {needsGateFacts ? <span className="text-sm text-muted-foreground">Stage moves are not offered because the proposals or Zoho references could not be loaded.</span> : <MoveStageButton opportunityId={opp.id} version={opp.version} stage={opp.stage} options={moveOptions} />}
-                <HoldButton opportunityId={opp.id} version={opp.version} />
-              </>
-            ) : null}
-            {canEdit && isOpen ? (
-              <>
-                {isActive ? <Link href={`/sales/opportunities/${opp.id}/close?outcome=won`} className={LINK_OUTLINE}>Close as won</Link> : null}
-                <Link href={`/sales/opportunities/${opp.id}/close?outcome=lost`} className={LINK_OUTLINE}>Close as lost</Link>
-              </>
-            ) : null}
-            {view.editMode ? <EditDetailsButton data={toEditable(view)} mode={view.editMode} availabilityWillNeedRecheck={item.availability === "confirmed" || item.availability === "unavailable"} /> : null}
-            {view.canAssign && isOpen ? <AssignOwnerButton opportunityId={opp.id} currentOwnerId={opp.owner_id} currentOwnerName={view.ownerName} people={view.people} /> : null}
-            {view.canReopen && failed.has("handover") ? <span className="text-sm text-muted-foreground">Reopen is not offered because the handover record could not be loaded.</span> : null}
-            {view.canReopen && !failed.has("handover") ? <ReopenButton opportunityId={opp.id} version={opp.version} outcome={isWon ? "won" : "lost"} stageBeforeClose={opp.stage_before_close} hasHandover={!!detail.handover} /> : null}
-            {isWon ? <Link href={`/sales/opportunities/${opp.id}/handover`} className={LINK_OUTLINE}>Handover package</Link> : null}
-          </div>
+        {backLink}
+        <div className="min-w-0">
+          <p className="break-words text-sm text-muted-foreground">{opp.reference} · <span title="The company this enquiry belongs to">{item.companyName}</span> · {opp.currency}</p>
+          <h1 className="mt-1 min-w-0 break-words text-2xl font-semibold">{opp.title}</h1>
         </div>
 
         {eventLink === "failed" ? (
-          <Alert variant="warning" role="status">The enquiry was created, but it could not be linked to the event edition you chose (only the enquiry owner or a founder can link it). Ask the owner, or use Edit details to link it.</Alert>
-        ) : null}
-
-        {isHold ? (
-          <Alert variant="warning" role="status">
-            <p><strong>On hold.</strong> Reason: {opp.hold_reason}. Review date {formatDate(opp.hold_review_date)}{holdReviewPassed ? " (the date has passed: decide whether to resume or close it)" : ""}. It returns to {opp.stage_before_hold ? crmStageLabel(opp.stage_before_hold) : "its earlier stage"} when resumed.</p>
-            {canEdit ? <div className="mt-2"><ResumeButton opportunityId={opp.id} version={opp.version} returnsTo={opp.stage_before_hold} /></div> : null}
-          </Alert>
-        ) : null}
-        {isWon ? (
-          <Alert variant="success" role="status">
-            <p><strong>Won</strong> on {formatDate(opp.closed_at)}{opp.evidence_type ? `, confirmed by ${EVIDENCE[opp.evidence_type]} ${opp.evidence_reference ?? ""} dated ${formatDate(opp.evidence_date)}` : ""}.</p>
-            {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">If it was recorded by mistake or has changed, use Reopen. The win stays in the history.</p>}
-          </Alert>
-        ) : null}
-        {isLost ? (
-          <Alert role="status">
-            <p><strong>Lost</strong> on {formatDate(opp.closed_at)}. Reason: {opp.lost_reason}. A lost opportunity is read-only, including its contacts, until it is reopened.</p>
-            {reopenNote ? <p className="mt-1 text-sm">{reopenNote}</p> : <p className="mt-1 text-sm">Use Reopen if it was recorded by mistake or the client is back. The loss stays in the history.</p>}
-          </Alert>
+          <Alert variant="warning" role="status">The enquiry was created, but it could not be linked to the event edition you chose (only the enquiry owner or a founder can link it). Ask the owner, or use Edit details (under More) to link it.</Alert>
         ) : null}
         {handoverKeptAfterReopen ? (
           <Alert variant="warning" role="status">
@@ -155,14 +96,14 @@ export default async function OpportunityPage({ params, searchParams }: { params
             <p className="mt-1"><Link href={`/sales/opportunities/${opp.id}/handover`} className="font-medium underline">See the handover record as it was</Link></p>
           </Alert>
         ) : null}
-        {isOpen && !canEdit ? <Alert role="status">Only the owner ({view.ownerName}) or a founder can change the stage, edit the details or close this opportunity. You can add notes, files and follow-ups.</Alert> : null}
 
-        <Suspense fallback={<div className="os-card p-4 text-sm text-muted-foreground" role="status">Loading the next action and latest activity…</div>}>
-          <EnquiryGuide view={view} currentUserId={ctx.userId} />
+        {/* The one summary: next action, main button, blockers, stage, owner, client, value and where it stands. Its own reads (estimates, handover) never hold up the title. */}
+        <Suspense fallback={<div className="os-card min-h-[11rem] border-l-4 border-l-border p-4 text-sm text-muted-foreground sm:p-5" role="status">Loading the next action…</div>}>
+          <EnquiryGuide view={view} />
         </Suspense>
       </header>
 
-      <DetailTabs tabs={tabs} initial={tab ?? "overview"} />
+      <DetailTabs tabs={tabs} initial={tab ?? "overview"} syncAddress />
     </div>
   );
 }

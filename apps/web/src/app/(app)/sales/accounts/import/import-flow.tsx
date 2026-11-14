@@ -14,11 +14,11 @@ type Ok<M extends "preview" | "confirm"> = Extract<ImportResponse, { ok: true; m
 type Step = "upload" | "preview" | "result";
 
 const GROUP_TITLE: Record<keyof PreviewGroups, { title: string; help: string }> = {
-  new: { title: "New organisations", help: "Will be created when you confirm." },
-  fill: { title: "Existing organisations to update", help: "Only empty fields are filled and only new contacts are added." },
-  noChange: { title: "Existing, nothing to change", help: "Already recorded. Nothing happens for these." },
-  conflicts: { title: "Conflicts (not overwritten)", help: "The file says something different from what is recorded. Existing values are kept; change them by hand if the file is right." },
-  ambiguous: { title: "Ambiguous matches (not merged)", help: "More than one existing organisation could be this one. Nothing was merged or changed." },
+  new: { title: "Will be created: new organisations", help: "Not recorded yet. Created when you confirm." },
+  fill: { title: "Will be updated: existing organisations", help: "Only empty fields are filled and only new contacts are added. Nothing recorded is overwritten." },
+  noChange: { title: "Skipped: existing, nothing to change", help: "Already recorded exactly as in the file. Nothing happens for these." },
+  conflicts: { title: "Skipped fields: conflicts (not overwritten)", help: "The file says something different from what is recorded. Existing values are kept; change them by hand if the file is right." },
+  ambiguous: { title: "Skipped: ambiguous matches (not merged)", help: "More than one existing organisation could be this one. Nothing was merged or changed." },
   review: { title: "Needs review", help: "Flagged rows: unknown type or country, owner that could not be verified, or values that differ inside the file." },
 };
 const GROUP_ORDER: (keyof PreviewGroups)[] = ["new", "fill", "noChange", "conflicts", "ambiguous", "review"];
@@ -138,7 +138,24 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
           <Card>
             <CardHeader><CardTitle>2. Preview: nothing has been saved yet</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">{file?.name} · into {companyName}</p>
+              <p className="text-sm text-muted-foreground"><span className="break-all">{file?.name}</span> · into <span className="font-medium text-foreground">{companyName}</span></p>
+              {/* What confirming will do, in the three words a person looks for, before any detail. */}
+              <dl className="grid gap-3 sm:grid-cols-3" data-testid="import-outcome">
+                <div className="rounded-md border border-border p-3">
+                  <dt className="text-sm font-medium">Will be created</dt>
+                  <dd className="text-sm text-muted-foreground"><span className="text-2xl font-semibold tabular-nums text-foreground">{s.newOrganisations}</span> organisation{s.newOrganisations === 1 ? "" : "s"}, and {s.contactsToAdd} contact{s.contactsToAdd === 1 ? "" : "s"} in all</dd>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <dt className="text-sm font-medium">Will be updated</dt>
+                  <dd className="text-sm text-muted-foreground"><span className="text-2xl font-semibold tabular-nums text-foreground">{s.existingWithFills}</span> existing organisation{s.existingWithFills === 1 ? "" : "s"}: empty fields filled, nothing overwritten</dd>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <dt className="text-sm font-medium">Will be skipped</dt>
+                  <dd className="text-sm text-muted-foreground">{s.existingNoChange} already recorded · {s.ambiguous} ambiguous · {s.conflictFields} conflicting field{s.conflictFields === 1 ? "" : "s"} · {s.unnamedRows} unnamed row{s.unnamedRows === 1 ? "" : "s"} · {s.rowErrors} row error{s.rowErrors === 1 ? "" : "s"}</dd>
+                </div>
+              </dl>
+              <p className="text-sm">Organisations and contacts are shared by every Enginious company. Account owner, lead source and exhibition are recorded for <span className="font-medium">{companyName}</span> only{s.ownersToAssign ? ` (${s.ownersToAssign} owner${s.ownersToAssign === 1 ? "" : "s"} to assign)` : ""}.</p>
+              <h3 className="text-sm font-medium">All the figures</h3>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
                 <Stat label="Rows in the file" value={s.sourceRows} />
                 <Stat label="Organisations in the file" value={s.candidates} />
@@ -182,12 +199,12 @@ export function ImportFlow({ companyId, companyName }: { companyId: string; comp
           <Card>
             <CardHeader><CardTitle>3. Confirm</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <p className="text-sm">Confirming will create {s.newOrganisations} new organisation{s.newOrganisations === 1 ? "" : "s"}, fill empty fields on {s.existingWithFills} existing one{s.existingWithFills === 1 ? "" : "s"}, and add {s.contactsToAdd} new contact{s.contactsToAdd === 1 ? "" : "s"}. Conflicts, ambiguous matches and flagged owners are left alone. The records are checked again when you confirm: if anything changed since this preview, nothing is imported and you are asked to preview again.</p>
+              <p className="text-sm">Confirming will create {s.newOrganisations} new organisation{s.newOrganisations === 1 ? "" : "s"}, fill empty fields on {s.existingWithFills} existing one{s.existingWithFills === 1 ? "" : "s"}, and add {s.contactsToAdd} new contact{s.contactsToAdd === 1 ? "" : "s"}, with owners and lead sources recorded for <span className="font-medium">{companyName}</span>. Conflicts, ambiguous matches and flagged owners are left alone. The records are checked again when you confirm: if anything changed since this preview, nothing is imported and you are asked to preview again.</p>
               <div className="flex flex-wrap gap-2">
                 {stale ? (
                   <Button type="button" onClick={() => send("preview")} disabled={busy}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} Run a fresh preview</Button>
                 ) : (
-                  <Button type="button" onClick={() => send("confirm")} disabled={busy || s.safeActions === 0}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} {s.safeActions === 0 ? "Nothing to apply" : "Confirm import"}</Button>
+                  <Button type="button" onClick={() => send("confirm")} disabled={busy || s.safeActions === 0}>{busy ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null} {s.safeActions === 0 ? "Nothing to apply" : `Confirm import into ${companyName}`}</Button>
                 )}
                 <Button type="button" variant="outline" onClick={reset} disabled={busy}>Choose another file</Button>
               </div>

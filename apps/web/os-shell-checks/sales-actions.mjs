@@ -25,7 +25,7 @@ await step("add contact", async () => {
 });
 await step("create enquiry (forced next action, reference issued)", async () => {
   await page.goto(`${BASE}/sales/new`, { waitUntil: "networkidle" });
-  await page.getByLabel("Requirement").fill("Interactive floor projection for showroom launch");
+  await page.getByLabel("What is the enquiry?").fill("Interactive floor projection for showroom launch");
   await page.getByLabel("Where did it come from?").selectOption("agency_call");
   await page.locator("select").filter({ has: page.locator("option", { hasText: "Zeta Media LLC" }) }).first().selectOption({ label: "Zeta Media LLC" });
   await page.getByLabel("Next action").fill("Call Hana to qualify the brief"); await page.getByLabel("Budget or value").fill("170000");

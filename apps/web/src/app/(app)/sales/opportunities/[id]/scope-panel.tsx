@@ -1,5 +1,7 @@
 import { AvailabilityBadge } from "@/components/sales/badges";
 import { formatDate } from "@/components/sales/format";
+import { Alert } from "@/components/ui/alert";
+import { TabLink } from "./detail-tabs";
 import { EditDetailsButton, type EditableOpportunity } from "./edit-details";
 import { dateRangeText } from "./helpers";
 import { Suspense } from "react";
@@ -23,12 +25,33 @@ export function ScopePanel({ view, compact = false }: { view: OppView; compact?:
   const { opp, detail, editMode } = view;
   const display = detail.item.availability;
   const show = dateRangeText(opp.event_start, opp.event_end, formatDate);
+  const commercial = `/sales/opportunities/${opp.id}?tab=commercial`;
+  const checked = display === "confirmed" || display === "unavailable";
+  const edit = editMode ? <EditDetailsButton data={toEditable(view)} mode={editMode} availabilityWillNeedRecheck={checked} /> : null;
   return (
+    <div className="space-y-6">
+      {/* The full page: the way to change these facts is at the top of the tab, with what a change means for the availability check. */}
+      {compact ? null : (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="min-w-0 text-sm text-muted-foreground">
+            Scope, dates and quantities as they stand now.
+            {checked ? " Equipment availability was checked against exactly these: change the dates, technologies or quantities and the check must be repeated." : ""}
+            {!editMode && view.isOpen ? ` Only the owner (${view.ownerName}) or a founder can change them.` : ""}
+          </p>
+          {edit}
+        </div>
+      )}
+      {display === "needs_recheck" ? (
+        <Alert variant="warning" role="status">
+          <p><strong>Availability must be checked again.</strong> The dates, technologies or quantities changed after the last check{opp.availability_at ? ` (${formatDate(opp.availability_at)})` : ""}, so it no longer covers what is offered now.</p>
+          {compact ? <p className="mt-1">Request a new check under Commercial.</p> : <p className="mt-1"><TabLink tab="commercial" href={commercial} className="font-medium underline underline-offset-2">Open Commercial to request a new check</TabLink></p>}
+        </Alert>
+      ) : null}
     <div className={compact ? "space-y-6" : "grid gap-6 lg:grid-cols-3"}>
       <div className={compact ? "space-y-6" : "space-y-6 lg:col-span-2"}>
         <Panel
           title="Scope"
-          actions={editMode ? <EditDetailsButton data={toEditable(view)} mode={editMode} availabilityWillNeedRecheck={display === "confirmed" || display === "unavailable"} /> : undefined}
+          actions={compact && edit ? edit : undefined}
         >
           <div className="space-y-4">
             <div><SubHeading>What is being supplied</SubHeading>{opp.scope ? <p className="mt-1 whitespace-pre-wrap break-words text-sm">{opp.scope}</p> : <Muted className="mt-1">No scope written down yet.</Muted>}</div>
@@ -68,11 +91,13 @@ export function ScopePanel({ view, compact = false }: { view: OppView; compact?:
             <Fact label="Waiting on">{opp.waiting_on === "client" ? "The client" : opp.waiting_on === "internal" ? "Our own team" : "Nobody"}</Fact>
           </dl>
         </Panel>
-        <Panel title="Equipment availability">
+        <Panel title="Equipment availability" hint="A dated check against these dates and quantities. It is not a stock reservation. Change the dates, technologies or quantities and it must be repeated."
+          actions={compact ? undefined : <TabLink tab="commercial" href={commercial} className="text-sm font-medium underline underline-offset-2">Commercial</TabLink>}>
           <AvailabilityBadge state={display} />
-          <p className="mt-2 text-sm text-muted-foreground">A dated check against these dates and quantities. Change them and it must be repeated. Details are on the Commercial tab.</p>
+          {display === "needs_recheck" ? <p className="mt-2 text-sm font-medium text-[hsl(var(--os-amber))]">The last check no longer applies to these dates and quantities.</p> : null}
         </Panel>
       </div>
+    </div>
     </div>
   );
 }

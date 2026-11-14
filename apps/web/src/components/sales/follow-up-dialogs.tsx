@@ -7,23 +7,69 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDueExact, dubaiTimeOfDay, resultingDue, whenShortcuts } from "@/lib/crm/follow-up-reschedule";
+import { cn } from "@/lib/utils";
 import { ActionForm, Field } from "./action-form";
 import { Modal } from "./modal";
 import { todayInDubai } from "./format";
 
 const KINDS = [["call", "Call"], ["email", "Email"], ["meeting", "Meeting"], ["proposal", "Proposal work"], ["other", "Other"]] as const;
 
-function KindSelect({ id, defaultValue = "other" }: { id: string; defaultValue?: string }) {
+function KindSelect({ id, defaultValue }: { id: string; defaultValue?: string }) {
+  // The next step is most often the same kind of thing as the one just done (a call after a call); an unknown kind falls back to Other.
+  const kind = KINDS.some(([v]) => v === defaultValue) ? defaultValue : "other";
   return (
-    <Select id={id} name="nextKind" defaultValue={defaultValue}>
+    <Select id={id} name="nextKind" defaultValue={kind}>
       {KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
     </Select>
+  );
+}
+
+/**
+ * The date and time of a follow-up, with one-tap choices (Tomorrow, In 2 days, Next week) and, always, the exact moment that will be saved, in words,
+ * before the person saves. The fields stay ordinary date and time inputs, so anything else can be typed. `children` adds more fields to the same row.
+ */
+export function WhenFields({ id, dateName, timeName, dateLabel = "Date", initialTime = "10:00", resultLabel = "Will be due", children }: { id: string; dateName: string; timeName: string; dateLabel?: string; initialTime?: string; resultLabel?: string; children?: React.ReactNode }) {
+  const [date, setDate] = useState("");
+  const [time, setTime] = useState(initialTime);
+  // The moment the form was opened: "tomorrow" and "already passed" are judged against it (a dialog is open for a minute, not a day).
+  const [opened] = useState(() => Date.now());
+  const due = resultingDue(date, time);
+  const past = !!due && new Date(due).getTime() < opened;
+  return (
+    <div className="space-y-2">
+      <div role="group" aria-label="Quick choices" className="flex flex-wrap gap-1.5">
+        {whenShortcuts(new Date(opened)).map((s) => (
+          <button key={s.key} type="button" aria-pressed={date === s.date} data-testid={`when-${s.key}`} onClick={() => setDate(s.date)}
+            className={cn("inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", date === s.date ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+            {s.label}
+          </button>
+        ))}
+      </div>
+      <div className={cn("grid gap-3", children ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
+        <Field label={dateLabel} htmlFor={`${id}-date`}><Input id={`${id}-date`} name={dateName} type="date" required min={todayInDubai()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label="Time (Dubai)" htmlFor={`${id}-time`}><Input id={`${id}-time`} name={timeName} type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+        {children}
+      </div>
+      <p aria-live="polite" data-testid="when-result" className="text-sm">
+        {due ? (
+          <>
+            <span className="text-muted-foreground">{resultLabel}</span> <span className="font-medium">{formatDueExact(due)}</span> <span className="text-muted-foreground">(Dubai time)</span>
+            {past ? <span className="font-medium text-[hsl(var(--os-amber))]"> · This time has already passed, so it will show as overdue.</span> : null}
+          </>
+        ) : <span className="text-muted-foreground">Choose a date to see the exact date and time before you save.</span>}
+      </p>
+    </div>
   );
 }
 
 export interface FollowUpRef {
   id: string;
   title: string;
+  /** The follow-up's own type (call, email…): the next action in the Complete dialog starts on the same type. */
+  kind?: string;
+  /** When it is due now: Reschedule keeps this time of day and says what it is moving from. */
+  dueAt?: string;
   /** Null for a follow-up on an account with no inquiry: there is no stage to protect, so no hold option and completing it never forces a next step. */
   opportunityId: string | null;
   /** True when this is the only open follow-up on an active opportunity: completing it then needs a next step or a hold. */
@@ -56,11 +102,9 @@ function CompleteBody({ followUp, onClose }: { followUp: FollowUpRef; onClose: (
       {next === "follow_up" ? (
         <div className="space-y-3 rounded-md border border-border p-3">
           <Field label="Next action" htmlFor={`nt-${followUp.id}`}><Input id={`nt-${followUp.id}`} name="nextTitle" required placeholder="e.g. Send revised proposal" /></Field>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Date" htmlFor={`nd-${followUp.id}`}><Input id={`nd-${followUp.id}`} name="nextDate" type="date" required min={todayInDubai()} /></Field>
-            <Field label="Time (Dubai)" htmlFor={`ntm-${followUp.id}`}><Input id={`ntm-${followUp.id}`} name="nextTime" type="time" defaultValue="10:00" /></Field>
-            <Field label="Type" htmlFor={`nk-${followUp.id}`}><KindSelect id={`nk-${followUp.id}`} /></Field>
-          </div>
+          <WhenFields id={`nd-${followUp.id}`} dateName="nextDate" timeName="nextTime">
+            <Field label="Type" htmlFor={`nk-${followUp.id}`}><KindSelect id={`nk-${followUp.id}`} defaultValue={followUp.kind} /></Field>
+          </WhenFields>
         </div>
       ) : null}
       {next === "hold" ? (
@@ -94,7 +138,7 @@ export function CompleteFollowUpButton({ followUp, size = "sm", label = "Complet
   );
 }
 
-type FollowUpBasics = Pick<FollowUpRef, "id" | "title" | "opportunityId">;
+type FollowUpBasics = Pick<FollowUpRef, "id" | "title" | "opportunityId" | "dueAt">;
 
 export function RescheduleFollowUpDialog({ open, onClose, followUp }: { open: boolean; onClose: () => void; followUp: FollowUpBasics }) {
   return (
@@ -102,10 +146,8 @@ export function RescheduleFollowUpDialog({ open, onClose, followUp }: { open: bo
       <ActionForm action={rescheduleFollowUp} submitLabel="Reschedule" onDone={onClose}>
         <input type="hidden" name="followUpId" value={followUp.id} />
         <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Field label="New date" htmlFor={`rd-${followUp.id}`}><Input id={`rd-${followUp.id}`} name="date" type="date" required min={todayInDubai()} /></Field>
-          <Field label="Time (Dubai)" htmlFor={`rt-${followUp.id}`}><Input id={`rt-${followUp.id}`} name="time" type="time" defaultValue="10:00" /></Field>
-        </div>
+        {followUp.dueAt ? <p className="text-sm text-muted-foreground">Due now: <span className="font-medium text-foreground">{formatDueExact(followUp.dueAt)}</span> (Dubai time)</p> : null}
+        <WhenFields id={`rd-${followUp.id}`} dateName="date" timeName="time" dateLabel="New date" initialTime={dubaiTimeOfDay(followUp.dueAt)} resultLabel="New due date" />
       </ActionForm>
     </Modal>
   );
@@ -123,12 +165,11 @@ export function RescheduleFollowUpButton({ followUp }: { followUp: FollowUpBasic
 
 export function CancelFollowUpDialog({ open, onClose, followUp }: { open: boolean; onClose: () => void; followUp: FollowUpBasics }) {
   return (
-    <Modal open={open} onClose={onClose} title="Cancel follow-up" description={followUp.title}>
+    <Modal open={open} onClose={onClose} title="Cancel follow-up" description={followUp.title} help="The only next action of an active opportunity cannot be cancelled. Complete it with a new next action instead.">
       <ActionForm action={cancelFollowUp} submitLabel="Cancel follow-up" variant="destructive" onDone={onClose}>
         <input type="hidden" name="followUpId" value={followUp.id} />
         <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
         <Field label="Why is it no longer needed?" htmlFor={`cr-${followUp.id}`}><Input id={`cr-${followUp.id}`} name="reason" required /></Field>
-        <p className="text-sm text-muted-foreground">The only next action of an active opportunity cannot be cancelled. Complete it with a new next action instead.</p>
       </ActionForm>
     </Modal>
   );
@@ -153,13 +194,11 @@ export function NewFollowUpButton({ opportunityId, people, canAssign, currentUse
         <ActionForm action={createFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)}>
           <input type="hidden" name="id" value={opportunityId} />
           <Field label="What needs to happen?" htmlFor={`fu-title-${opportunityId}`}><Input id={`fu-title-${opportunityId}`} name="title" required /></Field>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Date" htmlFor={`fu-date-${opportunityId}`}><Input id={`fu-date-${opportunityId}`} name="date" type="date" required min={todayInDubai()} /></Field>
-            <Field label="Time (Dubai)" htmlFor={`fu-time-${opportunityId}`}><Input id={`fu-time-${opportunityId}`} name="time" type="time" defaultValue="10:00" /></Field>
+          <WhenFields id={`fu-when-${opportunityId}`} dateName="date" timeName="time">
             <Field label="Type" htmlFor={`fu-kind-${opportunityId}`}>
               <Select id={`fu-kind-${opportunityId}`} name="kind" defaultValue="other">{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
             </Field>
-          </div>
+          </WhenFields>
           {canAssign ? (
             <Field label="Assigned to" htmlFor={`fu-who-${opportunityId}`}>
               <Select id={`fu-who-${opportunityId}`} name="assignedTo" defaultValue={currentUserId}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>

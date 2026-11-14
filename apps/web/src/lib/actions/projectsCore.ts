@@ -39,6 +39,9 @@ const technologiesSchema = z.preprocess(
   z.array(z.object({ name: z.string().trim().min(1, "Each technology needs a name"), qty: z.coerce.number().int().min(1, "Quantity must be at least 1") })).optional(),
 );
 
+const HANDOVER_ALREADY_SAVED = "A handover for this enquiry was saved a moment ago, so a second one was not created. Reload the page to see it and carry on from there.";
+const PROJECT_ALREADY_EXISTS = "A project already exists for this enquiry, so a second one was not created. Reload Handovers and open the project from the accepted handover.";
+
 /** Saves the delivery brief and returns its id, or the plain-language failure. Shared by "Save draft" and "Save and submit". */
 async function saveHandoverCore(fd: FormData): Promise<{ id: string; opportunityId: string } | { state: S }> {
   const p = z.object({
@@ -63,6 +66,9 @@ async function saveHandoverCore(fd: FormData): Promise<{ id: string; opportunity
   });
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_save_handover", { p_opportunity_id: p.data.opportunityId, p_fields: fields, p_expected_version: p.data.expectedVersion ?? null });
+  // Two first saves at the same moment (a double click, a second tab): the database keeps ONE open handover per enquiry (uq_proj_handovers_open) and refuses the other.
+  // Said as that, with what to do, instead of the bare "That already exists."
+  if (error && /uq_proj_handovers_open/.test(error.message)) return { state: { error: HANDOVER_ALREADY_SAVED } };
   if (error) return { state: fail(error.message) };
   refreshProjects();
   revalidateOpportunity(p.data.opportunityId);
@@ -86,6 +92,8 @@ export async function saveAndSubmitHandover(_prev: S, fd: FormData): Promise<S> 
   if (fd.get("intent") === "draft") return ok(saved.id);
   const supabase = await createClient();
   const { error } = await supabase.rpc("proj_submit_handover", { p_handover_id: saved.id });
+  // A repeated submit (double click, retry after a timeout) is not an error: proj_submit_handover returns quietly when it is already submitted, with the Project Manager or
+  // accepted, without a second notification. Only a real refusal reaches here, and the brief stays saved.
   if (error) return { error: `Your changes are saved as a draft, but it was not submitted: ${friendlyProjectError(error.message)}` };
   refreshProjects();
   revalidateOpportunity(saved.opportunityId);
@@ -138,14 +146,21 @@ export async function requestHandoverClarification(_prev: S, fd: FormData): Prom
   return ok();
 }
 
-/** Acceptance creates exactly one project (the database serialises concurrent and repeated clicks) and opens it. */
+/**
+ * Acceptance creates exactly one project and opens it. What guarantees it is in the database, not here: proj_accept_handover locks the handover row (so two clicks run one
+ * after the other), returns the SAME project id when the handover is already accepted, and the unique index uq_proj_projects_opportunity allows one project per enquiry.
+ * So a double click, or a retry after a timeout, lands on the project that already exists.
+ */
 export async function acceptHandover(_prev: S, fd: FormData): Promise<S> {
   const p = z.object({ handoverId: uuid }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_accept_handover", { p_handover_id: p.data.handoverId });
+  if (error && /already exists for this opportunity|uq_proj_projects_opportunity/.test(error.message)) return { error: PROJECT_ALREADY_EXISTS };
   if (error) return fail(error.message);
   refreshProjects();
+  // Never send the person to "/projects/null": without an id the acceptance is still recorded, and Handovers shows the project.
+  if (typeof data !== "string" || data === "") return { error: "The handover was accepted, but the project could not be opened from here. Reload Handovers and open it from the accepted handover." };
   // The new project's Project Plan: where the Project Manager starts planning (the Work overview is one click away). A repeated accept returns the same project (the database creates one only), so a retry lands here too.
   redirect(`/projects/${data}/delivery?from=handover`);
 }

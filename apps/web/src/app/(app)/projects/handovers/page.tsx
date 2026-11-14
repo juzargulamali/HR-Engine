@@ -73,7 +73,16 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
   const nameOf = (id: string | null) => (id ? (names.get(id) ?? ctx.people.find((p) => p.id === id)?.name ?? (id === ctx.userId ? "you" : staffFailed ? "name could not load" : "a Sales colleague")) : "Not chosen yet");
 
   const anyAssigner = ctx.grants.some((g) => hasProjCapability([g], g.companyId, "assign_pm"));
-  const salesHref = (h: ProjHandoverRow) => (h.crm_opportunity_id ? `/sales/opportunities/${h.crm_opportunity_id}/handover` : null);
+  // The link back to the enquiry is offered only when this person's own session can read that enquiry in Sales (row-level security answers: a row = access, no row = none),
+  // the same test the project's Details card uses for the event link. So it is never a dead link for a Project Manager without Sales access. A failed check is not
+  // "no access": it is said once below, and no link is offered until it loads.
+  const briefs = [...(asked ? [asked] : []), ...mine, ...toAssign];
+  const enquiryIds = [...new Set(briefs.map((h) => h.crm_opportunity_id).filter(Boolean))];
+  const salesRes = enquiryIds.length > 0 ? await supabase.from("crm_opportunities").select("id").in("id", enquiryIds) : { data: [] as { id: string }[], error: null };
+  const salesCheckFailed = !!salesRes.error;
+  if (salesRes.error) console.error("[projects] Sales access check for the handover links failed", salesRes.error.message);
+  const readable = new Set(((salesRes.data ?? []) as { id: string }[]).map((r) => r.id));
+  const salesHref = (h: ProjHandoverRow) => (h.crm_opportunity_id && readable.has(h.crm_opportunity_id) ? `/sales/opportunities/${h.crm_opportunity_id}/handover` : null);
   const clarificationOf = (h: ProjHandoverRow) => (h.clarification_note ? { note: h.clarification_note, at: h.clarification_requested_at, answered: h.status !== "clarification_requested" } : null);
   const isMine = (h: ProjHandoverRow) => h.pm_user_id === ctx.userId && (h.status === "pm_assigned" || h.status === "clarification_requested");
 
@@ -98,7 +107,10 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
               {h.accepted_at ? <div><dt className="text-muted-foreground">Accepted</dt><dd className="mt-0.5">{formatDateTime(h.accepted_at)}</dd></div> : null}
             </dl>
             {canChoose ? <AssignPmForm handoverId={h.id} people={people} current={h.pm_user_id} /> : h.status === "submitted" ? <Muted>Only a founder, or someone they gave PM assignment to, can name the Project Manager.</Muted> : null}
+            {/* The same read-only brief Sales sees on the enquiry's handover page (one component), so the two sides cannot drift. An accepted brief is frozen by the database. */}
+            {h.status === "accepted" ? <Muted>Accepted brief, kept as agreed: it can no longer be changed, by Sales or by anyone else.</Muted> : null}
             <HandoverBrief h={h} clarification={clarificationOf(h)} salesHref={salesHref(h)} />
+            {salesHref(h) ? <Link href={salesHref(h) as string} className="inline-block text-sm font-medium text-accent underline-offset-4 hover:underline" data-testid="handover-open-enquiry">Open the enquiry in Sales ({h.crm_reference})</Link> : null}
           </div>
         </Panel>
       </div>
@@ -134,6 +146,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
         <p className="mt-1.5">The brief carries no prices, budgets or purchase-order details.</p>
       </>} />
 
+      {salesCheckFailed ? <LoadError what="whether you can open the Sales enquiries" retryHref={withParams(BASE, sp)} note="The Sales references are shown without a link until this loads. The handovers themselves are complete." /> : null}
       {staffFailed ? <LoadError what="the staff names" retryHref={BASE} note="Where a name reads “name could not load” the person is not unknown: the directory could not be read." /> : null}
 
       {askedMissing ? (

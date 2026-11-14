@@ -337,21 +337,22 @@ export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpLi
   };
 }
 
+/**
+ * Every organisation that is not archived, with its contacts and how many enquiries name it, COMPLETE: each of the three lists is read page by page
+ * in a stable order until a short page (the data service returns at most 1000 rows per request, and a single unranged read would stop there
+ * without saying so). Throws when any page fails. The Clients & contacts page, New enquiry and Quick Add all use it.
+ */
 export async function loadOrganisations(): Promise<{
   organisations: (CrmOrganisationRow & { contacts: CrmContactRow[]; opportunityCount: number; openCount: number })[];
   /** People recorded without an organisation (so they can still be found and linked to an opportunity). */
   unassignedContacts: CrmContactRow[];
 }> {
   const supabase = await createClient();
-  const [orgsRes, contactsRes, oppsRes] = await Promise.all([
-    supabase.from("crm_organisations").select("*").is("archived_at", null).order("name"),
-    supabase.from("crm_contacts").select("*").is("archived_at", null).order("name"),
-    supabase.from("crm_opportunities").select("agency_org_id, client_org_id, stage"),
+  const [orgs, contacts, opps] = await Promise.all([
+    readPaged<CrmOrganisationRow>((from, to) => supabase.from("crm_organisations").select("*").is("archived_at", null).order("name").order("id").range(from, to)),
+    readPaged<CrmContactRow>((from, to) => supabase.from("crm_contacts").select("*").is("archived_at", null).order("name").order("id").range(from, to)),
+    readPaged<Pick<CrmOpportunityRow, "agency_org_id" | "client_org_id" | "stage">>((from, to) => supabase.from("crm_opportunities").select("agency_org_id, client_org_id, stage").order("id").range(from, to)),
   ]);
-  ok(orgsRes, contactsRes, oppsRes);
-  const orgs = orgsRes.data;
-  const contacts = contactsRes.data;
-  const opps = oppsRes.data;
   const contactsBy = new Map<string, CrmContactRow[]>();
   for (const c of contacts ?? []) if (c.organisation_id) contactsBy.set(c.organisation_id, [...(contactsBy.get(c.organisation_id) ?? []), c]);
   const total = new Map<string, number>();
@@ -377,16 +378,20 @@ export async function loadEstimateMarks(proposalIds: readonly string[]): Promise
   return new Map(((res.data ?? []) as { proposal_id: string; issued_at: string | null }[]).map((r) => [r.proposal_id, { finalised: !!r.issued_at }]));
 }
 
+/** The most proposal versions the register reads (newest first). The page says so when the read comes back full. */
+export const PROPOSALS_LIMIT = 500;
+
 export async function loadProposals(ctx: CrmContext): Promise<{ proposal: CrmProposalRow; opportunity: OpportunityListItem | null; file: CrmFileRow | null; estimate: { finalised: boolean } | null }[]> {
   const supabase = await createClient();
-  const [propsRes, items, filesRes] = await Promise.all([
-    supabase.from("crm_proposals").select("*").order("created_at", { ascending: false }).limit(500),
+  const [propsRes, items] = await Promise.all([
+    supabase.from("crm_proposals").select("*").order("created_at", { ascending: false }).limit(PROPOSALS_LIMIT),
     loadOpportunities(ctx),
-    supabase.from("crm_files").select("*").is("deleted_at", null).eq("purpose", "proposal"),
   ]);
-  ok(propsRes, filesRes);
+  ok(propsRes);
   const props = propsRes.data;
-  const files = filesRes.data;
+  // Only the files these versions point at, read by id: one unranged read of every proposal file would stop at the data service's own cap and show "No file attached" for the rest.
+  const fileIds = [...new Set((props ?? []).map((p) => p.file_id).filter((x): x is string => !!x))];
+  const files = await readForIds<CrmFileRow>(fileIds, (chunk, from, to) => supabase.from("crm_files").select("*").is("deleted_at", null).eq("purpose", "proposal").in("id", chunk).order("id").range(from, to));
   const estimates = await loadEstimateMarks((props ?? []).map((p) => p.id));
   const oppBy = new Map(items.map((i) => [i.opp.id, i]));
   const fileBy = new Map((files ?? []).map((f) => [f.id, f]));

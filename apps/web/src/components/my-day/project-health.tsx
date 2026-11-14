@@ -1,20 +1,36 @@
 import Link from "next/link";
 import { OsDonut } from "@/components/os/donut";
+import { InfoHint } from "@/components/ui/info-hint";
 import type { Portfolio } from "@/lib/my-day/loaders";
 import { cardLink, MyDayCard } from "./card-shell";
 
+/** The card's name says what is measured: tasks and milestones only (classifyProjects in lib/my-day/portfolio.ts). It is not the project's own status, which lives on Projects. */
+export const HEALTH_TITLE = "Task & milestone health";
+const HEALTH_LABEL = "Task & milestone health by deadlines and blockers";
+
 /**
  * Live projects grouped by two plain facts: a task marked blocked, or something past its due date. Not a score, not a forecast, and the
- * rule is printed on the card. Projects the viewer sees only as a summary have no tasks to read, so they are counted separately, not guessed.
+ * rule is printed on the card (the full definition is behind the ⓘ). Projects the viewer sees only as a summary have no tasks to read, so they are counted separately, not guessed.
  */
 export function ProjectHealth({ portfolio }: { portfolio: Portfolio | "error" }) {
-  const actions = <Link href="/projects" className={cardLink}>View projects</Link>;
-  if (portfolio === "error") return <MyDayCard title="Project status" actions={actions}><p className="text-sm text-muted-foreground">Project status could not be loaded right now. Reload in a moment.</p></MyDayCard>;
+  const actions = (
+    <>
+      <InfoHint label="task and milestone health" testId="project-health-hint">
+        <p>Each live project is in one group, decided only by its tasks and milestones.</p>
+        <p className="mt-1.5"><strong>Blocked</strong>: an open task is marked blocked.</p>
+        <p className="mt-1.5"><strong>At risk</strong>: an open task or an open milestone is past its due date.</p>
+        <p className="mt-1.5"><strong>On track</strong>: neither of those.</p>
+        <p className="mt-1.5">It is a count, not a score or a forecast. Equipment, site work, budget and the project&apos;s own status (planning, on hold and so on) are not part of it.</p>
+      </InfoHint>
+      <Link href="/projects" className={cardLink}>View projects</Link>
+    </>
+  );
+  if (portfolio === "error") return <MyDayCard title={HEALTH_TITLE} actions={actions}><p className="text-sm text-muted-foreground">Task and milestone health could not be loaded right now. Reload in a moment.</p></MyDayCard>;
   const { health, activeCount, summaryOnlyCount } = portfolio;
   const grouped = health.blocked + health.at_risk + health.on_track;
   const needLook = health.blocked + health.at_risk;
   return (
-    <MyDayCard title="Project status" actions={actions} label="Project status by deadlines and blockers">
+    <MyDayCard title={HEALTH_TITLE} actions={actions} label={HEALTH_LABEL}>
       {activeCount === 0 ? (
         <p className="text-sm text-muted-foreground">No live projects.</p>
       ) : grouped === 0 ? (

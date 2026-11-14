@@ -1,16 +1,40 @@
 import Link from "next/link";
-import { ArrowDown, ArrowUp, ChevronsUpDown, CircleDashed, CircleOff, Info, Moon, Trophy } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsUpDown, CircleDashed, CircleOff, Moon, Trophy } from "lucide-react";
+import { InfoHint } from "@/components/ui/info-hint";
 import { OsBadge } from "@/components/os/pills";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { priorityLabel, type DirectoryRow, type DirectorySort, type SortKey } from "@/lib/crm/clients-agencies/directory";
 import { countryLabel, ROLE_LABEL } from "@/lib/crm/clients-agencies/normalise";
-import { RELATIONSHIPS, RELATIONSHIP_HELP, RELATIONSHIP_LABEL, RELATIONSHIP_TONE, type Relationship } from "@/lib/crm/clients-agencies/relationship";
+import { RELATIONSHIPS, RELATIONSHIP_DEFINITION, RELATIONSHIP_LABEL, RELATIONSHIP_PRECEDENCE, RELATIONSHIP_TONE, type Relationship } from "@/lib/crm/clients-agencies/relationship";
 import { SelectAllBox, SelectBox } from "./outreach-select";
 
-/** The wording of the Enquiries column, shown as a visible footnote and as the column's tooltip. */
+/** What the Enquiries column counts: the column's tooltip and the first line behind its ⓘ. */
 export const ENQUIRIES_NOTE = "CRM enquiries linked to this account, not quotes Enginious sent";
-export const ENQUIRIES_NOTE_ID = "ca-enquiries-note";
+
+/** How the enquiry columns are counted (lib/crm/clients-agencies/account.ts: `linkedInquiries`, `enquiryStats`, `isWonStage`), behind the ⓘ beside the Enquiries heading. */
+export function EnquiriesHelp({ testId = "info-hint-enquiries-column" }: { testId?: string }) {
+  return (
+    <InfoHint label="Enquiries" testId={testId}>
+      <span className="block">{ENQUIRIES_NOTE}.</span>
+      <span className="mt-1.5 block">Won enquiries are enquiries recorded as won (not projects in progress). An enquiry linked to the same account twice (for example as agency and as end client) counts once.</span>
+    </InfoHint>
+  );
+}
+
+/** What each relationship badge means, in the order the rules are tried (lib/crm/clients-agencies/relationship.ts: `relationshipOf`). One badge per account: the first rule that fits. */
+export function RelationshipHelp({ testId }: { testId?: string }) {
+  return (
+    <InfoHint label="Relationship" testId={testId}>
+      <span className="block">Each account shows one badge, worked out from this company&apos;s enquiries. The first rule that fits wins:</span>
+      <span className="mt-1.5 block space-y-1.5">
+        {RELATIONSHIP_PRECEDENCE.map((r, n) => (
+          <span key={r} className="block"><span className="font-medium">{n + 1}. {RELATIONSHIP_LABEL[r]}:</span> {RELATIONSHIP_DEFINITION[r]}</span>
+        ))}
+      </span>
+    </InfoHint>
+  );
+}
 
 const ICON: Record<Relationship, typeof Trophy> = { won: Trophy, no_wins: CircleDashed, none: CircleOff, dormant: Moon };
 
@@ -25,9 +49,9 @@ export function QuickFilters({ active, counts, available, hrefFor }: { active: "
   const chip = "inline-flex min-h-10 items-center gap-1.5 rounded-full border px-3 text-sm font-medium transition-colors";
   const total = counts ? RELATIONSHIPS.reduce((n, r) => n + counts[r], 0) : null;
   return (
-    <nav aria-label="Relationship quick filters" className="space-y-1.5">
+    <nav aria-label="Relationship quick filters">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-sm font-medium">Relationship</span>
+        <span className="inline-flex items-center gap-1 text-sm font-medium">Relationship<RelationshipHelp testId="info-hint-relationship-filters" /></span>
         {available ? (
           <Link href={hrefFor("")} aria-current={active === "" ? "true" : undefined} className={cn(chip, active === "" ? "border-foreground bg-foreground text-background" : "border-border hover:bg-secondary/60")}>
             All{total !== null ? <span className="font-normal">({total})</span> : null}
@@ -45,21 +69,23 @@ export function QuickFilters({ active, counts, available, hrefFor }: { active: "
           );
         })}
       </div>
-      <p className="text-xs text-muted-foreground">{RELATIONSHIP_HELP}</p>
     </nav>
   );
 }
 
-function SortHead({ sortKey, label, sort, hrefFor, note }: { sortKey: SortKey; label: string; sort: DirectorySort; hrefFor: (key: SortKey) => string; note?: boolean }) {
+function SortHead({ sortKey, label, sort, hrefFor, note, help }: { sortKey: SortKey; label: string; sort: DirectorySort; hrefFor: (key: SortKey) => string; note?: boolean; help?: React.ReactNode }) {
   const active = sort.key === sortKey;
   const Arrow = !active ? ChevronsUpDown : sort.dir === "asc" ? ArrowUp : ArrowDown;
   return (
     <TableHead aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}>
-      <Link href={hrefFor(sortKey)} className="inline-flex min-h-10 items-center gap-1 underline-offset-2 hover:underline" title={note ? `${label}: ${ENQUIRIES_NOTE}` : `Sort by ${label}`} aria-describedby={note ? ENQUIRIES_NOTE_ID : undefined}>
-        {label}
-        {note ? <Info className="h-3.5 w-3.5" aria-hidden /> : null}
-        <Arrow className={cn("h-3.5 w-3.5", !active && "opacity-50")} aria-hidden />
-      </Link>
+      <span className="inline-flex items-center gap-0.5">
+        <Link href={hrefFor(sortKey)} className="inline-flex min-h-10 items-center gap-1 underline-offset-2 hover:underline" title={note ? `${label}: ${ENQUIRIES_NOTE}` : `Sort by ${label}`}>
+          {label}
+          <Arrow className={cn("h-3.5 w-3.5", !active && "opacity-50")} aria-hidden />
+        </Link>
+        {/* The explanation is a button of its own beside the sort link: a control inside a link could not be reached by keyboard. */}
+        {help}
+      </span>
     </TableHead>
   );
 }
@@ -77,6 +103,8 @@ export function PhoneSort({ sort, hrefFor }: { sort: DirectorySort; hrefFor: (ke
           {sort.key === k ? <span className="sr-only">{sort.dir === "asc" ? "ascending" : "descending"}</span> : null}
         </Link>
       ))}
+      {/* The headings (and the ⓘ beside Enquiries) are hidden on a phone, so the same explanation is offered here. */}
+      <span className="inline-flex items-center gap-0.5 text-muted-foreground">What Enquiries counts<EnquiriesHelp testId="info-hint-enquiries-phone" /></span>
     </nav>
   );
 }
@@ -88,7 +116,7 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
   rows: readonly DirectoryRow[]; sort: DirectorySort; hrefFor: (key: SortKey) => string; accountHref: (orgId: string) => string; canSelect: boolean; ownerName: (id: string | null) => string | null;
 }) {
   const shown = rows.map((r) => ({ id: r.org.id, name: r.org.name }));
-  const head = (key: SortKey, note?: boolean) => <SortHead sortKey={key} label={SORT_LABELS[key]} sort={sort} hrefFor={hrefFor} note={note} />;
+  const head = (key: SortKey, note?: boolean, help?: React.ReactNode) => <SortHead sortKey={key} label={SORT_LABELS[key]} sort={sort} hrefFor={hrefFor} note={note} help={help} />;
   return (
     <Table stack aria-label="Clients and agencies" className="[&_td]:align-middle md:[&_td]:px-2 md:[&_th]:px-2">
       <TableHeader>
@@ -104,10 +132,10 @@ export function DirectoryTable({ rows, sort, hrefFor, accountHref, canSelect, ow
           {head("country")}
           {head("priority")}
           <TableHead>Type</TableHead>
-          {head("enquiries", true)}
+          {head("enquiries", true, <EnquiriesHelp />)}
           {head("won")}
           {head("last")}
-          {head("badge")}
+          {head("badge", false, <RelationshipHelp testId="info-hint-relationship-column" />)}
           {head("owner")}
         </TableRow>
       </TableHeader>

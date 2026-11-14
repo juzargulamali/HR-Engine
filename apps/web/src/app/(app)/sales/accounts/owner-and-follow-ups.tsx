@@ -59,8 +59,8 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on one of this account's open inquiries, for whoever should do it.">
+      <Button type="button" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on one of this account's open inquiries, for whoever should do it. It is recorded here only: nothing is sent to the client.">
         <ActionForm action={createFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <Field label="Inquiry" htmlFor="fu-opp"><Select id="fu-opp" name="id" defaultValue={inquiries[0]?.id}>{inquiries.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}</Select></Field>
           <Field label="What to do" htmlFor="fu-title"><Input id="fu-title" name="title" required autoComplete="off" placeholder="e.g. Follow up the exhibition introduction" /></Field>
@@ -84,8 +84,8 @@ export function AddAccountFollowUpButton({ orgId, companyId, people, currentUser
   const choices = canAssign ? people : people.filter((p) => p.id === currentUserId);
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on this account, which has no inquiry yet. It does not change the account owner.">
+      <Button type="button" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on this account, which has no open inquiry. It does not change the account owner. It is recorded here only: nothing is sent to the client.">
         <ActionForm action={createAccountFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="orgId" value={orgId} />
           <input type="hidden" name="companyId" value={companyId} />

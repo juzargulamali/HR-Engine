@@ -3,6 +3,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 
 export interface ComboOption {
@@ -27,18 +28,35 @@ export function matchOptions<T extends ComboOption>(options: readonly T[], query
 }
 
 /**
+ * Puts the keyboard focus back in a search field without opening its list of matches: used after "Add organisation" or "Create event or edition" has chosen
+ * the new record, so the person carries on from the field they were in. Does nothing when the field is not on the page.
+ */
+export function focusComboQuietly(id: string): void {
+  if (typeof document === "undefined") return;
+  const el = document.getElementById(id);
+  if (!(el instanceof HTMLInputElement) || el.disabled) return;
+  if (document.activeElement === el) return;
+  el.dataset.quietFocus = "1";
+  el.focus();
+  // If the focus could not move (the field is inside something inert), the mark must not swallow the person's next real focus.
+  if (document.activeElement !== el) delete el.dataset.quietFocus;
+}
+
+/**
  * One search-as-you-type field: type, see the matches directly below, choose by mouse, touch or keyboard (arrow keys, Enter, Escape). The chosen id is posted in a hidden
  * input named `name`. TYPING ALONE NEVER SELECTS OR CREATES ANYTHING: editing the text after a choice clears the choice until a match is chosen again, and Enter picks only
  * a highlighted match. Built to the ARIA combobox pattern (input role=combobox + listbox of options, focus stays in the input).
  */
 export function SearchCombobox({
-  id, name, label, hint, options, value, onChange, placeholder = "Type to search", emptyText, disabled = false, required = false, footer, optionBadge, onQueryChange,
+  id, name, label, hint, help, options, value, onChange, placeholder = "Type to search", emptyText, disabled = false, required = false, footer, optionBadge, onQueryChange,
 }: {
   id: string;
   /** The hidden input that posts the chosen id. Leave it out (undefined) and nothing is posted: used for a field that is posted only when it changed. */
   name?: string | undefined;
   label: string;
   hint?: string;
+  /** Optional explanation or example: behind an ⓘ beside the label. `hint` stays visible, for what a person must read to fill the field in. */
+  help?: React.ReactNode;
   options: readonly ComboOption[];
   /** The chosen id, or "" for none. */
   value: string;
@@ -97,13 +115,17 @@ export function SearchCombobox({
 
   return (
     <div ref={box} className="relative min-w-0 space-y-1.5">
-      <label htmlFor={id} className="text-sm font-medium leading-none">{label}{required ? <span aria-hidden> *</span> : null}</label>
+      <span className="flex items-center gap-1"><label htmlFor={id} className="text-sm font-medium leading-none">{label}{required ? <span aria-hidden> *</span> : null}</label>{help ? <InfoHint label={label}>{help}</InfoHint> : null}</span>
       {name ? <input type="hidden" name={name} value={value} /> : null}
       <div className="relative">
         <Input
           id={id} role="combobox" aria-expanded={open} aria-controls={listId} aria-autocomplete="list" aria-activedescendant={open && matches[active] ? optionId(active) : undefined}
           autoComplete="off" autoCapitalize="off" spellCheck={false} enterKeyHint="search" placeholder={placeholder} disabled={disabled} value={text} className={cn("min-h-11", chosen && "pr-10")}
-          onFocus={() => { setActive(0); setOpen(true); }}
+          onFocus={(e) => {
+            // Focus handed back by a form (after a record was added from the field) should not reopen the list over the form.
+            if (e.currentTarget.dataset.quietFocus) { delete e.currentTarget.dataset.quietFocus; return; }
+            setActive(0); setOpen(true);
+          }}
           onChange={(e) => { setText(e.target.value); setActive(0); setOpen(true); onQueryChange?.(e.target.value); if (value) { lastValue.current = ""; onChange(""); } }}
           onKeyDown={onKey}
         />

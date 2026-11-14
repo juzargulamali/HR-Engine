@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CrmOutreachEventRow, CrmOutreachRow } from "@/types/crm";
 import { readFileSync } from "node:fs";
-import { describeEvent, filterOutreach, isOutcomeValidForKind, isOverdue, outcomeAfterKindChange, outcomesForKind, outreachFiltersFromParams, OUTREACH_OUTCOME_LABEL, OUTREACH_OUTCOMES, OUTREACH_OUTCOMES_BY_KIND, OUTREACH_SETTABLE_STATUSES, summariseAssignResults } from "./outreach";
+import { outreachRowState, describeEvent, filterOutreach, isOutcomeValidForKind, isOverdue, outcomeAfterKindChange, outcomesForKind, outreachFiltersFromParams, OUTREACH_OUTCOME_LABEL, OUTREACH_OUTCOMES, OUTREACH_OUTCOMES_BY_KIND, OUTREACH_SETTABLE_STATUSES, summariseAssignResults } from "./outreach";
 
 const TODAY = "2026-11-07";
 const row = (o: Partial<CrmOutreachRow> & { id: string }): CrmOutreachRow => ({
@@ -93,5 +93,38 @@ describe("definitions", () => {
     expect(describeEvent(ev({ kind: "reassigned", from_user: "s", to_user: "o" }), who, () => "")).toBe("Reassigned from Sara to Omar");
     expect(describeEvent(ev({ kind: "status", from_status: "not_started", to_status: "in_progress", note: "First activity logged" }), who, () => "")).toBe("Status: Not started to In progress (First activity logged)");
     expect(describeEvent(ev({ kind: "inquiry_linked", opportunity_id: "x" }), who, () => "UAE-1: Gala")).toBe("Inquiry linked: UAE-1: Gala");
+  });
+});
+
+describe("an outreach row: where it stands in words, and its one action", () => {
+  it("overdue is red and says by how many days, whichever date it is measured from", () => {
+    expect(outreachRowState(row({ id: "a", target_date: "2026-11-04" }), TODAY)).toMatchObject({ tone: "red", label: "Overdue by 3 days", overdue: true, dueKind: "target", dueDate: "2026-11-04", action: "log" });
+    expect(outreachRowState(row({ id: "a", next_action: "Call back", next_due: "2026-11-06", status: "waiting_for_reply" }), TODAY)).toMatchObject({ tone: "red", label: "Overdue by 1 day", overdue: true, waiting: false, dueKind: "next_action" });
+  });
+  it("due today and waiting for a reply are amber, in words", () => {
+    expect(outreachRowState(row({ id: "a", target_date: TODAY }), TODAY)).toMatchObject({ tone: "amber", label: "Due today", overdue: false });
+    expect(outreachRowState(row({ id: "a", status: "waiting_for_reply", next_action: "Chase", next_due: "2026-11-20" }), TODAY)).toMatchObject({ tone: "amber", label: "Waiting for reply", waiting: true, overdue: false });
+    expect(outreachRowState(row({ id: "a", status: "waiting_for_reply", target_date: TODAY }), TODAY).label).toBe("Waiting for reply, due today");
+  });
+  it("on time is neutral and counts the days left", () => {
+    expect(outreachRowState(row({ id: "a", next_action: "Send portfolio", next_due: "2026-11-09", status: "in_progress" }), TODAY)).toMatchObject({ tone: "neutral", label: "Due in 2 days", action: "log" });
+    expect(outreachRowState(row({ id: "a", target_date: "2026-11-08" }), TODAY).label).toBe("Due in 1 day");
+  });
+  it("the action is Set next action only when a contact was logged and nothing is planned", () => {
+    expect(outreachRowState(row({ id: "a", status: "in_progress", last_contact_on: "2026-11-05" }), TODAY).action).toBe("set_next");
+    expect(outreachRowState(row({ id: "a", status: "in_progress", last_contact_on: "2026-11-05", next_action: "Call", next_due: "2026-11-12" }), TODAY).action).toBe("log");
+    expect(outreachRowState(row({ id: "a" }), TODAY).action).toBe("log");
+  });
+  it("an outreach that already has an enquiry offers the enquiry, never another one, and is not overdue", () => {
+    expect(outreachRowState(row({ id: "a", status: "inquiry_raised", opportunity_id: "opp", target_date: "2026-01-01" }), TODAY)).toEqual({ tone: "green", label: "Enquiry raised", dueDate: null, dueKind: null, waiting: false, overdue: false, action: "open_enquiry" });
+    // linked and later closed: still the enquiry
+    expect(outreachRowState(row({ id: "a", status: "closed", opportunity_id: "opp" }), TODAY).action).toBe("open_enquiry");
+    expect(outreachRowState(row({ id: "a", status: "closed", target_date: "2026-01-01" }), TODAY)).toMatchObject({ tone: "quiet", label: "Closed", overdue: false, action: "open_account" });
+  });
+  it("agrees with isOverdue for every status", () => {
+    for (const status of ["not_started", "in_progress", "waiting_for_reply", "meeting_booked", "inquiry_raised", "closed"] as const) {
+      const o = row({ id: "a", status, target_date: "2026-11-01" });
+      expect(outreachRowState(o, TODAY).overdue).toBe(isOverdue(o, TODAY));
+    }
   });
 });

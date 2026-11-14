@@ -45,8 +45,8 @@ export function LogActivityButton({ outreachId, accountName }: { outreachId: str
   const id = `lg-${outreachId}`;
   return (
     <>
-      <Button type="button" size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" aria-hidden /> Log activity</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Log activity" description={`A call, email or meeting with ${accountName}. The entry is kept in the history and cannot be edited. Choosing an outcome is how you record a reply: nothing is assumed.`}>
+      <Button type="button" size="sm" onClick={() => setOpen(true)}><Plus className="h-4 w-4" aria-hidden /> Log activity<span className="sr-only"> with {accountName}</span></Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Log activity" description={`A call, email or meeting with ${accountName}. It records what you did: nothing is sent to the client from here.`} help="The entry is kept in the history and cannot be edited. Choosing an outcome is how you record a reply: nothing is assumed.">
         <ActionForm action={logOutreachActivity} submitLabel="Log activity" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="outreachId" value={outreachId} />
           <KindOutcomeFields id={id} />
@@ -62,12 +62,12 @@ export function LogActivityButton({ outreachId, accountName }: { outreachId: str
   );
 }
 
-export function NextActionButton({ outreachId, current, due }: { outreachId: string; current: string | null; due: string | null }) {
+export function NextActionButton({ outreachId, current, due, accountName, primary = false }: { outreachId: string; current: string | null; due: string | null; /** Named for screen readers where several rows carry the button. */ accountName?: string; /** The row's one action (the Outreach list) rather than one of several (the account page). */ primary?: boolean }) {
   const [open, setOpen] = useState(false);
   const id = `na-${outreachId}`;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><ClipboardPen className="h-4 w-4" aria-hidden /> {current ? "Change next action" : "Set next action"}</Button>
+      <Button type="button" variant={primary ? "default" : "outline"} size="sm" onClick={() => setOpen(true)}><ClipboardPen className="h-4 w-4" aria-hidden /> {current ? "Change next action" : "Set next action"}{accountName ? <span className="sr-only"> for {accountName}</span> : null}</Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Next action" description="What happens next and by when. It shows in My outreach and in the Sales lead view.">
         <ActionForm action={setOutreachNextAction} submitLabel="Save next action" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="outreachId" value={outreachId} />
@@ -101,13 +101,16 @@ export function StatusControl({ outreachId, status }: { outreachId: string; stat
   );
 }
 
-/** Raise a real inquiry: create one through the normal enquiry form (account and company pre-filled) or link one the account already has. */
-export function InquiryLinkControls({ outreachId, orgId, companyId, inquiries }: { outreachId: string; orgId: string; companyId: string; inquiries: { id: string; label: string }[] }) {
+/**
+ * Raise a real inquiry: create one through the normal enquiry form or link one the account already has. `createHref` opens the New enquiry form with what the
+ * outreach already knows (lib/crm/clients-agencies/outreach-enquiry.ts); the form is the review step and nothing exists until it is saved there.
+ */
+export function InquiryLinkControls({ outreachId, createHref, inquiries }: { outreachId: string; createHref: string; inquiries: { id: string; label: string }[] }) {
   const [open, setOpen] = useState(false);
   const id = `lk-${outreachId}`;
   return (
     <>
-      <Link href={`/sales/new?company=${companyId}&org=${orgId}&outreach=${outreachId}`} className={buttonVariants({ variant: "outline", size: "sm" })}>Create inquiry</Link>
+      <Link href={createHref} className={buttonVariants({ variant: "outline", size: "sm" })} title="Opens the New enquiry form with the account, company and outreach notes filled in. Nothing is created until you save it there.">Create inquiry</Link>
       {inquiries.length > 0 ? <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><Link2 className="h-4 w-4" aria-hidden /> Link an inquiry</Button> : null}
       <Modal open={open} onClose={() => setOpen(false)} title="Link an inquiry" description="Link an inquiry this account already has. The outreach becomes Inquiry raised; its history stays on the account. No inquiry or deal is created.">
         <ActionForm action={linkOutreachInquiry} submitLabel="Link inquiry" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
