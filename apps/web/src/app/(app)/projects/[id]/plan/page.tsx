@@ -1,3 +1,4 @@
+import { SCHEDULE_PURPOSES } from "@/lib/projects/plan-view";
 import { notFound, redirect } from "next/navigation";
 import { hasProjCapability, isFinishedProject } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -18,6 +19,11 @@ import { DependencyForm } from "../timeline/_components/dependency-form";
 import { DialogButton } from "../timeline/_components/dialog";
 import { bookablePeople, canBookPerson, sortPlanItems } from "../timeline/timeline-helpers";
 import { PlanSwitch } from "./_controls";
+import { InfoHint } from "@/components/ui/info-hint";
+import { SiteSchedulePanel, SiteTimelineStrip } from "@/components/projects/site/site-views";
+import type { SiteBriefing } from "@/lib/projects/phase2/model";
+import { loadSiteSchedule } from "@/lib/projects/phase2/data";
+import { memberOptions } from "@/lib/projects/data";
 import { BookingCard, ConflictList, DependencyRow, PlanSection } from "./_sections";
 
 export const metadata = { title: "Plan" };
@@ -52,9 +58,12 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
     </div>
   );
   const intro = (
-    <Muted>
-      Plans, not commitments: nothing reaches the client unless an item is marked client-facing and a client timeline is issued from Files &amp; client plan. Changing a date never moves another date.
-    </Muted>
+    <p className="text-sm text-muted-foreground" data-testid="plan-intro">
+      {plan === "site" ? SCHEDULE_PURPOSES.site : SCHEDULE_PURPOSES.delivery}
+      <InfoHint label="how plans work" className="ml-1">
+        Plans, not commitments: nothing reaches the client unless an item is marked client-facing and a client timeline is issued from Files &amp; client plan. Changing a date never moves another date. {plan === "site" ? "Where the team is on site: the Site schedule shows each run, its crew and its shipments." : "The Delivery timeline holds dates the client may see; where the team is on site, with crew and shipments, is the Site schedule."}
+      </InfoHint>
+    </p>
   );
 
   // ------------------------------------------------------------------------------------------------ Calendar
@@ -98,6 +107,20 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
       </div>
     );
   }
+  const [siteRes, reqR, techR, briefR] = plan === "site"
+    ? await Promise.all([
+      loadSiteSchedule(id), supabase.from("inv_requests").select("id, code, status").eq("project_id", id).neq("status", "cancelled").order("created_at", { ascending: false }).limit(50),
+      // People who can be assigned on site: the project's members and the company's active employees who are not on it (site-only). Project Managers only.
+      canEditPlan ? supabase.rpc("proj_site_technician_candidates", { p_project_id: id }) : Promise.resolve({ data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }),
+      // What each activity's briefing is missing, and the venue / date / readiness it effectively has (the activity's own, else the project's records). A failed read just hides the extras.
+      supabase.rpc("proj_site_briefing", { p_project_id: id }),
+    ])
+    : [null, { data: [] as { id: string; code: string; status: string }[] }, { data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }, { data: null, error: null }];
+  const briefings = Object.fromEntries(((briefR.data ?? []) as unknown as SiteBriefing[]).map((b) => [b.id, b]));
+  const crewChoices = (techR.data ?? []).length > 0 ? (techR.data ?? []).map((t) => ({ id: t.user_id, name: t.name, siteOnly: !t.is_member })) : memberOptions(view);
+  // Does the Project Plan already hold this project's work? Then the suggested stages are not offered (the same work is planned once). A failed or empty count just keeps the old offer.
+  const dpCount = plan === "delivery" ? (await supabase.from("proj_dp_items").select("id", { count: "exact", head: true }).eq("project_id", id)).count : null;
+  const planHasWork = (dpCount ?? 0) > 0;
   const milestones = milestoneR.data ?? [];
   const milestoneTitle = (mid: string | null) => milestones.find((m) => m.id === mid)?.title ?? null;
   const items = planR.data ?? [];
@@ -113,23 +136,43 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
   const siteItems = items.filter((i) => i.plan === "site" && i.status !== "cancelled").map((i) => ({ id: i.id, title: i.title }));
   const checkHref = (bookingId: string) => `${planHref(id, sp, { plan: "site", mode: "list", check: bookingId }, ["view", "date", "tz", "kind"])}#bookings`;
 
+  const planSection = (
+    <PlanSection
+      plan={plan} items={sortPlanItems(items.filter((i) => i.plan === plan))} canEdit={canEditPlan} projectId={id} siteTz={siteTz} milestones={milestones}
+      milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"} planHasWork={planHasWork}
+    />
+  );
+
   return (
     <div className="space-y-5">
       {switches}
       {intro}
-      <PlanSection
-        plan={plan} items={sortPlanItems(items.filter((i) => i.plan === plan))} canEdit={canEditPlan} projectId={id} siteTz={siteTz} milestones={milestones}
-        milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"}
-      />
+      {plan === "site" && siteRes?.state === "ok" ? (
+        <>
+          {mode === "timeline" ? <Panel title="Site timeline" hint="Setup, show and dismantling run by run, and the shipments that supply them, on one calendar. Names stay in view while it scrolls; exact dates are on every row."><SiteTimelineStrip schedule={siteRes.data} today={todayIso()} /></Panel> : null}
+          <SiteSchedulePanel projectId={id} schedule={siteRes.data} canEdit={canEditPlan} members={crewChoices} briefings={briefings} requests={(reqR.data ?? []).map((r) => ({ id: r.id, name: `${r.code} (${r.status})` }))} />
+          <details className="os-card px-4 py-3" data-testid="site-all-items">
+            <summary className="cursor-pointer text-sm font-semibold">All site timeline items (client-facing, milestone and status) <InfoHint label="All site timeline items">The same items as the Site schedule above, with the fields that are not part of it: whether an item is offered to a client timeline, its milestone and its status.</InfoHint></summary>
+      {planSection}
+          </details>
+        </>
+      ) : plan === "site" && siteRes?.state === "error" ? (
+        <>
+          <LoadError what="the site schedule" retryHref={planHref(id, sp, {})} />
+      {planSection}
+        </>
+      ) : (
+        planSection
+      )}
 
       {plan === "site" ? (
         <>
           <Panel
             title="Dependencies on others"
-            description="Things outside the team that have to happen first: structure ready, power and network, access, the standbuilder's work."
+            hint="Things outside the team that have to happen first: structure ready, power and network, access, the standbuilder's work."
             actions={canEditPlan ? <DialogButton label="Add dependency" title="Add a dependency" variant="default"><DependencyForm projectId={id} siteTimezone={siteTz} milestones={milestones} /></DialogButton> : null}
           >
-            <Muted className="mb-3">Recorded for the team only; nothing is sent to anyone. Times are site time ({siteTz.replace(/_/g, " ")}).</Muted>
+            <Muted className="mb-3">Team only; nothing is sent to anyone. Times are site time ({siteTz.replace(/_/g, " ")}).</Muted>
             {deps.length === 0 ? (
               <EmptyState dense title="No dependencies recorded" description={canEditPlan ? "Add what you are waiting for, who is responsible and when it is expected." : "The Project Manager records what the project is waiting for."} />
             ) : (
@@ -145,15 +188,15 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
           <Panel
             id="bookings"
             title="Site bookings"
-            description="A person reserved at a site, in the site's own time, with preparation and travel allowances."
+            hint="A person reserved at a site, in the site's own time, with preparation and travel allowances. Several assignments in one day are never a conflict: only physical site bookings are compared, across every project, including each booking's preparation and travel time."
             actions={canBookAny ? <DialogButton label="Add booking" title="Book someone on site" variant="default"><BookingForm projectId={id} siteTimezone={siteTz} people={people} siteItems={siteItems} /></DialogButton> : null}
           >
             <Muted className="mb-3">
-              Several assignments in one day are never a conflict. Only physical site bookings are compared, across every project, including each booking&apos;s preparation and travel time. A booking is tentative until confirmed, and confirming one that overlaps another needs authority and a reason.
-              {!view.canManage && view.headOfTeamIds.length > 0 ? " As a department head you can book the people of your own team." : ""}
+              A booking is tentative until confirmed. ⚠ Confirming one that overlaps another needs authority and a reason.
+              {!view.canManage && view.headOfTeamIds.length > 0 ? " As a team lead you can book the people of your own team." : ""}
             </Muted>
             {bookings.length === 0 ? (
-              <EmptyState dense title="No site bookings" description={canBookAny ? "Book the people who have to be on site, then confirm each booking." : "The Project Manager, or the head of a person's department team, books people on site."} />
+              <EmptyState dense title="No site bookings" description={canBookAny ? "Book the people who have to be on site, then confirm each booking." : "The Project Manager, or the head of a person's project team, books people on site."} />
             ) : (
               <div className="space-y-3">
                 {bookings.map((b) => {

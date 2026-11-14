@@ -79,9 +79,9 @@ function CreateBudget({ view }: { view: PbxBudgetView }) {
   const a = useAction();
   const [currency, setCurrency] = useState(view.default_currency ?? "AED");
   return (
-    <Panel title="Create the project budget" description="One budget per project, in one currency. Nothing is converted between currencies.">
+    <Panel title="Create the project budget" hint="One budget per project, in one currency. Nothing is converted between currencies.">
       <form className="max-w-xl space-y-3" onSubmit={(e) => { e.preventDefault(); a.run(() => createBudget({ projectId: view.project.id, currency })); }}>
-        <Field label="Expense currency" htmlFor="pbx-cur" hint="The currency the expenses will be paid in. It cannot be changed once the budget exists. If something is paid in another currency, record it in that line's note with the original amount and rate.">
+        <Field label="Expense currency" htmlFor="pbx-cur" hint="It cannot be changed once the budget exists." help="The currency the expenses will be paid in. If something is paid in another currency, record it in that line's note with the original amount and rate.">
           <input id="pbx-cur" className="flex h-9 w-32 rounded-md border border-input bg-field px-3 py-1 text-sm uppercase shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" value={currency} maxLength={3} onChange={(e) => setCurrency(e.target.value.toUpperCase())} />
         </Field>
         <Button type="submit" disabled={a.pending || currency.length !== 3}>{a.pending ? "Creating…" : "Create budget"}</Button>
@@ -193,7 +193,7 @@ export function BudgetSection({ view }: { view: PbxBudgetView }) {
       ) : null}
 
       {draft && view.viewer.is_pm ? (
-        <Panel title={draft.kind === "addition" ? "Additional budget request (draft)" : "Draft budget"} description={draft.kind === "addition" ? "Only the extra amount is entered here. The approved budget stays as it is until the approver approves this request." : "Prepare the expenses you expect. Nothing is sent for approval until you submit."}>
+        <Panel title={draft.kind === "addition" ? "Additional budget request (draft)" : "Draft budget"} description={draft.kind === "addition" ? "Enter only the extra amount. The approved budget stays as it is until the approver approves this request." : "Nothing is sent for approval until you submit."}>
           <BudgetEditor key={`${draft.id}:${draft.row_version}`} view={view} version={draft} />
         </Panel>
       ) : draft ? (
@@ -203,12 +203,12 @@ export function BudgetSection({ view }: { view: PbxBudgetView }) {
       {canAdd ? (
         <div className="space-y-1">
           <Button type="button" variant="outline" disabled={add.pending} onClick={() => add.run(() => requestAddition({ projectId: view.project.id, budgetId: view.budget!.id }))}>{add.pending ? "Starting…" : "Request additional budget"}</Button>
-          <p className="text-[13px] text-muted-foreground">The approved budget is never overwritten. You enter only the extra amount; The appropriate approver decides it separately.</p>
+          <p className="text-[13px] text-muted-foreground">The approved budget stays as it is until the approver decides.</p>
           <ActionMessage error={add.error} />
         </div>
       ) : null}
 
-      <Panel title="Budget history" description="Every submitted version is kept exactly as it was, with the approver's decision.">
+      <Panel title="Budget history" hint="Every submitted version is kept exactly as it was, with the approver's decision.">
         {history.length === 0 ? <Muted>{draft ? "Nothing submitted yet." : "No versions yet."}</Muted> : (
           <div className="space-y-2">
             {history.map((v, i) => <VersionCard key={v.id} view={view} version={v} versions={versions} defaultOpen={i === 0 || v.status === "submitted"} />)}

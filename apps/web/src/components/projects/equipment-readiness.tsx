@@ -26,7 +26,7 @@ export function ReadinessLine({ request }: { request: RequestReadiness }) {
 export function EquipmentReviewPanel({ reviews, projectId, canReview }: { reviews: readonly EquipmentReview[]; projectId: string; canReview: boolean }) {
   if (reviews.length === 0) return null;
   return (
-    <Panel id="equipment-review" title="Review equipment booking" description="A project date changed after the equipment was requested." className="border-[hsl(var(--os-amber)/0.5)]">
+    <Panel id="equipment-review" title="Review equipment booking" description="⚠ A project date changed after the equipment was requested." className="border-[hsl(var(--os-amber)/0.5)]">
       <p className="mb-3 text-sm">{REVIEW_BOOKING_SENTENCE}</p>
       <ul className="divide-y divide-border text-sm" data-testid="equipment-reviews">
         {reviews.map((v) => (

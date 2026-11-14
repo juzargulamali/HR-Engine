@@ -1,4 +1,4 @@
-import { CircleAlert, CircleCheck, CircleHelp, Hammer, PackageOpen, Presentation, TriangleAlert } from "lucide-react";
+import { CalendarClock, CircleAlert, CircleCheck, CircleHelp, Hammer, PackageOpen, Presentation, TriangleAlert } from "lucide-react";
 import { HEALTH_WORDS, TIMELINE_WORDS, type Health, type TimelineKind } from "@/lib/operations/model";
 import { cn } from "@/lib/utils";
 
@@ -21,6 +21,7 @@ const KIND_STYLE: Record<TimelineKind, { icon: typeof Hammer; tone: string }> = 
   installation: { icon: Hammer, tone: "bg-accent/15 text-accent" },
   show: { icon: Presentation, tone: "bg-[hsl(var(--os-info)/0.15)] text-[hsl(var(--os-info))]" },
   dismantling: { icon: PackageOpen, tone: "bg-[hsl(var(--os-purple)/0.15)] text-[hsl(var(--os-purple))]" },
+  activity: { icon: CalendarClock, tone: "bg-muted text-muted-foreground" },
 };
 /** Installation, show and dismantling each have their own icon, tint and word. */
 export function KindMark({ kind, className }: { kind: TimelineKind; className?: string }) {

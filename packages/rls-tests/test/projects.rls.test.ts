@@ -196,12 +196,27 @@ describe("Projects & Tasks", () => {
       const pol = await admin<{ policyname: string }>(`select policyname from pg_policies where tablename in ('projects', 'project_allocations') order by 1`);
       expect(pol.every((p) => !p.policyname.startsWith("proj_"))).toBe(true);
     });
+    it("lets the two site-technician functions read only who is employed (user, company, status, dates): no name, pay, reporting line or attendance", async () => {
+      const rows = await admin<{ proname: string; src: string }>(
+        `select proname, prosrc as src from pg_proc where pronamespace = 'public'::regnamespace and proname in ('proj_site_technician_eligible', 'proj_site_technician_candidates')`,
+      );
+      expect(rows.map((r) => r.proname).sort()).toEqual(["proj_site_technician_candidates", "proj_site_technician_eligible"]);
+      for (const r of rows) {
+        const cols = [...r.src.matchAll(/\be\.([a-z_]+)/g)].map((m) => m[1] ?? "");
+        expect(cols.length).toBeGreaterThan(0);
+        expect(cols.filter((c) => !["user_id", "company_id", "deleted_at", "employment_status", "termination_date"].includes(c))).toEqual([]);
+        expect(r.src).not.toMatch(/manager_id|salary|payroll|attendance|leave/i);
+      }
+    });
     it("contains no Projects function that touches an HR table, attendance, Recovery Leave, payroll or the reporting line", async () => {
       const rows = await admin<{ proname: string }>(
         `select proname from pg_proc where pronamespace = 'public'::regnamespace and proname like 'proj\\_%'
             and prosrc ~* '(from|into|update|join)\\s+(employees|attendance[a-z_]*|recovery[a-z_]*|leave[a-z_]*|payroll[a-z_]*|user_roles|salary[a-z_]*|reimbursement[a-z_]*|timesheet[a-z_]*|project_allocations|projects)\\y'`,
       );
-      expect(rows.map((r) => r.proname)).toEqual([]);
+      // The one deliberate exception (Phase 2 follow-up): a site-only technician must be an ACTIVE EMPLOYEE of the company, and Projects has no other source for that.
+      // Exactly these two functions may read `employees`, and only to test who is employed (see the next test); nothing else in HR is touched.
+      const allowed = new Set(["proj_site_technician_eligible", "proj_site_technician_candidates"]);
+      expect(rows.map((r) => r.proname).filter((n) => !allowed.has(n))).toEqual([]);
       const mgr = await admin<{ proname: string }>(`select proname from pg_proc where pronamespace = 'public'::regnamespace and proname like 'proj\\_%' and prosrc ~* 'manager_id'`);
       expect(mgr).toHaveLength(0);
     });

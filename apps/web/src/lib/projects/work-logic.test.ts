@@ -104,7 +104,15 @@ describe("My Work: three different kinds of attention", () => {
     expect(selectRows(sets, "waiting", "2026-11-11").map((r) => r.id)).toEqual(["w"]);
     expect(selectRows(sets, "overdue", "2026-11-11").map((r) => r.id)).toEqual(["a"]);
     expect(LABELS.blockers).toBe("Blockers I can help clear");
-    expect(LABELS.waiting).toMatch(/waiting on someone else/);
+    expect(LABELS.waiting).toBe("Waiting for review");
+  });
+  it("Do next is my unblocked open tasks plus the ones sent back; Changes requested is only the sent-back ones", () => {
+    const withBlocked = { ...sets, mine: [row("a", "2026-11-01"), { ...row("b"), blocked: true }, row("c")], changes: [row("c"), row("d")] };
+    expect(selectRows(withBlocked, "next", "2026-11-11").map((r) => r.id)).toEqual(["a", "c", "d"]);
+    expect(selectRows(withBlocked, "changes", "2026-11-11").map((r) => r.id)).toEqual(["c", "d"]);
+    expect(selectRows(sets, "changes", "2026-11-11")).toEqual([]);
+    expect([LABELS.next, LABELS.changes, LABELS.waiting]).toEqual(["Do next", "Changes requested", "Waiting for review"]);
+    expect(parseShow("changes", false)).toBe("changes");
   });
   it("the team view stays for people who lead something and is refused for everyone else", () => {
     expect(parseShow("team", true)).toBe("team");

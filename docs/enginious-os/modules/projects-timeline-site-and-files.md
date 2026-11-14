@@ -2,6 +2,8 @@
 
 Part of the Projects & Tasks Map: [coverage index](./projects-coverage-index.md) (every screen, numbered) and [action catalogue](./projects-action-catalogue.md) (every action that changes data). The two tables at the end of this file are their source.
 
+Copy note (Phase 2 follow-up 2, 2026-11-14): explanatory text on the Project Plan, Site schedule and Files & client plan screens moved behind one shared ⓘ beside the heading or field (optional explanations, examples and rules); ⚠ marks real warnings; errors, blockers, required inputs, who acts next and the consequences of issuing, sending or accepting stay on the page. Panel descriptions, dialog descriptions and field hints quoted below that are optional explanations now read inside the ⓘ popover (the Files & client plan page also stopped failing on a project that has files; see `docs/projects-phase-2-scope.md` section 14).
+
 Status: Projects & Tasks Phase 1 branch `claude/admiring-cray-uky379`, merged as PR #82 (merge `30c7895adc75f834a60b00ed3bca7015b1654282`, 2026-11-11); code read only, nothing run; this slice was not changed by Phase 1. Written by reading the files cited in each section on that branch. No app, test, database or hosted project was run or opened for this document, so every "Tests" cell names a test file that exists and what its test titles say, not a result. No hosted facts are stated. Anything that code reading could not confirm is marked `Unverified` and collected in section 12.
 
 Related: the compact index [`projects-phase1-changes.md`](./projects-phase1-changes.md); flows in [`../04-flows-sales-to-warehouse-and-others.md`](../04-flows-sales-to-warehouse-and-others.md).
@@ -141,6 +143,9 @@ Other failures: "Choose the timeline and give the item a title." (app, on Add); 
 
 ## 5. Site bookings (Site plan)
 
+> **Phase 2 (draft PR, migration `20270106000100`, not applied by Claude):** Site plan items also carry activity kind, run label, location, owner and Tentative / Confirmed, with crew and shipments on separate records; Project Plan > Site shows them as the Site schedule and the old item list stays under "All site items". Booking and committed-date rules are unchanged. See [`projects-phase-2-deliverables-and-site.md`](./projects-phase-2-deliverables-and-site.md) (reference S) and `docs/projects-phase-2-scope.md`.
+
+
 **How to reach it.** Timeline tab, Site, List or Timeline mode: `/projects/<id>/plan?plan=site`, panel "Site bookings" (anchor `#bookings`). A conflict check has its own address: `/projects/<id>/plan?plan=site&mode=list&check=<bookingId>#bookings`. In-app notices about a booking link to the legacy address `/projects/<id>/timeline`, which opens the Delivery list, not the Site plan (`apps/web/src/lib/projects/notification-text.ts`; section 8).
 
 **Who can see it.** Members and founders read every booking of the project (SELECT policy on `proj_site_bookings`). Who may add, edit, confirm or cancel a booking of a person: the Booker of that person (section 1). The page offers **Add booking** when the project is not finished and the person can book at least one of the project's people (`canBookAny`), and offers the row controls when the person can book the booked person (`mayBook`; a Manager for a booked person no longer in the people list) (`plan/page.tsx`). The database repeats it: "Only the Project Manager, or the head of that person's department team, can book them on site" (`proj_save_booking`), "... can confirm this booking" (`proj_confirm_booking`), "... can cancel this booking" (`proj_cancel_booking`). A plain member books nobody (`timeline-helpers.test.ts`: "lets a manager book everybody, a team head only their own team, and a plain member nobody").
@@ -245,7 +250,7 @@ Who can open them: the redirect itself makes no access check; the Plan page it l
 
 **Who can see it.** Members and founders see the issued versions (`proj_issued_plans` SELECT policy). The preview and the three recording actions are for a Manager (`view.canManage`; `proj_current_plan_payload` returns nothing for anyone else; `proj_require_manager` in `proj_issue_plan`, `proj_record_plan_sent`, `proj_record_plan_accepted`). On an internal project the panel only says: "Client timelines are for client projects. This is an internal project, so there is nothing to issue."
 
-**Purpose.** Freeze what the client is told as numbered versions, and record separately that a version was issued, sent and accepted. Notice at the top: "Downloading or generating a PDF sends nothing to anyone. “Issued”, “sent to the client” and “client accepted” are three separate facts, each recorded by a person. The timeline never contains internal tasks, discussions, staff notes, commercial figures or confidential attachments."
+**Purpose.** Freeze what the client is told as numbered versions, and record separately that a version was issued, sent and accepted. Notice at the top: "Issuing or downloading a PDF sends nothing to the client. “Sent” and “accepted” are recorded by a person." (what the timeline contains, and that nothing is client-facing by default, is behind the ⓘ beside the panel title; the panel line is "Issued versions are frozen.")
 
 **What goes into a version** (`proj_build_plan_payload`, `20261120000500_...sql`): the project's reference, name, client name, location and site time zone; client-facing milestones that are not cancelled (title, due date); client-facing Delivery items that are not cancelled (title, dates); client-facing Site items that are not cancelled (title, dates or local times with zone); client-facing dependencies (label, kind, expected date and time, organisation, confirmation). Never: notes, contacts, bookings, tasks, files.
 
@@ -315,6 +320,13 @@ Who can open them: the redirect itself makes no access check; the Plan page it l
 | `apps/web/src/components/projects/calendar/helpers.test.ts` | Calendar helpers (titles not re-read) |
 | `packages/rls-tests/test/projects.rls.test.ts` | Calendars and time zones; site bookings (who may book, overlaps with allowances, withdrawal on change, concurrency, cancellation); client timeline (payload, issue, immutability, outdated, sent and accepted, read access); files (links, restricted, refused types, registration from a validated attempt, private buckets, removal and completion evidence) |
 | `apps/web/os-shell-checks/projects-flow.mjs` | Browser flow: suggested stages on both plans, all six plan and mode combinations without data change, both legacy redirects, add and confirm a booking, the overlap refusal, the founder override |
+
+## 14. Finish Phase 2 (draft PR; migration `20270109000100`, not applied by Claude)
+
+* **Site schedule:** each activity has a phase line (same words as the technician card, Work, Calendar and Operations), **Preview briefing** beside Crew, **Record started** / **Clear start record**, and this run's readiness separate from **Project-wide readiness**. Details: `projects-phase-2-deliverables-and-site.md` section 13.
+* **Schedules and purposes:** Delivery timeline (the older delivery plan) and Site schedule are named and explained behind an ⓘ; the Project Plan links to the Site schedule. Once the Project Plan holds work, the Delivery timeline no longer offers suggested stages; it points to the Work schedule and Files & client plan.
+* **Files & client plan** reads 1 **Choose what the client sees** (tick boxes over milestones and plan items; `saveClientTimelineSelection` writes only changed boxes through `proj_save_milestone` / `proj_save_plan_item`), 2 **Preview**, 3 **Issued versions (frozen)**. Issued versions are never touched by a new choice. Individual tasks cannot be put on the client timeline (needs a migration: tasks have no client-facing flag and `proj_build_plan_payload` has no slot).
+* **Release plan** has a needs-attention block (each waiting line links to its row with the unblock step). **Feedback & changes** link both ways (a scope change shows what it was raised from; feedback links its scope change).
 
 ## Coverage rows
 

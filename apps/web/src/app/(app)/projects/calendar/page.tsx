@@ -2,19 +2,23 @@ import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
 import { Select } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Panel, PageHeader } from "@/components/projects/parts";
+import { Panel } from "@/components/projects/parts";
+import { PageTitle } from "@/components/projects/page-title";
 import { CalendarShell } from "@/components/projects/calendar/calendar-views";
 import { SpanBars } from "@/components/projects/calendar/span-bars";
-import { calendarHref, fetchRange, filterKinds, mapCompanyRows, mapMyRows, parseCalendarParams, visibleRange } from "@/components/projects/calendar/helpers";
+import { calendarHref, fetchRange, filterKinds, mapCompanyRows, mapMyRows, mapSiteActivities, parseCalendarParams, visibleRange } from "@/components/projects/calendar/helpers";
 import { COMPANY_NOT_SHOWN, getProjectsContext } from "@/lib/projects/context";
 import { loadDirectory } from "@/lib/projects/data";
 import { todayIso } from "@/lib/projects/format";
+import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Project calendar" };
 
 const MY_KINDS = [
   { id: "task", label: "Task deadlines" }, { id: "review", label: "Review requests" }, { id: "milestone", label: "Milestones" }, { id: "booking", label: "Site bookings" },
+  // Opt-in: every dated site activity of the companies you hold a Projects grant for, with the same words the Site schedule uses.
+  { id: "site_activity", label: "Site activities" },
 ];
 
 export default async function ProjectsCalendarPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
@@ -41,6 +45,16 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
     const { data, error: e } = await supabase.rpc("proj_my_calendar", { p_from: range.from, p_to: range.to, p_view_tz: params.tz });
     if (e) error = e.message;
     entries = filterKinds(mapMyRows(data ?? []), params.kinds);
+    // Site activities are read only when asked for (the filter), once per company, never for everything by default.
+    if (params.kinds.includes("site_activity")) {
+      const reads = await Promise.all(ctx.grants.map((g) => g.companyId).filter((c, i, a) => a.indexOf(c) === i).map((cid) => supabase.rpc("proj_site_activities_read", { p_company_id: cid, p_limit: 300 })));
+      const acts: SiteActivityRead[] = [];
+      for (const r of reads) {
+        if (r.error) { if (!error) error = `site activities: ${r.error.message}`; continue; }
+        if (Array.isArray(r.data)) acts.push(...(r.data as unknown as SiteActivityRead[]));
+      }
+      entries = [...entries, ...mapSiteActivities(acts, range.from, range.to)];
+    }
   } else if (companyId) {
     const { data, error: e } = await supabase.rpc("proj_company_calendar", { p_company_id: companyId, p_from: range.from, p_to: range.to });
     if (e) error = e.message;
@@ -52,7 +66,10 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
 
   return (
     <div className="space-y-5">
-      <PageHeader title="Calendar" description="Deadlines, reviews, milestones and site bookings that are yours, and the company's project dates at summary level." />
+      <PageTitle title="Calendar" hint={<>
+        <p><strong>My calendar:</strong> deadlines, reviews, milestones and site bookings that are yours. Tick Site activities to add the dated setup, show and dismantling activities of your companies; each opens its row in the Site schedule. On a phone, Agenda lists the days one under the other.</p>
+        <p className="mt-1.5"><strong>Company calendar:</strong> the company&apos;s project dates at summary level only: reference, name, status and the start and end dates. Milestones, tasks and bookings are not shown there.{hasGrants ? "" : " People who are only linked to a project as Sales see just their own projects."}</p>
+      </>} />
       <nav aria-label="Calendar scope" className="-mx-1 flex gap-1 overflow-x-auto border-b border-border pb-px">
         {hasGrants ? <Link href={calendarHref("/projects/calendar", { ...base, scope: "mine", kind: params.kinds })} aria-current={scope === "mine" ? "page" : undefined} className={tabClass(scope === "mine")}>My calendar</Link> : null}
         <Link href={calendarHref("/projects/calendar", { ...base, scope: "company", company: companyId })} aria-current={scope === "company" ? "page" : undefined} className={tabClass(scope === "company")}>Company calendar</Link>
@@ -68,12 +85,6 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
           <Button type="submit" variant="outline" size="sm">Show</Button>
         </form>
       ) : null}
-      {scope === "company" ? (
-        <Alert role="status">
-          This calendar shows project summaries only: reference, name, status and the start and end dates. Milestones, tasks and bookings are not shown here.
-          {hasGrants ? "" : " People who are only linked to a project as Sales see just their own projects."}
-        </Alert>
-      ) : null}
       {error ? <Alert variant="destructive" role="alert">The calendar could not be loaded: {error}</Alert> : null}
       {!companyId && scope === "company" ? (
         <Alert role="status">There is no company to show.</Alert>
@@ -82,10 +93,10 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
           <CalendarShell
             basePath="/projects/calendar" params={params} keep={keep} today={today} entries={entries} showProject timeZoneSelect={scope === "mine"}
             kindOptions={scope === "mine" ? MY_KINDS : undefined}
-            emptyText={scope === "mine" ? "You have no deadlines, reviews, milestones or site bookings in this period." : "No project in your view starts or runs in this period."}
+            emptyText={scope === "mine" ? "You have no deadlines, reviews, milestones or site bookings in this period. Tick Site activities to add the dated site activities of your companies." : "No project in your view starts or runs in this period."}
           />
           {scope === "company" && entries.length > 0 ? (
-            <Panel title="Project spans" description="A drawing of the same dates, for a quick overall picture. The agenda above has the dates in words.">
+            <Panel title="Project spans" hint="A drawing of the same dates, for a quick overall picture. The agenda above has the dates in words.">
               <SpanBars entries={entries.filter((e) => (e.endDate ?? e.onDate ?? "") >= visible.from && (e.onDate ?? "") <= visible.to)} label="Project spans in the visible period" />
             </Panel>
           ) : null}

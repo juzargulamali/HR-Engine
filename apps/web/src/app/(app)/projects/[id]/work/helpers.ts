@@ -295,6 +295,9 @@ export function describeTaskEvent(e: Pick<ProjTaskEventRow, "kind" | "from_value
     case "status_changed": return `Status changed from ${STATUS_WORDS[e.from_value ?? ""] ?? e.from_value ?? "unset"} to ${STATUS_WORDS[e.to_value ?? ""] ?? e.to_value}.${note}`;
     case "blocked": return `Blocked: ${e.to_value ?? ""}.${e.note ? ` To unblock: ${e.note}` : ""}`;
     case "unblocked": return `Blocker cleared (was: ${e.from_value ?? "unknown"}).${note}`;
+    case "output_expected": return e.to_value ? `Expected output set: ${e.to_value} (${e.note ?? "optional"}).` : "Expected output removed.";
+    case "output_submitted": return `Output ${e.to_value ?? "version"} submitted${e.from_value ? ` (replacing ${e.from_value})` : ""}.${e.note ? ` Note: ${e.note}` : ""}`;
+    case "output_decision": return `${e.from_value ?? "Output"} ${e.to_value === "approved" ? "approved" : "sent back with changes requested"}.${e.note ? ` ${e.to_value === "approved" ? "Note" : "Feedback"}: ${e.note}` : ""}`;
     case "review_rule_changed": return `Review ${e.to_value === "true" ? "is now required" : "is no longer required"}.`;
     default: return `${e.kind.replace(/_/g, " ")}.${note}`;
   }

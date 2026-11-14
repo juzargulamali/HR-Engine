@@ -5,6 +5,7 @@ import { listTable } from "@/components/workspace/list-table";
 import { FolderKanban } from "lucide-react";
 import { hasProjCapability, isProjFounder, projectStatusLabel, PROJECT_STATUSES } from "@enginious-hr/domain";
 import { EmptyState } from "@/components/ui/empty-state";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { buttonVariants } from "@/components/ui/button";
 import { KindBadge, ProjectStatusBadge } from "@/components/projects/badges";
@@ -24,8 +25,10 @@ import { firstParam, nextSort, parseRecordId, parseSort, parseView, sortToParam,
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadDirectoryResult, loadProjectEditions } from "@/lib/projects/data";
+import { buildActivityPreviews, noCommitmentText, pickNextCommitment, teamStanding, type ActivityPreview, type Commitment } from "@/lib/projects/list-extras";
+import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { canChangeStatus, canSeeProjectDetails, DEFAULT_DIRECTORY_SORT, DIRECTORY_SORT_KEYS, editionChoices, filterByEdition, milestoneProjectIds, nextMilestones, sortDirectory, type ProjectEdition } from "@/lib/projects/directory";
-import { dateRangeText, formatDate } from "@/lib/projects/format";
+import { dateRangeText, formatDate, todayIso } from "@/lib/projects/format";
 import { loadProjectsAttention } from "@/lib/projects/my-work";
 import { filterDirectory } from "@/lib/projects/work-logic";
 import { createClient } from "@/lib/supabase/server";
@@ -80,6 +83,46 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   }
   const rows = sortDirectory(filtered, sort, new Map([...nextBy].map(([k, v]) => [k, v.due])));
 
+  // ---- next commitment, team standing and a combined recent-activity preview: each read once for the whole page (never per project), only for projects the person may see in detail.
+  // A failed or not-yet-installed read leaves the list usable and says what is missing.
+  const today = todayIso();
+  const detailIds = rows.filter((r) => canSeeProjectDetails(r, ctx.grants)).map((r) => r.id);
+  const wantsExtras = !finished && detailIds.length > 0;
+  const siteActivities: SiteActivityRead[] = [];
+  let siteError = false;
+  const teamCounts = new Map<string, { leads: number; members: number }>();
+  let teamError = false;
+  let previews = new Map<string, ActivityPreview>();
+  let activityError = false;
+  // Milestones are asked for in the table only; the board and the commitment column use the same read, so the board asks too.
+  if (wantsExtras && view === "board") {
+    const { data, error: mErr } = await supabase.from("proj_milestones").select("project_id, title, due_date, status").in("project_id", detailIds).in("status", ["planned", "in_progress", "ready_for_acceptance"]).not("due_date", "is", null);
+    if (mErr) milestoneError = true;
+    else nextBy = nextMilestones(data ?? []);
+  }
+  if (wantsExtras) {
+    const companyIdsInList = [...new Set(rows.filter((r) => detailIds.includes(r.id)).map((r) => r.company_id))];
+    const [siteReads, teamsRes, membersRes, logRes] = await Promise.all([
+      Promise.all(companyIdsInList.map((cid) => supabase.rpc("proj_site_activities_read", { p_company_id: cid, p_limit: 300 }))),
+      supabase.from("proj_teams").select("project_id, head_user_id").in("project_id", detailIds).is("removed_at", null),
+      supabase.from("proj_project_members").select("project_id").in("project_id", detailIds).is("removed_at", null),
+      supabase.from("proj_change_log").select("id, project_id, entity_type, entity_id, field, from_value, to_value, note, actor_id").in("project_id", detailIds).order("id", { ascending: false }).limit(60),
+    ]);
+    for (const r of siteReads) {
+      if (r.error) { if (!/does not exist|schema cache|42883|PGRST202/i.test(`${r.error.code} ${r.error.message}`)) siteError = true; continue; }
+      if (Array.isArray(r.data)) siteActivities.push(...(r.data as unknown as SiteActivityRead[]));
+    }
+    if (teamsRes.error || membersRes.error) teamError = true;
+    else {
+      for (const id of detailIds) teamCounts.set(id, { leads: 0, members: 0 });
+      for (const t of teamsRes.data ?? []) if (t.head_user_id) teamCounts.get(t.project_id)!.leads += 1;
+      for (const m of membersRes.data ?? []) teamCounts.get(m.project_id)!.members += 1;
+    }
+    if (logRes.error) activityError = true;
+    else previews = buildActivityPreviews(logRes.data ?? [], ctx.personName);
+  }
+  const commitmentOf = (p: { id: string; pm_name: string | null }): Commitment | null => pickNextCommitment(p.id, siteActivities, nextBy.get(p.id), today);
+
   // ---- unread project chat counts (members only: the server lists a project's group only for the people enrolled in it)
   const unreadBy = new Map<string, number>();
   let unreadError = false;
@@ -116,9 +159,15 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
 
   const boardProjects: BoardProject[] = rows.map((p) => {
     const details = canSeeProjectDetails(p, ctx.grants);
+    const c = details ? commitmentOf(p) : null;
+    const none = noCommitmentText(p.pm_name);
+    const tc = teamCounts.get(p.id);
+    const team = details && tc ? teamStanding(tc.leads, tc.members) : null;
     return {
       id: p.id, name: p.name, reference: p.reference, kind: p.kind, isOngoing: p.is_ongoing, status: p.status, pmName: p.pm_name ?? "—", dates: dateRangeText(p.start_date, p.end_date),
       href: detailsHref(p.id, details), panel: !details, canMove: canChangeStatus(p, ctx.userId, ctx.grants), unread: unreadBy.get(p.id) ?? 0,
+      next: !details ? null : { text: c?.text ?? none.text, detail: c?.detail ?? (siteError || milestoneError ? "Not available just now" : none.detail), href: c?.href ?? null, needsAction: c?.needsAction ?? false },
+      team: team && team.label ? { label: team.label, manageHref: `/projects/${p.id}/people` } : null,
     };
   });
 
@@ -152,7 +201,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
           ...(editions.length > 0 ? [{ name: "edition", label: "Event edition", value: edition, options: [{ value: "", label: "All editions" }, ...editions]}] : []),
         ]}
       >
-        {!finished && !salesOnly ? <ViewSwitch current={view} tableHref={href({ view: null })} boardHref={href({ view: "board" })} boardLabel="Board" /> : null}
+        {!finished && !salesOnly ? <span data-testid="project-view-switch"><ViewSwitch current={view} tableHref={href({ view: null })} boardHref={href({ view: "board" })} boardLabel="Board" /></span> : null}
       </ListToolbar>
       </div>
       {editionsRes.state === "error" ? <Muted>Event editions could not be loaded just now, so no project shows its edition and the edition filter is not offered. Everything else is shown.</Muted> : null}
@@ -168,10 +217,13 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
           }
         />
       ) : view === "board" ? (
-        <ProjectBoard projects={boardProjects} />
+        <>
+          <div data-testid="project-view-board"><ProjectBoard projects={boardProjects} /></div>
+          {siteError || milestoneError ? <Muted>Some next commitments could not be loaded just now; the cards say so.</Muted> : null}
+        </>
       ) : (
         <>
-          <Table className={cn("min-w-[44rem]", listTable)}>
+          <Table className={cn("min-w-[44rem]", listTable)} data-testid="project-view-table">
             <caption className="sr-only">Projects</caption>
             <TableHeader>
               <TableRow>
@@ -181,6 +233,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                 <SortHead label="Status" href={sortHref("status")} active={sort.key === "status"} dir={sort.dir} />
                 <SortHead label="Key dates" href={sortHref("dates")} active={sort.key === "dates"} dir={sort.dir} />
                 {showMilestone ? <SortHead label="Next milestone" href={sortHref("milestone")} active={sort.key === "milestone"} dir={sort.dir} /> : null}
+                {wantsExtras ? <TableHead scope="col">Next commitment</TableHead> : null}
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -190,19 +243,47 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                 const Name = details ? Link : PanelLink;
                 return (
                   <ClickableRow key={p.id} href={detailsHref(p.id, details)} panel={!details} selected={openRow?.id === p.id} className="align-top">
-                    <TableCell className="min-w-[13rem]">
+                    <TableCell className="min-w-[12rem]">
                       <Name href={detailsHref(p.id, details)} className="break-words font-medium underline-offset-2 hover:underline">{p.name}</Name>
                       {unreadBy.get(p.id) ? <span className="ml-2 rounded-full bg-accent px-1.5 text-[13px] font-semibold text-accent-foreground">{unreadBy.get(p.id)} unread</span> : null}
                       <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-sm text-muted-foreground"><span>{p.reference}</span><KindBadge kind={p.kind} ongoing={p.is_ongoing} /></div>
                       {editionBy.get(p.id) ? <div className="mt-0.5 break-words text-sm text-muted-foreground" data-testid="project-edition">Event edition: {editionBy.get(p.id)!.label}</div> : null}
+                      {details && teamCounts.get(p.id) && teamStanding(teamCounts.get(p.id)!.leads, teamCounts.get(p.id)!.members).label ? (
+                        <div className="mt-0.5 text-sm" data-testid={`project-team-${p.id}`}>
+                          <span className="text-[hsl(var(--os-amber))]">⚠ {teamStanding(teamCounts.get(p.id)!.leads, teamCounts.get(p.id)!.members).label}</span>{" "}
+                          <Link href={`/projects/${p.id}/people`} className="whitespace-nowrap font-medium underline underline-offset-2" data-testid={`project-manage-team-${p.id}`}>Manage team</Link>
+                        </div>
+                      ) : details ? <div className="mt-0.5 text-sm"><Link href={`/projects/${p.id}/people`} className="text-muted-foreground underline underline-offset-2 hover:text-foreground" data-testid={`project-manage-team-${p.id}`}>Manage team</Link></div> : null}
+                      {details && previews.get(p.id) ? (
+                        <div className="mt-1 space-y-0.5 text-[13px] text-muted-foreground" data-testid={`project-activity-${p.id}`}>
+                          {previews.get(p.id)!.lines.map((l) => <p key={l.key} className="break-words">{l.text}</p>)}
+                          <p><Link href={`/projects/${p.id}/history`} className="font-medium underline underline-offset-2">History{previews.get(p.id)!.more > 0 ? ` (${previews.get(p.id)!.more} more)` : ""}</Link></p>
+                        </div>
+                      ) : null}
                     </TableCell>
                     {companies.length > 1 ? <TableCell data-label="Company" className="text-sm">{ctx.companyName(p.company_id)}</TableCell> : null}
                     <TableCell data-label="Project Manager" className="text-sm">{p.pm_name ? <span className="inline-flex items-center gap-2"><OsAvatar name={p.pm_name} size="sm" />{p.pm_name}</span> : "—"}</TableCell>
                     <TableCell data-label="Status"><ProjectStatusBadge status={p.status} /></TableCell>
-                    <TableCell data-label="Key dates" className="whitespace-nowrap text-sm">{dateRangeText(p.start_date, p.end_date)}</TableCell>
+                    <TableCell data-label="Key dates" className="min-w-[7rem] text-sm">{dateRangeText(p.start_date, p.end_date)}</TableCell>
                     {showMilestone ? (
-                      <TableCell data-label="Next milestone" className="min-w-[10rem] text-sm">
+                      <TableCell data-label="Next milestone" className="min-w-[8rem] text-sm">
                         {!details ? <span className="text-muted-foreground">Members only</span> : milestoneError ? <span className="text-muted-foreground">Not available</span> : next ? <>{next.title}<span className="block text-muted-foreground">{formatDate(next.due)}</span></> : <span className="text-muted-foreground">None dated</span>}
+                      </TableCell>
+                    ) : null}
+                    {wantsExtras ? (
+                      <TableCell data-label="Next commitment" className="min-w-[11rem] text-sm" data-testid={`project-next-${p.id}`}>
+                        {!details ? <span className="text-muted-foreground">Members only</span> : (() => {
+                          const c = commitmentOf(p);
+                          const none = noCommitmentText(p.pm_name);
+                          return c ? (
+                            <>
+                              <Link href={c.href} className={cn("break-words underline-offset-2 hover:underline", c.needsAction && "font-medium")}>{c.needsAction ? "⚠ " : ""}{c.text}</Link>
+                              {c.detail ? <span className="block break-words text-[13px] text-muted-foreground">{c.detail}</span> : null}
+                            </>
+                          ) : (
+                            <><span className="text-muted-foreground">{siteError || milestoneError ? "Not available just now" : none.text}</span>{siteError || milestoneError ? null : <span className="block break-words text-[13px] text-muted-foreground">{none.detail}</span>}</>
+                          );
+                        })()}
                       </TableCell>
                     ) : null}
                   </ClickableRow>
@@ -211,12 +292,17 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
             </TableBody>
           </Table>
           {milestoneError ? <Muted>Next milestones could not be loaded just now; everything else is shown.</Muted> : null}
+          {siteError ? <Muted>Site dates could not be loaded just now, so the next commitment shows milestones only. Everything else is shown.</Muted> : null}
+          {teamError ? <Muted>Team standing could not be loaded just now, so no project shows a team warning. Manage team is still on every row.</Muted> : null}
+          {activityError ? <Muted>Recent activity could not be loaded just now. History on each project has the full record.</Muted> : null}
           {unreadError ? <Muted>Unread chat counts could not be loaded just now, so no project shows one. The Chat button still lists your groups.</Muted> : null}
         </>
       )}
 
       {!salesOnly && rows.some((r) => !canSeeProjectDetails(r, ctx.grants)) ? (
-        <Muted>Projects you are not part of show their summary only. Their plans, chat and files are for their members and founders.</Muted>
+        <p className="flex items-center gap-1 text-sm text-muted-foreground">Some projects show a summary only
+          <InfoHint label="summary-only projects">Projects you are not part of show their summary only. Their plans, chat and files are for their members and founders.</InfoHint>
+        </p>
       ) : null}
 
       {openRow ? (

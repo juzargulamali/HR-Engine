@@ -184,8 +184,15 @@ export interface TimelineModel { rows: TimelineRow[]; range: { start: string; en
 
 const dayStr = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const DAY = 86_400_000;
-/** Up to this many days a schedule gets a column for every day. */
-export const DAY_MODE_MAX_DAYS = 28;
+/** Up to this many days a schedule starts in Day view (a column for every day); a longer one starts in Week view. The person can switch either way. */
+export const DAY_MODE_MAX_DAYS = 31;
+/** Day view: every day is at least this wide, so "Mon / 14 / Nov" stays readable. A plan of seven days is 392px, so it fits beside the names in a normal window; nine days (504px) and more extend and scroll inside the chart there. */
+export const DAY_PX = 56;
+/** Week view: about 18px a day, which still leaves a weekly label (about 125px) clear of the next. */
+export const WEEK_PX_PER_DAY = 18;
+export type TimelineMode = "day" | "week";
+/** The mode a schedule of this many days opens in. */
+export const autoMode = (dayCount: number): TimelineMode => (dayCount <= DAY_MODE_MAX_DAYS ? "day" : "week");
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const part = (iso: string) => ({ y: Number(iso.slice(0, 4)), m: Number(iso.slice(5, 7)), d: Number(iso.slice(8, 10)) });
 
@@ -207,14 +214,27 @@ export function formatSpan(start: string | null, due: string | null, today: stri
   return `${one(start!, true)} – ${one(due!, true)}`;
 }
 
-export function timelineScale(range: { start: string; end: string }): TimelineScale {
+/** `mode` overrides the automatic choice (the Day / Week switch); without it the length of the schedule decides. */
+export function timelineScale(range: { start: string; end: string }, mode?: TimelineMode): TimelineScale {
   const s = d(range.start), e = Math.max(d(range.end), s + 6 * DAY);
   const days: string[] = [];
   for (let t = s; t <= e; t += DAY) days.push(dayStr(t));
-  const day = days.length <= DAY_MODE_MAX_DAYS;
+  const m = mode ?? autoMode(days.length);
+  const day = m === "day";
   const labels: TimelineScale["labels"] = day ? days.map((date, index) => ({ date, index })) : days.flatMap((date, index) => (index % 7 === 0 ? [{ date, index }] : []));
-  // 46px a day keeps "Mon / 14" readable; a long schedule gets about 18px a day, which still leaves a weekly label (about 125px) clear of the next.
-  return { mode: day ? "day" : "week", days, labels, widthPx: Math.max(day ? days.length * 46 : days.length * 18, 560) };
+  return { mode: m, days, labels, widthPx: day ? days.length * DAY_PX : Math.max(days.length * WEEK_PX_PER_DAY, 360) };
+}
+
+/**
+ * Where to scroll so today's column sits in the middle of the visible chart. All widths in pixels: `chartW` the drawing area, `labelW` the pinned name column, `viewportW` the
+ * scrolling box and `scrollW` its whole content. Clamped to what can scroll. Null when today is not in the range.
+ */
+export function todayScrollTarget(scale: TimelineScale, today: string, m: { chartW: number; labelW: number; viewportW: number; scrollW: number }): number | null {
+  const i = dayIndex(scale, today);
+  if (i < 0) return null;
+  const centre = ((i + 0.5) / scale.days.length) * m.chartW;
+  const target = centre - (m.viewportW - m.labelW) / 2;
+  return Math.round(Math.min(Math.max(target, 0), Math.max(m.scrollW - m.viewportW, 0)));
 }
 
 /** Where a bar sits, aligned to the day columns: left and width in percent of the drawing area. One day is exactly one column; only a due (or only a start) date is one column too. */

@@ -61,6 +61,7 @@ await step("PM: accepts the handover and lands on the Project Plan (with a way b
   PRJ = page.url().match(/projects\/([0-9a-f-]{36})\//)[1];
   await page.waitForLoadState("networkidle");
   await seen(/Project Plan/);
+  await page.getByTestId("dp-welcome").waitFor({ timeout: 10000 }).catch(() => undefined);                 // drawn just after the redirect settles
   if (!(await page.getByTestId("dp-welcome").isVisible())) throw new Error("no welcome note after acceptance");
   if (!(await page.getByRole("link", { name: "Work overview" }).first().isVisible())) throw new Error("no link to the Work overview");
   if (db("select count(*) from proj_projects where crm_opportunity_id is not null") !== "1") throw new Error("not exactly one client project");
@@ -79,7 +80,8 @@ await step("the summary at the top is honest about an empty plan, and the brief 
   await expectText(/Nothing in the plan yet/);
   await expectText(/Next step: bring in the accepted technologies/i);
   await expectText(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
-  await expectText(/manual step/);
+  await page.getByTestId("dp-seed-help").hover();                                               // the long explanation is behind the ⓘ
+  if (!/manual step/.test(await page.getByTestId("info-hint-popover").innerText())) throw new Error("the ⓘ does not explain the manual step");     // the popover is drawn outside <main>
   if (!(await page.getByTestId("dp-scope-pending").isVisible())) throw new Error("the scope step is not visible");
   const brief = (await page.getByTestId("dp-brief").textContent()) ?? "";
   if (!/six tablets/.test(brief)) throw new Error("the handover brief is not shown beside the plan");
@@ -155,9 +157,11 @@ await step("a content sequence the delegate adds: editable steps with their own 
   await c.getByRole("button", { name: "Start from a sequence" }).click();
   const d = dialog();
   const names = ["Moodboard", "Storyboard", "First draft", "Client review", "Final export", "On-device test"];
+  if ((await d.getByLabel("Step 1 name").inputValue()) !== "") throw new Error("the sequence starts prefilled");   // blank: the person types the steps
+  for (let n = 2; n < names.length; n++) await d.getByRole("button", { name: "Add a step" }).click();
   for (let n = 0; n < names.length; n++) {
     const li = d.getByTestId(`seq-step-${n}`);
-    if ((await li.getByLabel(`Step ${n + 1} name`).inputValue()) !== names[n]) throw new Error(`step ${n + 1} is not ${names[n]}`);
+    await li.getByLabel(`Step ${n + 1} name`).fill(names[n]);
     await choose(li.getByLabel(`Step ${n + 1} owner`), n === 5 ? /^lead/i : /^hr(?!1)/i);
     await li.getByLabel(`Step ${n + 1} start`).fill(dayIso(1 + n * 2)); await li.getByLabel(`Step ${n + 1} due`).fill(dayIso(2 + n * 2));
   }
@@ -219,7 +223,9 @@ await step("release: the dialog says what it creates; one task per work line, on
   await page.getByTestId("dp-release").click();
   const pv = await page.getByTestId("dp-release-preview").innerText();
   if (!/9 tasks will be created/.test(pv) || !/1 hardware line will be added to the project's draft equipment request/.test(pv)) throw new Error(`preview: ${pv}`);
-  if (!/1 hardware line is bought, rented or client supplied/.test(pv) || !/needs a stock match/.test(pv)) throw new Error(`preview misses the rented or waiting line: ${pv}`);
+  const attention = await page.getByTestId("dp-release-attention").innerText();
+  if (!/1 hardware line is bought, rented or client supplied/.test(pv) || !/needs a stock match/i.test(attention) || !/Choose the stock item/.test(attention)) throw new Error(`preview misses the rented line or the line that needs attention: ${pv} / ${attention}`);
+  if (!(await page.getByTestId("dp-release-attention").locator("a[href*='/delivery#dp-']").count())) throw new Error("a line that needs attention has no link to it");
   await dialog().getByRole("button", { name: "Release", exact: true }).click();
   await until(() => db(`select count(*) from proj_tasks where project_id='${PRJ}'`) === "9");
   await seen(/Released: 9 tasks created, 1 line added to the draft equipment request/).catch(() => {});

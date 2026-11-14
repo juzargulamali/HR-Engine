@@ -20,7 +20,7 @@ export interface ChangeContext {
 const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 const FIELD_LABELS: Record<string, string> = {
   start_date: "start date", end_date: "end date", due_date: "due date", install_start: "installation start", event_start: "event start", event_end: "event end",
-  priority: "priority", start: "start", end: "end", expected: "expected date", team: "department",
+  priority: "priority", start: "start", end: "end", expected: "expected date", team: "team",
 };
 
 function value(field: string, entity: string, v: string | null): string {
@@ -39,8 +39,8 @@ function value(field: string, entity: string, v: string | null): string {
 }
 
 const ENTITY_WORD: Record<string, string> = {
-  project: "The project", milestone: "Milestone", deliverable: "Deliverable", plan_item: "Timeline activity", booking: "Site booking",
-  member: "Person", message: "Discussion message", external_dependency: "Dependency",
+  project: "The project", milestone: "Milestone", deliverable: "Work package", plan_item: "Timeline activity", booking: "Site booking",
+  member: "Person", message: "Discussion message", external_dependency: "Dependency", task_output: "Task output", site_activity: "Site activity", shipment: "Shipment",
 };
 
 /** One sentence per change: who/what changed, from and to, never an id and never message or booking text. */
@@ -63,6 +63,23 @@ export function describeChange(row: ChangeRow, ctx: ChangeContext): { subject: s
   }
   if (row.entity_type === "message" && f === "deleted") {
     return { subject, sentence: `A message by ${row.from_value ?? "someone"} was deleted by ${row.to_value ?? "someone"}.` };
+  }
+  if (row.entity_type === "task_output") {
+    if (f === "version") return { subject, sentence: `Version ${row.to_value} was submitted${row.from_value ? `, replacing ${row.from_value}` : ""}.` };
+    if (f.startsWith("review of ")) return { subject, sentence: `${f.replace("review of ", "Version ")} was ${row.to_value === "approved" ? "approved" : "sent back with changes requested"}${row.note ? `: ${row.note}` : ""}.` };
+    if (f === "expected output") return { subject, sentence: row.to_value ? `The expected output was set to ${row.to_value}${row.note ? ` (${row.note.toLowerCase()})` : ""}.` : "The expected output was removed." };
+  }
+  if (row.entity_type === "site_activity") {
+    if (f === "added") return { subject, sentence: `${row.to_value} was added to the site schedule.` };
+    if (f === "state") return { subject, sentence: `The activity changed from ${row.from_value === "confirmed" ? "confirmed" : "tentative"} to ${row.to_value === "confirmed" ? "confirmed" : "tentative"}${row.note ? `: ${row.note}` : ""}.` };
+    if (f === "date") return { subject, sentence: `The date or time changed from ${row.from_value ?? "not set"} to ${row.to_value ?? "not set"}${row.note ? `. Reason: ${row.note}` : ""}.` };
+    if (f === "crew") return { subject, sentence: `The crew was updated: ${row.to_value}.` };
+  }
+  if (row.entity_type === "shipment") {
+    if (f === "added") return { subject, sentence: `The shipment ${row.to_value} was added.` };
+    if (f === "removed") return { subject, sentence: `The shipment ${row.from_value} was removed.` };
+    if (f === "state") return { subject, sentence: `The shipment changed from ${row.from_value} to ${row.to_value}${row.note ? `. Reason: ${row.note}` : ""}.` };
+    if (f === "arrival") return { subject, sentence: `The expected arrival changed${row.note ? `. Reason: ${row.note}` : ""}.` };
   }
   if (f === "deleted") return { subject, sentence: `${word}${row.from_value ? ` “${row.from_value}”` : ""} was deleted.` };
   if (f === "pm") return { subject, sentence: `The Project Manager changed from ${row.from_value ?? "nobody"} to ${row.to_value ?? "nobody"}.` };

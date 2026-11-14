@@ -11,7 +11,7 @@ export interface PersonLike {
 export interface TeamLike {
   id: string;
   name: string;
-  head_user_id: string;
+  head_user_id: string | null;
 }
 
 /** Leadership that has passed its end date (date-only compare, as the database does) no longer carries project powers. */
@@ -23,7 +23,7 @@ export function roleLabels(p: PersonLike, teams: readonly TeamLike[], today: str
   if (p.role === "acting_pm") {
     out.push(isActingCurrent(p, today) ? `Temporary leader until ${formatPlanDay(p.acting_until)}` : "Temporary leadership ended");
   }
-  for (const t of teams) if (t.head_user_id === p.user_id) out.push(`Department head of ${t.name}`);
+  for (const t of teams) if (t.head_user_id === p.user_id) out.push(`${t.name} Lead`);
   if (out.length === 0 || (p.role === "acting_pm" && !isActingCurrent(p, today) && out.length === 1)) out.push("Member");
   return out;
 }
@@ -31,9 +31,9 @@ export function roleLabels(p: PersonLike, teams: readonly TeamLike[], today: str
 export const teamNameOf = (teamId: string | null, teams: readonly TeamLike[]) => (teamId ? (teams.find((t) => t.id === teamId)?.name ?? null) : null);
 
 export const ROLE_EXPLANATIONS: { role: string; can: string }[] = [
-  { role: "Project Manager", can: "Manages the scope, people, departments, milestones and delivery of this project, accepts milestones, and prepares the client timeline." },
+  { role: "Project Manager", can: "Manages the scope, people, teams, milestones and delivery of this project, accepts milestones, and prepares the client timeline." },
   { role: "Temporary leader", can: "Has the Project Manager's project powers until the end date. Cannot change who the Project Manager is or appoint other leaders." },
-  { role: "Department head", can: "Manages their department's deliverables and tasks, hands work to people in the department, accepts the department's deliverables and reviews its tasks." },
+  { role: "Team lead", can: "Manages their team's deliverables and tasks, hands work to people in the team, accepts the team's deliverables and reviews its tasks." },
   { role: "Member", can: "Reads the project workspace and its chat group, updates their own tasks, creates tasks for themselves and comments." },
 ];
 

@@ -23,12 +23,16 @@ export function UpcomingCard({ r, people }: { r: UpcomingRow; people: { id: stri
   const ev = eventLine(r);
   const p = r.planning;
   const waitingAnswer = !!p?.question && !p.answer;
+  // The one action Operations takes here when the next step is naming a provisional Project Manager: the button says so, instead of a bare "Plan".
+  const namePm = next.what === "Name a provisional Project Manager";
+  const pending = !!r.handover && r.handover.status !== "draft" && r.handover.status !== "accepted";
   return (
     <li className="os-card p-4" data-testid={`ops-row-${r.reference}`}>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-2">
         <div className="min-w-0 flex-1 basis-64">
           <h2 className="break-words font-heading text-base font-semibold leading-snug">{ev.event}</h2>
           <p className="text-[13px] text-muted-foreground">{ev.venue ?? "Venue not recorded"} · <span className="font-mono">{r.reference}</span>{ev.event !== r.title ? ` · ${r.title}` : ""}</p>
+          {pending ? <p className="mt-1 text-[13px]" data-testid={`ops-handover-line-${r.reference}`}><span className="font-medium">With {next.who}{next.person ? ` (${next.person})` : ""}</span> <span className="text-muted-foreground">·</span> Next: {next.what}</p> : null}
           <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <Badge variant="outline">{STAGE_WORDS[r.stage] ?? r.stage}</Badge>
             <Badge variant="outline" className={cn(dates.tentative ? "border-dashed border-[hsl(var(--os-amber)/0.6)] text-[hsl(var(--os-amber))]" : "border-[hsl(var(--os-green)/0.45)] text-[hsl(var(--os-green))]")}>{dates.tentative ? "Tentative dates" : r.won ? "Confirmed (won)" : "Dates confirmed, not won"}</Badge>
@@ -37,8 +41,9 @@ export function UpcomingCard({ r, people }: { r: UpcomingRow; people: { id: stri
           </p>
         </div>
         <span className="flex flex-none items-center gap-2">
+          {r.handover?.status === "accepted" && r.handover.project_id ? <Link href={`/projects/${r.handover.project_id}/delivery?from=handover`} className={buttonVariants({ size: "sm" })} data-testid={`ops-setup-${r.reference}`}>Start the project plan</Link> : null}
           {r.handover && r.handover.status !== "draft" ? <Link href={`/projects/handovers?handover=${r.handover.id}`} className={buttonVariants({ variant: r.handover.status === "submitted" ? "default" : "outline", size: "sm" })}>{r.handover.status === "submitted" ? "Assign a Project Manager" : "Open the handover"}</Link> : null}
-          <PlanningDialog row={r} people={people} />
+          <PlanningDialog row={r} people={people} label={namePm ? "Name a provisional Project Manager" : "Plan"} primary={namePm} />
         </span>
       </div>
 
@@ -56,7 +61,7 @@ export function UpcomingCard({ r, people }: { r: UpcomingRow; people: { id: stri
       </dl>
 
       <details className="mt-3 border-t pt-2">
-        <summary className="cursor-pointer text-[13px] font-medium text-accent">More: teams, equipment, what Sales still has to confirm, risk and questions</summary>
+        <summary className="cursor-pointer text-[13px] font-medium text-accent">More details</summary>
         <dl className="mt-3 grid gap-x-6 gap-y-3 sm:grid-cols-2 xl:grid-cols-4">
           <Fact label="Sales owner">{r.owner}</Fact>
           <Fact label="Event edition">{r.edition?.label ?? <Unknown>Not linked to an event</Unknown>}</Fact>

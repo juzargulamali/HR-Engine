@@ -35,7 +35,7 @@ export type ProjEditionSnapshot = {
   edition_id?: string | null; event_id?: string | null; event_name?: string | null; label?: string | null; venue?: string | null; city?: string | null; country_code?: string | null;
   start_date?: string | null; end_date?: string | null; taken_at?: string | null;
 }
-export type ProjTeamRow = { id: string; project_id: string; name: string; department_id: string | null; head_user_id: string; created_by: string | null; created_at: string; removed_at: string | null }
+export type ProjTeamRow = { id: string; project_id: string; name: string; department_id: string | null; head_user_id: string | null; preset_key: string | null; created_by: string | null; created_at: string; removed_at: string | null }
 export type ProjMemberRow = {
   id: string; project_id: string; user_id: string; role: "pm" | "acting_pm" | "member"; team_id: string | null; acting_until: string | null;
   added_by: string | null; added_at: string; removed_at: string | null; removed_by: string | null; removal_reason: string | null;
@@ -102,6 +102,8 @@ export type ProjFeedbackRow = {
   id: string; project_id: string; target_type: string; target_id: string | null; source: string; received_on: string; request_text: string;
   kind: "in_scope_correction" | "proposed_change"; responsible_user_id: string | null; due_date: string | null; status: string; resolution: string | null;
   evidence_note: string | null; resolved_at: string | null; resolved_by: string | null; scope_change_id: string | null; created_by: string | null;
+  /** Phase 2: the task output version and the Project Plan activation this feedback is about (either may be gone later). */
+  output_version_id?: string | null; activation_id?: string | null;
   version: number; created_at: string; updated_at: string;
 }
 export type ProjScopeChangeRow = {

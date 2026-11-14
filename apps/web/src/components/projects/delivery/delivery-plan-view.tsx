@@ -1,7 +1,9 @@
+import { SCHEDULE_PURPOSES } from "@/lib/projects/plan-view";
 import Link from "next/link";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { EmptyState } from "@/components/ui/empty-state";
 import { OsBadge } from "@/components/os/pills";
 import { Muted, Panel } from "@/components/projects/parts";
@@ -28,9 +30,11 @@ export interface DeliveryPlanViewProps {
   readOnly: boolean; statusWord: string;
   members: Option[]; stock: Option[]; stockFailed: boolean; images: Option[]; imagesFailed: boolean;
   nameOfUser: (id: string) => string;
-  /** Breakdown (the working view, the default) or Timeline. Both draw the same plan records. */
-  view?: "breakdown" | "timeline";
-  /** The activation to open (its key, D001), from a link in the summary or the Timeline. */
+  /** Breakdown (the working view, the default) or the Work schedule (`timeline` in the address, `work-schedule` accepted too). Both draw the same plan records. */
+  view?: "breakdown" | "timeline" | "deliverables";
+  /** The Deliverables register (Phase 2), built by the page from the same records as the task panel; drawn only in the Deliverables view. */
+  deliverablesSlot?: React.ReactNode;
+  /** The activation to open (its key, D001), from a link in the summary or the Work schedule. */
   openKey?: string | null;
   /** Today as YYYY-MM-DD; the page passes it so the same day is used throughout. */
   today?: string;
@@ -41,10 +45,10 @@ const WORK_SECTIONS: DpSection[] = ["content", "apps", "engineering", "site"];
 
 /**
  * The Project Plan as drawn: technologies / activations (grouped by zone when the project has zones), what each needs, the next-step summary, milestones, and the
- * Breakdown / Timeline views of the same records. It receives the plan already read for this person; which controls it draws follows `plan.can_manage` and
+ * Breakdown / Work schedule views of the same records. It receives the plan already read for this person; which controls it draws follows `plan.can_manage` and
  * `plan.my_sections`, and the database decides again on every action.
  */
-export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, statusWord, members, stock, stockFailed, images, imagesFailed, nameOfUser, view = "breakdown", openKey = null, today = todayIso() }: DeliveryPlanViewProps) {
+export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, statusWord, members, stock, stockFailed, images, imagesFailed, nameOfUser, view = "breakdown", deliverablesSlot = null, openKey = null, today = todayIso() }: DeliveryPlanViewProps) {
   const manage = plan.can_manage && !readOnly;
   const editable = (s: DpSection) => !readOnly && canEditSection(plan, s);
   const mySections = DP_CURRENT_SECTIONS.filter(editable);
@@ -181,7 +185,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
               {waitingFor.map((d) => <OsBadge key={d.section} tone="amber" className="mr-1.5">Waiting for {d.name}: {DP_SECTION_LABELS[sectionFamily(d.section)]}</OsBadge>)}
             </p>
           ) : null}
-          {sections.length === 0 ? <Muted>No requirements yet. Add only the sections this {item.title} needs: a simple job may be hardware and site work alone.</Muted> : sections.map((s) => {
+          {sections.length === 0 ? <Muted>No requirements yet.<InfoHint label="requirements" className="ml-1">Add only the sections this {item.title} needs: a simple job may be hardware and site work alone.</InfoHint></Muted> : sections.map((s) => {
             const lines = item.lines.filter((l) => l.section === s);
             const reorder = editable(s) && lines.length > 1;
             return (
@@ -199,8 +203,8 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
     );
   };
 
-  const viewLink = (v: "breakdown" | "timeline", label: string) => (
-    <Link href={v === "breakdown" ? `${base}/delivery` : `${base}/delivery?view=timeline`} aria-current={view === v ? "page" : undefined} data-testid={`dp-view-${v}`}
+  const viewLink = (v: "breakdown" | "timeline" | "deliverables", label: string) => (
+    <Link href={v === "breakdown" ? `${base}/delivery` : `${base}/delivery?view=${v}`} aria-current={view === v ? "page" : undefined} data-testid={`dp-view-${v}`}
       className={`inline-flex min-h-9 items-center rounded-md px-3 text-sm font-medium ${view === v ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</Link>
   );
 
@@ -208,8 +212,11 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-lg font-semibold">Project Plan</h2>
-          <p className="text-sm text-muted-foreground">Break each technology into what it needs, assign and schedule it, then release it. Entered once: Release creates the tasks and adds stock-matched hardware to the draft equipment request. Progress comes from those tasks and from Inventory. <Link href={`${base}/work`} className="underline underline-offset-2">Open the Work overview</Link>.</p>
+          <h2 className="text-lg font-semibold">Project Plan<InfoHint label="the Project Plan" className="ml-1.5" testId="dp-help">
+            <p>Break each technology into what it needs, assign and schedule it, then release it.</p>
+            <p className="mt-1.5">Work is entered once: Release creates the tasks and adds stock-matched hardware to the draft equipment request. Progress comes from those tasks and from Inventory.</p>
+          </InfoHint></h2>
+          <p className="text-sm"><Link href={`${base}/work`} className="underline underline-offset-2">Open the Work overview</Link></p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <a href={`/api/projects/${id}/delivery-plan/template`} className={buttonVariants({ variant: "outline", size: "sm" })}><Download className="h-4 w-4" aria-hidden /> Download template</a>
@@ -224,9 +231,8 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
 
       {manage && pendingNames.length > 0 ? (
         <section aria-label="Bring in the accepted technologies" className="os-card space-y-2 border-primary/60 bg-primary/5 px-4 py-3 sm:px-5" data-testid="dp-scope-pending">
-          <h3 className="text-base font-semibold">Next step: bring in the accepted technologies</h3>
+          <h3 className="text-base font-semibold">Next step: bring in the accepted technologies<InfoHint label="bringing in the accepted technologies" className="ml-1.5" testId="dp-seed-help">This is a manual step: accepting a handover does not add anything to the plan by itself. Pressing the button adds one row per technology with its quantity; doing it again never duplicates a row or overwrites what you have edited, and a row you remove stays removed.</InfoHint></h3>
           <p className="text-sm">The accepted handover lists {pendingNames.length} technolog{pendingNames.length === 1 ? "y" : "ies"} that {pendingNames.length === 1 ? "is" : "are"} not in the plan yet: {(scope?.pending ?? []).map((t) => `${t.name}${t.qty ? ` × ${t.qty}` : ""}`).join(", ")}.</p>
-          <p className="text-[13px] text-muted-foreground">This is a manual step: accepting a handover does not add anything to the plan by itself. Pressing the button adds one row per technology with its quantity; doing it again never duplicates a row or overwrites what you have edited, and a row you remove stays removed.</p>
           <SeedScopeDialog projectId={id} names={pendingNames} />
         </section>
       ) : null}
@@ -235,10 +241,20 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
 
       <div className={briefOnly ? "grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : "space-y-5"}>
         <div className="min-w-0 space-y-5">
-          <nav aria-label="Plan views" className="flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border p-1">{viewLink("breakdown", "Breakdown")}{viewLink("timeline", "Timeline")}</nav>
+          <nav aria-label="Plan views" className="flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border p-1">{viewLink("breakdown", "Breakdown")}{viewLink("timeline", "Work schedule")}{viewLink("deliverables", "Deliverables")}</nav>
+          <p className="text-[13px] text-muted-foreground" data-testid="dp-schedules-links">
+            Other schedules: <Link href={`${base}/plan?plan=site`} className="font-medium underline underline-offset-2" data-testid="dp-site-schedule-link">Site schedule</Link> (who is where on site), <Link href={`${base}/plan?plan=delivery`} className="font-medium underline underline-offset-2">Delivery timeline</Link> (dates the client sees) and <Link href={`${base}/plan?mode=calendar`} className="font-medium underline underline-offset-2">Calendar</Link>.
+            <InfoHint label="which schedule is which" className="ml-1" testId="dp-schedule-purposes">
+              <p><strong>Work schedule</strong>: {SCHEDULE_PURPOSES.work}</p>
+              <p className="mt-1.5"><strong>Delivery timeline</strong>: {SCHEDULE_PURPOSES.delivery}</p>
+              <p className="mt-1.5"><strong>Site schedule</strong>: {SCHEDULE_PURPOSES.site}</p>
+              <p className="mt-1.5"><strong>Calendar</strong>: {SCHEDULE_PURPOSES.calendar}</p>
+            </InfoHint>
+          </p>
 
           {proposed.length > 0 ? (
-            <Panel title={`Proposed changes to released work (${proposed.length})`} description="Nothing that was released changes until the Project Manager approves it. An approved owner, date or milestone change is applied to the task through the existing task rules; if the task cannot take it, the requirement shows Task update pending. Booked equipment is changed on the Equipment tab.">
+            <Panel title={`Proposed changes to released work (${proposed.length})`} description="Nothing that was released changes until the Project Manager approves it."
+              hint="An approved owner, date or milestone change is applied to the task through the existing task rules; if the task cannot take it, the requirement shows Task update pending. Booked equipment is changed on the Equipment tab.">
               <ul className="divide-y divide-border" data-testid="dp-proposed">
                 {proposed.map((c) => (
                   <li key={c.id} className="space-y-2 py-3">
@@ -253,7 +269,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
           ) : null}
 
           {openCorrections.length > 0 ? (
-            <Panel title={`Corrections waiting for a decision (${openCorrections.length})`} description="Raised by people on the project. Each goes to one lead; the Project Manager is told. A correction changes nothing by itself.">
+            <Panel title={`Corrections waiting for a decision (${openCorrections.length})`} description="A correction changes nothing by itself." hint="Raised by people on the project. Each goes to one lead; the Project Manager is told.">
               <ul className="divide-y divide-border" data-testid="dp-corrections">
                 {openCorrections.map((c) => (
                   <li key={c.id} className="space-y-2 py-3">
@@ -269,7 +285,9 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
 
           {milestones.length > 0 ? <MilestonePanel projectId={id} milestones={milestones} /> : null}
 
-          {view === "timeline" ? (
+          {view === "deliverables" ? (
+            deliverablesSlot ?? <Muted>The deliverables register could not be shown.</Muted>
+          ) : view === "timeline" ? (
             <PlanTimeline projectId={id} model={timelineModel(plan, today)} today={today} />
           ) : plan.items.length === 0 ? (
             <EmptyState icon={FileSpreadsheet} title="No technologies or activations yet"
@@ -285,7 +303,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
         {scope?.brief ? (
           <aside aria-label="Accepted scope" className={briefOnly ? "lg:sticky lg:top-4" : ""} data-testid="dp-brief">
             {briefOnly ? (
-              <Panel title="Accepted scope (brief)" description="The handover has the scope as a brief only, with no list of technologies. Read it here while you build the plan.">
+              <Panel title="Accepted scope (brief)" hint="The handover has the scope as a brief only, with no list of technologies. Read it here while you build the plan.">
                 <p className="whitespace-pre-wrap break-words text-sm">{scope.brief}</p>
               </Panel>
             ) : (
@@ -296,7 +314,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
       </div>
 
       {manage ? (
-        <Panel title="Who defines each section" description="Delegate a section to the person who should break it down: Engineering for hardware and integration, Content for assets and UI/UX, Programming for apps, the Site Lead for site work. They add and edit that section's requirements on every technology. You still resolve overlaps and release the work.">
+        <Panel title="Who defines each section" hint="Delegate a section to the person who should break it down: Engineering for hardware and integration, Content for assets and UI/UX, Programming for apps, the Site Lead for site work. They add and edit that section's requirements on every technology. You still resolve overlaps and release the work.">
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" data-testid="dp-delegations">
             {DP_CURRENT_SECTIONS.map((s) => <DelegateForm key={s} projectId={id} section={s} current={plan.delegations.find((d) => d.section === s)?.user_id ?? null} members={members} />)}
             {DP_SECTIONS.filter((s) => !(DP_CURRENT_SECTIONS as readonly string[]).includes(s) && plan.delegations.some((d) => d.section === s)).map((s) => <DelegateForm key={s} projectId={id} section={s} current={plan.delegations.find((d) => d.section === s)?.user_id ?? null} members={members} />)}
@@ -307,7 +325,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
       ) : null}
 
       {decidedCorrections.length + decidedChanges.length > 0 ? (
-        <Panel title="Decisions" description="The latest decided corrections and proposed changes, so the person who raised one can see what was decided and why.">
+        <Panel title="Decisions" hint="The latest decided corrections and proposed changes, so the person who raised one can see what was decided and why.">
           <ul className="divide-y divide-border" data-testid="dp-decisions">
             {decidedCorrections.map((c) => (
               <li key={c.id} className="py-2.5 text-sm">

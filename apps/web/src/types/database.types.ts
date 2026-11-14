@@ -1680,6 +1680,7 @@ export interface Database {
       inv_project_note_events: InvReadOnlyTable<InvProjectNoteEventRow>;
       // Projects & Tasks (20261120000000-500): read-only to clients; every write is a proj_* function below.
       proj_closeout_reports: ProjReadOnlyTable<{ id: string; project_id: string; version_no: number; status: string; snapshot: unknown; snapshot_at: string; selection: unknown; payload_hash: string; generation: string; provider_kind: string | null; sections: unknown; source_refs: unknown; created_by: string; created_at: string; updated_by: string | null; updated_at: string; approved_by: string | null; approved_at: string | null; version: number }>;
+      proj_task_output_versions: ProjReadOnlyTable<{ id: string; project_id: string; task_id: string; version_no: number; file_id: string; snapshot_file_id: string | null; mutable_link: boolean; item_count: number; note: string | null; submitted_by: string; attached_at: string; status: string; decided_by: string | null; decided_at: string | null; decision_note: string | null; approved_by: string | null; approved_at: string | null; client_key: string | null; review_route: string; reviewer_id: string | null; reviewer_assigned_at: string | null; reviewer_assigned_by: string | null }>;
       proj_company_grants: ProjReadOnlyTable<ProjCompanyGrantRow>;
       proj_audit_log: ProjReadOnlyTable<ProjAuditLogRow>;
       proj_company_settings: ProjReadOnlyTable<ProjCompanySettingsRow>;
@@ -1694,7 +1695,7 @@ export interface Database {
       proj_deliverables: ProjReadOnlyTable<ProjDeliverableRow>;
       proj_tasks: ProjReadOnlyTable<ProjTaskRow>;
       proj_dp_items: ProjReadOnlyTable<{ id: string; project_id: string; item_key: string; zone: string; title: string; qty: number | null; removed_at: string | null }>;
-      proj_dp_lines: ProjReadOnlyTable<{ id: string; project_id: string; item_id: string; line_key: string; section: string; description: string; task_id: string | null; removed_at: string | null }>;
+      proj_dp_lines: ProjReadOnlyTable<{ id: string; project_id: string; item_id: string; line_key: string; section: string; description: string; task_id: string | null; request_line_id: string | null; removed_at: string | null }>;
       proj_task_collaborators: ProjReadOnlyTable<ProjTaskCollaboratorRow>;
       proj_task_dependencies: ProjReadOnlyTable<ProjTaskDependencyRow>;
       proj_task_events: ProjReadOnlyTable<ProjTaskEventRow>;
@@ -2125,6 +2126,30 @@ export interface Database {
       proj_dp_add_sequence: { Args: { p_item_id: string; p_section: string; p_steps: Record<string, unknown>[] }; Returns: unknown };
       proj_dp_add_lines: { Args: { p_item_id: string; p_section: string; p_rows: Record<string, unknown>[]; p_chain?: boolean }; Returns: unknown };
       proj_dp_reorder_lines: { Args: { p_item_id: string; p_line_ids: string[] }; Returns: unknown };
+      proj_set_task_output: { Args: { p_task_id: string; p_label: string | null; p_qty?: number | null; p_required?: boolean; p_expected_version?: number | null }; Returns: unknown };
+      proj_submit_task_output: { Args: { p_task_id: string; p_file_id: string; p_snapshot_file_id?: string | null; p_item_count?: number; p_note?: string | null; p_mutable_link?: boolean; p_client_key?: string | null; p_expected_current?: number | null }; Returns: unknown };
+      proj_decide_task_output: { Args: { p_version_id: string; p_decision: string; p_note?: string | null }; Returns: unknown };
+      proj_link_feedback_output: { Args: { p_feedback_id: string; p_version_id?: string | null; p_activation_id?: string | null }; Returns: undefined };
+      proj_deliverables_register: { Args: { p_project_id: string; p_task_id?: string | null }; Returns: unknown };
+      proj_save_site_activity: { Args: { p_project_id: string; p_item_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
+      proj_add_site_activities: { Args: { p_project_id: string; p_rows: Record<string, unknown>[] }; Returns: unknown };
+      proj_set_site_crew: { Args: { p_item_id: string; p_rows: Record<string, unknown>[]; p_override_reason?: string | null }; Returns: unknown };
+      proj_setup_teams: { Args: { p_project_id: string; p_teams: Record<string, unknown>[]; p_confirm_access?: boolean }; Returns: unknown };
+      proj_set_activity_readiness: { Args: { p_item_id: string; p_fields: Record<string, unknown> }; Returns: unknown };
+      proj_site_technician_candidates: { Args: { p_project_id: string }; Returns: { user_id: string; name: string; is_member: boolean }[] };
+      proj_my_site_assignments: { Args: Record<string, never>; Returns: unknown };
+      proj_assign_output_reviewer: { Args: { p_version_id: string; p_reviewer: string | null }; Returns: unknown };
+      proj_reroute_output_review: { Args: { p_version_id: string }; Returns: unknown };
+      proj_site_briefing: { Args: { p_project_id: string }; Returns: unknown };
+      proj_apply_project_dates: { Args: { p_item_id: string }; Returns: unknown };
+      proj_record_site_start: { Args: { p_item_id: string; p_started_at?: string | null; p_note?: string | null }; Returns: unknown };
+      proj_clear_site_start: { Args: { p_item_id: string }; Returns: unknown };
+      proj_preview_site_assignment: { Args: { p_item_id: string; p_user_id: string }; Returns: unknown };
+      proj_site_activities_read: { Args: { p_company_id: string; p_project_id?: string | null; p_limit?: number }; Returns: unknown };
+      proj_save_shipment: { Args: { p_project_id: string; p_shipment_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
+      proj_remove_shipment: { Args: { p_shipment_id: string }; Returns: undefined };
+      proj_site_schedule: { Args: { p_project_id: string }; Returns: unknown };
+      proj_work_overview: { Args: { p_project_id: string }; Returns: unknown };
       proj_dp_seed_scope: { Args: { p_project_id: string }; Returns: unknown };
       proj_dp_reconcile_task: { Args: { p_line_id: string; p_action: string }; Returns: unknown };
       proj_dp_apply_import: { Args: { p_project_id: string; p_expected_rev: number; p_items: Record<string, unknown>[]; p_lines: Record<string, unknown>[] }; Returns: unknown };

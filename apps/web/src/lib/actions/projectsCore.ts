@@ -286,8 +286,8 @@ export async function removeProjectMember(_prev: S, fd: FormData): Promise<S> {
 }
 
 export async function saveProjectTeam(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, teamId: optionalUuid, name: z.string().trim().min(1, "Name the department team"), headUserId: uuid, departmentId: optionalUuid }).safeParse(Object.fromEntries(fd));
-  if (!p.success) return { error: p.error.issues[0]?.path[0] === "headUserId" ? "Choose the department head." : firstIssue(p.error) };
+  const p = z.object({ projectId: uuid, teamId: optionalUuid, name: z.string().trim().min(1, "Name the project team"), headUserId: uuid, departmentId: optionalUuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: p.error.issues[0]?.path[0] === "headUserId" ? "Choose the team lead." : firstIssue(p.error) };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_save_team", { p_project_id: p.data.projectId, p_team_id: p.data.teamId ?? null, p_name: p.data.name, p_head_user_id: p.data.headUserId, p_department_id: p.data.departmentId ?? null });
   if (error) return fail(error.message);

@@ -10,7 +10,7 @@ export interface AttentionTask {
   unblock_owner_id: string | null; unblock_action: string | null;
 }
 export interface AttentionMilestone { id: string; title: string; due_date: string | null }
-export type AttentionKind = "blocker" | "review" | "overdue" | "due_today" | "in_review" | "milestone" | "equipment";
+export type AttentionKind = "blocker" | "review" | "output" | "output_changes" | "overdue" | "due_today" | "in_review" | "milestone" | "equipment";
 export interface AttentionItem {
   key: string; kind: AttentionKind;
   /** The word shown beside the colour, so the colour is never the only signal. */
@@ -24,6 +24,10 @@ export interface AttentionItem {
   tone: "red" | "amber" | "blue" | "quiet";
   /** True when a control on the Work page itself can resolve it (the failed equipment import). */
   recovery?: "import";
+  /** An output line: the task it belongs to, the output it expects and the next step in words (shown beside the owner and due date). */
+  taskId?: string;
+  expected?: string | null;
+  next?: string | null;
 }
 
 export type EquipmentState =
@@ -48,6 +52,8 @@ export interface AttentionInput {
   taskHref: (taskId: string) => string;
   milestonesHref: string;
   equipmentHref: (requestId?: string) => string;
+  /** Output lines from the deliverables register (see work-queues.ts). Their tasks no longer get a generic "Review" or "In review" line, so one task is never listed twice. */
+  outputs?: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; handledTaskIds: ReadonlySet<string> };
 }
 
 const OPEN = ["todo", "in_progress", "ready_for_review"];
@@ -66,7 +72,8 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
     (mine ? needsYou : waiting).push({ key: `b-${t.id}`, kind: "blocker", label: "Blocked", title: t.title, href: i.taskHref(t.id), owner, due: t.due_date, detail, tone: "red" });
   }
   // Reviews the viewer may decide.
-  for (const t of open.filter((x) => i.reviewIds.includes(x.id))) {
+  const handled = i.outputs?.handledTaskIds ?? new Set<string>();
+  for (const t of open.filter((x) => i.reviewIds.includes(x.id) && !handled.has(x.id))) {
     needsYou.push({ key: `r-${t.id}`, kind: "review", label: "Review", title: t.title, href: i.taskHref(t.id), owner: "You", due: t.due_date, detail: `Done by ${i.nameOf(t.assignee_id)}. Accept it or send it back.`, tone: "blue" });
   }
   // The viewer's own tasks: overdue or due today (a blocked one is already listed above).
@@ -75,9 +82,11 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
     needsYou.push({ key: `d-${t.id}`, kind: late ? "overdue" : "due_today", label: late ? "Overdue" : "Due today", title: t.title, href: i.taskHref(t.id), owner: "You", due: t.due_date, detail: null, tone: "amber" });
   }
   // The viewer's work that someone else must review.
-  for (const t of open.filter((x) => x.assignee_id === i.userId && x.status === "ready_for_review" && !x.blocked_at)) {
-    waiting.push({ key: `w-${t.id}`, kind: "in_review", label: "In review", title: t.title, href: i.taskHref(t.id), owner: "A reviewer (the department head or the Project Manager)", due: t.due_date, detail: "You sent it for review.", tone: "quiet" });
+  for (const t of open.filter((x) => x.assignee_id === i.userId && x.status === "ready_for_review" && !x.blocked_at && !handled.has(x.id))) {
+    waiting.push({ key: `w-${t.id}`, kind: "in_review", label: "In review", title: t.title, href: i.taskHref(t.id), owner: "A reviewer (the team lead or the Project Manager)", due: t.due_date, detail: "You sent it for review.", tone: "quiet" });
   }
+  needsYou.push(...(i.outputs?.needsYou ?? []));
+  waiting.push(...(i.outputs?.waiting ?? []));
   // Overdue milestones belong to whoever manages the project.
   for (const m of i.lateMilestones) {
     (i.manager ? needsYou : waiting).push({ key: `m-${m.id}`, kind: "milestone", label: "Milestone overdue", title: m.title, href: i.milestonesHref, owner: i.manager ? "You" : i.pmName, due: m.due_date, detail: null, tone: "amber" });
@@ -105,7 +114,7 @@ export function workAttention(i: AttentionInput): { needsYou: AttentionItem[]; w
       detail: `${vs.map((v) => `${REVIEW_FIELD_LABEL[v.field]}: ${reviewChangeText(v)}`).join(" · ")}. The booking has not been changed.`, tone: "amber",
     });
   }
-  const order: AttentionKind[] = ["blocker", "review", "overdue", "due_today", "milestone", "equipment", "in_review"];
+  const order: AttentionKind[] = ["blocker", "review", "output", "output_changes", "overdue", "due_today", "milestone", "equipment", "in_review"];
   const rank = (a: AttentionItem) => order.indexOf(a.kind);
   // Equipment lines keep the order they were added in (a failed import before drafts before waiting); the rest go by due date.
   const sort = (xs: AttentionItem[]) => xs.sort((a, b) => rank(a) - rank(b) || (a.kind === "equipment" ? 0 : byDue(a, b)));

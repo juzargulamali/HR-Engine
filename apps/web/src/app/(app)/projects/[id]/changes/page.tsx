@@ -1,3 +1,4 @@
+import { feedbackLinks, type FeedbackLinkLookup } from "@/lib/projects/phase2/model";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { canDecideScope, canSeeCommercialEffects, isFinishedProject } from "@enginious-hr/domain";
@@ -29,7 +30,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
   const canDecide = canDecideScope(ctx.grants, project.company_id);
   const finished = isFinishedProject(project.status);
 
-  const [fb, sc, ms, dl, tk, handover, commercial] = await Promise.all([
+  const [fb, sc, ms, dl, tk, handover, commercial, dpItems, outVersions] = await Promise.all([
     supabase.from("proj_feedback").select("*").eq("project_id", id).order("received_on", { ascending: false }).order("created_at", { ascending: false }),
     supabase.from("proj_scope_changes").select("*").eq("project_id", id).order("proposed_at", { ascending: false }),
     supabase.from("proj_milestones").select("id, title").eq("project_id", id).order("sort_order"),
@@ -37,7 +38,15 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
     supabase.from("proj_tasks").select("id, title").eq("project_id", id).order("title"),
     project.handover_id ? supabase.from("proj_handovers").select("scope, accepted_at, crm_reference").eq("id", project.handover_id).maybeSingle() : Promise.resolve({ data: null }),
     seeCommercial ? supabase.from("proj_scope_change_commercial").select("*").eq("project_id", id) : Promise.resolve({ data: [] }),
+    // What feedback is linked to (Phase 2): looked up here so a removed activation reads "Activation removed" instead of a broken link. A failed lookup only loses the link words.
+    supabase.from("proj_dp_items").select("id, item_key, title, removed_at").eq("project_id", id),
+    supabase.from("proj_task_output_versions").select("id, task_id, version_no").eq("project_id", id),
   ]);
+  const linkLook: FeedbackLinkLookup = {
+    items: new Map((dpItems.data ?? []).map((i) => [i.id, { key: i.item_key, title: i.title, removed: !!i.removed_at }])),
+    versions: new Map((outVersions.data ?? []).map((v) => [v.id, { task_id: v.task_id, version_no: v.version_no }])),
+    tasks: new Map((tk.data ?? []).map((t) => [t.id, t.title])),
+  };
   const feedback = fb.data ?? [];
   const changes = sc.data ?? [];
   const milestones = (ms.data ?? []).map((m) => ({ id: m.id, label: m.title }));
@@ -57,15 +66,15 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
   return (
     <div className="space-y-6">
-      <Alert role="note">Nothing here approves scope, price or a deadline by itself: not a chat message, not an attachment, not feedback being recorded. A scope change is approved only by someone with scope approval, with a reason, on this page.</Alert>
+      <Alert role="note">Nothing here approves scope, price or a deadline by itself. Only someone with scope approval can approve a scope change, with a reason, on this page; chat, attachments and recorded feedback approve nothing.</Alert>
 
       <Panel
         title="Client feedback"
-        description="What the client asked for, who is responsible and how it was resolved. A correction fixes something against what was agreed; a proposed change needs a scope decision below."
+        hint="What the client asked for, who is responsible and how it was resolved. A correction fixes something against what was agreed; a proposed change needs a scope decision below."
         actions={view.canManage && !finished ? <RecordFeedbackForm projectId={id} today={today} milestones={milestones} deliverables={deliverables} tasks={tasks} people={people} /> : null}
       >
         {feedback.length === 0 ? (
-          <EmptyState dense title="No client feedback recorded" description={view.canManage ? "Record feedback when the client asks for a correction or a change, so it has a person responsible and a decision." : "The Project Manager records client feedback here."} />
+          <EmptyState dense title="No client feedback recorded" description={view.canManage ? undefined : "The Project Manager records client feedback here."} />
         ) : (
           <ul className="space-y-3">
             {feedback.map((f) => {
@@ -73,7 +82,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
               const canUpdate = !finished && (view.canManage || (f.responsible_user_id === ctx.userId && view.standing.isMember));
               const linked = changes.find((c) => c.id === f.scope_change_id);
               return (
-                <li key={f.id} className="rounded-md border border-border p-3">
+                <li key={f.id} id={`feedback-${f.id}`} className="scroll-mt-24 rounded-md border border-border p-3" data-testid={`feedback-${f.id}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <FeedbackStatusBadge status={f.status} />
                     <Badge variant="outline" className="whitespace-nowrap">{f.kind === "in_scope_correction" ? "Correction to what was agreed" : "Proposed change"}</Badge>
@@ -87,11 +96,12 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
                     <Fact label="From">{f.source}</Fact>
                     <Fact label="Received">{formatDate(f.received_on)}</Fact>
                     <Fact label="About">{targetLabel(f.target_type, f.target_id)}</Fact>
+                    {(() => { const lw = feedbackLinks(f, id, linkLook); return lw.activation || lw.version ? <Fact label="Linked to"><span data-testid={`feedback-links-${f.id}`}>{lw.version ? (lw.version.href ? <Link href={lw.version.href} className="underline underline-offset-2">{lw.version.text}</Link> : lw.version.text) : null}{lw.version && lw.activation ? " · " : null}{lw.activation ? (lw.activation.href ? <Link href={lw.activation.href} className="underline underline-offset-2">{lw.activation.text}</Link> : <span className="text-muted-foreground">{lw.activation.text}</span>) : null}</span></Fact> : null; })()}
                     <Fact label="Responsible">{f.responsible_user_id ? view.nameOf(f.responsible_user_id) : "Nobody yet"}</Fact>
                     <Fact label="Deadline">{dateText(f.due_date)}</Fact>
                     {f.resolution ? <Fact label={`Resolution${f.resolved_at ? ` (${formatDateTime(f.resolved_at)})` : ""}`} className="sm:col-span-2">{f.resolution}</Fact> : null}
                     {f.evidence_note ? <Fact label="Evidence">{f.evidence_note}</Fact> : null}
-                    {linked ? <Fact label="Scope change">{linked.title} ({SCOPE_STATUS[linked.status] ?? linked.status})</Fact> : null}
+                    {linked ? <Fact label="Scope change"><a href={`#scope-${linked.id}`} className="underline underline-offset-2" data-testid={`feedback-scope-link-${f.id}`}>{linked.title}</a> ({SCOPE_STATUS[linked.status] ?? linked.status})</Fact> : null}
                   </dl>
                 </li>
               );
@@ -102,7 +112,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
       <Panel
         title="Scope"
-        description="The original agreed scope is kept exactly as it was handed over. Approved changes replace the current scope; the original and every decision stay on record."
+        hint="The original agreed scope is kept exactly as it was handed over. Approved changes replace the current scope; the original and every decision stay on record."
         actions={view.canManage && !finished ? <ProposeScopeChangeForm projectId={id} currentScope={view.details?.scope ?? null} feedback={feedback.filter((f) => f.kind === "proposed_change" && !f.scope_change_id).map((f) => ({ id: f.id, label: `${formatDate(f.received_on)}: ${f.request_text.slice(0, 60)}` }))} /> : null}
       >
         <div className="grid gap-4 lg:grid-cols-2">
@@ -126,14 +136,16 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
 
       <Panel title="Scope change proposals" description={seeCommercial ? "You have commercial access, so the cost effect of each proposal is shown." : "Cost effects are recorded in a restricted area and are visible only to people with commercial access."}>
         {changes.length === 0 ? (
-          <EmptyState dense title="No scope changes proposed" description="When the client asks for something outside the agreed scope, the Project Manager proposes a change here so it can be decided." />
+          <EmptyState dense title="No scope changes proposed" description="The Project Manager proposes changes here." />
         ) : (
           <ul className="space-y-3">
             {changes.map((c) => {
               const cost = commercialBy.get(c.id);
               const proposed = c.status === "proposed";
+              const source = feedback.find((f) => f.scope_change_id === c.id);
+              const sourceLinks = source ? feedbackLinks(source, id, linkLook) : null;
               return (
-                <li key={c.id} className="rounded-md border border-border p-3">
+                <li key={c.id} id={`scope-${c.id}`} className="scroll-mt-24 rounded-md border border-border p-3" data-testid={`scope-change-${c.id}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className={c.status === "approved" ? "border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]" : c.status === "proposed" ? "border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]" : "text-muted-foreground"}>{SCOPE_STATUS[c.status] ?? c.status}</Badge>
                     <h3 className="text-sm font-semibold">{c.title}</h3>
@@ -145,6 +157,15 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
                   </div>
                   <dl className="mt-3 grid gap-3 sm:grid-cols-2">
                     <Fact label="Proposed scope" className="sm:col-span-2"><span className="whitespace-pre-wrap">{c.proposed_scope}</span></Fact>
+                    {source ? (
+                      <Fact label="Raised from" className="sm:col-span-2">
+                        <span data-testid={`scope-source-${c.id}`}>
+                          <a href={`#feedback-${source.id}`} className="underline underline-offset-2">Client feedback from {source.source}, {formatDate(source.received_on)}</a>
+                          {sourceLinks?.version ? <>, about {sourceLinks.version.href ? <Link href={sourceLinks.version.href} className="underline underline-offset-2">{sourceLinks.version.text}</Link> : sourceLinks.version.text}</> : null}
+                          {sourceLinks?.activation ? <>, activation {sourceLinks.activation.href ? <Link href={sourceLinks.activation.href} className="underline underline-offset-2">{sourceLinks.activation.text}</Link> : sourceLinks.activation.text}</> : null}
+                        </span>
+                      </Fact>
+                    ) : null}
                     <Fact label="Effect on dates">{c.effect_on_dates ?? "Not stated"}</Fact>
                     <Fact label="Proposed">{view.nameOf(c.proposed_by)}, {formatDateTime(c.proposed_at)}</Fact>
                     {c.decided_at ? <Fact label="Decision">{c.status === "approved" ? "Approved" : "Rejected"} by {view.nameOf(c.decided_by)}, {formatDateTime(c.decided_at)}</Fact> : null}

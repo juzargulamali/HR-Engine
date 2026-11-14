@@ -54,7 +54,7 @@ task() { as 4 "select proj_create_task('$PRJ', '$1'::jsonb)"; }
 T_SHADER=$(task "{\"title\":\"Shader prototype\",\"assignee_id\":\"$U-0000000000a2\",\"deliverable_id\":\"$DEL\",\"due_date\":\"$(day 7)\",\"requires_review\":true}")
 T_SENSOR=$(task "{\"title\":\"Sensor calibration\",\"assignee_id\":\"$U-0000000000a2\",\"deliverable_id\":\"$DEL\",\"due_date\":\"$(day 5)\"}")
 T_GUIDE=$(task "{\"title\":\"Write the operator guide\",\"assignee_id\":\"$U-0000000000a2\",\"deliverable_id\":\"$DEL\",\"due_date\":\"$(day -3)\"}")
-T_POWER=$(task "{\"title\":\"Confirm power and network with the venue\",\"assignee_id\":\"$U-0000000000a4\",\"due_date\":\"2026-11-02\"}")
+T_POWER=$(task "{\"title\":\"Confirm power and network with the venue\",\"assignee_id\":\"$U-0000000000a4\",\"due_date\":\"$(day 10)\"}")
 as 2 "select proj_set_task_status('$T_SHADER', 'in_progress')" >/dev/null
 as 2 "select proj_set_task_status('$T_SHADER', 'ready_for_review')" >/dev/null
 as 4 "select proj_post_message('$PRJ', 'Kick-off done. Truss arrives on Thursday at the venue.')" >/dev/null

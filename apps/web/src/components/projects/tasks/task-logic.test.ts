@@ -162,7 +162,7 @@ describe("grouping", () => {
     expect(g[2]?.none).toBe(true);
   });
   it("groups by department with the unassigned tasks last", () => {
-    expect(groupTaskRows(rows, "team").map((x) => x.label)).toEqual(["Hardware", "Programming", "No department"]);
+    expect(groupTaskRows(rows, "team").map((x) => x.label)).toEqual(["Hardware", "Programming", "No project team"]);
   });
   it("groups by status in workflow order and by assignee alphabetically", () => {
     expect(groupTaskRows(rows, "status").map((x) => x.label)).toEqual(["To do", "In progress"]);

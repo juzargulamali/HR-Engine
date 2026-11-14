@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Flag, Hourglass, MapPin, Package } from "lucide-react";
+import { InfoHint } from "@/components/ui/info-hint";
+import { AlertTriangle, CalendarClock, Check, ClipboardCheck, FileCheck2, FileWarning, Flag, Hourglass, MapPin, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dateText } from "@/lib/projects/format";
 import { stripSteps, type StripMilestone } from "@/app/(app)/projects/[id]/work/helpers";
@@ -79,12 +80,12 @@ export function MilestoneStrip({ milestones, today, basis, percent, manageHref, 
 }
 
 const TONE_TEXT = { red: "text-[hsl(var(--os-red))]", amber: "text-[hsl(var(--os-amber))]", blue: "text-[hsl(var(--os-info))]", quiet: "text-muted-foreground" } as const;
-const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = { blocker: AlertTriangle, review: ClipboardCheck, overdue: CalendarClock, due_today: CalendarClock, in_review: Hourglass, milestone: Flag, equipment: Package };
+const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = { blocker: AlertTriangle, review: ClipboardCheck, output: FileCheck2, output_changes: FileWarning, overdue: CalendarClock, due_today: CalendarClock, in_review: Hourglass, milestone: Flag, equipment: Package };
 
 function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.ReactNode }) {
   const Icon = KIND_ICON[a.kind];
   return (
-    <li className="flex items-start gap-2.5 py-2 text-sm">
+    <li className="flex items-start gap-2.5 py-2 text-sm" data-testid={a.taskId ? `work-output-${a.taskId}` : undefined}>
       <Icon className={cn("mt-0.5 h-4 w-4 flex-none", TONE_TEXT[a.tone])} aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="break-words">
@@ -93,7 +94,9 @@ function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.Reac
           <Link href={a.href} scroll={false} className="font-medium underline-offset-4 hover:underline">{a.title}</Link>
         </p>
         <p className="break-words text-[13px] text-muted-foreground">Owner: {a.owner} · {a.due ? `Due ${dateText(a.due)}` : "No due date recorded"}</p>
+        {a.expected ? <p className="break-words text-[13px] text-muted-foreground">Expected output: {a.expected}</p> : null}
         {a.detail ? <p className="break-words text-[13px] text-muted-foreground">{a.detail}</p> : null}
+        {a.next ? <p className="break-words text-[13px]" data-testid="attention-next">Next: {a.next}</p> : null}
         {recovery ? <div className="mt-1.5">{recovery}</div> : null}
       </div>
     </li>
@@ -105,11 +108,12 @@ function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.Reac
  * recorded) and a link to the task or record. Every line is a recorded fact; when nothing is waiting it says so in one line. `importRecovery` is the existing "import the
  * handover equipment" control, shown under the failed-import line only.
  */
-export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; importRecovery?: React.ReactNode; max?: number }) {
+export function WorkAttention({ needsYou, waiting, importRecovery, nextOnSite, max = 5 }: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; importRecovery?: React.ReactNode; nextOnSite?: React.ReactNode; max?: number }) {
   if (needsYou.length === 0 && waiting.length === 0) {
     return (
-      <section aria-label="What needs doing" className="os-card px-4 py-3" data-testid="work-attention">
-        <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span> <span className="text-muted-foreground">No blocker, review, overdue task or equipment decision is recorded for this project.</span></p>
+      <section aria-label="What needs doing" className="os-card space-y-3 px-4 py-3" data-testid="work-attention">
+        <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span><InfoHint label="what needs you" className="ml-1">No blocker, review, overdue task or equipment decision is recorded for this project.</InfoHint></p>
+        {nextOnSite ? <div data-testid="work-next-on-site">{nextOnSite}</div> : null}
       </section>
     );
   }
@@ -121,15 +125,16 @@ export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { 
           {items.slice(0, max).map((a) => <AttentionRow key={a.key} a={a} recovery={a.recovery === "import" ? importRecovery : undefined} />)}
         </ul>
       )}
-      {items.length > max ? <p className="pt-1 text-[13px] text-muted-foreground">Showing {max} of {items.length}. The task list below has the rest.</p> : null}
+      {items.length > max ? <p className="pt-1 text-[13px] text-muted-foreground">Showing {max} of {items.length}. The task list and Deliverables have the rest.</p> : null}
     </div>
   );
   return (
     <section aria-label="What needs doing" className="os-card os-warm px-4 py-3.5 sm:px-5" data-testid="work-attention">
       <h2 className="mb-2 font-heading text-base font-semibold">What needs doing</h2>
-      <div className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
+      <div className={cn("grid gap-x-8 gap-y-3", nextOnSite ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
         {group("Needs you", needsYou, "attention-needs-you", "Nothing needs you right now.")}
         {group("Waiting on someone else", waiting, "attention-waiting", "Nothing is waiting on anyone else.")}
+        {nextOnSite ? <div className="min-w-0" data-testid="work-next-on-site">{nextOnSite}</div> : null}
       </div>
     </section>
   );
@@ -163,12 +168,11 @@ export function ProjectPlanEntry({ projectId, canManage }: { projectId: string; 
   return (
     <section aria-label="Project Plan" className="os-card flex flex-wrap items-center justify-between gap-3 border-primary/40 px-4 py-3 sm:px-5" data-testid="project-plan-entry">
       <div className="min-w-0">
-        <h2 className="font-heading text-base font-semibold">Project Plan</h2>
-        <p className="text-sm text-muted-foreground">{canManage ? "Break each technology into what it needs, assign and schedule it, release it, and see what holds up delivery." : "See what each technology needs, who does it and by when."} Tasks you update here show in the plan, and the other way round.</p>
+        <h2 className="font-heading text-base font-semibold">Project Plan<InfoHint label="the Project Plan" className="ml-1">{canManage ? "Break each technology into what it needs, assign and schedule it, release it, and see what holds up delivery." : "See what each technology needs, who does it and by when."} Tasks you update here show in the plan, and the other way round.</InfoHint></h2>
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <Link href={`/projects/${projectId}/delivery`} className="inline-flex min-h-10 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Open the Project Plan</Link>
-        <Link href={`/projects/${projectId}/delivery?view=timeline`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Timeline</Link>
+        <Link href={`/projects/${projectId}/delivery?view=timeline`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Work schedule</Link>
       </div>
     </section>
   );
@@ -204,7 +208,8 @@ export function RecentActivity({ lines, failed, historyHref }: { lines: readonly
 }
 
 /** Direct ways into the parts of the project the work depends on, each with the fact that makes it relevant. Only the ones given are shown. */
-export function WorkShortcuts({ items }: { items: readonly { href: string; label: string; note: string }[] }) {
+/** `note` is a fact that makes the link relevant (stays visible); `hint` is a static description (behind the ⓘ). */
+export function WorkShortcuts({ items }: { items: readonly { href: string; label: string; note?: string; hint?: string }[] }) {
   if (items.length === 0) return null;
   return (
     <nav aria-label="Go to" className="os-card p-4" data-testid="work-shortcuts">
@@ -213,7 +218,8 @@ export function WorkShortcuts({ items }: { items: readonly { href: string; label
         {items.map((i) => (
           <li key={i.href} className="text-sm">
             <Link href={i.href} className="font-medium text-accent underline-offset-4 hover:underline">{i.label}</Link>
-            <span className="block text-[13px] text-muted-foreground">{i.note}</span>
+            {i.hint ? <InfoHint label={i.label} className="ml-1">{i.hint}</InfoHint> : null}
+            {i.note ? <span className="block text-[13px] text-muted-foreground">{i.note}</span> : null}
           </li>
         ))}
       </ul>

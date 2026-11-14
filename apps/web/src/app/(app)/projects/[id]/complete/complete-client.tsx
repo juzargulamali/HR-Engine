@@ -8,6 +8,7 @@ import { completeProject } from "@/lib/actions/projectsClose";
 import type { ProjectActionState } from "@/lib/projects/action-utils";
 import type { ProjCompletionReviewRow } from "@/types/projects";
 import { Field } from "@/components/sales/action-form";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,15 +89,14 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
           <Alert role="status">Nothing is unfinished: no open tasks, deliverables, milestones, client feedback or upcoming site bookings. You can go straight to the evidence.</Alert>
         ) : (
           <>
-            <p className="text-sm text-muted-foreground">Completing the project does not mark anything Done. Every item below needs an explicit decision and a reason, so nothing is closed silently. Deferred items stay on the project; cancelled ones are kept in the history.</p>
+            <p className="text-sm text-muted-foreground">Completing marks nothing Done. Every item below needs a decision and a reason.<InfoHint label="completion decisions" className="ml-1">Nothing is closed silently. Deferred items stay on the project; cancelled ones are kept in the history.</InfoHint></p>
             {grouped.map((g) => {
               const actions = completionActionsFor(g.kind);
               const b = bulk[g.kind] ?? { action: "", note: "" };
               return (
                 <div key={g.kind} className="rounded-md border border-border">
                   <div className="space-y-2 border-b border-border px-3 py-2">
-                    <h3 className="text-sm font-semibold">{KIND_TITLES[g.kind]} ({g.rows.length})</h3>
-                    <p className="text-sm text-muted-foreground">{EXPLAIN[g.kind]}</p>
+                    <h3 className="text-sm font-semibold">{KIND_TITLES[g.kind]} ({g.rows.length})<InfoHint label={KIND_TITLES[g.kind]} className="ml-1">{EXPLAIN[g.kind]}</InfoHint></h3>
                     {g.rows.length > 1 ? (
                       <div className="flex flex-wrap items-end gap-2">
                         <div className="w-full sm:w-44">
@@ -154,7 +154,7 @@ export function CompleteClient({ projectId, projectKind, items, evidenceFiles, t
         <h2 id="evidence" className="text-base font-semibold">2. {projectKind === "client" ? "The client's completion confirmation" : "Completion note"}</h2>
         {projectKind === "client" ? (
           <>
-            <p className="text-sm text-muted-foreground">A client project cannot be completed without the client confirming completion. Record where that confirmation is; the app does not contact the client.</p>
+            <p className="text-sm text-muted-foreground">A client project cannot be completed without the client confirming completion. Record where that confirmation is.<InfoHint label="client confirmation" className="ml-1">The app does not contact the client.</InfoHint></p>
             <div className="grid gap-3 sm:grid-cols-2">
               <Field label="Kind of confirmation" htmlFor="ev-type">
                 <Select id="ev-type" name="evidenceType" value={evidence.evidenceType} onChange={(e) => setEvidence({ ...evidence, evidenceType: e.target.value })} required>

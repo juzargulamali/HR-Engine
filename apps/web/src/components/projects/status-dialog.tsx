@@ -37,7 +37,7 @@ export function StatusDialog({ projectId, projectName, moves, currentLabel, init
           <Field label="Note (optional)" htmlFor={`ps-note-${projectId}`}><Textarea id={`ps-note-${projectId}`} name="reason" rows={2} /></Field>
         )}
         {move?.needsReviewDate ? (
-          <Field label="Review date" htmlFor={`ps-review-${projectId}`} hint="When someone will look at this again."><Input id={`ps-review-${projectId}`} name="reviewDate" type="date" required /></Field>
+          <Field label="Review date" htmlFor={`ps-review-${projectId}`}><Input id={`ps-review-${projectId}`} name="reviewDate" type="date" required /></Field>
         ) : null}
       </ActionForm>
     </Modal>

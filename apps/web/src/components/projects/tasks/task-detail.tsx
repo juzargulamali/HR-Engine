@@ -1,3 +1,5 @@
+import { TaskOutputSection } from "@/components/projects/deliverables/output-views";
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { OsPill } from "@/components/os/pills";
@@ -21,7 +23,7 @@ import { cn } from "@/lib/utils";
  * then the description, status / assignee / due (each editable only by the people who may) with the rarer actions under "More"; then comments, details, dependencies and history. `taskHref` says how a
  * related task is opened (in the panel, or as its own page).
  */
-export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData; view: ProjectView; taskHref: (taskId: string) => string }) {
+export function TaskDetailBody({ data, view, taskHref, focusVersionId }: { data: TaskDetailData; view: ProjectView; taskHref: (taskId: string) => string; focusVersionId?: string }) {
   const { task, row } = data;
   const fmtDay = (d: string | null) => (d ? dateText(d) : "no date");
   const control = toControlRow(row);
@@ -50,10 +52,18 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
         {main.length > 0 ? <div className="mt-2.5"><TaskPrimaryAction row={control} moves={main} /></div> : null}
       </section>
 
+      {/* The expected output sits right under the action the assignee takes: what is expected, what is missing, the current version and its review. */}
+      <TaskOutputSection
+        projectId={view.project.id} task={{ id: task.id, version: task.version, status: task.status }} row={data.output.row} tz={data.output.tz} files={data.output.files}
+        focusVersionId={focusVersionId}
+        flags={{ canDefine: data.leader, canSubmit: data.role !== null, viewerIsAssignee: task.assignee_id === data.viewerId, canReview: data.leader && task.assignee_id !== data.viewerId, readOnly: data.readOnly }}
+      />
+      {data.output.state === "unavailable" ? <Muted>⚠ The expected output could not be read just now. The rest of the task is unaffected; reload to try again.</Muted> : null}
+
       {data.planLink ? (
         <p className="text-sm" data-testid="task-plan-link">
           From the Project Plan: <Link href={`/projects/${view.project.id}/delivery?open=${data.planLink.itemKey}#dp-${data.planLink.lineKey}`} className="font-medium underline underline-offset-2">{data.planLink.itemKey} {data.planLink.itemTitle}</Link>
-          <span className="text-muted-foreground"> · {data.planLink.lineKey}. Status, owner and dates here are what the plan shows.</span>
+          <span className="text-muted-foreground"> · {data.planLink.lineKey}</span><InfoHint label="the plan link" className="ml-1">Status, owner and dates here are what the plan shows.</InfoHint>
         </p>
       ) : null}
       {task.description ? <p className="whitespace-pre-wrap text-sm">{task.description}</p> : <Muted>No description.</Muted>}
@@ -85,7 +95,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
           milestones={data.milestones}
         />
       </div>
-      <Panel title={`Comments (${data.comments.length})`} description="About this task only. The project's conversation is in Chat; formal changes are in History.">
+      <Panel title={`Comments (${data.comments.length})`} hint="About this task only. The project's conversation is in Chat; formal changes are in History.">
         {data.comments.length === 0 ? (
           <Muted className="mb-4">No comments yet.</Muted>
         ) : (
@@ -110,7 +120,7 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
       <Panel title="Details">
         <dl className="grid gap-4 sm:grid-cols-2">
           <Fact label="Collaborators">{data.collaboratorIds.length > 0 ? data.collaboratorIds.map((c) => view.nameOf(c)).join(", ") : "None"}</Fact>
-          <Fact label="Department team">{data.team ? `${data.team.name} (head: ${data.team.head})` : "None"}</Fact>
+          <Fact label="Project team">{data.team ? `${data.team.name} (head: ${data.team.head})` : "None"}</Fact>
           <Fact label="Deliverable">{data.deliverable ?? "None"}</Fact>
           <Fact label="Milestone">{data.milestone ?? "None"}</Fact>
           <Fact label="Start date">{task.start_date ? dateText(task.start_date) : "Not set"}</Fact>
@@ -119,14 +129,14 @@ export function TaskDetailBody({ data, view, taskHref }: { data: TaskDetailData;
         <p className="mt-3 text-sm"><Link href={`/projects/${view.project.id}/documents`} className="underline underline-offset-4">Project files and client documents</Link></p>
       </Panel>
 
-      <Panel title="Dependencies" description="Information, never automation: a changed date does not move anyone else's work.">
+      <Panel title="Dependencies" hint="Information, never automation: a changed date does not move anyone else's work.">
         <div className="grid gap-4 sm:grid-cols-2">
           <DependencyList heading="Depends on" ids={data.dependsOn} tasksById={data.tasksById} empty="Does not depend on another task." link={asLink} />
           <DependencyList heading="Waiting on this one" ids={data.blocks} tasksById={data.tasksById} empty="No task depends on this one." link={asLink} />
         </div>
       </Panel>
 
-      <Panel title="History" description="Reassignments, date changes with their reasons, status changes and blockers. Nothing here can be edited.">
+      <Panel title="History" hint="Reassignments, date changes with their reasons, status changes and blockers. Nothing here can be edited.">
         {data.events.length === 0 ? (
           <Muted>No history yet.</Muted>
         ) : (

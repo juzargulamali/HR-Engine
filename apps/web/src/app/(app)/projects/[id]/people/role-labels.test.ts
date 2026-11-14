@@ -8,10 +8,10 @@ describe("roleLabels", () => {
   it("names the PM, a plain member and a department head", () => {
     expect(roleLabels(p({ role: "pm", user_id: "u-x" }), teams, "2099-01-01")).toEqual(["Project Manager"]);
     expect(roleLabels(p({}), teams, "2099-01-01")).toEqual(["Member"]);
-    expect(roleLabels(p({ user_id: "u-head" }), teams, "2099-01-01")).toEqual(["Department head of Programming"]);
+    expect(roleLabels(p({ user_id: "u-head" }), teams, "2099-01-01")).toEqual(["Programming Lead"]);
   });
   it("combines roles when a PM also heads a team", () => {
-    expect(roleLabels(p({ role: "pm", user_id: "u-pm" }), teams, "2099-01-01")).toEqual(["Project Manager", "Department head of Content"]);
+    expect(roleLabels(p({ role: "pm", user_id: "u-pm" }), teams, "2099-01-01")).toEqual(["Project Manager", "Content Lead"]);
   });
   it("shows temporary leadership with its end date and says when it has ended (date-only compare)", () => {
     const acting = p({ role: "acting_pm", acting_until: "2099-03-05" });

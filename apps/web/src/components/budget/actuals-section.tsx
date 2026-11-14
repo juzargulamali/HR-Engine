@@ -183,7 +183,7 @@ function ActualsEditor({ view, submission, claims, claimsFailed, claimsRetryHref
       <div className="space-y-2 rounded-lg border border-border bg-secondary/30 p-3" role="group" aria-label="How these were paid">
         <p className="text-sm font-medium">How were these paid?</p>
         <div className="grid gap-2 sm:grid-cols-2 lg:max-w-3xl lg:grid-cols-[minmax(15rem,1.3fr)_minmax(9rem,1fr)]">
-          <Field label="How paid (all lines)" htmlFor="pbx-def-via">
+          <Field label="How paid (all lines)" htmlFor="pbx-def-via" help="Asked once. Every line with an amount uses this unless you choose “Different for this line”. Receipts are unchanged: they are still handed to Finance in person.">
             <Select id="pbx-def-via" value={def.via} disabled={busy} onChange={(e) => { setDef({ ...def, via: e.target.value as PaidVia | "" }); touch(); }}>
               <option value="">Choose…</option>
               {PAID_VIA.map((p) => <option key={p} value={p}>{PAID_VIA_LABELS[p]}</option>)}
@@ -198,7 +198,6 @@ function ActualsEditor({ view, submission, claims, claimsFailed, claimsRetryHref
             </Field>
           ) : null}
         </div>
-        <p className="text-[13px] text-muted-foreground">Asked once. Every line with an amount uses this unless you choose “Different for this line”. Receipts are unchanged: they are still handed to Finance in person.</p>
       </div>
       <ul className="space-y-2">
         {lines.map((l, i) => {
@@ -267,7 +266,7 @@ function ActualsEditor({ view, submission, claims, claimsFailed, claimsRetryHref
                       <LoadError what="your expense claims" retryHref={claimsRetryHref} note={`${l.claim_id ? "The claim already linked to this line is kept. " : ""}You can write the claim reference in the note meanwhile.`} />
                     </div>
                   ) : eff.via === "existing_claim" ? (
-                    <Field label="Your expense claim" htmlFor={`${base}-claim`} hint="This only links the claim. It is not paid twice, and the claim itself is not changed.">
+                    <Field label="Your expense claim" htmlFor={`${base}-claim`} help="This only links the claim. It is not paid twice, and the claim itself is not changed.">
                       <Select id={`${base}-claim`} value={l.claim_id} disabled={busy} onChange={(e) => update(l.key, { claim_id: e.target.value })}>
                         <option value="">Not listed — I will write the reference in the note</option>
                         {claimOptions.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
@@ -278,7 +277,7 @@ function ActualsEditor({ view, submission, claims, claimsFailed, claimsRetryHref
                   <div className="space-y-1 sm:col-span-2 lg:col-span-3">
                     <label className="flex min-h-8 items-center gap-2 text-sm"><input type="checkbox" className="h-4 w-4" checked={l.foreign_currency} disabled={busy} onChange={(e) => update(l.key, { foreign_currency: e.target.checked })} />This was paid in another currency</label>
                     {l.foreign_currency ? (
-                      <Field label={`Original amount, currency and rate (the line above is in ${currency})`} htmlFor={`${base}-fx`} hint="Nothing is converted for you. Write what you paid and the rate used, for example “EUR 10.00 at 4.00”.">
+                      <Field label={`Original amount, currency and rate (the line above is in ${currency})`} htmlFor={`${base}-fx`} hint="Write what you paid and the rate used." help="Nothing is converted for you. For example: “EUR 10.00 at 4.00”.">
                         <Input id={`${base}-fx`} value={l.foreign_note} maxLength={500} disabled={busy} onChange={(e) => update(l.key, { foreign_note: e.target.value })} />
                       </Field>
                     ) : null}
@@ -392,12 +391,12 @@ export function ActualsSection({ view, claims, claimsFailed = false, claimsRetry
   const open = budget.settlement_status === "open";
 
   if (!approvedBaseline && list.length === 0) {
-    return <Muted>Actual expenses are entered after the budget is approved. Nothing to enter yet.</Muted>;
+    return <Muted>Available once the budget is approved.</Muted>;
   }
   return (
     <div className="space-y-4">
       {!current && isPm && open ? (
-        <Panel title="Enter the actual expenses" description="After the project, enter what was really spent, line by line, next to the approved budget.">
+        <Panel title="Enter the actual expenses" hint="After the project, enter what was really spent, line by line, next to the approved budget.">
           <div className="space-y-2">
             <Button type="button" disabled={a.pending} onClick={() => a.run(() => startActuals({ projectId: view.project.id, budgetId: budget.id }))}>{a.pending ? "Starting…" : "Start entering actual expenses"}</Button>
             <ActionMessage error={a.error} />

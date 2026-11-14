@@ -1,3 +1,4 @@
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { addDays, groupByDay, monthGrid, startOfWeek, type CalendarEntry } from "@enginious-hr/domain";
@@ -40,7 +41,7 @@ export function CalendarToolbar(p: CalendarProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div role="group" aria-label="Calendar view" className="inline-flex overflow-hidden rounded-md border border-input">
+        <div role="group" aria-label="Calendar view" data-testid="calendar-view-switch" className="inline-flex overflow-hidden rounded-md border border-input">
           {CALENDAR_VIEWS.map((v) => (
             <Link key={v} href={hrefFor(p, { view: v })} aria-current={p.params.view === v ? "true" : undefined}
               className={cn("px-3 py-1.5 text-sm font-medium", p.params.view === v ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60")}>
@@ -52,6 +53,10 @@ export function CalendarToolbar(p: CalendarProps) {
         <Link href={hrefFor(p, { date: p.today })} className={link}>Today</Link>
         <Link href={hrefFor(p, { date: next })} aria-label="Next period" className={link}><ChevronRight className="h-4 w-4" aria-hidden /></Link>
         <h2 className="ml-1 text-base font-semibold" aria-live="polite">{rangeTitle(p.params.view, p.params.date)}</h2>
+        <InfoHint label="dates and time zones">
+          <p>Deadlines are plain dates and never move with a time zone. Timed events show the site&apos;s own time first{p.timeZoneSelect ? `, and your chosen zone (${p.params.tz.replace(/_/g, " ")}) when it differs` : ""}.</p>
+          {p.kindOptions && p.kindOptions.length > 0 ? <p className="mt-1.5">Under Show only, ticking nothing shows everything.</p> : null}
+        </InfoHint>
       </div>
       {p.timeZoneSelect || (p.kindOptions && p.kindOptions.length > 0) ? (
         <form method="get" action={p.basePath} className="flex flex-wrap items-end gap-3">
@@ -68,7 +73,7 @@ export function CalendarToolbar(p: CalendarProps) {
           ) : null}
           {p.kindOptions && p.kindOptions.length > 0 ? (
             <fieldset className="flex flex-wrap items-center gap-x-4 gap-y-1">
-              <legend className="mb-1 text-sm font-medium">Show only (none ticked shows everything)</legend>
+              <legend className="mb-1 text-sm font-medium">Show only</legend>
               {p.kindOptions.map((k) => (
                 <label key={k.id} className="flex items-center gap-1.5 text-sm">
                   <input type="checkbox" name="kind" value={k.id} defaultChecked={p.params.kinds.includes(k.id)} /> {k.label}
@@ -119,7 +124,7 @@ export function AgendaView({ entries, from, to, viewTz, showProject, today, empt
   const days = [...byDay.keys()].filter((d) => d >= from && d <= to).sort();
   if (days.length === 0) return <EmptyState title="Nothing in this period" description={emptyText} dense />;
   return (
-    <ol className="divide-y divide-border rounded-lg border border-border bg-card">
+    <ol className="divide-y divide-border rounded-lg border border-border bg-card" data-testid="calendar-agenda">
       {days.map((day) => (
         <li key={day} className="grid gap-2 p-3 sm:grid-cols-[11rem_1fr]">
           <h3 className="text-sm font-semibold">{dayLabel(day)}{day === today ? <span className="ml-2 rounded-full bg-accent px-2 text-[13px] text-accent-foreground">Today</span> : null}</h3>
@@ -199,9 +204,6 @@ export function CalendarShell(p: CalendarProps & { emptyText: string }) {
       ) : (
         <AgendaView entries={p.entries} from={from} to={to} viewTz={p.params.tz} showProject={p.showProject} today={p.today} emptyText={p.emptyText} />
       )}
-      <p className="text-sm text-muted-foreground">
-        Deadlines are plain dates and never move with a time zone. Timed events show the site&apos;s own time first{p.timeZoneSelect ? `, and your chosen zone (${p.params.tz.replace(/_/g, " ")}) when it differs` : ""}.
-      </p>
     </div>
   );
 }

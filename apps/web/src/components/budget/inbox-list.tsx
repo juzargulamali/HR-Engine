@@ -137,7 +137,7 @@ export function InboxList({ inbox, initialFilter }: { inbox: PbxInbox; initialFi
       {shown.map((s) => (
         <section key={s.id} aria-labelledby={`inbox-${s.id}`} className="space-y-2">
           <h2 id={`inbox-${s.id}`} className="text-sm font-semibold">{s.title} <span className="font-normal text-muted-foreground">({s.count})</span></h2>
-          {s.count === 0 ? <EmptyState dense title={s.empty} description="When something needs you it will appear here." /> : s.body}
+          {s.count === 0 ? <EmptyState dense title={s.empty} /> : s.body}
         </section>
       ))}
     </div>

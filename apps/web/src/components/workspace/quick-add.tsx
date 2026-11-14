@@ -12,7 +12,7 @@ import { withParams } from "./url-state";
  * `?add=1`, so an empty state or another page can link straight to it. The form is passed in (it keeps its own server action);
  * `close` is handed to it so it can shut the dialog after a successful save.
  */
-export function QuickAdd({ label, title, description, children, size = "default", closeOnParam = "open" }: { label: string; title: string; description?: string; children: React.ReactNode | ((api: { close: () => void }) => React.ReactNode); size?: "default" | "wide"; closeOnParam?: string }) {
+export function QuickAdd({ label, title, description, help, children, size = "default", closeOnParam = "open" }: { label: string; title: string; description?: string; /** Longer optional explanation: behind an ⓘ beside the dialog title. */ help?: React.ReactNode; children: React.ReactNode | ((api: { close: () => void }) => React.ReactNode); size?: "default" | "wide"; closeOnParam?: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const sp = useSearchParams();
@@ -30,7 +30,7 @@ export function QuickAdd({ label, title, description, children, size = "default"
       <Button type="button" onClick={() => setOpenedAt(watched)}>
         <Plus className="h-4 w-4" aria-hidden /> {label}
       </Button>
-      <Modal open={open} onClose={close} title={title} description={description} size={size}>
+      <Modal open={open} onClose={close} title={title} description={description} help={help} size={size}>
         {typeof children === "function" ? children({ close }) : children}
       </Modal>
     </>

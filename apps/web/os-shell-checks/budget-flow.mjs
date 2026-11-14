@@ -80,7 +80,7 @@ await step("the Project Manager sees the Budget tab and creates the budget in AE
   await page.getByRole("navigation", { name: "Project sections" }).getByRole("link", { name: "Budget" }).click();
   await page.waitForURL(/\/budget/);
   await seen(/Create the project budget/);
-  await page.getByLabel("Expense currency").fill("AED");
+  await page.getByLabel("Expense currency", { exact: true }).fill("AED");
   await page.getByRole("button", { name: "Create budget" }).click();
   await seen(/Draft budget/);
   await seen(/Total budget/);
@@ -103,7 +103,7 @@ await step("the four worked examples calculate as typed: food 360, petrol 30, me
 await step("the budget saves as a draft and comes back unchanged after a reload; people can be chosen without touching project dates", async () => {
   await main().getByLabel("Floor projection delivery", { exact: false }).first().isVisible().catch(() => {});
   await page.getByLabel(/Expense period starts/).fill("2026-10-19");
-  await page.getByLabel(/Expense period ends/).fill("2026-10-23");
+  await page.getByLabel(/^Expense period ends/).fill("2026-10-23");
   await main().getByRole("checkbox").first().check();
   await shot("budget-draft-desktop-dark");
   await page.getByRole("button", { name: "Save draft" }).click();
@@ -189,7 +189,7 @@ await step("Finance records a cash advance and a Pluto allocation as different t
   await page.getByLabel("Amount (AED)").fill("500");
   await page.getByRole("button", { name: "Record funding" }).dblclick();   // a double click records once
   await seen(/Funding recorded/);
-  await page.getByLabel("How was it provided?").selectOption({ label: "Pluto" });
+  await page.getByLabel("How was it provided?", { exact: true }).selectOption({ label: "Pluto" });
   await page.getByLabel("Amount (AED)").fill("2000");
   await page.getByRole("button", { name: "Record funding" }).click();
   await seen(/AED 2,000\.00/);
@@ -218,7 +218,7 @@ await step("blank is not zero: a typed 0 counts, the difference is worded as ove
   const li = (text) => main().locator("li", { hasText: text }).first();
   const amt = (text) => li(text).getByLabel(/Actual \(AED\)/);
   // How paid / Who paid are asked once for the list; only a line that differs repeats them.
-  await page.getByLabel("How paid (all lines)").selectOption({ label: "Paid from a cash / bank advance" });
+  await page.getByLabel("How paid (all lines)", { exact: true }).selectOption({ label: "Paid from a cash / bank advance" });
   await page.getByLabel("Who paid (all lines)").selectOption({ label: "mgr" });
   await amt("Lunch for the install team").fill("400");
   await expectText(/Over AED 40\.00/);
@@ -283,7 +283,7 @@ await step("a Finance-holding PM's budget is routed to the CEO/CTO approver: Fin
   await as("hr1");
   await go(`/projects/${P2}/budget`);
   await seen(/Create the project budget/);
-  await page.getByLabel("Expense currency").fill("AED");
+  await page.getByLabel("Expense currency", { exact: true }).fill("AED");
   await page.getByRole("button", { name: "Create budget" }).click();
   await seen(/Draft budget/);
   await page.waitForTimeout(1500);

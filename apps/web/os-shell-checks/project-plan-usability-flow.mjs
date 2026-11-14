@@ -97,7 +97,7 @@ await step("retrying the save adds nothing: the same list again, and a double cl
 await step("Moodboard -> Storyboard sequence with owners and dates, each step waiting for the one before", async () => {
   await as("mgr", { width: 1280, height: 900 });
   const c = await openActivation(TKEY); await c.getByRole("button", { name: "Start from a sequence" }).click(); await dialog().waitFor();
-  for (let n = 0; n < 4; n++) await dialog().getByRole("button", { name: "Remove step 3" }).click();
+  await dialog().getByLabel("Step 1 name").fill("Moodboard"); await dialog().getByLabel("Step 2 name").fill("Storyboard");        // starts blank with two steps
   await choose(dialog().getByLabel("Step 2 owner"), /Konstantinopoulos/);
   await dialog().getByLabel("Step 1 start").fill(dayIso(2)); await dialog().getByLabel("Step 1 due").fill(dayIso(4));
   await dialog().getByLabel("Step 2 start").fill(dayIso(5)); await dialog().getByLabel("Step 2 due").fill(dayIso(8));

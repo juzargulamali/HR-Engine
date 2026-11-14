@@ -92,6 +92,19 @@ describe("Project Plan screen", () => {
     expect(preview).toMatch(/0 hardware lines will be added to the project's draft equipment request\. It is not sent to the warehouse/);
   });
 
+  it("a release names the lines that need attention, links to each and says what unblocks it", () => {
+    const unmatched: DpItem = { ...kiosk, lines: [line({ id: "l9", key: "L0009", section: "hardware", description: "Kiosk screen", inv_item_id: null, assignee_id: null, assignee_name: null })] };
+    render(<DeliveryPlanView {...props(plan({ can_manage: true, items: [wall, unmatched] }), { userId: "pm" })} />);
+    fireEvent.click(screen.getByTestId("dp-release"));
+    const box = screen.getByTestId("dp-release-attention");
+    expect(box.textContent).toMatch(/needs? attention before/);
+    const link = within(box).getAllByRole("link")[0] as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toMatch(/^\/projects\/p1\/delivery#dp-L\d+/);
+    expect(box.textContent).toMatch(/Product kiosk: Kiosk screen/);
+    expect(box.textContent).toMatch(/Choose the stock item/);
+    expect(screen.getByTestId("dp-release-preview").textContent).not.toMatch(/will wait/);
+  });
+
   it("equipment that is with the warehouse cannot be changed from the plan: the form says where to change it and its Save is off", () => {
     render(<DeliveryPlanView {...props(plan({ can_manage: true }), { userId: "pm" })} />);
     fireEvent.click(within(screen.getByTestId("dp-line-L0002")).getByRole("button", { name: "Edit" }));
@@ -234,7 +247,9 @@ describe("Project Plan screen", () => {
       const pending = screen.getByTestId("dp-scope-pending").textContent ?? "";
       expect(pending).toMatch(/Next step: bring in the accepted technologies/);
       expect(pending).toMatch(/2 technologies that are not in the plan yet: Photobooth × 2, Cartoon app × 1/);
-      expect(pending).toMatch(/manual step: accepting a handover does not add anything to the plan by itself/);
+      expect(pending).not.toMatch(/manual step/);                                                                                 // the long explanation is behind the ⓘ, not in the card
+      fireEvent.pointerEnter(within(screen.getByTestId("dp-scope-pending")).getByTestId("dp-seed-help"), { pointerType: "mouse" });
+      expect(screen.getByRole("tooltip").textContent).toMatch(/manual step: accepting a handover does not add anything to the plan by itself/);
       expect(screen.getByTestId("plan-summary").compareDocumentPosition(screen.getByTestId("dp-scope-pending")) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();   // shown above the summary, first thing on the page
       expect(screen.getByTestId("dp-seed-scope").textContent).toBe("Bring in accepted technologies (2)");
       cleanup();
@@ -280,7 +295,9 @@ describe("Project Plan screen", () => {
       dialog = screen.getByRole("dialog");
       expect(within(dialog).getByLabelText("Number of devices")).toBeTruthy();
       expect(within(dialog).getByLabelText("Platform")).toBeTruthy();
-      expect(within(dialog).getByText(/One app on six screens is one app and six devices/)).toBeTruthy();
+      expect(within(dialog).queryByText(/One app on six screens is one app and six devices/)).toBeNull();                         // the example is behind the ⓘ beside the label
+      fireEvent.pointerEnter(within(dialog).getByTestId("info-hint-number-of-devices"), { pointerType: "mouse" });
+      expect(screen.getByRole("tooltip").textContent).toMatch(/One app on six screens is one app and six devices/);
       expect(within(dialog).queryByLabelText("Resolution")).toBeNull();
     });
   });

@@ -1,6 +1,7 @@
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { loadProjectUnread } from "@/lib/chat/data";
-import { AlertTriangle, ClipboardCheck, ListChecks, ShieldAlert } from "lucide-react";
+import { ClipboardCheck, FileWarning, ListChecks, ShieldAlert, Hourglass } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
@@ -8,6 +9,7 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { OsHero } from "@/components/os/hero";
 import { OsStatCard } from "@/components/os/stat-card";
 import { MyProjects, type MyProjectItem } from "@/components/projects/my-projects";
+import { MyWorkOutputs } from "@/components/projects/my-work-outputs";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { TaskBoard } from "@/components/projects/tasks/task-board";
 import { TaskPanel } from "@/components/projects/tasks/task-panel";
@@ -23,9 +25,13 @@ import { loadDirectoryResult } from "@/lib/projects/data";
 import { canSeeProjectDetails, milestoneProjectIds, nextMilestones } from "@/lib/projects/directory";
 import { describeNotification } from "@/lib/projects/notification-text";
 import { loadProjectsAttention, loadWorkRows, type WorkRows } from "@/lib/projects/my-work";
+import { outputLinkLines } from "@/lib/projects/my-work-outputs";
+import { loadOperationsDay } from "@/lib/my-day/operations-day";
+import { opsReviewCandidates } from "@/lib/my-day/operations";
 import { MY_WORK_LABELS, MY_WORK_SHOWS, narrowMyWork, parseMyWorkShow, selectMyWorkRows, type MyWorkShow } from "@/lib/projects/work-logic";
 import { createClient } from "@/lib/supabase/server";
 import { formatDateTime } from "@/components/sales/format";
+import { RememberList } from "@/components/workspace/list-memory";
 import { MarkAllRead } from "./mark-read-button";
 
 export const metadata = { title: "My Work" };
@@ -34,12 +40,14 @@ type SearchParams = Record<string, string | string[] | undefined>;
 const BASE = "/projects/work";
 
 const EMPTY: Record<MyWorkShow, { title: string; description: string }> = {
-  mine: { title: "No open tasks", description: "Tasks assigned to you, or shared with you as a collaborator, appear here. You can add your own task inside a project you are part of." },
-  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the departments you head appear here." },
-  overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed appear here." },
-  blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you as the person who can unblock them appear here, and blocked tasks with nobody named on a project you manage." },
-  waiting: { title: "Nothing of yours is in review", description: "Tasks you sent for review appear here until a reviewer accepts them or sends them back. There is nothing for you to do on them meanwhile." },
-  review: { title: "Nothing is waiting for your review", description: "Tasks sent for review that you lead as Project Manager, temporary leader, founder or department head appear here. You never review your own work." },
+  mine: { title: "No open tasks", description: "You can add your own task inside a project you are part of." },
+  next: { title: "Nothing to do next", description: "Open tasks of yours that nothing is holding up, and tasks sent back for changes." },
+  changes: { title: "No changes were requested", description: "A reviewer asked for changes to an output of yours: the task shows here until you upload a new version." },
+  team: { title: "No open tasks in your team", description: "Open tasks of the projects you manage and the project teams you lead." },
+  overdue: { title: "Nothing is overdue", description: "Open tasks of yours whose due date has passed." },
+  blockers: { title: "No blocker is waiting on you", description: "Blocked tasks that name you, and blocked tasks with nobody named on a project you manage." },
+  waiting: { title: "Nothing of yours is waiting for review", description: "Tasks you sent for review stay here until a reviewer accepts them or sends them back. There is nothing for you to do meanwhile." },
+  review: { title: "Nothing is waiting for your review", description: "You never review your own work." },
 };
 
 /**
@@ -72,7 +80,12 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
       </div>
     );
   }
-  const attention = await loadProjectsAttention(ctx).catch((e) => { console.error("[projects] handover count failed", e); return null; });
+  const [attention, opsDay] = await Promise.all([
+    loadProjectsAttention(ctx).catch((e) => { console.error("[projects] handover count failed", e); return null; }),
+    // Operations reviews waiting for this person (a version the Project Manager submitted): only for people who are an Operations Manager; the same read as My Day, the link opens that exact version.
+    loadOperationsDay().catch((e) => { console.error("[projects] operations reviews failed", e); return "error" as const; }),
+  ]);
+  const opsReviews = opsDay && opsDay !== "error" ? opsReviewCandidates(opsDay, ctx.userId, new Date()) : [];
 
   const current = paramsToRecord(sp);
   const show = parseMyWorkShow(firstParam(sp, "show"), work.canSeeTeam);
@@ -80,7 +93,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
   const sort = parseTaskSort(firstParam(sp, "sort"));
   const columns = parseColumns(firstParam(sp, "cols"), TASK_COLUMN_IDS, DEFAULT_TASK_COLUMNS);
   const q = firstParam(sp, "q").trim().slice(0, 100);
-  const base = selectMyWorkRows({ mine: work.mine, team: work.team, reviews: work.reviews, blockers: work.blockers, waiting: work.waiting }, show, work.today);
+  const base = selectMyWorkRows({ mine: work.mine, team: work.team, reviews: work.reviews, blockers: work.blockers, waiting: work.waiting, changes: work.changes }, show, work.today);
   const projects = [...new Map(base.map((r) => [r.projectId, `${r.projectName}`])).entries()].sort((a, b) => a[1].localeCompare(b[1]));
   const projectId = projects.some(([id]) => id === firstParam(sp, "project")) ? firstParam(sp, "project") : "";
   const rows = sortTaskRows(narrowMyWork(base, q, projectId), sort);
@@ -112,30 +125,43 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
     mine: work.mine.length,
     team: work.team.length,
     overdue: selectMyWorkRows({ mine: work.mine, team: [], reviews: [] }, "overdue", work.today).length,
-    review: work.reviews.length,
+    next: selectMyWorkRows({ mine: work.mine, team: [], reviews: [], changes: work.changes }, "next", work.today).length,
+    changes: work.changes.length,
+    review: work.reviews.length + opsReviews.length,
     blockers: work.blockers.length,
     waiting: work.waiting.length,
   };
+  // The versions behind the output views: each line opens the task in the panel with that exact version in view, keeping the filter, the search and the project in the address.
+  const versionHref = (taskId: string, versionId: string) => withParams(BASE, current, { task: taskId, version: versionId });
+  const outputLines = show === "waiting" || show === "review" || show === "changes" ? outputLinkLines(show, rows, work.outputs, versionHref) : [];
+  const opsLines = show === "review" && !filtered ? opsReviews.map((c) => ({ taskId: c.key, versionId: c.key, title: c.title, context: c.context ?? "", text: c.what, href: c.href })) : [];
   const showOptions = MY_WORK_SHOWS.filter((s) => s !== "team" || work.canSeeTeam).map((s) => ({ value: s === "mine" ? "" : s, label: `${MY_WORK_LABELS[s]} (${counts[s]})` }));
 
   return (
     <div className="space-y-5">
-      <OsHero title="My Work" eyebrow="Projects" sub="Tasks assigned to you, work waiting for your review and blockers you can clear. Having several tasks on one day is normal and is never flagged." />
+      <RememberList section="my-work" />
+      <OsHero title="My Work" eyebrow="Projects" />
 
-      {/* Three different things, never mixed: work I must do, reviews I must give, blockers I can clear. Each card's number is the number of rows its list shows. */}
-      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-3" aria-label="What needs you">
-        <li><OsStatCard href={withParams(BASE, current, { show: null })} label="My tasks" value={counts.mine} icon={ListChecks} edge="cyan" active={show === "mine"} /></li>
-        <li><OsStatCard href={withParams(BASE, current, { show: "review" })} label="Waiting for my review" value={counts.review} icon={ShieldAlert} edge="blue" active={show === "review"} /></li>
-        <li><OsStatCard href={withParams(BASE, current, { show: "blockers" })} label="Blockers I can help clear" value={counts.blockers} icon={AlertTriangle} edge="amber" active={show === "blockers"} /></li>
+      {/* Different things, never mixed: what to do next, what came back with changes, what is waiting on a reviewer, and the reviews I owe. Each card's number is the number of rows its list shows. */}
+      <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4" aria-label="What needs you">
+        <li><OsStatCard href={withParams(BASE, current, { show: "next" }, ["task", "version"])} label={MY_WORK_LABELS.next} value={counts.next} icon={ListChecks} edge="cyan" active={show === "next"} testId="mywork-filter-do-next" /></li>
+        <li><OsStatCard href={withParams(BASE, current, { show: "changes" }, ["task", "version"])} label={MY_WORK_LABELS.changes} value={counts.changes} icon={FileWarning} edge="amber" active={show === "changes"} testId="mywork-filter-changes" /></li>
+        <li><OsStatCard href={withParams(BASE, current, { show: "waiting" }, ["task", "version"])} label={MY_WORK_LABELS.waiting} value={counts.waiting} icon={Hourglass} edge="blue" active={show === "waiting"} testId="mywork-filter-waiting" /></li>
+        <li><OsStatCard href={withParams(BASE, current, { show: "review" }, ["task", "version"])} label={MY_WORK_LABELS.review} value={counts.review} icon={ShieldAlert} edge="blue" active={show === "review"} testId="mywork-filter-review" /></li>
       </ul>
       <nav aria-label="More views" className="flex flex-wrap items-center gap-2 text-sm">
-        {([["overdue", "Overdue"], ["waiting", "Sent for review: waiting on someone else"], ...(work.canSeeTeam ? [["team", "My team's open tasks"] as const] : [])] as const).map(([key, label]) => (
-          <Link key={key} href={withParams(BASE, current, { show: show === key ? null : key })} scroll={false} aria-current={show === key ? "true" : undefined}
+        {([["mine", "All my open tasks"], ["blockers", "Blockers I can help clear"], ["overdue", "Overdue"], ...(work.canSeeTeam ? [["team", "My team's open tasks"] as const] : [])] as const).map(([key, label]) => (
+          <Link key={key} href={withParams(BASE, current, { show: key === "mine" ? null : show === key ? null : key }, ["task", "version"])} scroll={false} aria-current={show === key ? "true" : undefined} data-testid={`mywork-view-${key}`}
             className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 font-medium", show === key ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
             {label}<span className="tabular-nums text-foreground">{counts[key]}</span>
           </Link>
         ))}
+        <InfoHint label="My Work">
+          <p>Do next: your open tasks that nothing is holding up. Changes requested: a reviewer sent an output back to you. Waiting for review: you sent it and someone else decides.</p>
+          <p className="mt-1.5">Having several tasks on one day is normal and is never flagged.</p>
+        </InfoHint>
       </nav>
+      {work.outputsFailed ? <Alert variant="warning" role="status" data-testid="mywork-outputs-failed">The output versions could not be loaded just now, so Changes requested and the links to a version may be incomplete. Your tasks below are unaffected; reload to try again.</Alert> : null}
 
       {!attention ? <LoadError what="your waiting handovers" retryHref={BASE} /> : null}
       {attention && attention.handoversWaiting > 0 ? (
@@ -161,7 +187,9 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
           <ViewSwitch current={mode} tableHref={withParams(BASE, current, { view: null })} boardHref={withParams(BASE, current, { view: "board" })} />
         </ListToolbar>
 
-        {rows.length === 0 ? (
+        <MyWorkOutputs title={show === "changes" ? "Outputs sent back to you" : show === "review" ? "Outputs waiting for your review" : "Outputs waiting for review"} lines={outputLines} />
+        <MyWorkOutputs title="Operations reviews waiting for you" lines={opsLines} testId="mywork-ops-reviews" />
+        {rows.length === 0 && opsLines.length > 0 ? null : rows.length === 0 ? (
           <EmptyState
             icon={ClipboardCheck}
             title={filtered ? "No task matches" : EMPTY[show].title}
@@ -176,11 +204,11 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         {work.team.length >= 1000 && show === "team" ? <Muted>Showing the first 1,000 open tasks of your teams. Narrow the list with the search or the project filter.</Muted> : null}
       </div>
 
-      <Panel title="Project notices" description="Assignments, review requests, mentions and changes that need your attention. No message text is ever copied into a notice." actions={<MarkAllRead unread={unread} />}>
+      <Panel title="Project notices" hint={<><p>Assignments, review requests, mentions and changes that need your attention. No message text is ever copied into a notice.</p><p className="mt-1.5">You are told when you are added to a project, assigned a task, asked to review, mentioned, or when a deadline you depend on moves.</p></>} actions={<MarkAllRead unread={unread} />}>
         {noticeError ? (
           <LoadError what="your notices" retryHref={BASE} />
         ) : notifications.length === 0 ? (
-          <Muted>No notices yet. You are told when you are added to a project, assigned a task, asked to review, mentioned, or when a deadline you depend on moves.</Muted>
+          <Muted>No notices yet.</Muted>
         ) : (
           <ul className="divide-y divide-border">
             {notifications.map((n) => {
@@ -199,7 +227,7 @@ export default async function MyWorkPage({ searchParams }: { searchParams: Promi
         )}
       </Panel>
 
-      {taskParam ? <TaskPanel rawTaskId={taskParam} basePath={BASE} current={current} /> : null}
+      {taskParam ? <TaskPanel rawTaskId={taskParam} basePath={BASE} current={current} backFrom="my-work" /> : null}
     </div>
   );
 }

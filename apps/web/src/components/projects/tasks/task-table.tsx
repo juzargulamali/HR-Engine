@@ -59,7 +59,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
           {head("due", "Due")}
           {head("status", "Status")}
           {has("priority") ? head("priority", "Priority") : null}
-          {has("team") ? <TableHead scope="col">Department</TableHead> : null}
+          {has("team") ? <TableHead scope="col">Project team</TableHead> : null}
           {has("milestone") ? <TableHead scope="col">Milestone</TableHead> : null}
           {has("deliverable") ? <TableHead scope="col">Deliverable</TableHead> : null}
         </TableRow>
@@ -81,7 +81,7 @@ export function TaskTable({ rows, columns, sort, basePath, current, showProject,
             <TableCell data-label="Due" className="min-w-[10rem] px-3 py-2.5 text-sm"><TaskDueControl row={toControlRow(r)} /></TableCell>
             <TableCell data-label="Status" className="px-3 py-2.5 text-sm"><TaskStatusControl row={toControlRow(r)} /></TableCell>
             {has("priority") ? <TableCell data-label="Priority" className="px-3 py-2.5 text-sm capitalize">{r.priority}</TableCell> : null}
-            {has("team") ? <TableCell data-label="Department" className="px-3 py-2.5 text-sm">{r.teamName ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
+            {has("team") ? <TableCell data-label="Project team" className="px-3 py-2.5 text-sm">{r.teamName ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
             {has("milestone") ? <TableCell data-label="Milestone" className="px-3 py-2.5 text-sm">{r.milestoneTitle ?? <span className="text-muted-foreground">Unlinked</span>}</TableCell> : null}
             {has("deliverable") ? <TableCell data-label="Deliverable" className="px-3 py-2.5 text-sm">{r.deliverableTitle ?? <span className="text-muted-foreground">None</span>}</TableCell> : null}
           </ClickableRow>

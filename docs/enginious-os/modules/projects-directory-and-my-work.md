@@ -364,6 +364,12 @@ Unit and component tests (under `apps/web/src`): `lib/projects/directory.test.ts
 * Failed reads that are not reported where they happen, found while reading (each is noted in its row): the unread badges on the directory; the directory, milestone and unread reads of "My projects" on My Work; the handover section of the summary panel; the company list of the Calendar; "Mark all as read" ignoring a failed save; the Calendar drawing its empty text under its own error message.
 * Stale wording found: "A founder must set it first (Projects, then Access)." (there is no Projects Access screen; it is People & Access).
 
+## 14a. Finish Phase 2: My Work and the Work queues (draft PR; migration `20270109000100`, not applied by Claude)
+
+* **My Work** cards: Do next, Changes requested, Waiting for review, Waiting for my review; pills All my open tasks, Blockers, Overdue and My team. Output filters list each version with "Open the version" (`?task=<id>&version=<id>`). Operations Managers also see "Operations reviews waiting for you" (the same read My Day uses). The version lookup covers up to 300 task ids and shows a note if it fails.
+* **Return navigation:** closing a task panel clears `task` and `version` and keeps the other filters; from My Work the full-page Back link restores the filter and scroll.
+* **Not done:** the My Day task-review entry links the task without `&version=` (My Day reads tasks only).
+
 ## Coverage rows
 
 | Entry | Kind (screen / tab / panel / dialog / form / filter / download / legacy route) | How to reach it | Who can see it | Purpose | Reference (section number in this file) | Status (Documented or Unverified: what) |

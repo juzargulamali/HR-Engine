@@ -10,11 +10,13 @@ type Action = (prev: ProjectActionState, formData: FormData) => Promise<ProjectA
 
 /** A button that opens a dialog holding one server-action form. The dialog closes after a successful save. */
 export function DialogForm({
-  triggerLabel, title, description, action, submitLabel, children, triggerVariant = "outline", submitVariant = "default", size = "sm", resetOnSuccess,
+  triggerLabel, title, description, help, action, submitLabel, children, triggerVariant = "outline", submitVariant = "default", size = "sm", resetOnSuccess,
 }: {
   triggerLabel: string;
   title: string;
   description?: string;
+  /** The longer, optional explanation: behind an ⓘ beside the title. `description` stays for a short line the person must read (a consequence, who acts next). */
+  help?: React.ReactNode;
   action: Action;
   submitLabel: string;
   children: React.ReactNode;
@@ -27,7 +29,7 @@ export function DialogForm({
   return (
     <>
       <Button type="button" variant={triggerVariant} size={size} onClick={() => setOpen(true)}>{triggerLabel}</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title={title} description={description}>
+      <Modal open={open} onClose={() => setOpen(false)} title={title} description={description} help={help}>
         <ActionForm
           action={action}
           submitLabel={submitLabel}

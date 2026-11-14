@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activationReadiness, barPosition, formatSpan, hardwareState, lateDependency, lineSchedule, milestoneProgress, planSummary, timelineModel, timelineScale } from "./insights";
+import { activationReadiness, autoMode, barPosition, formatSpan, hardwareState, lateDependency, lineSchedule, milestoneProgress, planSummary, timelineModel, timelineScale, todayScrollTarget, DAY_PX, WEEK_PX_PER_DAY } from "./insights";
 import type { DeliveryPlan, DpItem, DpLine, DpMilestone } from "./model";
 
 // Fictional data only.
@@ -168,9 +168,39 @@ describe("timeline", () => {
     expect(long.labels.map((l) => l.date).slice(0, 3)).toEqual(["2027-04-14", "2027-04-21", "2027-04-28"]);
     expect(long.labels.every((l) => l.index % 7 === 0)).toBe(true);
     expect(long.widthPx).toBeGreaterThan(1500);
-    const edge = timelineScale({ start: "2027-04-14", end: "2027-05-11" });                          // 28 days: still a column per day
-    expect(edge.mode).toBe("day"); expect(edge.days).toHaveLength(28);
-    expect(timelineScale({ start: "2027-04-14", end: "2027-05-12" }).mode).toBe("week");
+    const edge = timelineScale({ start: "2027-04-14", end: "2027-05-14" });                          // 31 days: still a column per day
+    expect(edge.mode).toBe("day"); expect(edge.days).toHaveLength(31);
+    expect(timelineScale({ start: "2027-04-14", end: "2027-05-15" }).mode).toBe("week");
+  });
+  it("Day view gives every day a readable minimum width: a 7-day plan is narrow enough to fit, a 9- and a 30-day plan are wider than a screen and scroll inside the chart", () => {
+    expect(DAY_PX).toBeGreaterThanOrEqual(56);
+    const seven = timelineScale({ start: "2027-04-14", end: "2027-04-20" });
+    expect(seven.mode).toBe("day"); expect(seven.widthPx).toBe(7 * DAY_PX); expect(seven.widthPx).toBeLessThan(700);
+    const nine = timelineScale({ start: "2027-04-14", end: "2027-04-22" });
+    expect(nine.days).toHaveLength(9); expect(nine.widthPx).toBe(9 * DAY_PX);
+    const thirty = timelineScale({ start: "2027-04-01", end: "2027-04-30" });
+    expect(thirty.mode).toBe("day"); expect(thirty.days).toHaveLength(30); expect(thirty.widthPx).toBe(30 * DAY_PX); expect(thirty.widthPx).toBeGreaterThan(1500);
+    expect(thirty.labels).toHaveLength(30);
+  });
+  it("an explicit mode overrides the length: Week groups a short plan by week, Day opens a long one day by day", () => {
+    const range = { start: "2027-04-01", end: "2027-04-30" };
+    const week = timelineScale(range, "week");
+    expect(week.mode).toBe("week"); expect(week.labels.map((l) => l.date)).toEqual(["2027-04-01", "2027-04-08", "2027-04-15", "2027-04-22", "2027-04-29"]);
+    expect(week.widthPx).toBe(30 * WEEK_PX_PER_DAY < 360 ? 360 : 30 * WEEK_PX_PER_DAY);
+    expect(week.days).toEqual(timelineScale(range, "day").days);                                       // the same days either way, so rows keep their exact dates
+    const longDay = timelineScale({ start: "2027-04-14", end: "2027-07-14" }, "day");
+    expect(longDay.mode).toBe("day"); expect(longDay.labels).toHaveLength(longDay.days.length); expect(longDay.widthPx).toBe(longDay.days.length * DAY_PX);
+    expect(autoMode(31)).toBe("day"); expect(autoMode(32)).toBe("week");
+  });
+  it("the Today jump centres today in the visible chart and stays within what can scroll; null when today is outside the schedule", () => {
+    const sc = timelineScale({ start: "2027-04-01", end: "2027-04-30" });                               // 30 days, 1680px
+    const m = { chartW: 1680, labelW: 256, viewportW: 900, scrollW: 256 + 1680 };
+    const mid = todayScrollTarget(sc, "2027-04-15", m)!;                                                // index 14: centre at 14.5 * 56 = 812; the chart area is 644 wide
+    expect(mid).toBe(Math.round(812 - (900 - 256) / 2));
+    expect(todayScrollTarget(sc, "2027-04-01", m)).toBe(0);                                             // the first day cannot go below zero
+    expect(todayScrollTarget(sc, "2027-04-30", m)).toBe(256 + 1680 - 900);                              // the last day stops at the far end
+    expect(todayScrollTarget(sc, "2027-05-20", m)).toBeNull();
+    expect(todayScrollTarget(sc, "2027-03-20", m)).toBeNull();
   });
 });
 

@@ -34,9 +34,22 @@ export function describeNotification(type: string, payload: Record<string, unkno
       if (until) return { text: `You were given temporary project leadership of ${project} until ${until}.`, href: projectLink };
       return { text: `You were made responsible for ${project}.`, href: projectLink };
     }
+    case "project_site_change": {
+      // A confirmed date or venue moved, or a personal call time moved: the previous and new values, with a link to the briefing. Only the people on that assignment get this.
+      const act = str(payload.title) ?? "your site activity";
+      const run = str(payload.run_label);
+      const changes = Array.isArray(payload.changes) ? (payload.changes as { field?: unknown; from?: unknown; to?: unknown }[]) : [];
+      const parts = changes.map((c) => `${String(c.field ?? "detail")}: ${String(c.from ?? "not set")} → ${String(c.to ?? "not set")}`);
+      const aid = str(payload.activity_id);
+      return { text: `${act}${run ? ` (${run})` : ""} changed: ${parts.length > 0 ? parts.join("; ") : "details moved"}. Open your briefing.`, href: aid ? `/site-assignments?activity=${aid}` : "/site-assignments" };
+    }
     case "project_assignment": {
       const deliverable = str(payload.deliverable);
-      if (deliverable) return { text: `The deliverable “${deliverable}” on ${project} was assigned to your department.`, href: pid ? `/projects/${pid}/work` : null };
+      if (payload.site_assignment === true) {
+        const act = str(payload.activity), role = str(payload.role);
+        return { text: `You were assigned to ${act ?? "a site activity"}${role ? ` as ${role}` : ""}. Open your site assignments for the venue, your call time and what to know.`, href: "/site-assignments" };
+      }
+      if (deliverable) return { text: `The work package “${deliverable}” on ${project} was assigned to your team.`, href: pid ? `/projects/${pid}/work` : null };
       if (str(payload.booking_id)) {
         const where = str(payload.location);
         return { text: `A site booking${where ? ` at ${where}` : ""} on ${project} was made or confirmed for you.`, href: pid ? `/projects/${pid}/timeline` : null };
@@ -61,8 +74,15 @@ export function describeNotification(type: string, payload: Record<string, unkno
       const what = task ? `The task “${task}”` : str(payload.deliverable) ? `The deliverable “${str(payload.deliverable)}”` : str(payload.milestone) ? `The milestone “${str(payload.milestone)}”` : str(payload.booking_id) ? "A site booking" : "A date";
       return { text: `${what} on ${project} changed${to ? ` (now ${to})` : ""}.`, href: task ? taskLink : projectLink };
     }
-    case "project_review_requested":
+    case "project_review_requested": {
+      // An output the Project Manager submitted waits for an Operations Manager: the link opens that exact version.
+      if (payload.operations === true && pid && taskId) {
+        const versionId = str(payload.version_id);
+        const no = typeof payload.version_no === "number" ? `Version ${payload.version_no}` : "A version";
+        return { text: `${no} of ${task ? `“${task}”` : "an output"} on ${project} is waiting for your Operations review.`, href: `/projects/${pid}/work?task=${taskId}${versionId ? `&version=${versionId}` : ""}` };
+      }
       return { text: `${task ? `“${task}”` : str(payload.deliverable) ? `The deliverable “${str(payload.deliverable)}”` : "Work"} on ${project} is ready for your review.`, href: taskLink };
+    }
     case "project_review_result": {
       const done = payload.result === "done";
       return { text: `${task ? `“${task}”` : "Your task"} on ${project} was ${done ? "accepted and completed" : "sent back with changes requested"}.`, href: taskLink };

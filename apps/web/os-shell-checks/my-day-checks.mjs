@@ -109,7 +109,7 @@ for (const [email, want] of cases) {
     ok(/waiting for your review|handover|Also open|Waiting on your decision|Nothing is waiting on you/.test(d), "mgr@: Needs me lists what waits, or says nothing does");
     ok((await region(p, "My work today").count()) === 1, "mgr@: My work today shows their own tasks by title");
   }
-  if (email === "pol.worker@e2e.local") ok(/Nothing is waiting on you/.test(await p.locator("main").innerText()), "an employee with nothing waiting is told so plainly");
+  if (email === "pol.worker@e2e.local") ok(/Nothing (is waiting on you|needs your attention right now)/.test(await p.locator("main").innerText()), "an employee with nothing waiting is told so plainly");
   if (email === "hr@e2e.local") {
     ok(Number(await valueOf(p, "People and HR figures", "Recorded present")) === Number(asUser(email, `select count(*) from attendance_records where work_date='${TODAY}' and status='present'`)), "hr@: Recorded present = what hr@ can read");
     const l = await region(p, "People today, live clock status").innerText();

@@ -105,7 +105,7 @@ describe("Closeout report: the draft, approval and approved versions", () => {
     expect(sources.querySelector('a[href="/projects/p1/equipment"]')).toBeTruthy();
     expect(sources.querySelector('a[href="/projects/p1/delivery"]')).toBeTruthy();
     expect(screen.queryByText("Download PDF")).toBeNull();                              // a draft cannot be downloaded
-    expect(screen.getByText(/No version has been approved yet/)).toBeTruthy();
+    expect(screen.getByText(/No version approved yet/)).toBeTruthy();
   });
 
   it("statements that contradict the records are marked and approval is not offered until they are changed", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { safeListHref } from "./list-memory";
+import { listAddress, safeListHref } from "./list-memory";
 
 describe("safeListHref", () => {
   it("returns the remembered address of the same list, with its filters", () => {
@@ -15,5 +15,13 @@ describe("safeListHref", () => {
     expect(safeListHref("//example.com/employees?x=1", "/employees")).toBe("/employees");
     expect(safeListHref("/employeesevil?x=1", "/employees")).toBe("/employees");
     expect(safeListHref("/payroll?x=1", "/employees")).toBe("/employees");
+  });
+});
+
+describe("listAddress", () => {
+  it("remembers the filters but never an open task or version, so Back lands on the list", () => {
+    expect(listAddress("/projects/work", "show=review&q=logo&task=t1&version=v1")).toBe("/projects/work?show=review&q=logo");
+    expect(listAddress("/projects/work", "task=t1")).toBe("/projects/work");
+    expect(listAddress("/projects/P/work", "")).toBe("/projects/P/work");
   });
 });

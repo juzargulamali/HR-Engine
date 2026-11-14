@@ -47,7 +47,7 @@ export function EditDetailsDialog({ p, open, onClose }: { p: EditableProject; op
                 {Object.entries(PRIORITY_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
               </Select>
             </Field>
-            <Field label="Site time zone" htmlFor="ed-tz" hint="Installation and show bookings use this zone.">
+            <Field label="Site time zone" htmlFor="ed-tz" help="Installation and show bookings use this zone.">
               <Select id="ed-tz" name="siteTimezone" defaultValue={p.siteTimezone}>{zones.map((z) => <option key={z} value={z}>{z}</option>)}</Select>
             </Field>
             <Field label="Project start" htmlFor="ed-start"><Input id="ed-start" name="startDate" type="date" defaultValue={p.startDate ?? ""} /></Field>

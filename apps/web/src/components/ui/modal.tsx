@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef } from "react";
 import { X } from "lucide-react";
+import { InfoHint } from "@/components/ui/info-hint";
 
 /**
  * Accessible modal built on the native <dialog> element (focus trapping, Escape to close and inertness of the page
@@ -9,7 +10,7 @@ import { X } from "lucide-react";
  * It is a child of whatever opened it (a table cell, a menu), so it takes that element's text rules; `whitespace-normal` stops a
  * "do not wrap" cell from making the dialog's text run out of its box.
  */
-export function Modal({ open, onClose, title, description, children, size = "default" }: { open: boolean; onClose: () => void; title: string; description?: string; children: React.ReactNode; size?: "default" | "wide" | "xl" }) {
+export function Modal({ open, onClose, title, description, help, children, size = "default" }: { open: boolean; onClose: () => void; title: string; description?: string; /** Longer optional explanation: sits behind an ⓘ beside the title. */ help?: React.ReactNode; children: React.ReactNode; size?: "default" | "wide" | "xl" }) {
   const ref = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   useEffect(() => {
@@ -31,7 +32,7 @@ export function Modal({ open, onClose, title, description, children, size = "def
     >
       <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
         <div>
-          <h2 id={titleId} className="font-heading text-base font-semibold">{title}</h2>
+          <h2 id={titleId} className="font-heading text-base font-semibold">{title}{help ? <InfoHint label={title} className="ml-1.5">{help}</InfoHint> : null}</h2>
           {description ? <p className="mt-1 text-sm text-muted-foreground">{description}</p> : null}
         </div>
         <button type="button" onClick={onClose} aria-label="Close" className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground">

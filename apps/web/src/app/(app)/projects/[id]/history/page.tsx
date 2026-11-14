@@ -38,7 +38,8 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
   // Titles for the things the log mentions (they may have been renamed since; the current title is shown).
   const idsOf = (type: string) => [...new Set(log.filter((l) => l.entity_type === type).map((l) => l.entity_id))];
   const titleMap = new Map<string, string>();
-  const lookups: [string, "proj_milestones" | "proj_deliverables" | "proj_plan_items" | "proj_external_dependencies", string][] = [
+  const lookups: [string, "proj_milestones" | "proj_deliverables" | "proj_plan_items" | "proj_external_dependencies" | "proj_tasks", string][] = [
+    ["task_output", "proj_tasks", "title"], ["site_activity", "proj_plan_items", "title"],
     ["milestone", "proj_milestones", "title"], ["deliverable", "proj_deliverables", "title"], ["plan_item", "proj_plan_items", "title"], ["external_dependency", "proj_external_dependencies", "label"],
   ];
   await Promise.all(
@@ -55,9 +56,9 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
   return (
     <div className="space-y-5">
       {project.kind === "client" ? (
-        <Panel title="Sales handover" description="What was agreed when the Project Manager accepted the handover. It is a historical snapshot: later changes in Sales & CRM never alter it.">
+        <Panel title="Sales handover" hint={<>What was agreed when the Project Manager accepted the handover. It is a historical snapshot: later changes in Sales &amp; CRM never alter it. Commercial details are not part of this record; they stay in Sales &amp; CRM.</>}>
           {!handover ? (
-            <EmptyState dense title="No handover record" description="This project has no linked Sales handover." />
+            <EmptyState dense title="No handover record" />
           ) : (
             <div className="space-y-4">
               <dl className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -88,15 +89,14 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
                 ) : null}
                 {handover.notes ? <p className="mt-4 whitespace-pre-wrap text-sm"><span className="font-medium">Notes from Sales: </span>{handover.notes}</p> : null}
               </div>
-              <Muted>Commercial details are not part of this record. They stay in Sales &amp; CRM.</Muted>
             </div>
           )}
         </Panel>
       ) : null}
 
-      <Panel title="Completion and reopening" description="Every completion is kept, including ones that were later reopened.">
+      <Panel title="Completion and reopening" hint="Every completion is kept, including ones that were later reopened.">
         {completions.length === 0 ? (
-          <EmptyState dense title="Not completed" description="A completion is recorded here, with its evidence, when the project is completed." />
+          <EmptyState dense title="Not completed" />
         ) : (
           <ol className="space-y-5">
             {completions.map((c) => (
@@ -129,9 +129,9 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
         )}
       </Panel>
 
-      <Panel title="Change log" description={`Dates, status, ownership and people, newest first. Showing the latest ${LOG_LIMIT} changes at most.`}>
+      <Panel title="Change log" hint={<>Dates, status, ownership and people, newest first. Shows the latest {LOG_LIMIT} changes at most.{canSeeAudit ? " You can read the full audit trail of this company's projects; it is a separate record and is not shown on this page." : ""}</>}>
         {log.length === 0 ? (
-          <EmptyState dense title="No changes recorded yet" description="Changes to dates, status, the Project Manager and the people on the project appear here as they happen." />
+          <EmptyState dense title="No changes recorded yet" />
         ) : (
           <ol className="divide-y divide-border">
             {log.map((l) => {
@@ -150,7 +150,6 @@ export default async function ProjectHistoryPage({ params }: { params: Promise<{
           </ol>
         )}
         {log.length >= LOG_LIMIT ? <Muted className="mt-3">Older changes are not shown here.</Muted> : null}
-        {canSeeAudit ? <Muted className="mt-3">You can read the full audit trail of this company&apos;s projects. It is a separate record and is not shown on this page.</Muted> : null}
       </Panel>
     </div>
   );

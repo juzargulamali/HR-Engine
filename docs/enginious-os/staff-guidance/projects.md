@@ -279,7 +279,7 @@ Dependencies on others are things outside the team that must happen first: struc
 - links: Projects -> /projects
 - screens: /projects/[id]/documents
 
-Files & client plan holds the project's files and links and the client timeline. Anyone on the project can add and open files and links, and remove what they added; the Project Manager can remove any. The client timeline shows only what was ticked for the client. Issuing freezes a numbered version and sends nothing; sent and accepted are recorded separately by the Project Manager. If the plan changes later, the latest version is marked Outdated until a new one is issued.
+Files & client plan holds the project's files and links and the client timeline. Anyone on the project can add and open files and links, and remove what they added; the Project Manager can remove any, and alone sees files marked Restricted. The client timeline shows only what was ticked for the client. Issuing freezes a numbered version and sends nothing; sent and accepted are recorded separately by the Project Manager. If the plan changes later, the latest version is marked Outdated until a new one is issued.
 
 1. Open the project, press Manage project and choose Files & client plan.
 2. To add a file choose Upload a file, pick the file, choose What is it and press Upload file. For a link choose Add a link and press Add link.
@@ -525,7 +525,7 @@ The Overview is for Operations Managers. Four cards at the top give the counts a
 2. Press a card at the top to jump to its list.
 3. Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.
 4. For other items press the button on the item and speak to the person named under With.
-5. Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab.
+5. Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab. Decisions assigned to me and follow-ups (with the person each waits on) come first, then Next on site. Each dated site activity appears once, with a link to its row on the Site schedule; a date from the project header is labelled, and a date from Sales before handover is labelled tentative. A date that has passed reads start unconfirmed until the Project Manager records the start. Press a request code to open that equipment request and its next action.
 
 ## Project health labels in Operations
 - id: operations-project-health
@@ -539,7 +539,7 @@ Each live project on the Operations Overview has one label, taken from the recor
 
 1. Open Operations, then Overview, and scroll to Project health.
 2. Read the reasons under the label. Each one opens the screen where it is dealt with.
-3. Press How the label is decided to read the rules.
+3. Open the ⓘ beside Project health to read how the label is decided.
 4. The label follows the records. To change it, speak to the Project Manager or the warehouse named on the item.
 
 ## After a date change: mark as reviewed
@@ -589,3 +589,290 @@ Quick add saves a whole list of requirements for one technology in one go, and s
 4. To change the order, drag the grip at the start of a row, or press the up or down arrow beside it (Tab to the button, then Enter). The order is saved as you go and is the same for everyone.
 5. Only the Project Manager, or the person a section is delegated to, sees these controls for that section.
 
+## Say what a task must produce
+- id: projects-task-expected-output
+- area: projects
+- status: published
+- keywords: expected output; what a task must produce; required output; deliverable on a task
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+A task can name the thing it must produce, for example a moodboard, and say whether it is required. A required output stops the task being sent for review or finished until it is added.
+
+1. Open the task from the project's Work page.
+2. Press Set expected output (or Edit expected output). Type the name, a quantity if there is more than one, and tick Required if the task cannot be finished without it.
+3. The person doing the task sees what is expected and what is missing right beside their action.
+4. Only the Project Manager, or the head of the task's team, can set or change this.
+
+## Hand in a version of a task's output
+- id: projects-task-submit-output
+- area: projects
+- status: published
+- keywords: submit output; add a version; attach a file to a task; version 2; hand in work
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+Each time you hand work in, it becomes a new version. Earlier versions and the feedback on them stay available.
+
+1. Open your task and press Submit output (or Submit version 2, and so on).
+2. Choose Upload a file, Choose a project file, or Add a link, and add a note for the reviewer if you like.
+3. A link to a document that can change later is marked so; add a snapshot or a link to one exact version if the reviewer needs it.
+4. Press the submit button once. Pressing it again by mistake does not make a second version.
+5. A file marked as restricted can only be chosen by the Project Manager.
+
+## Review one version of a task's output
+- id: projects-task-review-output
+- area: projects
+- status: published
+- keywords: review output; approve a version; request changes on a version; changes requested
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+Your decision applies to the one version you are looking at. If a newer version arrives while your screen is open, you are told and nothing is approved by mistake.
+
+1. Open the task and press Review.
+2. Choose Approve, or Request changes and write what needs changing.
+3. If you are told a newer version exists, reload and review that one.
+4. The time it was handed in and the time it was approved appear separately, in the project's time zone.
+5. You cannot review your own work.
+
+## Deliverables view and register export
+- id: projects-deliverables-register
+- area: projects
+- status: published
+- keywords: deliverables view; register of outputs; export deliverables; missing outputs
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+The Deliverables view on the Project Plan gathers the expected outputs of a project, grouped by activation, with the current version, status and times.
+
+1. Open the project, go to Project Plan, then Deliverables.
+2. Use Missing, Awaiting review, Changes requested or Approved to narrow the list.
+3. Open a row's Version history to see earlier versions and decisions.
+4. Press Export register (CSV) for a spreadsheet. It holds only what you can see on the screen: a restricted file appears as restricted.
+
+## Plan the installation and dismantling on site
+- id: projects-site-schedule
+- area: projects
+- status: published
+- keywords: site schedule; installation and dismantling; second installation; tentative or confirmed; run on site
+- links: Projects -> /projects
+- screens: /projects/[id]/plan
+
+The Site schedule is what happens at the venue. It is separate from the Project Plan's work schedule, which is the tasks. A plan with gaps still saves, and the gaps are listed with a link to fix each.
+
+1. Open the project, go to Project Plan, then Site.
+2. Press Add activity, or Quick add to enter several runs in one go (for example installation 11 Nov, the live days 12 to 13 Nov, dismantling).
+3. Give each run an owner, a place, the date or time window and its time zone, and mark it Tentative or Confirmed.
+4. Changing the date of a Confirmed run asks you for a reason. Only the Project Manager can add or change site activities.
+
+## Add crew and shipments to the site schedule
+- id: projects-site-crew-shipments
+- area: projects
+- status: published
+- keywords: site crew; standby crew; shipment arrival; equipment arriving late
+- links: Projects -> /projects
+- screens: /projects/[id]/plan
+
+Each run can have a crew by role. A shipment records when it leaves, when it should arrive and when it comes back, and warns you if it arrives after the installation it is for.
+
+1. On the Site schedule press Assign crew on a run and add people as installation, standby, backup or dismantling.
+2. Press Add shipment, enter each leg with its own time zone, and say which installation it supports.
+3. If the shipment is linked to an equipment request, its reservation, dispatch and return state comes from Inventory. Change that in Inventory, not here.
+4. A red warning means the shipment arrives after the installation starts.
+5. Under each run, Still missing from the briefing lists what the crew still lacks (see the crew card topic).
+
+## Make the crew card complete: venue, date, call time and readiness
+- id: projects-crew-card-briefing
+- area: projects
+- status: published
+- keywords: crew card; call time; use the activity start; project date; which run; hardware ready; not applicable; not recorded; my site assignment is empty; venue missing; briefing
+- links: Projects -> /projects; My site assignments -> /site-assignments
+- screens: /projects/[id]/plan; /site-assignments
+
+The crew card says where, when and what is ready, from the project's own records, so nothing is typed twice. The venue is the activity's own, else the project's, and says so. The date is the activity's own, else the project's installation or event date, only when the project has exactly one activity of that kind; with several runs nothing is guessed. A call time is personal: until the Project Manager sets it, the card says Not set yet.
+
+1. Project Manager: open Project Plan, Site and read Still missing from the briefing under each run.
+2. If it says to choose which run a project date belongs to, press This run on the right one. Only that run gets the date.
+3. Press Crew (or Set call times), and beside a person's call time press Use the activity start. It needs a start time on the activity.
+4. Press Brief to set Hardware, Content and App by hand. Leave Not recorded to use the Project Plan; choose Not applicable when it does not apply.
+5. Anyone assigned opens My site assignments to read their card. Not applicable and Not recorded mean different things.
+
+## The ⓘ help buttons
+- id: projects-help-buttons
+- area: projects
+- status: published
+- keywords: info button; help icon; ⓘ; explanation; where did the explanation go; hover help; more about
+- links: Projects -> /projects; Operations -> /operations
+- screens: /projects; /operations
+
+Longer explanations, examples and rules sit behind a small ⓘ next to the heading or field they explain. Warnings, errors, what blocks you, who acts next and what submitting, approving or publishing will do stay on the page.
+
+1. Move the pointer over the ⓘ, or tab to it, or tap it on a phone.
+2. Read the note. Press Escape, move away or tap elsewhere to close it.
+
+## What is next on site and what needs attention
+- id: projects-work-overview
+- area: projects
+- status: published
+- keywords: work overview; next on site; needs attention; recent changes on a project
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+The top of a project's Work page lists the next thing happening on site, what is missing or waiting, who can act on it, and the latest changes.
+
+1. Open the project's Work page.
+2. Next on site gives the next activity with its time, place, owner and whether it is confirmed.
+3. Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.
+4. Recent changes links to the full History.
+
+## Choose the project teams and their leads
+- id: projects-team-setup
+- area: projects
+- status: published
+- keywords: project team; project teams; team lead; lead needed; manage team; programming lead; content team; engineering team; installation team; add custom team; who leads
+- links: Projects -> /projects
+- screens: /projects/[id]/work
+
+A new project's Work page opens with Set up your project team. Choose teams from Content, Programming, Engineering and Site / Installation, or Add custom team, and pick a lead for each. You can save before every lead is known: that team is flagged Lead needed. A lead new to the project is added to it, so you confirm that first. Saving twice never duplicates a team or replaces a lead. Site / Installation never enrols technicians. Manage team reopens it.
+
+1. Open the project's Work page and press Set up your project team.
+2. Tick the teams you need, or press Add custom team and type a name.
+3. Choose a lead for each team, or leave it for later.
+4. Read which people will be added to the project and tick the confirmation.
+5. Press save. Press Manage team on Work to name a missing lead later.
+
+## Assign technicians who are not on the project
+- id: projects-site-only-technicians
+- area: projects
+- status: published
+- keywords: site only technician; my site assignments; call time; crew instructions; technician assignment; installation crew; readiness; hardware ready; content ready; app ready
+- links: My site assignments -> /site-assignments; Projects -> /projects
+- screens: /projects/[id]/plan; /site-assignments
+
+The Project Manager can put a company employee on an installation activity without adding them to the project; they are labelled site-only. In Assign crew choose the role, call time and instructions; Brief records hardware, content and app readiness. A site-only technician sees only their own assignment under My site assignments: activity, role, venue, call time and instructions. They cannot open Project Chat, tasks, files or exports. Access ends when they are removed, or the activity or project ends.
+
+1. Open Project Plan and choose Site schedule.
+2. Press Assign crew on the activity and choose people, roles, call times and instructions.
+3. Press Brief to record Hardware, Content and App readiness.
+4. Read the warning if a person is already committed at that time, or give the reason for the override.
+5. Technicians open My site assignments to read their own assignment.
+
+## Output the Project Manager hands in: Operations review
+- id: projects-operations-review
+- area: projects
+- status: published
+- keywords: operations review; awaiting operations review; needs an operations reviewer; assign reviewer; operations manager review; project manager output; review of my own output
+- links: Projects -> /projects; Operations -> /operations
+- screens: /projects/[id]/work; /operations
+
+When the Project Manager hands in a version of a task's output, even on someone else's task, an Operations Manager reviews it, not the team lead. It says Awaiting Operations review with the reviewer's name. The person who handed it in and the task's assignee can never approve it, even with the Operations role. With no eligible reviewer it says Needs an Operations reviewer, and the Project Manager or an Operations Manager presses Assign reviewer. Each new version gets its own review.
+
+1. Open the task from the link on Operations or My Day.
+2. Check the version number and read the evidence within the files you may open.
+3. Press Approve this version or Request changes.
+4. If the version says Needs an Operations reviewer, press Assign reviewer and choose an Operations Manager.
+5. A version the Project Manager handed in before this rule, still waiting for the team, shows Send to Operations review for the Project Manager and Operations. Press it: nothing is uploaded again. A restricted file must be made unrestricted first.
+
+## The Work schedule chart
+- id: projects-work-schedule
+- area: projects
+- status: published
+- keywords: work schedule; timeline renamed; project plan chart; day view; week view; today marker; chart scroll; chart tooltip; schedule bars
+- links: Projects -> /projects
+- screens: /projects/[id]/delivery
+
+The Project Plan view once called Timeline is now Work schedule: each activation and requirement as a bar by its dates. Installation, dismantling, crew and shipments stay under Site schedule. A week fits a normal desktop window; nine or thirty days scroll sideways inside the chart while the page stays still. Names and the date header stay pinned, Today is marked and rows print exact dates. Choose Day or Week, press Today, and hover, focus or tap a bar for details. Bars are read only.
+
+1. Open the project and choose Project Plan, then Work schedule.
+2. Scroll the chart sideways, or press Today.
+3. Choose Day or Week.
+4. Hover, focus or tap a bar for its details.
+
+## Work packages and the Work page summary
+- id: projects-work-summary
+- area: projects
+- status: published
+- keywords: work packages; milestones summary; task outputs summary; deliverables renamed; activation removed; feedback link
+- links: Projects -> /projects
+- screens: /projects/[id]/work; /projects/[id]/changes
+
+Work lists the real task outputs with their review state and a link to each version, and shows milestone progress: accepted of total, next, overdue. With no milestones the Project Manager sees a small Add milestone button; tasks never need one. The older team-level deliverables are now Work packages, in a collapsed section that appears only when some exist. Feedback linked to a removed activation says Activation removed.
+
+1. Open the project's Work page and read Milestones and Task outputs.
+2. Press a count to open the matching Deliverables list.
+3. Open the collapsed Work packages section, when it is there, to see what each team was given.
+
+## Say whether work on site has started
+- id: projects-site-started
+- area: projects
+- status: published
+- keywords: record started; clear start record; installation started; date passed; start unconfirmed; tentative date; project header date; no date; choose which run; site phase
+- links: Projects -> /projects
+- screens: /projects/[id]/plan; /site-assignments
+
+Every screen words a site activity the same way. A date from the project header reads Tentative, from the project header: a suggestion. A passed date with no recorded start reads Scheduled installation date passed, start unconfirmed. Started appears only when the Project Manager recorded it; a passed date never means the work began.
+
+1. Project Manager: open Project Plan, Site schedule and find the activity.
+2. When the crew actually begin, press Record started, add a note if useful, and press Record that work began.
+3. If it was recorded by mistake, press Clear start record. The activity goes back to its schedule wording.
+4. Technicians, Work, Calendar and Operations all read the same wording from that one record.
+
+## Preview a crew briefing before the crew read it
+- id: projects-preview-briefing
+- area: projects
+- status: published
+- keywords: preview briefing; as the technician sees it; crew briefing; missing date; missing venue; call time; provisional date passed; phone view
+- links: Projects -> /projects
+- screens: /projects/[id]/plan; /site-assignments
+
+Preview briefing lets the Project Manager read exactly what one crew member will read, in a phone-sized frame: reporting status, call time, venue and the named contact first, then instructions and readiness. Anything missing is listed with a shortcut. The call time belongs to each person and is not the activity start.
+
+1. Open Project Plan, Site schedule and press Preview briefing beside Crew on the activity.
+2. Choose the crew member at the top of the preview.
+3. Use the shortcuts to add the date, the venue or a call time, then press Refresh in the preview.
+4. Readiness appears for this run and, on its own line, as Project-wide readiness from the Project Plan. A finished task alone never marks an output approved or equipment ready.
+
+## What crew are told when a date, venue or call time changes
+- id: projects-crew-change-notices
+- area: projects
+- status: published
+- keywords: crew notice; date changed; venue changed; call time changed; changed briefing; notification; site assignment changed
+- links: My site assignments -> /site-assignments
+- screens: /site-assignments
+
+When a confirmed activity moves to another date or venue, or a person's own call time or its zone changes, the people assigned get one notice with the previous and new values and a link to their briefing. The same happens when the project's own venue, dates or zone change under an activity that uses them. Only affected assignments are told. My Day shows the change on On site next, and opening the briefing does not mark the notice read.
+
+1. Open the notice, My Day (On site next) or My site assignments.
+2. Find the card with Changed: the field, the old value and the new value.
+3. Check call time, venue and the named contact, and ask the contact if anything is unclear.
+
+## See who a review is waiting on
+- id: projects-review-waiting
+- area: projects
+- status: published
+- keywords: waiting on someone else; needs you; outputs awaiting approval; tasks in review; operations review; reviewer; changes requested; do next; waiting for my review; exact version
+- links: My Work -> /projects/work; Projects -> /projects
+- screens: /projects/work; /projects/[id]/work; /projects/[id]/delivery
+
+On a project's Work page, Needs you, Waiting on someone else and Next on site come first. An output waiting for Operations review names its reviewer (or Operations) and links the exact version. The person who submitted or owns the work cannot review it. Counters read Tasks in review and Outputs awaiting approval.
+
+1. Open the project's Work page and read the three blocks at the top.
+2. Press the version link on a line to open that exact version.
+3. Reviewers: open My Work, press Waiting for my review, open the version and decide.
+4. After changes are requested, the assignee finds it under Changes requested and Do next in My Work, with the earlier feedback beside the new version.
+
+## Choose what the client sees on the timeline
+- id: projects-client-timeline-choice
+- area: projects
+- status: published
+- keywords: client timeline; choose what the client sees; client facing; issue preview; issued versions; milestones; project files
+- links: Projects -> /projects
+- screens: /projects/[id]/documents
+
+Files and client plan reads in three steps: Choose what the client sees, Preview, and Issued versions. Tick the milestones and timeline activities for the next issued client timeline. Issued versions are frozen: changing the ticks never alters one already issued. Individual tasks cannot be put on the client timeline yet.
+
+1. Open the project's Files and client plan.
+2. Tick or untick items under Choose what the client sees and press Save what the client sees.
+3. Read the Preview, then issue a version when it is right.
+4. Open any earlier issued version from the list; it stays as it was issued.

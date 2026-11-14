@@ -5,6 +5,7 @@ import type { ActionState } from "@/lib/actions/companies";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
+import { InfoHint } from "@/components/ui/info-hint";
 
 type Action = (prev: ActionState & { id?: string }, formData: FormData) => Promise<ActionState & { id?: string }>;
 type S = ActionState & { id?: string };
@@ -87,10 +88,10 @@ export function ActionForm({
   );
 }
 
-export function Field({ label, htmlFor, hint, children, className }: { label: string; htmlFor: string; hint?: string; children: React.ReactNode; className?: string }) {
+export function Field({ label, htmlFor, hint, help, children, className }: { label: string; htmlFor: string; hint?: string; /** Optional explanation, example or rule: behind an ⓘ beside the label. `hint` stays visible, for what a person must read to fill the field in. */ help?: React.ReactNode; children: React.ReactNode; className?: string }) {
   return (
     <div className={className ?? "space-y-1.5"}>
-      <label htmlFor={htmlFor} className="text-sm font-medium leading-none">{label}</label>
+      <span className="flex items-center gap-1"><label htmlFor={htmlFor} className="text-sm font-medium leading-none">{label}</label>{help ? <InfoHint label={label}>{help}</InfoHint> : null}</span>
       {children}
       {hint ? <p className="text-sm text-muted-foreground">{hint}</p> : null}
     </div>

@@ -27,7 +27,7 @@ describe("describeNotification", () => {
     expect(describeNotification("project_reply", { ...base, message_id: "m1" }).href).toBe("/projects/p1/discussion");
   });
   it("distinguishes the three kinds of assignment", () => {
-    expect(describeNotification("project_assignment", { ...base, deliverable: "Floor build" }).text).toContain("assigned to your department");
+    expect(describeNotification("project_assignment", { ...base, deliverable: "Floor build" }).text).toContain("assigned to your team");
     expect(describeNotification("project_assignment", { ...base, booking_id: "b", location: "Expo Hall" })).toMatchObject({ href: "/projects/p1/timeline" });
     expect(describeNotification("project_assignment", { ...base, feedback_id: "f" }).href).toBe("/projects/p1/changes");
   });
@@ -85,5 +85,11 @@ describe("equipment review and Operations planning notices", () => {
     expect(n?.text).toContain("Rana Lead is now the Project Manager of");
     expect(n?.text).toContain("Reason: Pat is on leave");
     expect(n?.text).toContain("You stay on the project as a member.");
+  });
+  it("tells a crew member what moved, with the previous and new values and a link to their briefing", () => {
+    const n = describeNotification("project_site_change", { ...base, title: "Setup", run_label: "Run 1", activity_id: "a7",
+      changes: [{ field: "date", from: "11 Nov 2026", to: "12 Nov 2026" }, { field: "call time", from: "11 Nov 2026 07:30 Asia/Dubai", to: "12 Nov 2026 08:00 Asia/Dubai" }] });
+    expect(n.text).toBe("Setup (Run 1) changed: date: 11 Nov 2026 → 12 Nov 2026; call time: 11 Nov 2026 07:30 Asia/Dubai → 12 Nov 2026 08:00 Asia/Dubai. Open your briefing.");
+    expect(n.href).toBe("/site-assignments?activity=a7");
   });
 });

@@ -32,7 +32,7 @@ describe("budget lines: fewer repeated choices", () => {
     fireEvent.click(screen.getAllByRole("button", { name: /Add line/ })[0]!);
     fireEvent.change(screen.getByLabelText("Description"), { target: { value: "Lunch" } });
     fireEvent.change(screen.getByLabelText("How is it calculated?"), { target: { value: "fixed" } });
-    fireEvent.change(screen.getByLabelText(/Total amount/), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText(/^Total amount/), { target: { value: "50" } });
     fireEvent.click(screen.getByRole("button", { name: "Duplicate the line Lunch" }));
     const descriptions = screen.getAllByLabelText("Description") as HTMLInputElement[];
     expect(descriptions.map((d) => d.value)).toEqual(["Lunch", "Lunch"]);

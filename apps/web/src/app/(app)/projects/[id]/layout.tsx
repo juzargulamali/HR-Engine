@@ -14,6 +14,7 @@ import { loadProjectChat, loadProjectUnread } from "@/lib/chat/data";
 import { holdsOperationsRight } from "@/lib/chat/model";
 import { ProjectChatButton } from "@/components/chat/project-chat-button";
 import { dateRangeText, dateText } from "@/lib/projects/format";
+import { handoverHref } from "@/lib/projects/handover-list";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/workspace/list-memory";
@@ -57,6 +58,14 @@ export default async function ProjectLayout({ children, params }: { children: Re
   const chatUnread = chat.state === "ready" ? ((await loadProjectUnread())?.get(id) ?? 0) : 0;
   // The Budget tab: only where the module's own access rules let this person in (the Project Manager, or Finance / view access in the owning company).
   const budgetAccess = view.level === "details" ? await loadProjectBudgetAccess(id) : { can_open: false };
+  // The accepted brief stays reachable from the project it created (one small read; row-level security decides whether this person may open it, and a failed or empty read just hides the link).
+  let briefId: string | null = null;
+  if (view.level === "details" && project.kind === "client") {
+    try {
+      const { data: hb } = await (await createClient()).from("proj_handovers").select("id").eq("project_id", id).eq("status", "accepted").limit(1);
+      briefId = hb?.[0]?.id ?? null;
+    } catch { briefId = null; }
+  }
   const base = `/projects/${id}`;
   const live = !isFinishedProject(project.status);
   const moves = view.canManage ? allowedStatusMoves(project.kind, project.status) : [];
@@ -86,6 +95,7 @@ export default async function ProjectLayout({ children, params }: { children: Re
             <span>Project Manager: <span className="font-medium text-white">{view.pmName}</span></span>
             {details?.install_start ? <span>Installation: <span className="font-medium text-white">{dateText(details.install_start)}</span></span> : null}
             {details?.event_start ? <span>Event: <span className="font-medium text-white">{dateRangeText(details.event_start, details.event_end)}</span></span> : null}
+            {briefId ? <Link href={handoverHref(briefId)} className="font-medium text-white underline underline-offset-4" data-testid="project-accepted-brief">Accepted brief</Link> : null}
           </>
         }
       >

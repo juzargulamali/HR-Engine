@@ -1,8 +1,11 @@
+import Link from "next/link";
+import { SCHEDULE_PURPOSES } from "@/lib/projects/plan-view";
 import { CONFIRMATION_LABELS, DEPENDENCY_KIND_LABELS, PLAN_LABELS, describeTimedEvent, planTemplate } from "@enginious-hr/domain";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { BookingStateBadge } from "@/components/projects/badges";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Muted, Panel } from "@/components/projects/parts";
 import { dateText } from "@/lib/projects/format";
 import type { ProjExternalDependencyRow, ProjPlanItemRow, ProjSiteBookingRow } from "@/types/projects";
@@ -99,8 +102,10 @@ export function DependencyRow({ d, projectId, siteTz, milestones, milestoneTitle
   );
 }
 
-export function PlanSection({ plan, items, canEdit, projectId, siteTz, milestones, milestoneTitle, defaultBase, bars: showBars }: {
+export function PlanSection({ plan, items, canEdit, projectId, siteTz, milestones, milestoneTitle, defaultBase, bars: showBars, planHasWork = false }: {
   bars: boolean;
+  /** The Project Plan already holds this project's work (activations or tasks): the suggested stages are then NOT offered, so the same work is not entered twice. */
+  planHasWork?: boolean;
   plan: "delivery" | "site"; items: ProjPlanItemRow[]; canEdit: boolean; projectId: string; siteTz: string; milestones: { id: string; title: string }[]; milestoneTitle: (id: string | null) => string | null; defaultBase: string;
 }) {
   const bars = planBarItems(items);
@@ -108,18 +113,20 @@ export function PlanSection({ plan, items, canEdit, projectId, siteTz, milestone
   return (
     <Panel
       title={PLAN_LABELS[plan]}
-      description={plan === "delivery" ? "The creative and technical build, from moodboard to full test." : "What happens on site, from access to dismantling."}
+      hint={plan === "delivery" ? `${SCHEDULE_PURPOSES.delivery} Internal task and requirement dates are planned once, in the Project Plan.` : SCHEDULE_PURPOSES.site}
       actions={canEdit ? <DialogButton label="Add item" title={`Add to the ${PLAN_LABELS[plan].toLowerCase()}`} variant="default"><PlanItemForm projectId={projectId} plan={plan} siteTimezone={siteTz} milestones={milestones} /></DialogButton> : null}
     >
       {items.length === 0 ? (
         <div className="space-y-4">
-          <EmptyState dense title={`No ${PLAN_LABELS[plan].toLowerCase()} yet`} description={canEdit ? "Start from the suggested stages or add your own. The suggestion is only a starting point: edit or delete anything." : "The Project Manager plans this."} />
-          {canEdit ? (
-            <div className="rounded-lg border border-border p-3">
-              <p className="mb-2 text-sm font-medium">Use the suggested timeline</p>
-              <Muted className="mb-3">Suggested stages (editable, never mandatory, nothing client-visible): {suggestion}.</Muted>
-              <TemplateForm projectId={projectId} plan={plan} defaultBase={defaultBase} label="Create suggested stages" />
-            </div>
+          <EmptyState dense title={`No ${PLAN_LABELS[plan].toLowerCase()} yet`}
+            description={plan === "delivery" && planHasWork ? (canEdit ? "The build is planned in the Project Plan. Add an item here only for a date the client should see." : "The Project Manager adds the dates the client will see.") : canEdit ? "Add the first item, or start from suggested stages." : "The Project Manager plans this."} />
+          {plan === "delivery" && planHasWork ? (
+            <p className="text-sm" data-testid="plan-delivery-in-project-plan">The build&apos;s tasks and requirements are in the <Link href={`/projects/${projectId}/delivery?view=timeline`} className="font-medium underline underline-offset-2">Project Plan, Work schedule</Link>. Pick the milestones the client sees under <Link href={`/projects/${projectId}/documents#issue-preview`} className="font-medium underline underline-offset-2">Files &amp; client plan</Link>.</p>
+          ) : canEdit ? (
+            <details className="rounded-lg border border-border p-3" data-testid="plan-suggested-stages">
+              <summary className="cursor-pointer text-sm font-medium">Start from suggested stages <InfoHint label="the suggested stages" className="ml-1">Suggested stages: {suggestion}. Editable, never mandatory, nothing client-visible. Edit or delete anything after creating them.</InfoHint></summary>
+              <div className="mt-3"><TemplateForm projectId={projectId} plan={plan} defaultBase={defaultBase} label="Create suggested stages" /></div>
+            </details>
           ) : null}
         </div>
       ) : (

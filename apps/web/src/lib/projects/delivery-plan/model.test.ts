@@ -48,7 +48,7 @@ describe("Delivery plan: screens", () => {
   it("says what a release will create and what will wait, before anything is created", () => {
     const p = releasePreview([item({ owner_id: "o", lines: [line({}), line({ section: "hardware", inv_item_id: "x" }), line({ key: "L0003", section: "hardware" }), line({ released_at: "x", task: task("todo") })] }),
       item({ lines: [line({ key: "L0009" }), line({ assignee_id: "a" })] })]);
-    expect(p).toEqual({ tasks: 2, equipment: 1, external: 0, waiting: [{ key: "L0003", reason: "needs a stock match" }, { key: "L0009", reason: "nobody named, and the deliverable has no accountable owner" }] });
+    expect(p).toEqual({ tasks: 2, equipment: 1, external: 0, waiting: [expect.objectContaining({ key: "L0003", reason: "needs a stock match", fix: expect.stringContaining("stock item") }), expect.objectContaining({ key: "L0009", reason: "nobody named, and the deliverable has no accountable owner", fix: expect.stringContaining("accountable owner") })] });
   });
   it("counts hardware that is bought, rented or client supplied as followed in the plan, not requested", () => {
     const p = releasePreview([item({ owner_id: "o", lines: [line({ section: "hardware", supply_route: "rent" }), line({ key: "L2", section: "hardware", supply_route: "client" }), line({ key: "L3", section: "hardware", inv_item_id: "x", supply_route: "inventory" })] })]);

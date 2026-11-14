@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { addPlanLines } from "@/lib/actions/projectsDeliveryPlan";
 import { ActionForm } from "@/components/sales/action-form";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -47,7 +48,8 @@ export function QuickAddDialog({ projectId, itemId, sections, members, milestone
 
   return (
     <FormDialog label="Quick add" title="Add several requirements at once" dialogSize="xl" testId="dp-quick-add"
-      description="Type or paste a list, one requirement per row. Rows already in the plan are never added twice, so saving again is safe. Nothing is released until the Project Manager releases it.">
+      description="Nothing is released until the Project Manager releases it."
+      help="Type or paste a list, one requirement per row. Rows already in the plan are never added twice, so saving again is safe.">
       {(done) => (
         <ActionForm action={addPlanLines} submitLabel="Add rows" pendingLabel="Adding…" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} />
@@ -65,7 +67,7 @@ export function QuickAddDialog({ projectId, itemId, sections, members, milestone
           <details className="rounded-md border border-border px-3 py-2">
             <summary className="cursor-pointer text-sm font-medium">Paste a list</summary>
             <div className="mt-2 space-y-2">
-              <label htmlFor="qa-paste" className="block text-[13px] text-muted-foreground">One requirement per line. A quantity can follow a tab (copy two columns from Excel), or be written “Batak unit x 4” or “4 x Batak unit”.</label>
+              <div className="flex items-center gap-1 text-[13px] text-muted-foreground"><label htmlFor="qa-paste">One requirement per line</label><InfoHint label="pasting a list">A quantity can follow a tab (copy two columns from Excel), or be written “Batak unit x 4” or “4 x Batak unit”.</InfoHint></div>
               <Textarea id="qa-paste" rows={5} value={paste} onChange={(e) => setPaste(e.target.value)} placeholder={"Batak unit\t4\nPower distribution box x 2"} />
               <Button type="button" variant="outline" size="sm" onClick={addPasted} disabled={!paste.trim()}>Put these in the rows below</Button>
             </div>
