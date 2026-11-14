@@ -89,7 +89,7 @@ const createOpportunitySchema = z.object({
   contactIds: z.array(uuid).default([]),
 });
 
-export async function createOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState> {
+export async function createOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState & { /** Set when the outreach this was raised from already has an enquiry: nothing was created, and this is that enquiry. */ existingEnquiryId?: string }> {
   const raw = { ...Object.fromEntries(formData), contactIds: formData.getAll("contactIds").filter((x) => x !== "") };
   const parsed = createOpportunitySchema.safeParse(raw);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -108,6 +108,17 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   if (!company.settings) return { error: `${company.name} has no Sales settings yet (reference code and default currency), so an enquiry cannot be recorded for it.` };
 
   const supabase = await createClient();
+  // Raised from an outreach: an outreach holds ONE enquiry (crm_outreach.opportunity_id, set by crm_outreach_link_inquiry). A tab left open after the enquiry was
+  // already raised would otherwise create a second, unlinked one. So the outreach is read first, as the signed-in person: if it already has an enquiry nothing is
+  // created and the person is sent to that one. A check that fails saves nothing and says so; it never goes ahead as if there were none. (An outreach the person
+  // cannot read comes back as no row: the enquiry is created and the link step below reports its own refusal, as before.)
+  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
+  if (fromOutreach.success) {
+    const outreach = await (supabase as unknown as SupabaseClient).from("crm_outreach").select("opportunity_id").eq("id", fromOutreach.data).maybeSingle();
+    if (outreach.error) return { error: "Could not check whether this outreach already has an enquiry, so nothing was saved. What you entered is still here: try again." };
+    const existing = (outreach.data as { opportunity_id: string | null } | null)?.opportunity_id;
+    if (existing) return { error: "This outreach already has an enquiry, so a second one was not created. Open the existing enquiry instead.", existingEnquiryId: existing };
+  }
   const { data, error } = await supabase.rpc("crm_create_opportunity", {
     p_company_id: d.companyId,
     p_title: d.title,
@@ -135,7 +146,6 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   refresh();
   // Raised from an outreach ("Create inquiry" on the account's Outreach section): link it, which sets Inquiry raised. The inquiry exists either way; if the
   // link is refused the person lands on the account, where the Outreach section says so and offers "Link an inquiry".
-  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
   if (fromOutreach.success) {
     const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
     if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);

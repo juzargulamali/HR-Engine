@@ -5,7 +5,11 @@ vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 class Redirect extends Error { constructor(public to: string) { super(`redirect:${to}`); } }
 vi.mock("next/navigation", () => ({ redirect: (to: string) => { throw new Redirect(to); } }));
 const rpc = vi.fn();
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from: () => ({}) }) }));
+// What the (mocked) database answers when the outreach an enquiry is raised from is read.
+let outreachRow: { data: { opportunity_id: string | null } | null; error: { message: string } | null } = { data: null, error: null };
+const read = vi.fn();
+const from = (table: string) => ({ select: (cols: string) => ({ eq: (_c: string, id: string) => ({ maybeSingle: async () => { read(table, cols, id); return outreachRow; } }) }) });
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
 let salesContext: unknown = null;
 vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => salesContext }));
 
@@ -22,6 +26,7 @@ const created = () => rpc.mock.calls.filter((c) => c[0] === "crm_create_opportun
 
 beforeEach(() => {
   rpc.mockReset().mockResolvedValue({ data: "new-id", error: null });
+  read.mockReset(); outreachRow = { data: null, error: null };
   // The person holds Sales access to Fictional UAE and to a company that has no Sales settings yet. They hold none to Fictional Europe.
   salesContext = {
     userId: ME, grants: [{ companyId: UAE, capabilities: [] }, { companyId: NO_SETTINGS, capabilities: [] }], people: [],
@@ -83,5 +88,35 @@ describe("createOpportunity: where Quick Add lands", () => {
   });
   it("the full form still opens the enquiry's own page", async () => {
     await expect(createOpportunity({ error: null }, fd({ ...base, returnTo: "/sales/follow-ups" }))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+  });
+});
+
+describe("createOpportunity: raised from an outreach", () => {
+  const OUTREACH = "77777777-7777-4777-8777-777777777777";
+  const EXISTING = "88888888-8888-4888-8888-888888888888";
+  const raised = { ...base, outreachId: OUTREACH };
+  it("an outreach without an enquiry: the enquiry is created and then linked", async () => {
+    outreachRow = { data: { opportunity_id: null }, error: null };
+    await expect(createOpportunity({ error: null }, fd(raised))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(read).toHaveBeenCalledWith("crm_outreach", "opportunity_id", OUTREACH);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_opportunity", "crm_outreach_link_inquiry"]);
+  });
+  it("an outreach that already has an enquiry (a stale tab): nothing is created, it says so and points at the existing enquiry", async () => {
+    outreachRow = { data: { opportunity_id: EXISTING }, error: null };
+    const r = await createOpportunity({ error: null }, fd(raised));
+    expect(r.error).toMatch(/already has an enquiry, so a second one was not created/);
+    expect(r.existingEnquiryId).toBe(EXISTING);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("a check that fails saves nothing and says it could not check (it never goes ahead as if there were none)", async () => {
+    outreachRow = { data: null, error: { message: "the data service did not answer" } };
+    const r = await createOpportunity({ error: null }, fd(raised));
+    expect(r.error).toMatch(/Could not check whether this outreach already has an enquiry/);
+    expect(r.existingEnquiryId).toBeUndefined();
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("an enquiry that is not raised from an outreach makes no such read", async () => {
+    await expect(createOpportunity({ error: null }, fd(base))).rejects.toThrow("redirect:");
+    expect(read).not.toHaveBeenCalled();
   });
 });

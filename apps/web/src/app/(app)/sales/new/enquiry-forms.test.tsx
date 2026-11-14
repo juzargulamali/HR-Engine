@@ -206,11 +206,11 @@ describe("Quick Add", () => {
     set("Where did it come from?", "whatsapp");
     set("Next action", "Call the fictional agency");
     const form = screen.getByLabelText("What is the enquiry?").closest("form")!;
-    fireEvent.submit(form);
-    await waitFor(() => { screen.debug(screen.getAllByRole("alert")[0], 3000); expect(screen.getByText(/Choose an agency, an end client, or both/)).toBeTruthy(); }, { timeout: 300 });
+    await act(async () => { fireEvent.submit(form); });
+    await waitFor(() => expect(screen.getByText(/Choose an agency, an end client, or both/)).toBeTruthy());
     expect(createOpportunity).not.toHaveBeenCalled();
     choose("End client", "Fictional");
-    fireEvent.submit(form);
+    await act(async () => { fireEvent.submit(form); });
     await waitFor(() => expect(createOpportunity).toHaveBeenCalledTimes(1));
     const sent = createOpportunity.mock.calls[0]![1] as FormData;
     expect(Object.fromEntries(sent)).toMatchObject({ companyId: UAE, currency: "AED", after: "panel", returnTo: "/sales/follow-ups?view=week", nextTime: "10:00", nextKind: "call", clientOrgId: "cl" });

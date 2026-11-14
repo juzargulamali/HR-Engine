@@ -67,7 +67,7 @@ export interface EnquiryContact {
   roleTitle: string | null;
 }
 
-const initialState: ActionState = { error: null };
+const initialState: ActionState & { existingEnquiryId?: string } = { error: null };
 
 
 let techKey = 1;
@@ -605,7 +605,8 @@ export function NewEnquiryForm({
           </fieldset>
 
           <div ref={errorRef} tabIndex={-1} className="outline-none" aria-live="polite">
-            {error ? <Alert variant="destructive">{error}{state.error && !clientError ? " Nothing was saved, and what you entered is still here: correct it and save again." : ""}</Alert> : null}
+            {error ? <Alert variant="destructive">{error}{state.error && !clientError && !state.existingEnquiryId ? " Nothing was saved, and what you entered is still here: correct it and save again." : ""}</Alert> : null}
+            {state.existingEnquiryId && !clientError ? <p className="mt-2 text-sm"><Link href={`/sales/opportunities/${state.existingEnquiryId}`} className="font-medium underline underline-offset-2">Open the existing enquiry</Link></p> : null}
           </div>
           <SavingToLine company={company} currency={currency} />
           <div className="flex flex-wrap items-center gap-2">
