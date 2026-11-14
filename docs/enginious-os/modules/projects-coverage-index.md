@@ -401,7 +401,25 @@ Who can see: **Member** = actively enrolled in the project and still eligible (`
 | 317 | Equipment: next step, request link, Shipments by site run | panel | Project Equipment | People who can read the project's details | Submit, Reserve, Dispatch, Return line; request link; shipments under their run | S 13 | Documented |
 | 318 | Files & client plan: Choose what the client sees | panel | `/projects/[id]/documents` | Project Manager (edit); readers see the result | Tick milestones and plan items for the next issued timeline; issued versions stay frozen | S 13 | Documented |
 
+## 11. Phase 3: the office board, Operations TV (B)
+
+Reference: [`operations-office-board.md`](./operations-office-board.md). Draft PR from `feat/operations-tv`; migration `20270110000100` not applied by Claude; written from the code and the local browser flow `project-ops-tv-flow.mjs`; nothing signed in on Preview or on the office TV was seen by Claude.
+
+| # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
+|---|---|---|---|---|---|---|---|
+| 319 | Operations board (header, company, Last updated, Sign out) | screen | `/tv` (`?company=`, `?page=`, `?rotate=0`) | An un-revoked display of the company; Operations Managers and founders of it | One read-only screen for the office TV: what happens on site next, who is going, what could hold it up | B 1, 4, 5 | Documented |
+| 320 | Board refresh | route | `/api/tv/board` (called by the board every 60 s) | Same as row 319 | One bounded read, `no-store, private`; 200, 401, 403 (denied or revoked), 503 (not installed), 502 | B 1, 5 | Documented |
+| 321 | Next on site (the pinned rail) | panel | `/tv`, left of the board (above it on laptop, tablet, phone) | Same as row 319 | Setup, show, dismantle and key shipment movements in date order: what and when, then where and who, then the blocker and action | B 4, 5 | Documented |
+| 322 | Active projects table | panel | `/tv` | Same as row 319 | Projects with their next three runs (all runs on small screens), where and who, the most actionable blocker per run, "No scheduled site work", project-wide readiness and the Inventory request state | B 4, 5 | Documented |
+| 323 | Handovers awaiting acceptance | panel | `/tv`, below the projects | Same as row 319 | Submitted handovers: title, reference, status, named Project Manager or "PM not named yet", install date, location | B 4 | Documented |
+| 324 | Board states: Stale, Signed out, Revoked, No access, Not installed, empty | states | `/tv` | Same as row 319 | The last good board with a Stale bar and its time; the board cleared at once, with the reason, when access ends | B 5 | Documented |
+| 325 | Office board: displays | list | `/operations/office-board` | Operations Managers of the company; founders | Each display with Active or Revoked, sign-in e-mail, time zone, last seen | B 6 | Documented |
+| 326 | Add a display | dialog | Office board, **Add a display** | Operations Managers of the company; founders | Name, new sign-in e-mail, office time zone; the one-time password is shown once | B 6 | Documented |
+| 327 | Revoke display / Retry sign-in block | dialog | Office board, **Revoke** | Operations Managers of the company; founders | Refuse the display on its next read, block its sign-in; retry the block if it failed | B 6 | Documented |
+| 328 | Operations Overview: Office board link | link | `/operations`, the link to the board screen | Operations Managers | Takes the manager to the Office board page | B 1 | Documented |
+| 329 | Operations menu: Office board | menu entry | Operations > Office board | Operations Managers; founders | Opens `/operations/office-board` | B 1 | Documented |
+
 ## Totals
 
-318 entries: 289 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8, S 50, O 32 (section 9: 18 Operations screens, rows 237 to 249 and 261 to 265; 11 changes on existing Projects screens, rows 250 to 260; 2 on My Day, rows 266 and 267; all 31 are `Documented` from the code, none was seen signed in by Claude). *(Rows 307 to 318 were added by Finish Phase 2: 11 in S and 1 in O (row 314), all `Documented` from the code and the local browser flows.)* *(260 entries and O 24 until the Overview redesign of 2026-11-12; rows 240 to 244, 247 and 258 were rewritten in place and keep their numbers.)*
+329 entries: 300 `Documented`, 29 `Unverified` (each names its open point). Per section: D 36, W 52, T 40, P 37, H 44, C 6, L 13, R 8, S 50, O 32, B 11 (section 11, the Phase 3 office board, rows 319 to 329, all `Documented` from the code and the local browser flow) (section 9: 18 Operations screens, rows 237 to 249 and 261 to 265; 11 changes on existing Projects screens, rows 250 to 260; 2 on My Day, rows 266 and 267; all 31 are `Documented` from the code, none was seen signed in by Claude). *(Rows 307 to 318 were added by Finish Phase 2: 11 in S and 1 in O (row 314), all `Documented` from the code and the local browser flows.)* *(260 entries and O 24 until the Overview redesign of 2026-11-12; rows 240 to 244, 247 and 258 were rewritten in place and keep their numbers.)*
 

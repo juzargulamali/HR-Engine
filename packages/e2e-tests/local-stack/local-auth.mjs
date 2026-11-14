@@ -14,6 +14,7 @@
 const DDL = `
   create schema if not exists local_auth;
   create table if not exists local_auth.credentials (user_id uuid primary key, password text, banned_until timestamptz);
+  alter table local_auth.credentials add column if not exists app_metadata jsonb not null default '{}';
   create table if not exists local_auth.sessions (id uuid primary key default gen_random_uuid(), user_id uuid not null, revoked boolean not null default false, created_at timestamptz not null default now());
   create table if not exists local_auth.outbox (id bigserial primary key, kind text not null, email text not null, action_link text not null, created_at timestamptz not null default now());
 `;
@@ -26,19 +27,19 @@ export function createLocalAuth({ pool, sign, verify, fixedPassword, send, readB
 
   const toUser = (row) => ({
     id: row.id, aud: "authenticated", role: "authenticated", email: row.email, email_confirmed_at: row.created_at, phone: "",
-    app_metadata: { provider: "email", providers: ["email"] }, user_metadata: row.raw_user_meta_data ?? {}, identities: [],
+    app_metadata: { provider: "email", providers: ["email"], ...(row.app_metadata ?? {}) }, user_metadata: row.raw_user_meta_data ?? {}, identities: [],
     created_at: row.created_at, updated_at: row.created_at, is_anonymous: false, banned_until: row.banned_until ?? null,
   });
   const loadUser = async (where, value) =>
     (await pool.query(
-      `select u.id, u.email, u.raw_user_meta_data, u.created_at, c.banned_until from auth.users u left join local_auth.credentials c on c.user_id = u.id where ${where}`,
+      `select u.id, u.email, u.raw_user_meta_data, u.created_at, c.banned_until, c.app_metadata from auth.users u left join local_auth.credentials c on c.user_id = u.id where ${where}`,
       [value],
     )).rows[0];
 
   async function startSession(row) {
     const sessionId = (await pool.query("insert into local_auth.sessions (user_id) values ($1) returning id", [row.id])).rows[0].id;
     const now = Math.floor(Date.now() / 1000);
-    const claims = { aud: "authenticated", role: "authenticated", sub: row.id, email: row.email, iat: now, exp: now + 3600, session_id: sessionId, app_metadata: { provider: "email" }, user_metadata: {}, is_anonymous: false };
+    const claims = { aud: "authenticated", role: "authenticated", sub: row.id, email: row.email, iat: now, exp: now + 3600, session_id: sessionId, app_metadata: { provider: "email", ...(row.app_metadata ?? {}) }, user_metadata: {}, is_anonymous: false };
     return {
       access_token: sign(claims), token_type: "bearer", expires_in: 3600, expires_at: claims.exp,
       refresh_token: sign({ sub: row.id, sid: sessionId, kind: "refresh", exp: now + 86400 }), user: toUser(row),
@@ -85,7 +86,7 @@ export function createLocalAuth({ pool, sign, verify, fixedPassword, send, readB
         const session = (await pool.query("select revoked from local_auth.sessions where id = $1", [claims.sid])).rows[0];
         if (!session || session.revoked) return fail(res, 400, "session_not_found", "Invalid Refresh Token: Session Not Found"), true;
         const now = Math.floor(Date.now() / 1000);
-        const access = { aud: "authenticated", role: "authenticated", sub: row.id, email: row.email, iat: now, exp: now + 3600, session_id: claims.sid, app_metadata: { provider: "email" }, user_metadata: {}, is_anonymous: false };
+        const access = { aud: "authenticated", role: "authenticated", sub: row.id, email: row.email, iat: now, exp: now + 3600, session_id: claims.sid, app_metadata: { provider: "email", ...(row.app_metadata ?? {}) }, user_metadata: {}, is_anonymous: false };
         return send(res, 200, { access_token: sign(access), token_type: "bearer", expires_in: 3600, expires_at: access.exp, refresh_token: sign({ sub: row.id, sid: claims.sid, kind: "refresh", exp: now + 86400 }), user: toUser(row) }), true;
       }
       return fail(res, 400, "unsupported_grant_type", "unsupported grant"), true;
@@ -145,7 +146,7 @@ export function createLocalAuth({ pool, sign, verify, fixedPassword, send, readB
         const body = await json();
         if (await loadUser("lower(u.email) = lower($1)", body.email ?? "")) return fail(res, 422, "email_exists", "A user with this email address has already been registered"), true;
         const created = (await pool.query("insert into auth.users (email, raw_user_meta_data) values ($1, $2::jsonb) returning id", [body.email, JSON.stringify(body.user_metadata ?? {})])).rows[0].id;
-        if (typeof body.password === "string") await pool.query("insert into local_auth.credentials (user_id, password) values ($1, $2)", [created, body.password]);
+        if (typeof body.password === "string" || body.app_metadata) await pool.query("insert into local_auth.credentials (user_id, password, app_metadata) values ($1, $2, $3::jsonb)", [created, typeof body.password === "string" ? body.password : null, JSON.stringify(body.app_metadata ?? {})]);
         return send(res, 200, toUser(await loadUser("u.id = $1", created))), true;
       }
       if (id) {
@@ -160,6 +161,7 @@ export function createLocalAuth({ pool, sign, verify, fixedPassword, send, readB
             await pool.query("insert into local_auth.credentials (user_id, banned_until) values ($1, case when $2::int is null then null else now() + ($2::int * interval '1 hour') end) on conflict (user_id) do update set banned_until = excluded.banned_until", [id, hours ? Number(hours) : null]);
           }
           if (typeof body.password === "string") await pool.query("insert into local_auth.credentials (user_id, password) values ($1, $2) on conflict (user_id) do update set password = excluded.password", [id, body.password]);
+          if (body.app_metadata && typeof body.app_metadata === "object") await pool.query("insert into local_auth.credentials (user_id, app_metadata) values ($1, $2::jsonb) on conflict (user_id) do update set app_metadata = local_auth.credentials.app_metadata || excluded.app_metadata", [id, JSON.stringify(body.app_metadata)]);
           return send(res, 200, toUser(await loadUser("u.id = $1", id))), true;
         }
         if (req.method === "DELETE") {

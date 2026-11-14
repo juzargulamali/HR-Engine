@@ -3,6 +3,7 @@
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import { isDisplayUser, TV_PATH } from "@/lib/operations-tv/gate";
 
 const signInSchema = z.object({
   email: z.string().email(),
@@ -21,7 +22,7 @@ export async function signIn(_prevState: SignInState, formData: FormData): Promi
   }
 
   const supabase = await createClient();
-  const { error } = await supabase.auth.signInWithPassword({
+  const { data, error } = await supabase.auth.signInWithPassword({
     email: parsed.data.email,
     password: parsed.data.password,
   });
@@ -30,6 +31,8 @@ export async function signIn(_prevState: SignInState, formData: FormData): Promi
     return { error: "That email/password combination wasn't recognized." };
   }
 
+  // An office-board display signs in on its own account and goes straight to the board, whatever page it asked for.
+  if (isDisplayUser(data?.user)) redirect(TV_PATH);
   redirect(parsed.data.next && parsed.data.next.startsWith("/") ? parsed.data.next : "/");
 }
 

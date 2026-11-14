@@ -51,7 +51,7 @@ export function OverviewView({ header, companies, company, ov, up, sites, today,
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-end justify-between gap-3">{header}<CompanyTabs companies={companies} current={company.id} base="/operations" /></div>
+      <div className="flex flex-wrap items-end justify-between gap-3">{header}<div className="flex flex-wrap items-center gap-2"><Link href={`/tv?company=${company.id}`} target="_blank" rel="noopener" data-testid="ops-office-board-link" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>Open the office board</Link><CompanyTabs companies={companies} current={company.id} base="/operations" /></div></div>
 
       <Panel id="decisions" className="scroll-mt-20" title={`Needs my decision (${items.length})`}
         hint={<><p>Each row says who it is with, since when and why, and gives one place to act. Decisions assigned to you come first, then the follow-ups, each with the person or role it waits on.</p><p className="mt-1.5">What lands here: a submitted handover with no Project Manager or stalled for {STALLED_DAYS}+ days, an output waiting for Operations review, a blocker nobody has resolved, an installation in the next {AT_RISK_WINDOW_DAYS} days with a recorded problem, an equipment booking to review, and reservations that were not released.</p></>}>

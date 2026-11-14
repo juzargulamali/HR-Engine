@@ -2101,6 +2101,11 @@ export interface Database {
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
       ops_overview: { Args: { p_company_id: string }; Returns: unknown };
       ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
+      ops_tv_board: { Args: { p_company_id: string }; Returns: unknown };
+      ops_tv_my_display: { Args: Record<string, never>; Returns: unknown };
+      ops_tv_register_display: { Args: { p_user_id: string; p_company_id: string; p_label: string; p_office_tz?: string | null }; Returns: unknown };
+      ops_tv_revoke_display: { Args: { p_display_id: string }; Returns: unknown };
+      ops_tv_list_displays: { Args: { p_company_id: string }; Returns: unknown };
       ops_set_enquiry_planning: { Args: { p_opportunity_id: string; p_patch: unknown }; Returns: undefined };
       proj_closeout_claim: { Args: { p_project_id: string; p_payload_hash: string; p_limit: number }; Returns: unknown };
       proj_closeout_finish: { Args: { p_project_id: string; p_payload_hash: string; p_ok: boolean; p_provider_kind: string | null; p_answer: unknown }; Returns: undefined };

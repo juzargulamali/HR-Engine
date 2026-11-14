@@ -493,10 +493,10 @@ describe("Operations navigation", () => {
     ({ projects: { grants: [{ companyId: "c1", capabilities: capabilities as never[] }], ...extra } });
   const ops = (mods: NavModuleData[]) => mods.find((m) => m.id === "operations");
 
-  it("is shown to an Operations Manager, with Overview and Upcoming Work", () => {
+  it("is shown to an Operations Manager, with Overview, Upcoming Work and Office board", () => {
     const m = ops(buildNavModules([grant("employee")], proj(["operations"])));
     expect(m).toMatchObject({ label: "Operations", href: "/operations" });
-    expect(m!.sections.flatMap((s) => s.links.map((l) => [l.label, l.href]))).toEqual([["Overview", "/operations"], ["Upcoming Work", "/operations/upcoming"]]);
+    expect(m!.sections.flatMap((s) => s.links.map((l) => [l.label, l.href]))).toEqual([["Overview", "/operations"], ["Upcoming Work", "/operations/upcoming"], ["Office board", "/operations/office-board"]]);
   });
 
   it("is shown to a Projects founder, in any one of their companies", () => {
