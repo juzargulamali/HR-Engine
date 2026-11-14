@@ -278,6 +278,9 @@ function ShellInner({ children }: { children: React.ReactNode }) {
 }
 
 export function PreviewShell({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  // The Projects & Tasks redesign concept (os-preview/concept) brings its own, simpler frame: this shell steps aside for it.
+  if (pathname.startsWith("/os-preview/concept")) return <>{children}</>;
   return (
     <Suspense fallback={<div className="p-8 text-sm text-muted-foreground">Loading preview…</div>}>
       <ClockProvider><ShellInner>{children}</ShellInner></ClockProvider>
