@@ -195,8 +195,7 @@ await step("the linked edition's figures follow each viewer's own permissions: U
   await go(mgrPage, `/sales/events/${event}?edition=${e26}`);
   const mgrDefault = (await figures(mgrPage)).text;
   if (mgrDefault !== "2,1,1,0,1" && mgrDefault !== "2,1,1,1,0") throw new Error(`default scope should be ONE company: ${mgrDefault}`);
-  await mgrPage.locator("#ev-scope").selectOption("all");
-  await mgrPage.getByRole("button", { name: "Apply" }).click();
+  await mgrPage.getByRole("navigation", { name: "Company" }).getByRole("link", { name: "All my companies" }).click();
   await mgrPage.waitForURL(/scope=all/);
   await mgrPage.getByRole("table", { name: "Editions of this event" }).waitFor();
   eq((await figures(mgrPage)).text, "4,2,2,1,1", "figures under All my companies");

@@ -348,7 +348,7 @@ await step("one Reports card cannot be read: 'Could not load' on that card, the 
   try {
     await go("/sales/reports");
     await has(/This report is incomplete/, "report-level notice"); await has(/Could not load the count of closures that were later reopened/, "card message");
-    await has(/n = 1 enquiries/, "other cards intact");
+    await has(/1 enquiry, /, "other cards intact");
   } finally { healReadByPrivilege("crm_closures"); }
 });
 await step("everything is back to normal once the reads work again", async () => {

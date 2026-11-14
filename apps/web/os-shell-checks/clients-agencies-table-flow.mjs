@@ -97,7 +97,7 @@ await step("quick filters: counts, one at a time, kept in the address, reset wit
   eq((await names()).length, 3, "dormant rows");
   eq(await nav.getByRole("link", { name: /Dormant/ }).getAttribute("aria-current"), "true", "active chip");
   eq(await nav.getByRole("link", { name: /Won work/ }).getAttribute("aria-current"), null, "other chip");
-  const href = await page.getByRole("link", { name: "Export filtered results" }).getAttribute("href");
+  const href = await page.getByTestId("accounts-export-filtered").getAttribute("href");
   if (!/rel=dormant/.test(href)) throw new Error("Export filtered lacks rel: " + href);
   const res = await page.request.get(new URL(href, BASE).toString()); eq(res.status(), 200, "export status");
   await nav.getByRole("link", { name: /Dormant/ }).click(); await page.waitForURL((u) => !u.search.includes("rel="));

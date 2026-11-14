@@ -145,7 +145,7 @@ export default async function EventPage({ params, searchParams }: { params: Prom
   };
 
   const scopeNote = scope.choose ? null : <span className="text-muted-foreground" data-testid="event-scope">for <strong className="font-medium text-foreground">{scope.label}</strong></span>;
-  const selectedCounts = selected ? countEnquiries(linked) : null;
+  const selectedCounts = selected && !scope.choose ? countEnquiries(linked) : null;
   const selectedPhase = selected ? editionPhase(selected, today) : null;
 
   return (

@@ -71,7 +71,7 @@ const directory = (n: number): DirectoryRow[] => buildDirectoryRows({
   organisations: Array.from({ length: n }, (_, i) => org(`o${i}`, `Fictional Account ${String(i + 1).padStart(3, "0")}`)), contacts: [], profiles: [], opportunities: [], companyId: UAE, now: new Date("2026-11-08T08:00:00Z"),
 });
 
-beforeEach(() => { cookie = undefined; ctx.homeCompanyId = null; ctx.grants = [{ companyId: EU, capabilities: [] }, { companyId: UAE, capabilities: [] }]; loadDirectory.mockClear(); loadAccount.mockClear(); loadStaff.mockClear(); loadAccountOutreach.mockClear(); loadDirectory.mockResolvedValue([]); loadAccount.mockResolvedValue(null); });
+beforeEach(() => { sessionStorage.clear(); cookie = undefined; ctx.homeCompanyId = null; ctx.grants = [{ companyId: EU, capabilities: [] }, { companyId: UAE, capabilities: [] }]; loadDirectory.mockClear(); loadAccount.mockClear(); loadStaff.mockClear(); loadAccountOutreach.mockClear(); loadDirectory.mockResolvedValue([]); loadAccount.mockResolvedValue(null); });
 afterEach(cleanup);
 
 describe("Clients & Agencies: the company it opens in", () => {
@@ -247,6 +247,15 @@ describe("the account page", () => {
     loadAccount.mockResolvedValue(account({ contacts: 2 }));
     const two = await showAccount({ company: UAE });
     expect(two.container.querySelector("#outreach")?.getAttribute("data-contact")).toBe("");
+  });
+  it("Back returns to the directory as it was left: search, filters, sort and page", async () => {
+    loadDirectory.mockResolvedValue(directory(240));
+    address = "x";
+    await showList({ company: UAE, q: "Fictional", role: "agency", page: "2" });
+    cleanup();
+    loadAccount.mockResolvedValue(account());
+    await showAccount({ company: UAE });
+    expect(screen.getByRole("link", { name: "Clients & Agencies" }).getAttribute("href")).toBe(`/sales/accounts?company=${UAE}&q=Fictional&role=agency&page=2`);
   });
   it("Back goes to Clients & Agencies, or to Follow-ups when the account was opened from there", async () => {
     loadAccount.mockResolvedValue(account());

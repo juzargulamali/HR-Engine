@@ -13,7 +13,7 @@ vi.mock("@/lib/actions/quotations", () => ({ saveVatChoice: vi.fn() }));
 const EU = "11111111-1111-4111-8111-111111111111";
 const UAE = "22222222-2222-4222-8222-222222222222";
 const SAVED = { reference_code: "UAE", default_quote_currency: "AED", response_target_hours: 4, working_calendar: { workdays: [1, 2, 3, 4, 5], start: "09:00", end: "18:00", holidays: [] }, duplicate_window_days: 180, owner_email_enabled: false, approval_policy: "required", approval_note: null, updated_at: "2026-10-01T08:00:00Z", updated_by: "u1" };
-type Grant = { companyId: string; isFounder: boolean; capabilities: string[] };
+type Grant = { companyId: string; capabilities: string[] };
 const ctx: { userId: string; grants: Grant[]; homeCompanyId: string | null; personName: () => string; companies: { id: string; name: string; settings: unknown }[] } = {
   userId: "u1", grants: [], homeCompanyId: UAE, personName: () => "Fictional Founder",
   companies: [{ id: EU, name: "Enginious Europe", settings: null }, { id: UAE, name: "Enginious UAE", settings: SAVED }],
@@ -36,7 +36,7 @@ vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ from: tab
 
 import SalesSettingsPage from "./page";
 const show = async (sp: Record<string, string> = {}) => render(<>{await SalesSettingsPage({ searchParams: Promise.resolve(sp) })}</>);
-const founder = (...companies: string[]) => { ctx.grants = companies.map((companyId) => ({ companyId, isFounder: true, capabilities: [] })); };
+const founder = (...companies: string[]) => { ctx.grants = companies.map((companyId) => ({ companyId, capabilities: ["founder"] })); };
 
 beforeEach(() => {
   asked.length = 0; vatError = null; ctx.homeCompanyId = UAE; founder(EU, UAE);
@@ -59,7 +59,7 @@ describe("Sales settings page", () => {
     expect(asked.every((a) => a.company === UAE)).toBe(true);
     // No "All my companies" here: settings belong to one company.
     expect(screen.queryByRole("link", { name: "All my companies" })).toBeNull();
-    expect(screen.getByRole("link", { name: "Enginious Europe" }).getAttribute("href")).toBe(`/sales/settings?company=${EU}`);
+    expect(screen.getByTestId("sales-company").querySelector(`a[href="/sales/settings?company=${EU}"]`)?.textContent).toBe("Enginious Europe");
   });
 
   it("the company in the address wins (a link from Reports or an enquiry form names it)", async () => {
@@ -115,7 +115,7 @@ describe("Sales settings page", () => {
   });
 
   it("someone who may read but not change the settings gets the read-only list, no form, no Save and no Add VAT choice", async () => {
-    ctx.grants = [{ companyId: UAE, isFounder: false, capabilities: [] }, { companyId: EU, isFounder: false, capabilities: [] }];
+    ctx.grants = [{ companyId: UAE, capabilities: [] }, { companyId: EU, capabilities: [] }];
     await show();
     expect(screen.getByTestId("settings-access").textContent).toBe("You can read these settings but not change them. Ask a founder, or someone allowed to manage Sales settings, to change them.");
     expect(screen.queryByRole("form")).toBeNull();

@@ -55,6 +55,9 @@ await step("ARCHIVE: an empty edition and an edition linked only to a Poland enq
   const shape = async (year) => flat(await rowOf(year).getByRole("cell").nth(4).innerText());
   eq(await shape(2030), "0", "enquiries on the empty edition"); eq(await shape(2031), "0", "enquiries on the Poland-linked edition (invisible to her)");
   for (const [year, label] of [[2030, "empty"], [2031, "Poland-linked"]]) {
+    // Archive is in the row's More menu; its confirmation says what happens, and the button in it carries the edition's name.
+    await rowOf(year).getByRole("button", { name: "More" }).click();
+    await rowOf(year).getByRole("menuitem", { name: /Archive edition/ }).click();
     await emp.getByRole("button", { name: new RegExp(`^Archive edition .*· ${year} ·`) }).click();
     await rowOf(year).getByText("Archived", { exact: true }).waitFor({ timeout: 15000 });
     if (await rowOf(year).getByRole("button", { name: /^Archive/ }).count()) throw new Error(`the ${label} edition still offers Archive`);
