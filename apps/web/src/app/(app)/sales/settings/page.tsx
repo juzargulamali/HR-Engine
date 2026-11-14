@@ -2,12 +2,15 @@ import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canManageApprovalRules, canManageCrmAccess, canManageCrmSettings, isCrmFounder, parseWorkingCalendar } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { InfoHint } from "@/components/ui/info-hint";
+import { Panel } from "@/components/projects/parts";
+import { ChooseCompanyNotice, CompanySwitch } from "@/components/sales/company-switch";
 import { formatDate } from "@/components/sales/format";
 import { LoadError } from "@/components/workspace/states";
+import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext, type CrmCompanyInfo, type CrmContext } from "@/lib/crm/context";
 import { createClient } from "@/lib/supabase/server";
+import { SECTION, settingsBlockers } from "./blockers";
 import { VatChoices, type VatChoiceView } from "./quotation-defaults";
 import { APPROVAL_POLICY_EXPLANATION, APPROVAL_POLICY_LABEL, SettingsForm, type SettingsInitial } from "./settings-form";
 
@@ -71,88 +74,98 @@ function ReadOnlySettings({ company, ctx }: { company: CrmCompanyInfo; ctx: CrmC
   );
 }
 
-export default async function SalesSettingsPage() {
+export default async function SalesSettingsPage({ searchParams }: { searchParams?: Promise<Record<string, string | string[] | undefined>> }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
+  const sp = (await searchParams) ?? {};
+  // ONE company's settings at a time: the company in the address (a link from Reports or an enquiry form names it), else the active Sales company. With several
+  // companies and none to assume, the person chooses; nothing is shown for a company they did not pick.
+  const active = await pickSalesCompany(ctx, sp.company);
+  const c = active.company;
+  const editable = (id: string) => isCrmFounder(ctx.grants, id) || canManageCrmSettings(ctx.grants, id);
+  const others = ctx.companies.filter((x) => !x.settings && x.id !== c?.id);
+
+  const header = (
+    <div>
+      <h1 className="text-2xl font-semibold">Sales settings
+        <InfoHint label="Sales settings" className="ml-1.5">Per company: response targets and the working calendar, the commercial approval policy, and how enquiries and estimates are numbered, the default currency, duplicate warnings and the VAT choices. Anything left blank is shown as “Not configured”; nothing is guessed.</InfoHint>
+      </h1>
+      <p className="text-sm text-muted-foreground">One company at a time. Anything left blank is shown as “Not configured”; nothing is guessed.</p>
+    </div>
+  );
+  const switcher = ctx.companies.length > 0 ? <CompanySwitch companies={ctx.companies} current={c?.id ?? null} from={active.from} hrefFor={(id) => `/sales/settings?company=${id}`} /> : null;
+  // Other companies that cannot take enquiries yet are named with the way to them (the page shows one company, so they would otherwise go unnoticed).
+  const otherCompanies = others.length > 0 ? (
+    <Alert variant="warning" data-testid="settings-other-companies">
+      <p><strong>{others.length === 1 ? "One other company has" : `${others.length} other companies have`} no Sales settings yet</strong>, so enquiries cannot be recorded for {others.length === 1 ? "it" : "them"}:{" "}
+        {others.map((x, i) => <span key={x.id}>{i ? ", " : ""}<Link href={`/sales/settings?company=${x.id}#${SECTION.estimates}`} className="font-medium underline underline-offset-2">{x.name}</Link></span>)}.</p>
+    </Alert>
+  ) : null;
+
+  if (!c) {
+    return (
+      <div className="space-y-5">
+        {header}
+        {ctx.companies.length === 0 ? <Alert>You do not have Sales access to any company.</Alert> : <>{switcher}<ChooseCompanyNotice what="its Sales settings" />{otherCompanies}</>}
+      </div>
+    );
+  }
 
   const supabase = await createClient();
-  const { data: companyRows } = ctx.companies.length > 0 ? await supabase.from("companies").select("id, default_currency").in("id", ctx.companies.map((c) => c.id)) : { data: [] };
-  const legalCurrency = new Map((companyRows ?? []).map((c) => [c.id, c.default_currency]));
+  const { data: companyRows } = await supabase.from("companies").select("id, default_currency").in("id", [c.id]);
+  const legalCurrency = (companyRows ?? []).find((r) => r.id === c.id)?.default_currency ?? "";
 
   const raw = supabase as unknown as SupabaseClient; // the quotation tables are not in the generated types
   // Estimate defaults (the VAT choices). A failed read says so; it never shows an empty list. The old standard terms are kept in the database but no longer used.
-  const vatRes = ctx.companies.length > 0
-    ? await raw.from("crm_quote_vat_choices").select("id, company_id, label, kind, rate, active").in("company_id", ctx.companies.map((c) => c.id)).order("position")
-    : { data: [], error: null };
+  const vatRes = await raw.from("crm_quote_vat_choices").select("id, company_id, label, kind, rate, active").eq("company_id", c.id).order("position");
   const defaultsFailed = !!vatRes.error;
-  const vatBy = new Map<string, VatChoiceView[]>();
-  for (const v of (vatRes.data ?? []) as (VatChoiceView & { company_id: string })[]) vatBy.set(v.company_id, [...(vatBy.get(v.company_id) ?? []), { ...v, rate: v.rate == null ? null : String(v.rate) }]);
-  const editable = (id: string) => isCrmFounder(ctx.grants, id) || canManageCrmSettings(ctx.grants, id);
-  const missing = ctx.companies.filter((c) => !c.settings);
+  const vat: VatChoiceView[] = ((vatRes.data ?? []) as (VatChoiceView & { company_id: string })[]).map((v) => ({ ...v, rate: v.rate == null ? null : String(v.rate) }));
+  const canEdit = editable(c.id);
+  const blockers = settingsBlockers({ settings: c.settings, activeVatChoices: defaultsFailed ? null : vat.filter((v) => v.active).length });
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Sales settings</h1>
-        <p className="text-muted-foreground">Per company: how enquiries are numbered, the default currency, response targets, the working calendar, duplicate warnings, reminders and the commercial approval policy. Anything left blank is shown as “Not configured”; nothing is guessed.</p>
-      </div>
+    <div className="space-y-5">
+      {header}
+      {switcher}
 
-      {ctx.companies.length === 0 ? <Alert>You do not have Sales access to any company.</Alert> : null}
-
-      {missing.length > 0 ? (
-        <Alert variant="warning">
-          <p className="font-medium">{missing.length === 1 ? "One company has" : `${missing.length} companies have`} no Sales settings yet: {missing.map((c) => c.name).join(", ")}.</p>
-          <p className="mt-1">Enquiries cannot be recorded for a company until its reference code and default currency are set.</p>
-        </Alert>
+      {blockers.length > 0 ? (
+        <section aria-labelledby="settings-blockers" className="os-card space-y-2 p-4" data-testid="settings-blockers" style={{ borderColor: "hsl(var(--os-amber) / 0.5)" }}>
+          <h2 id="settings-blockers" className="text-sm font-semibold text-[hsl(var(--os-amber))]">Not set for {c.name}, and blocking work</h2>
+          <ul className="space-y-2 text-sm">
+            {blockers.map((b) => (
+              <li key={b.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1" data-blocker={b.id}>
+                <span className="min-w-0"><strong className="font-medium">{b.title}.</strong> {b.blocks}</span>
+                <a href={`#${b.section}`} className="shrink-0 font-medium underline underline-offset-2">{canEdit ? b.action : "See the setting"}</a>
+              </li>
+            ))}
+          </ul>
+          {canEdit ? null : <p className="text-sm text-muted-foreground">Ask a founder, or someone allowed to manage Sales settings, to set these.</p>}
+        </section>
       ) : null}
+      {otherCompanies}
 
-      {ctx.companies.map((c) => {
-        const canEdit = editable(c.id);
-        return (
-          <Card key={c.id} id={`company-${c.id}`}>
-            <CardHeader>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <CardTitle className="break-words">{c.name}</CardTitle>
-                {c.settings ? <Badge variant="outline">Settings saved</Badge> : <Badge variant="outline" className="border-[hsl(var(--os-amber)/0.4)] bg-[hsl(var(--os-amber)/0.1)] text-[hsl(var(--os-amber))]">Not set up yet</Badge>}
-              </div>
-              <CardDescription>
-                {canEdit ? "You can change these settings." : "You can read these settings but not change them. Ask a founder, or someone allowed to manage Sales settings, to change them."}
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              {canEdit ? (
-                <SettingsForm
-                  companyId={c.id}
-                  companyName={c.name}
-                  exists={c.settings !== null}
-                  initial={initialFor(c, legalCurrency.get(c.id) ?? "")}
-                  canEditApproval={canManageApprovalRules(ctx.grants, c.id)}
-                />
-              ) : (
-                <ReadOnlySettings company={c} ctx={ctx} />
-              )}
-            </CardContent>
-          </Card>
-        );
-      })}
+      <p className="text-sm text-muted-foreground" data-testid="settings-access">
+        {canEdit ? <>You can change the settings of <strong className="font-medium text-foreground">{c.name}</strong>.</> : "You can read these settings but not change them. Ask a founder, or someone allowed to manage Sales settings, to change them."}
+      </p>
 
-      {ctx.companies.map((c) => (
-        <Card key={`q-${c.id}`} id={`quotations-${c.id}`}>
-          <CardHeader>
-            <CardTitle className="break-words">{c.name}: Estimates</CardTitle>
-            <CardDescription>The VAT choices Sales can pick from on an estimate. Estimates do not print standard terms.</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {defaultsFailed ? <LoadError what="the estimate defaults" retryHref="/sales/settings" /> : (
-              <>
-                <section aria-label="VAT choices" className="space-y-2"><h3 className="text-sm font-semibold">VAT choices</h3><VatChoices companyId={c.id} choices={vatBy.get(c.id) ?? []} canEdit={editable(c.id)} /></section>
-              </>
-            )}
-          </CardContent>
-        </Card>
-      ))}
+      {canEdit ? (
+        <SettingsForm key={c.id} companyId={c.id} companyName={c.name} exists={c.settings !== null} initial={initialFor(c, legalCurrency)} canEditApproval={canManageApprovalRules(ctx.grants, c.id)} />
+      ) : (
+        <Panel id="settings-read-only" title={c.name} actions={c.settings ? null : <span className="os-badge" data-tone="amber">Not set up yet</span>}>
+          {/* The read-only view is one list; the section addresses other pages link to (for example Reports) still land here. */}
+          {[SECTION.response, SECTION.approval, SECTION.estimates].map((anchor) => <span key={anchor} id={anchor} />)}
+          <ReadOnlySettings company={c} ctx={ctx} />
+        </Panel>
+      )}
 
-      {ctx.companies.some((c) => canManageCrmAccess(ctx.grants, c.id)) ? (
+      <Panel id={SECTION.vat} title={`VAT choices for ${c.name}`} description="Part of Estimates & VAT. Each choice is saved as it is added."
+        hint="The VAT choices Sales can pick from on an estimate. “0%” and “Out of scope” are separate explicit choices; nothing is chosen for the client. Estimates do not print standard terms.">
+        {defaultsFailed ? <LoadError what="the VAT choices" retryHref={`/sales/settings?company=${c.id}`} /> : (
+          <section aria-label="VAT choices"><VatChoices companyId={c.id} companyName={c.name} choices={vat} canEdit={canEdit} /></section>
+        )}
+      </Panel>
+
+      {canManageCrmAccess(ctx.grants, c.id) ? (
         <p className="text-sm text-muted-foreground">Who can use Sales is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>.</p>
       ) : null}
     </div>

@@ -129,7 +129,7 @@ describe("Clients & Agencies: a long list is paged, never cut off", () => {
   it("says which rows are shown and offers the next page, keeping filters and sort", async () => {
     loadDirectory.mockResolvedValue(directory(240));
     await showList({ company: UAE, role: "agency", sort: "name", dir: "desc" });
-    expect(screen.getByTestId("accounts-count").textContent).toContain("Showing 1-100 of 240 accounts matching, of 240 in all".replace(" matching, of 240 in all", ""));
+    expect(screen.getByTestId("accounts-count").textContent).toContain("Showing 1-100 of 240 accounts, figures for Fictional Beta UAE");
     expect(screen.getAllByRole("row")).toHaveLength(101);
     const next = screen.getAllByRole("link", { name: /Next page/ });
     expect(next).toHaveLength(2); // above and below the table
@@ -247,6 +247,17 @@ describe("the account page", () => {
     loadAccount.mockResolvedValue(account({ contacts: 2 }));
     const two = await showAccount({ company: UAE });
     expect(two.container.querySelector("#outreach")?.getAttribute("data-contact")).toBe("");
+  });
+  it("Back goes to Clients & Agencies, or to Follow-ups when the account was opened from there", async () => {
+    loadAccount.mockResolvedValue(account());
+    await showAccount({ company: UAE });
+    expect(screen.getByRole("link", { name: "Clients & Agencies" }).getAttribute("href")).toBe(`/sales/accounts?company=${UAE}`);
+    cleanup();
+    await showAccount({ company: UAE, from: "follow-ups" });
+    expect(screen.getByRole("link", { name: "Follow-ups" }).getAttribute("href")).toBe("/sales/follow-ups");
+    expect(screen.queryByRole("link", { name: "Clients & Agencies" })).toBeNull();
+    // seeing the account for the other company keeps the way back
+    expect(within(companyBar()).getByRole("link", { name: "Fictional Alpha Europe" }).getAttribute("href")).toBe(`/sales/accounts/${ORG}?company=${EU}&from=follow-ups`);
   });
   it("a failed read says it could not load", async () => {
     loadAccount.mockRejectedValue(new Error("Clients & Agencies could not be loaded: down"));

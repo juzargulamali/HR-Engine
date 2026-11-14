@@ -131,7 +131,7 @@ await step("New enquiry: one field each for Agency, End client and Event; simila
   await empPage.getByRole("link", { name: "Fictional Expo Global · 2026 · Dubai" }).waitFor();
 });
 await step("the event link can be changed and cleared from Edit details, and an enquiry made before it existed (no link) still works", async () => {
-  await go(empPage, `/sales/opportunities/${oppId}`);
+  await go(empPage, `/sales/opportunities/${oppId}?tab=scope`);
   const open = async () => { await empPage.getByRole("button", { name: "Edit details" }).first().click(); const dlg = empPage.getByRole("dialog"); await dlg.waitFor(); await dlg.getByRole("combobox", { name: /^Agency/ }).waitFor(); await empPage.waitForFunction(() => !document.querySelector('[role=dialog] input[role=combobox][disabled]')); return dlg; };
   let dlg = await open();
   eq(await dlg.getByRole("combobox", { name: /^Event/ }).inputValue(), "Fictional Expo Global · 2026 · Dubai", "the current event in the dialog");

@@ -46,7 +46,7 @@ function projectText(p: InquiryRow["project"]): string {
   }
 }
 
-export default async function AccountPageRoute({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ company?: string; outreach_link?: string }> }) {
+export default async function AccountPageRoute({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ company?: string; outreach_link?: string; from?: string }> }) {
   const ctx = await getCrmContext();
   if (!ctx) return null;
   const [{ id }, sp] = await Promise.all([params, searchParams]);
@@ -55,9 +55,12 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   const active = await pickSalesCompany(ctx, sp.company);
   const company = active.company;
   // Back returns to the directory as it was left (search, filters, sort, page), not to a bare list.
-  const back = <BackLink section="accounts" fallback={`/sales/accounts${company ? `?company=${company.id}` : ""}`}>Clients &amp; Agencies</BackLink>;
+  // Opened from Follow-ups (its account links carry `from=follow-ups`): Back returns there, as that list was left.
+  const back = sp.from === "follow-ups"
+    ? <BackLink section="follow-ups" fallback="/sales/follow-ups">Follow-ups</BackLink>
+    : <BackLink section="accounts" fallback={`/sales/accounts${company ? `?company=${company.id}` : ""}`}>Clients &amp; Agencies</BackLink>;
   // The switch also remembers the company on screen (it renders the memory), so the next Sales page opens in it.
-  const companySwitch = <CompanySwitch companies={ctx.companies} current={company?.id ?? null} from={active.from} hrefFor={(c) => `/sales/accounts/${id}?company=${c}`} />;
+  const companySwitch = <CompanySwitch companies={ctx.companies} current={company?.id ?? null} from={active.from} hrefFor={(c) => `/sales/accounts/${id}?company=${c}${sp.from === "follow-ups" ? "&from=follow-ups" : ""}`} />;
   if (!company) {
     return (
       <div className="space-y-4">

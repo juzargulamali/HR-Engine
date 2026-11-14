@@ -147,7 +147,7 @@ await step("Quote sent is refused without the Zoho quote reference (screen hint 
   if (refused.ok || !/Zoho Books quote reference/.test(refused.out)) throw new Error(`gate: ${refused.out}`);
   if (world(OPP) !== w) throw new Error("the refusal changed the enquiry");
   await go(oppUrl.replace(BASE, ""));
-  await page.getByRole("button", { name: /^move stage$/i }).first().click();
+  await page.getByRole("button", { name: "More", exact: true }).first().click(); await page.getByRole("menuitem", { name: /Move to another stage/ }).click();
   const dlg = page.getByRole("dialog"); await dlg.waitFor();
   await dlg.getByLabel("Move to").selectOption({ label: "Quote sent" });
   if (!/Record the Zoho Books quote reference first/.test(flat(await dlg.innerText()))) throw new Error("the Move stage dialog does not say the quote reference is needed");
@@ -195,7 +195,7 @@ await step("an emptied field is an intentional clear; the others stay; saving wi
 });
 await step("with the quote reference recorded, Quote sent works on the screen", async () => {
   await go(oppUrl.replace(BASE, ""));
-  await page.getByRole("button", { name: /^move stage$/i }).first().click();
+  await page.getByRole("button", { name: "More", exact: true }).first().click(); await page.getByRole("menuitem", { name: /Move to another stage/ }).click();
   const dlg = page.getByRole("dialog"); await dlg.waitFor();
   await dlg.getByLabel("Move to").selectOption({ label: "Quote sent" });
   await dlg.getByRole("button", { name: /^move stage$/i }).click();
