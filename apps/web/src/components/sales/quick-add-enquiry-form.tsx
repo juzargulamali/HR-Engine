@@ -41,7 +41,7 @@ export interface QuickAddEnquiryProps {
   currentUserName: string;
   today: string;
   /** The active Sales company and why it is the one. `from: "choose"` = no reliable default: the form starts with no company and asks. */
-  activeCompany: { id: string | null; from: ActiveCompanySource };
+  activeCompany?: { id: string | null; from: ActiveCompanySource };
 }
 
 /**
@@ -147,7 +147,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
         <input type="hidden" name="after" value="panel" />
         <input type="hidden" name="returnTo" value={here} />
         <input type="hidden" name="nextKind" value={DEFAULT_NEXT_KIND} />
-        <CompanyField id="qa-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany.from} />
+        <CompanyField id="qa-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
         <NoSettingsAlert company={company} />
 
         {/* Until a company is chosen nothing below can be filled in: a disabled fieldset turns every field and button inside it off at once. */}

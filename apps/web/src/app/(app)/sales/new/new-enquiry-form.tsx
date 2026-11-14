@@ -291,7 +291,7 @@ export function NewEnquiryForm({
   /** Today's date in Dubai (YYYY-MM-DD), decided on the server so the page does not differ between server and browser. */
   today: string;
   /** The active Sales company and why it is the one (lib/crm/active-company.ts). `from: "choose"` = no reliable default: the form starts with no company. */
-  activeCompany: { id: string | null; from: ActiveCompanySource };
+  activeCompany?: { id: string | null; from: ActiveCompanySource };
   /** Starting values read from the address (parseEnquiryPrefill): from Quick Add's "Open the full form", or from an account's Outreach section. Already checked against what the person may use. */
   prefill?: EnquiryPrefill | null;
   /** The names of address parameters that were not used (an id the person may not use, a malformed value). */
@@ -450,7 +450,7 @@ export function NewEnquiryForm({
           {prefillIgnored.length > 0 ? <Alert variant="warning" role="status">Part of the link could not be used and was left out ({prefillIgnored.join(", ")}): it did not match anything you can choose here. Fill those in yourself.</Alert> : null}
 
           <Section title="Company" help="An enquiry belongs to one Enginious company. That decides its reference, its default currency and who can see it.">
-            <CompanyField id="enq-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany.from} />
+            <CompanyField id="enq-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
             <NoSettingsAlert company={company} />
           </Section>
 

@@ -56,9 +56,12 @@ export const ENQUIRY_HELP = {
 
 /**
  * The company a form starts in: the active Sales company (lib/crm/active-company.ts), when it is one of the companies offered. Otherwise none, and the form
- * asks the person to choose. It never falls back to the first company in the list.
+ * asks the person to choose. It never falls back to the first company in the list (a person's ONLY company is used: that is not a guess).
  */
-export function startingCompanyId(companies: readonly { id: string }[], active: { id: string | null; from: ActiveCompanySource }): string {
+export function startingCompanyId(companies: readonly { id: string }[], active?: { id: string | null; from: ActiveCompanySource } | null): string {
+  // The only company a person has is not a guess.
+  if (companies.length === 1) return companies[0]!.id;
+  if (!active) return "";
   if (active.from === "choose" || active.from === "none" || !active.id) return "";
   return companies.some((c) => c.id === active.id) ? active.id : "";
 }
