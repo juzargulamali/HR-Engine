@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { OsBadge } from "@/components/os/pills";
 import { Muted, Panel } from "@/components/projects/parts";
-import { ActivityDialog, ApplyProjectDateDialog, CrewDialog, QuickAddActivitiesDialog, ReadinessDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
+import { ActivityDialog, ApplyProjectDateDialog, ClearStartDialog, CrewDialog, PreviewBriefingDialog, QuickAddActivitiesDialog, ReadinessDialog, RecordStartDialog, RemoveShipmentDialog, ShipmentDialog } from "@/components/projects/site/site-forms";
 import type { Option } from "@/components/projects/delivery/delivery-forms";
 import { barPosition, timelineScale, type TimelineScale } from "@/lib/projects/delivery-plan/insights";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,8 @@ import {
   gapText, effectiveReadyText, EFFECTIVE_LABELS, type SiteActivity, type SiteBriefing, type SiteSchedule, type SiteShipment,
 } from "@/lib/projects/phase2/model";
 import { dateText } from "@/lib/projects/format";
+import { describeSitePhase } from "@/lib/projects/site-state";
+import { projectReadyText } from "@/lib/projects/site-assignments";
 
 const KIND_BAR: Record<string, string> = { setup: "bg-[hsl(var(--os-info))] border-[hsl(var(--os-info))]", show: "bg-[hsl(var(--os-green))] border-[hsl(var(--os-green))]", dismantling: "bg-[hsl(var(--os-amber))] border-[hsl(var(--os-amber))]", mockup: "bg-muted-foreground border-muted-foreground", other: "bg-muted-foreground border-muted-foreground" };
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -27,17 +29,20 @@ function ActivityRow({ a, projectId, schedule, canEdit, members, briefing }: { a
         <div className="min-w-0 flex-1 basis-64">
           <p className="break-words text-sm"><span className="font-medium">{a.title}</span> <span className="text-[13px] text-muted-foreground">{a.kind ? ACTIVITY_KIND_LABELS[a.kind] : "Activity"}</span></p>
           <p className="break-words text-[13px] font-medium" data-testid={`site-when-${a.id}`}>{activityWhen(a, schedule.tz)}</p>
+          {briefing?.phase ? (() => { const st = describeSitePhase(briefing.phase); return <p className={cn("break-words text-[13px]", st.tone === "green" ? "text-[hsl(var(--os-green))]" : st.tone === "amber" ? "text-[hsl(var(--os-amber))]" : st.tone === "blue" ? "text-[hsl(var(--os-info))]" : "text-muted-foreground")} data-testid={`site-phase-${a.id}`}><span className="font-medium">{st.label}</span>{st.detail ? <span className="text-muted-foreground"> · {st.detail}</span> : null}</p>; })() : null}
           {briefing && !a.start_date && !a.starts_at && briefing.effective.start_date && briefing.effective.date_source === "project" ? <p className="break-words text-[13px]" data-testid={`site-project-date-${a.id}`}>{dateText(briefing.effective.start_date)}{briefing.effective.end_date && briefing.effective.end_date !== briefing.effective.start_date ? ` to ${dateText(briefing.effective.end_date)}` : ""} <span className="text-muted-foreground">(from the project dates; the time is not set)</span></p> : null}
           <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-venue-${a.id}`}>{a.location ?? (briefing?.effective.venue ? `${briefing.effective.venue} (the project's venue)` : "No venue")} · Owner {a.owner_name ?? "not named"}</p>
           {a.crew.length > 0 ? <p className="break-words text-[13px]" data-testid={`site-crew-text-${a.id}`}>{Object.entries(crewByRole).map(([r, n]) => `${CREW_ROLE_LABELS[r as keyof typeof CREW_ROLE_LABELS]}: ${n.join(", ")}`).join(" · ")}</p> : null}
           {calls.length > 0 ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-calls-${a.id}`}>Call times: {calls.map((c) => `${c.name ?? "Someone"} ${formatAt(c.call_at!, c.call_tz ?? a.tz ?? schedule.tz)}`).join(" · ")}</p> : null}
           {overlapNames.length > 0 ? <p className="break-words text-[13px] font-medium text-[hsl(var(--os-red))]" role="status" data-testid={`site-crew-overlap-${a.id}`}>Already booked at this time: {overlapNames.join(", ")}. Another confirmed activity or booking overlaps.</p> : null}
-          {briefing ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-ready-${a.id}`}>Ready: {(["hardware", "content", "app"] as const).map((k) => `${k} ${EFFECTIVE_LABELS[briefing.ready[k].state].toLowerCase()}${briefing.ready[k].detail ? ` (${briefing.ready[k].detail})` : ""}`).join(", ")}{briefing.ready.note ? `. ${briefing.ready.note}` : ""}</p> : null}
+          {briefing ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-ready-${a.id}`}>This run&apos;s readiness: {(["hardware", "content", "app"] as const).map((k) => { const t = effectiveReadyText(briefing.ready[k]); return `${k} ${t.charAt(0).toLowerCase()}${t.slice(1)}`; }).join(", ")}{briefing.ready.note ? `. ${briefing.ready.note}` : ""}</p> : null}
+          {briefing && projectReadyText(briefing.ready) ? <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-project-ready-${a.id}`}>{projectReadyText(briefing.ready)}</p> : null}
           {a.notes ? <p className="break-words text-[13px] text-muted-foreground">{a.notes}</p> : null}
         </div>
         <div className="flex flex-wrap items-center gap-1.5">
           <StateBadge state={a.state} />
-          {canEdit ? <><CrewDialog projectId={projectId} activity={a} members={members} /><ReadinessDialog projectId={projectId} activity={a} /><ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} /></> : null}
+          {canEdit ? <><CrewDialog projectId={projectId} activity={a} members={members} /><PreviewBriefingDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} /><ReadinessDialog projectId={projectId} activity={a} /><ActivityDialog projectId={projectId} activity={a} members={members} tz={schedule.tz} />
+            {briefing?.phase?.phase === "started" ? <ClearStartDialog projectId={projectId} activity={a} /> : <RecordStartDialog projectId={projectId} activity={a} />}</> : null}
         </div>
       </div>
       {canEdit && briefing && briefing.gaps.length > 0 ? (

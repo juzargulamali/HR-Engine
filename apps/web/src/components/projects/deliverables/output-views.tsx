@@ -73,6 +73,8 @@ export function TaskOutputSection({ projectId, task, row, tz, files, flags, focu
   // Whether THIS reader may decide the current version is the database's answer (`can_decide`): the screen shows what the database would allow.
   const focus = focusVersionId && cur ? row.versions.find((v) => v.id === focusVersionId) ?? null : null;
   const mayDecide = cur ? (cur.can_decide ?? flags.canReview) : flags.canReview;
+  // A new version after a request for changes: the reviewer sees what was asked for right beside it (the full history stays below), so they can check that it was done.
+  const prior = cur && cur.status === "awaiting" ? row.versions.filter((v) => v.version_no < cur.version_no && v.decision_note).sort((a, b) => b.version_no - a.version_no)[0] ?? null : null;
   return (
     <section aria-label="Expected output" className="space-y-2 rounded-md border border-border p-3" data-testid="task-output">
       <div className="flex flex-wrap items-center gap-2">
@@ -85,6 +87,7 @@ export function TaskOutputSection({ projectId, task, row, tz, files, flags, focu
       {focus && cur && focus.id !== cur.id ? <Alert variant="warning" role="status" data-testid="output-version-stale">Version {focus.version_no} is no longer the current one: version {cur.version_no} was submitted after it. What is shown and reviewed here is version {cur.version_no}; a link to an older version never approves a newer one.</Alert> : null}
       {cur?.needs_reviewer ? <Alert variant="warning" role="status" data-testid="output-needs-reviewer"><p className="font-medium">Needs an Operations reviewer</p><p className="text-[13px]">{NEEDS_REVIEWER_HELP} <Link href="/people-access" className="underline">Open People &amp; Access</Link>.</p></Alert> : null}
       {cur ? <VersionBody v={cur} row={row} tz={tz} /> : null}
+      {prior ? <p className="whitespace-pre-wrap break-words rounded-md bg-[hsl(var(--field))] px-2.5 py-1.5 text-[13px]" data-testid="output-prior-feedback"><span className="font-medium">Earlier feedback, on version {prior.version_no}{prior.decided_by_name ? ` (${prior.decided_by_name})` : ""}: </span>{prior.decision_note}</p> : null}
       {!flags.readOnly ? (
         <div className="flex flex-wrap items-center gap-2">
           {flags.canSubmit && open ? <SubmitVersionDialog projectId={projectId} taskId={task.id} label={row.output_label} expected={row.output_qty ?? 1} nextNo={(cur?.version_no ?? 0) + 1} files={files} /> : null}
@@ -100,11 +103,11 @@ export function TaskOutputSection({ projectId, task, row, tz, files, flags, focu
 }
 
 /** The Deliverables view of Project Plan: the same records as the task panel, grouped by activation, with filters, a compact version history and the export. */
-export function RegisterView({ projectId, register, filter, rows, isReviewer, feedback, activations, hrefFor }: {
-  projectId: string; register: Register; filter: RegisterFilter; rows: RegisterRow[]; isReviewer: (r: RegisterRow) => boolean;
+export function RegisterView({ projectId, register, filter, rows, isReviewer, feedback, activations, hrefFor, userId = "" }: {
+  userId?: string; projectId: string; register: Register; filter: RegisterFilter; rows: RegisterRow[]; isReviewer: (r: RegisterRow) => boolean;
   feedback: { id: string; name: string }[]; activations: { id: string; name: string }[]; hrefFor: (f: RegisterFilter) => string;
 }) {
-  const counts = registerCounts(register.rows);
+  const counts = registerCounts(register.rows, userId);
   const groups = groupByActivation(rows);
   return (
     <div className="space-y-4" data-testid="deliverables-register">
@@ -134,7 +137,7 @@ export function RegisterView({ projectId, register, filter, rows, isReviewer, fe
                   {r.output_required ? <OsBadge tone="blue">Required</OsBadge> : null}
                   {r.current ? <span className="text-[13px] text-muted-foreground">Version {r.current.version_no}{quantityText(r, r.current) ? ` · ${quantityText(r, r.current)}` : ""}</span> : null}
                 </div>
-                <p className="break-words text-[13px] text-muted-foreground">Task: <Link href={`/projects/${projectId}/work?task=${r.task_id}`} className="underline-offset-4 hover:underline">{r.task_title}</Link> · Owner {r.assignee_name ?? "not named"}{r.milestone ? ` · Milestone ${r.milestone.title}` : ""}</p>
+                <p className="break-words text-[13px] text-muted-foreground">Task: <Link href={`/projects/${projectId}/work?task=${r.task_id}${r.current ? `&version=${r.current.id}` : ""}`} className="underline-offset-4 hover:underline" data-testid={`deliverable-task-link-${r.task_id}`}>{r.task_title}</Link> · Owner {r.assignee_name ?? "not named"}{r.milestone ? ` · Milestone ${r.milestone.title}` : ""}</p>
                 {r.current ? <VersionBody v={r.current} row={r} tz={register.tz} linkFeedback={(r.current?.can_decide ?? isReviewer(r)) ? <LinkFeedbackDialog projectId={projectId} versionId={r.current.id} feedback={feedback} activations={activations} /> : null} /> : null}
                 <p className="text-[13px] font-medium">{nextOutputAction(r, { isAssignee: false, isReviewer: isReviewer(r) })}</p>
                 {r.versions.length > 1 ? <VersionHistory row={r} tz={register.tz} /> : null}

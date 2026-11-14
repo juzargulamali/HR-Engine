@@ -13,9 +13,9 @@ import type { UpcomingRow } from "@/lib/operations/model";
 
 /**
  * The Operations side of a flagged enquiry: provisional Project Manager, risk, capacity conflict and a question for Sales. Saving writes the planning row and a line in the
- * enquiry's history, where Sales reads it. It does not create a project, book anyone or reserve stock, and the dialog says so next to the field where that could be assumed.
+ * enquiry's history, where Sales reads it. The button reads "Name a provisional Project Manager" when that is the known next step, otherwise "Plan". It does not create a project, book anyone or reserve stock, and the dialog says so next to the field where that could be assumed.
  */
-export function PlanningDialog({ row, people }: { row: UpcomingRow; people: { id: string; name: string }[] }) {
+export function PlanningDialog({ row, people, label = "Plan", primary = false }: { row: UpcomingRow; people: { id: string; name: string }[]; label?: string; primary?: boolean }) {
   const [open, setOpen] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [question, setQuestion] = useState(row.planning?.question ?? "");
@@ -23,7 +23,7 @@ export function PlanningDialog({ row, people }: { row: UpcomingRow; people: { id
   const p = row.planning;
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} data-testid={`ops-plan-${row.reference}`}>Plan</Button>
+      <Button type="button" variant={primary ? "default" : "outline"} size="sm" onClick={() => setOpen(true)} data-testid={`ops-plan-${row.reference}`}>{label}</Button>
       <Modal open={open} onClose={close} title={`Plan ${row.reference}`} description="Sales sees this on the enquiry.">
         {notice ? (
           <div className="space-y-3"><Alert role="status">{notice}</Alert><Button type="button" onClick={close}>Close</Button></div>

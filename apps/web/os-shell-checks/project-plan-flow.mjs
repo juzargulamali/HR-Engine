@@ -223,7 +223,9 @@ await step("release: the dialog says what it creates; one task per work line, on
   await page.getByTestId("dp-release").click();
   const pv = await page.getByTestId("dp-release-preview").innerText();
   if (!/9 tasks will be created/.test(pv) || !/1 hardware line will be added to the project's draft equipment request/.test(pv)) throw new Error(`preview: ${pv}`);
-  if (!/1 hardware line is bought, rented or client supplied/.test(pv) || !/needs a stock match/.test(pv)) throw new Error(`preview misses the rented or waiting line: ${pv}`);
+  const attention = await page.getByTestId("dp-release-attention").innerText();
+  if (!/1 hardware line is bought, rented or client supplied/.test(pv) || !/needs a stock match/i.test(attention) || !/Choose the stock item/.test(attention)) throw new Error(`preview misses the rented line or the line that needs attention: ${pv} / ${attention}`);
+  if (!(await page.getByTestId("dp-release-attention").locator("a[href*='/delivery#dp-']").count())) throw new Error("a line that needs attention has no link to it");
   await dialog().getByRole("button", { name: "Release", exact: true }).click();
   await until(() => db(`select count(*) from proj_tasks where project_id='${PRJ}'`) === "9");
   await seen(/Released: 9 tasks created, 1 line added to the draft equipment request/).catch(() => {});

@@ -115,17 +115,21 @@ describe("Projects Phase 2 follow-up 2: the crew card and the briefing", () => {
       ('${P}', '${item}', 'L0001', 'hardware', 'Secret LED wall panels', '${U.pm}'), ('${P}', '${item}', 'L0002', 'content', 'Secret intro film', '${U.pm}'), ('${P}', '${item}', 'L0003', 'content', 'Secret stills', '${U.pm}')`);
     await call(U.pm, `proj_set_activity_readiness('${show}', ${j({ content: "unknown", app: "unknown" })})`);                         // back to "not recorded": the plan now speaks
     row = (await briefing(U.pm, P)).find((x) => x.id === show)!;
-    expect(row.ready.hardware).toMatchObject({ state: "not_ready", detail: "0 of 1 ready", source: "plan" });
-    expect(row.ready.content).toMatchObject({ state: "not_ready", detail: "0 of 2 ready", source: "plan" });
-    expect(row.ready.app).toMatchObject({ state: "not_applicable", source: "plan" });                                                 // the plan has lines, none of this kind
+    // 20270109000100: the Project Plan's counts are PROJECT-WIDE and stay apart; the run itself has no evidence yet, so it is Not recorded
+    expect(row.ready.hardware).toMatchObject({ state: "not_recorded" });
+    expect(row.ready.content).toMatchObject({ state: "not_recorded" });
+    expect(row.ready.project!.hardware).toMatchObject({ state: "not_ready", detail: "0 of 1 equipment lines reserved or sent" });
+    expect(row.ready.project!.content).toMatchObject({ state: "not_ready", detail: "0 of 2 outputs approved" });
+    expect(row.ready.project!.app).toMatchObject({ state: "not_applicable" });
     const t = await call<string>(U.pm, `proj_create_task('${P}', ${j({ title: "Intro film", assignee_id: U.member })})`);
     await admin(`update proj_dp_lines set task_id = '${t}' where line_key = 'L0002' and project_id = '${P}'; update proj_tasks set status = 'done', completed_at = now() where id = '${t}'`);
     row = (await briefing(U.pm, P)).find((x) => x.id === show)!;
-    expect(row.ready.content).toMatchObject({ state: "not_ready", detail: "1 of 2 ready" });
-    // a technician sees the counts and states for their own activity, never a line, task or file name
+    expect(row.ready.content).toMatchObject({ state: "not_recorded" });                                                                // a finished task alone is not an approved output
+    expect(row.ready.project!.content.state).not.toBe("ready");
+    // a technician sees states for their own activity, never a line, task or file name
     await call(U.pm, `proj_set_site_crew('${show}', ${j([{ user_id: U.tech, role: "installation" }])}, null)`);
     const mine = await mineOf(U.tech, show);
-    expect(mine!.ready_effective.content).toMatchObject({ state: "not_ready", detail: "1 of 2 ready" });
+    expect(mine!.ready_effective.content).toMatchObject({ state: "not_recorded" });
     expect(JSON.stringify(mine)).not.toMatch(/Secret|Intro film|task_id|file|budget|scope/i);
     await expect(call(U.tech, `proj_site_briefing('${P}')`)).rejects.toThrow();                                                       // the PM view is not a technician read
     await admin(`delete from proj_dp_lines where project_id = '${P}'; delete from proj_site_crew where plan_item_id = '${show}'; delete from proj_plan_items where id = '${show}'`);
@@ -155,10 +159,12 @@ describe("Projects Phase 2 follow-up 2: the crew card and the briefing", () => {
 
   it("the owner packs: verify still passes with the new migration, and rollback restores the previous read", async () => {
     const verify = await admin<{ item: string; result: string }>(manual("proj_phase2_crew_briefing_20_verify_readonly.sql"));
-    expect(verify.filter((r) => r.result.startsWith("FAIL"))).toEqual([]);
+    // row 3 describes the body of proj_my_site_assignments that 20270109000100 deliberately replaced (the site-state verify pack checks the new one)
+    expect(verify.filter((r) => r.result.startsWith("FAIL") && !r.item.startsWith("the technician read carries"))).toEqual([]);
     const pre = await admin<{ item: string; result: string }>(manual("proj_phase2_crew_briefing_00_preflight_readonly.sql"));
     expect(pre.filter((r) => /^STOP/.test(r.result))).toEqual([]);
     await admin(`update proj_plan_items set ready_app = 'unknown' where ready_app = 'not_applicable'`);
+    await db.seed(manual("proj_phase2_site_state_90_rollback.sql"));                                                                  // later migrations are rolled back first
     await db.seed(manual("proj_phase2_crew_briefing_90_rollback.sql"));
     await db.seed(manual("proj_phase2_crew_briefing_90_rollback.sql"));                                                               // safe twice
     expect(await admin(`select 1 from pg_proc where proname = 'proj_site_briefing'`)).toHaveLength(0);

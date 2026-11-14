@@ -18,7 +18,10 @@ import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 import { AddFileForms, OpenFileButton, RemoveFileButton } from "./file-forms";
 import { IssueTimelineForm, RecordAcceptedForm, RecordSentForm } from "./plan-forms";
+import { ClientTimelinePicker, type PickerRow } from "./client-timeline-picker";
 import { PlanTable } from "./plan-table";
+import { planItemWhen } from "../timeline/timeline-helpers";
+import { PLAN_KIND_LABELS } from "@/lib/projects/plan-view";
 
 export const metadata = { title: "Documents" };
 
@@ -42,12 +45,22 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
   const finished = isFinishedProject(project.status);
   const isClient = project.kind === "client";
 
-  const [filesRes, plansRes, outdatedRes, previewRes] = await Promise.all([
+  const [filesRes, plansRes, outdatedRes, previewRes, pickMilestonesRes, pickItemsRes] = await Promise.all([
     supabase.from("proj_files").select("*").eq("project_id", id).is("deleted_at", null).order("created_at", { ascending: false }),
     isClient ? supabase.from("proj_issued_plans").select("*").eq("project_id", id).order("version", { ascending: false }) : Promise.resolve({ data: [] }),
     isClient ? supabase.rpc("proj_plan_outdated", { p_project_id: id }) : Promise.resolve({ data: null }),
     isClient && view.canManage ? supabase.rpc("proj_current_plan_payload", { p_project_id: id }) : Promise.resolve({ data: null }),
+    isClient && view.canManage ? supabase.from("proj_milestones").select("id, title, due_date, client_facing, version").eq("project_id", id).order("sort_order").limit(300) : Promise.resolve({ data: null }),
+    isClient && view.canManage ? supabase.from("proj_plan_items").select("id, plan, title, start_date, end_date, starts_at, ends_at, tz, client_facing, version, status, sort_order").eq("project_id", id).neq("status", "cancelled").order("sort_order").limit(300) : Promise.resolve({ data: null }),
   ]);
+  // The existing milestones and timeline activities, as tick boxes (a failed read just hides the chooser; the preview and issued versions still show).
+  const pickRows: PickerRow[] = [
+    ...(pickMilestonesRes.data ?? []).map((m) => ({ kind: "mile" as const, id: m.id, title: m.title, when: m.due_date ? `Due ${formatDate(m.due_date)}` : "No date", group: "Milestones", clientFacing: m.client_facing, version: m.version })),
+    ...(pickItemsRes.data ?? []).map((i) => ({
+      kind: "item" as const, id: i.id, title: i.title, group: PLAN_KIND_LABELS[i.plan as "delivery" | "site"] ?? "Timeline",
+      when: planItemWhen(i as unknown as Parameters<typeof planItemWhen>[0], view.details?.site_timezone ?? "UTC").source, clientFacing: i.client_facing, version: i.version,
+    })),
+  ];
   const files = filesRes.data ?? [];
   const plans = plansRes.data ?? [];
   const outdated = outdatedRes.data === true;
@@ -57,7 +70,7 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
 
   return (
     <div className="space-y-6">
-      <Panel title="Files and links" description="Private to this project's members and founders."
+      <Panel title="Project files" description="Private to this project's members and founders. Not part of the client timeline."
         hint={<>Files are checked before they become available, and every download re-checks that you still have access. Restricted files are visible to the Project Manager only. Commercial documents belong in Sales &amp; CRM, not here.</>}>
         {files.length === 0 ? (
           <EmptyState dense title="No files or links yet" description="Briefs, drawings and confirmations the team needs go here." />
@@ -119,14 +132,26 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
             </Alert>
 
             {view.canManage ? (
-              <div>
-                <h3 className="mb-2 text-sm font-semibold">What would be issued now<InfoHint label="what would be issued" className="ml-1">To change it, mark milestones, timeline activities and dependencies as client-facing on their own pages. Nothing is client-facing by default.</InfoHint></h3>
+              <div id="choose-client-items" data-testid="ct-choose">
+                <h3 className="mb-2 text-sm font-semibold">1. Choose what the client sees</h3>
+                {pickRows.length === 0 ? (
+                  <EmptyState dense title="No milestones or timeline activities yet" description={`Add milestones in the Project Plan or timeline activities in the Delivery timeline, then tick the ones the client should see.`}
+                    action={<div className="flex flex-wrap gap-2"><Link href={`/projects/${id}/delivery?view=milestones`} className={buttonVariants({ variant: "outline", size: "sm" })}>Add milestones</Link><Link href={`/projects/${id}/plan`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the timelines</Link></div>} />
+                ) : (
+                  <ClientTimelinePicker projectId={id} rows={pickRows} canEdit={!finished} />
+                )}
+              </div>
+            ) : null}
+
+            {view.canManage ? (
+              <div id="issue-preview" data-testid="ct-preview">
+                <h3 className="mb-2 text-sm font-semibold">2. Preview: what would be issued now<InfoHint label="what would be issued" className="ml-1">This is the live preview of the next version, built from the ticks above plus any client-facing dependencies (marked on the Delivery timeline page). Nothing is sent until a version is issued and a person records it as sent.</InfoHint></h3>
                 {preview ? <PlanTable payload={preview} /> : <Muted>The preview is not available.</Muted>}
               </div>
             ) : null}
 
-            <div>
-              <h3 className="mb-2 text-sm font-semibold">Issued versions</h3>
+            <div id="issued-versions" data-testid="ct-issued">
+              <h3 className="mb-2 text-sm font-semibold">{view.canManage ? "3. " : ""}Issued versions (frozen)</h3>
               {plans.length === 0 ? (
                 <EmptyState dense title="No version has been issued" description={view.canManage ? "Issuing freezes the timeline as version 1." : "The Project Manager issues the client timeline when it is ready."} />
               ) : (

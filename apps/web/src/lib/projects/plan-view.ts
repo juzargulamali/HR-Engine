@@ -9,7 +9,15 @@ export type PlanKind = (typeof PLAN_KINDS)[number];
 export const PLAN_MODES = ["list", "calendar", "timeline"] as const;
 export type PlanMode = (typeof PLAN_MODES)[number];
 
-export const PLAN_KIND_LABELS: Record<PlanKind, string> = { delivery: "Delivery", site: "Site" };
+export const PLAN_KIND_LABELS: Record<PlanKind, string> = { delivery: "Delivery timeline", site: "Site schedule" };
+
+/** One line of purpose for each schedule, so the three never read as the same thing: the Work schedule (Project Plan) holds internal task and requirement dates; the Site schedule holds runs, crew and shipments; the project Calendar and the company Calendar read dated commitments across them. */
+export const SCHEDULE_PURPOSES = {
+  work: "Internal task and requirement dates. Not shown to the client.",
+  delivery: "Dates the client may see on an issued timeline. Internal task dates are in the Work schedule.",
+  site: "Runs on site, their crew and the shipments that supply them.",
+  calendar: "This project's dated commitments (both timelines), month by month. Read-only: edit items in their own timeline.",
+} as const;
 export const PLAN_MODE_LABELS: Record<PlanMode, string> = { list: "List", calendar: "Calendar", timeline: "Timeline" };
 
 export function parsePlanParams(sp: SearchParamsLike): { plan: PlanKind; mode: PlanMode } {

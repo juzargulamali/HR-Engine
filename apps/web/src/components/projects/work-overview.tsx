@@ -2,30 +2,19 @@ import Link from "next/link";
 import { CalendarClock, History, TriangleAlert } from "lucide-react";
 import { OsBadge } from "@/components/os/pills";
 import { Muted } from "@/components/projects/parts";
-import { activityWhen, ACTIVITY_KIND_LABELS, ATTENTION_KIND_LABELS, attentionHref, formatAt, pickAttention, recentText, type WorkOverview } from "@/lib/projects/phase2/model";
+import { activityWhen, ACTIVITY_KIND_LABELS, ATTENTION_KIND_LABELS, attentionHref, formatAt, pickAttention, recentText, type SiteActivity, type WorkOverview } from "@/lib/projects/phase2/model";
 
 /**
  * Three concise areas at the top of the Work page, each linking to the records behind it (nothing here is a copy): Next on site (the next recorded activity, with its date or time window,
  * owner and Tentative / Confirmed state), Needs attention (what someone has to do, and who can) and Recent changes (a new output version, a review decision, a confirmed date).
  */
-export function WorkOverviewAreas({ projectId, overview }: { projectId: string; overview: WorkOverview }) {
+export function WorkOverviewAreas({ projectId, overview, hideNext = false, stateLabel }: { projectId: string; overview: WorkOverview; hideNext?: boolean; stateLabel?: (a: SiteActivity) => string | null }) {
   const next = overview.next_on_site;
   const attention = overview.attention;
   const { shown, more } = pickAttention(attention);
   return (
-    <section aria-label="Project overview" className="grid items-start gap-3 lg:grid-cols-3" data-testid="work-overview">
-      <div className="os-card p-4" data-testid="overview-next">
-        <h2 className="mb-2 flex items-center gap-2 font-heading text-base font-semibold"><CalendarClock className="h-4 w-4 text-accent" aria-hidden /> Next on site</h2>
-        {next ? (
-          <div className="space-y-0.5 text-sm">
-            <p className="break-words font-medium">{next.title}{next.run_label ? <span className="font-normal text-muted-foreground"> · {next.run_label}</span> : null}</p>
-            <p className="break-words text-[13px]" data-testid="overview-next-when">{activityWhen(next, overview.tz)}</p>
-            <p className="break-words text-[13px] text-muted-foreground">{next.kind ? ACTIVITY_KIND_LABELS[next.kind] : "Activity"} · {next.location ?? "No location"} · Owner {next.owner_name ?? "not named"}</p>
-            <p className="pt-1"><OsBadge tone={next.state === "confirmed" ? "green" : "amber"}>{next.state === "confirmed" ? "Confirmed" : "Tentative"}</OsBadge></p>
-            <Link href={`/projects/${projectId}/plan?plan=site&mode=list#site-${next.id}`} className="inline-block pt-1 text-[13px] font-medium text-accent underline-offset-4 hover:underline">Open the site schedule</Link>
-          </div>
-        ) : <Muted>Nothing is recorded on the site schedule yet. <Link href={`/projects/${projectId}/plan?plan=site&mode=list`} className="underline underline-offset-2">Open the site schedule</Link>.</Muted>}
-      </div>
+    <section aria-label="Project overview" className={hideNext ? "grid items-start gap-3 lg:grid-cols-2" : "grid items-start gap-3 lg:grid-cols-3"} data-testid="work-overview">
+      {hideNext ? null : <NextOnSite projectId={projectId} next={next} tz={overview.tz} stateLabel={stateLabel} />}
 
       <div className="os-card p-4" data-testid="overview-attention">
         <h2 className="mb-2 flex items-center gap-2 font-heading text-base font-semibold"><TriangleAlert className="h-4 w-4 text-[hsl(var(--os-amber))]" aria-hidden /> Needs attention{attention.length > 0 ? <span className="text-[13px] font-normal text-muted-foreground">({attention.length})</span> : null}</h2>
@@ -58,5 +47,27 @@ export function WorkOverviewAreas({ projectId, overview }: { projectId: string; 
         <Link href={`/projects/${projectId}/history`} className="mt-2 inline-block text-[13px] font-medium text-accent underline-offset-4 hover:underline">Full history</Link>
       </div>
     </section>
+  );
+}
+
+/**
+ * The next recorded site activity with its date or time window, place, owner and state, linking to that exact row of the site schedule. Shown at the top of the Work page beside "Needs you"
+ * and "Waiting on someone else" (and, when the overview is used on its own, as its first card). `stateLabel` lets the page word the state from the shared site-state helper (for example
+ * "Scheduled installation date passed · start unconfirmed"); without it the stored Confirmed / Tentative is shown.
+ */
+export function NextOnSite({ projectId, next, tz, stateLabel, className = "os-card p-4" }: { projectId: string; next: SiteActivity | null; tz: string | null; stateLabel?: (a: SiteActivity) => string | null; className?: string }) {
+  return (
+    <div className={className} data-testid="overview-next">
+      <h2 className="mb-2 flex items-center gap-2 font-heading text-base font-semibold"><CalendarClock className="h-4 w-4 text-accent" aria-hidden /> Next on site</h2>
+      {next ? (
+        <div className="space-y-0.5 text-sm">
+          <p className="break-words font-medium">{next.title}{next.run_label ? <span className="font-normal text-muted-foreground"> · {next.run_label}</span> : null}</p>
+          <p className="break-words text-[13px]" data-testid="overview-next-when">{activityWhen(next, tz)}</p>
+          <p className="break-words text-[13px] text-muted-foreground">{next.kind ? ACTIVITY_KIND_LABELS[next.kind] : "Activity"} · {next.location ?? "No location"} · Owner {next.owner_name ?? "not named"}</p>
+          <p className="pt-1"><OsBadge tone={next.state === "confirmed" ? "green" : "amber"}>{(stateLabel ? stateLabel(next) : null) ?? (next.state === "confirmed" ? "Confirmed" : "Tentative")}</OsBadge></p>
+          <Link href={`/projects/${projectId}/plan?plan=site&mode=list#site-${next.id}`} className="inline-block pt-1 text-[13px] font-medium text-accent underline-offset-4 hover:underline">Open the site schedule</Link>
+        </div>
+      ) : <Muted>Nothing is recorded on the site schedule yet. <Link href={`/projects/${projectId}/plan?plan=site&mode=list`} className="underline underline-offset-2">Open the site schedule</Link>.</Muted>}
+    </div>
   );
 }

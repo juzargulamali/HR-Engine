@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { InfoHint } from "@/components/ui/info-hint";
-import { AlertTriangle, CalendarClock, Check, ClipboardCheck, Flag, Hourglass, MapPin, Package } from "lucide-react";
+import { AlertTriangle, CalendarClock, Check, ClipboardCheck, FileCheck2, FileWarning, Flag, Hourglass, MapPin, Package } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { dateText } from "@/lib/projects/format";
 import { stripSteps, type StripMilestone } from "@/app/(app)/projects/[id]/work/helpers";
@@ -80,12 +80,12 @@ export function MilestoneStrip({ milestones, today, basis, percent, manageHref, 
 }
 
 const TONE_TEXT = { red: "text-[hsl(var(--os-red))]", amber: "text-[hsl(var(--os-amber))]", blue: "text-[hsl(var(--os-info))]", quiet: "text-muted-foreground" } as const;
-const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = { blocker: AlertTriangle, review: ClipboardCheck, overdue: CalendarClock, due_today: CalendarClock, in_review: Hourglass, milestone: Flag, equipment: Package };
+const KIND_ICON: Record<AttentionKind, typeof AlertTriangle> = { blocker: AlertTriangle, review: ClipboardCheck, output: FileCheck2, output_changes: FileWarning, overdue: CalendarClock, due_today: CalendarClock, in_review: Hourglass, milestone: Flag, equipment: Package };
 
 function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.ReactNode }) {
   const Icon = KIND_ICON[a.kind];
   return (
-    <li className="flex items-start gap-2.5 py-2 text-sm">
+    <li className="flex items-start gap-2.5 py-2 text-sm" data-testid={a.taskId ? `work-output-${a.taskId}` : undefined}>
       <Icon className={cn("mt-0.5 h-4 w-4 flex-none", TONE_TEXT[a.tone])} aria-hidden />
       <div className="min-w-0 flex-1">
         <p className="break-words">
@@ -94,7 +94,9 @@ function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.Reac
           <Link href={a.href} scroll={false} className="font-medium underline-offset-4 hover:underline">{a.title}</Link>
         </p>
         <p className="break-words text-[13px] text-muted-foreground">Owner: {a.owner} · {a.due ? `Due ${dateText(a.due)}` : "No due date recorded"}</p>
+        {a.expected ? <p className="break-words text-[13px] text-muted-foreground">Expected output: {a.expected}</p> : null}
         {a.detail ? <p className="break-words text-[13px] text-muted-foreground">{a.detail}</p> : null}
+        {a.next ? <p className="break-words text-[13px]" data-testid="attention-next">Next: {a.next}</p> : null}
         {recovery ? <div className="mt-1.5">{recovery}</div> : null}
       </div>
     </li>
@@ -106,11 +108,12 @@ function AttentionRow({ a, recovery }: { a: AttentionItem; recovery?: React.Reac
  * recorded) and a link to the task or record. Every line is a recorded fact; when nothing is waiting it says so in one line. `importRecovery` is the existing "import the
  * handover equipment" control, shown under the failed-import line only.
  */
-export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; importRecovery?: React.ReactNode; max?: number }) {
+export function WorkAttention({ needsYou, waiting, importRecovery, nextOnSite, max = 5 }: { needsYou: readonly AttentionItem[]; waiting: readonly AttentionItem[]; importRecovery?: React.ReactNode; nextOnSite?: React.ReactNode; max?: number }) {
   if (needsYou.length === 0 && waiting.length === 0) {
     return (
-      <section aria-label="What needs doing" className="os-card px-4 py-3" data-testid="work-attention">
+      <section aria-label="What needs doing" className="os-card space-y-3 px-4 py-3" data-testid="work-attention">
         <p className="text-sm"><span className="font-semibold">Nothing needs you right now.</span><InfoHint label="what needs you" className="ml-1">No blocker, review, overdue task or equipment decision is recorded for this project.</InfoHint></p>
+        {nextOnSite ? <div data-testid="work-next-on-site">{nextOnSite}</div> : null}
       </section>
     );
   }
@@ -122,15 +125,16 @@ export function WorkAttention({ needsYou, waiting, importRecovery, max = 5 }: { 
           {items.slice(0, max).map((a) => <AttentionRow key={a.key} a={a} recovery={a.recovery === "import" ? importRecovery : undefined} />)}
         </ul>
       )}
-      {items.length > max ? <p className="pt-1 text-[13px] text-muted-foreground">Showing {max} of {items.length}. The task list below has the rest.</p> : null}
+      {items.length > max ? <p className="pt-1 text-[13px] text-muted-foreground">Showing {max} of {items.length}. The task list and Deliverables have the rest.</p> : null}
     </div>
   );
   return (
     <section aria-label="What needs doing" className="os-card os-warm px-4 py-3.5 sm:px-5" data-testid="work-attention">
       <h2 className="mb-2 font-heading text-base font-semibold">What needs doing</h2>
-      <div className="grid gap-x-8 gap-y-3 lg:grid-cols-2">
+      <div className={cn("grid gap-x-8 gap-y-3", nextOnSite ? "lg:grid-cols-3" : "lg:grid-cols-2")}>
         {group("Needs you", needsYou, "attention-needs-you", "Nothing needs you right now.")}
         {group("Waiting on someone else", waiting, "attention-waiting", "Nothing is waiting on anyone else.")}
+        {nextOnSite ? <div className="min-w-0" data-testid="work-next-on-site">{nextOnSite}</div> : null}
       </div>
     </section>
   );

@@ -363,6 +363,13 @@ Nothing in this file was run. In addition:
 5. Removal reason is optional in the form and in the database ("Reason (optional)").
 6. `Unverified` items: where "Projects > Access" is; the notification wording for a person made responsible for feedback; what the stand-alone decision page shows right after a decision; phone layout of dialogs and stacked tables; whether typed completion decisions survive a visit to Documents in the same tab; whether any database guard beyond the functions read here blocks department, removal, team removal, ending leadership, withdrawal or cost edits on a finished project; where an audit reader reads the audit trail.
 
+## 15. Finish Phase 2: Projects list, Calendar, notices (draft PR; migration `20270109000100`, not applied by Claude)
+
+* **Projects list:** Table/Board (`view` in the address); a **Next commitment** (earliest dated site activity or milestone, linked to its exact row; "No dated commitment" names the Project Manager who sets it; a passed date with no start record reads "date passed · start unconfirmed" with ⚠); "Team leads not set" (no named lead) versus "No other members yet" (leads but only the Project Manager); **Manage team** on every row; the last two history events merged into one preview with one History link. Reads are bounded (300 site activities per company, 60 log rows per page) and a failed read shows a note.
+* **Calendar:** Month / Week / Agenda (Agenda is the phone view); an opt-in **Site activities** filter lists dated site activities with the shared phase wording; site entries open `…/plan?plan=site&mode=list#site-<id>` or `#bookings`; filters stay in the address. The three existing calendar reads return no phase, so only the new filter uses phase wording.
+* **Notifications:** crew receive `project_site_change` notices ("<title> (<run>) changed: field: from → to. Open your briefing.", link `/site-assignments?activity=<id>`); `lib/projects/notification-text.ts` words them.
+* **Not done:** work-package indicator on the list; "back to calendar" on plan links.
+
 ## Coverage rows
 
 | Entry | Kind (screen / tab / panel / dialog / form / filter / download / legacy route) | How to reach it | Who can see it | Purpose | Reference (section number in this file) | Status (Documented or Unverified: what) |

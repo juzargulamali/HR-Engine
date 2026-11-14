@@ -1639,7 +1639,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press a card at the top to jump to its list.",
       "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.",
       "For other items press the button on the item and speak to the person named under With.",
-      "Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab."
+      "Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab. Decisions assigned to me and follow-ups (with the person each waits on) come first, then Next on site. Each dated site activity appears once, with a link to its row on the Site schedule; a date from the project header is labelled, and a date from Sales before handover is labelled tentative. A date that has passed reads start unconfirmed until the Project Manager records the start. Press a request code to open that equipment request and its next action."
     ],
     "links": [
       {
@@ -2212,6 +2212,170 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "screens": [
       "/projects/[id]/work",
       "/projects/[id]/changes"
+    ]
+  },
+  {
+    "id": "projects-site-started",
+    "area": "projects",
+    "title": "Say whether work on site has started",
+    "keywords": [
+      "record started",
+      "clear start record",
+      "installation started",
+      "date passed",
+      "start unconfirmed",
+      "tentative date",
+      "project header date",
+      "no date",
+      "choose which run",
+      "site phase"
+    ],
+    "summary": "Every screen words a site activity the same way. A date from the project header reads Tentative, from the project header: a suggestion. A passed date with no recorded start reads Scheduled installation date passed, start unconfirmed. Started appears only when the Project Manager recorded it; a passed date never means the work began.",
+    "steps": [
+      "Project Manager: open Project Plan, Site schedule and find the activity.",
+      "When the crew actually begin, press Record started, add a note if useful, and press Record that work began.",
+      "If it was recorded by mistake, press Clear start record. The activity goes back to its schedule wording.",
+      "Technicians, Work, Calendar and Operations all read the same wording from that one record."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan",
+      "/site-assignments"
+    ]
+  },
+  {
+    "id": "projects-preview-briefing",
+    "area": "projects",
+    "title": "Preview a crew briefing before the crew read it",
+    "keywords": [
+      "preview briefing",
+      "as the technician sees it",
+      "crew briefing",
+      "missing date",
+      "missing venue",
+      "call time",
+      "provisional date passed",
+      "phone view"
+    ],
+    "summary": "Preview briefing lets the Project Manager read exactly what one crew member will read, in a phone-sized frame: reporting status, call time, venue and the named contact first, then instructions and readiness. Anything missing is listed with a shortcut. The call time belongs to each person and is not the activity start.",
+    "steps": [
+      "Open Project Plan, Site schedule and press Preview briefing beside Crew on the activity.",
+      "Choose the crew member at the top of the preview.",
+      "Use the shortcuts to add the date, the venue or a call time, then press Refresh in the preview.",
+      "Readiness appears for this run and, on its own line, as Project-wide readiness from the Project Plan. A finished task alone never marks an output approved or equipment ready."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/plan",
+      "/site-assignments"
+    ]
+  },
+  {
+    "id": "projects-crew-change-notices",
+    "area": "projects",
+    "title": "What crew are told when a date, venue or call time changes",
+    "keywords": [
+      "crew notice",
+      "date changed",
+      "venue changed",
+      "call time changed",
+      "changed briefing",
+      "notification",
+      "site assignment changed"
+    ],
+    "summary": "When a confirmed activity moves to another date or venue, or a person's own call time changes, the people assigned get one notice with the previous and new values and a link to their briefing. Only affected assignments are told. Opening the briefing does not mark the notice read.",
+    "steps": [
+      "Open the notice, or My site assignments.",
+      "Find the card with Changed: the field, the old value and the new value.",
+      "Check call time, venue and the named contact, and ask the contact if anything is unclear."
+    ],
+    "links": [
+      {
+        "label": "My site assignments",
+        "href": "/site-assignments"
+      }
+    ],
+    "screens": [
+      "/site-assignments"
+    ]
+  },
+  {
+    "id": "projects-review-waiting",
+    "area": "projects",
+    "title": "See who a review is waiting on",
+    "keywords": [
+      "waiting on someone else",
+      "needs you",
+      "outputs awaiting approval",
+      "tasks in review",
+      "operations review",
+      "reviewer",
+      "changes requested",
+      "do next",
+      "waiting for my review",
+      "exact version"
+    ],
+    "summary": "On a project's Work page, Needs you, Waiting on someone else and Next on site come first. An output waiting for Operations review names its reviewer (or Operations) and links the exact version. The person who submitted or owns the work cannot review it. Counters read Tasks in review and Outputs awaiting approval.",
+    "steps": [
+      "Open the project's Work page and read the three blocks at the top.",
+      "Press the version link on a line to open that exact version.",
+      "Reviewers: open My Work, press Waiting for my review, open the version and decide.",
+      "After changes are requested, the assignee finds it under Changes requested and Do next in My Work, with the earlier feedback beside the new version."
+    ],
+    "links": [
+      {
+        "label": "My Work",
+        "href": "/projects/work"
+      },
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/work",
+      "/projects/[id]/work",
+      "/projects/[id]/delivery"
+    ]
+  },
+  {
+    "id": "projects-client-timeline-choice",
+    "area": "projects",
+    "title": "Choose what the client sees on the timeline",
+    "keywords": [
+      "client timeline",
+      "choose what the client sees",
+      "client facing",
+      "issue preview",
+      "issued versions",
+      "milestones",
+      "project files"
+    ],
+    "summary": "Files and client plan reads in three steps: Choose what the client sees, Preview, and Issued versions. Tick the milestones and timeline activities for the next issued client timeline. Issued versions are frozen: changing the ticks never alters one already issued. Individual tasks cannot be put on the client timeline yet.",
+    "steps": [
+      "Open the project's Files and client plan.",
+      "Tick or untick items under Choose what the client sees and press Save what the client sees.",
+      "Read the Preview, then issue a version when it is right.",
+      "Open any earlier issued version from the list; it stays as it was issued."
+    ],
+    "links": [
+      {
+        "label": "Projects",
+        "href": "/projects"
+      }
+    ],
+    "screens": [
+      "/projects/[id]/documents"
     ]
   },
   {

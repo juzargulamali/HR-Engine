@@ -158,7 +158,17 @@ export interface WorkRows {
   blockers: TaskRowData[];
   /** This person's own tasks that they sent for review: nothing for them to do, the next step is a reviewer's. Not part of `mine`. */
   waiting: TaskRowData[];
+  /** This person's own open tasks whose current output version had changes requested: the next version is theirs to upload. */
+  changes: TaskRowData[];
+  /** For the tasks above (mine, sent for review, waiting on my review): the output version that is awaiting review or has changes requested, so a row can link to that exact version. */
+  outputs: Record<string, OutputRef>;
+  /** True when the version lookup failed: the lists still work, but "Changes requested" and the version links are then not known (the page says so instead of showing none). */
+  outputsFailed: boolean;
 }
+
+export interface OutputRef { versionId: string; versionNo: number; status: "awaiting" | "changes_requested" }
+/** At most this many task ids go into the one version lookup, so the request stays small however many tasks a person has. */
+export const OUTPUT_LOOKUP_LIMIT = 300;
 
 const FINISHED = "(completed,archived)";
 
@@ -169,7 +179,7 @@ const FINISHED = "(completed,archived)";
  */
 export const loadWorkRows = cache(async (ctx: ProjectsContext): Promise<WorkRows> => {
   const today = todayIso();
-  const none: WorkRows = { today, mine: [], reviews: [], team: [], canSeeTeam: false, blockers: [], waiting: [] };
+  const none: WorkRows = { today, mine: [], reviews: [], team: [], canSeeTeam: false, blockers: [], waiting: [], changes: [], outputs: {}, outputsFailed: false };
   if (ctx.grants.length === 0) return none;
   const supabase = await createClient();
   const founderCompanies = ctx.grants.map((g) => g.companyId).filter((c) => isProjFounder(ctx.grants, c));
@@ -273,8 +283,20 @@ export const loadWorkRows = cache(async (ctx: ProjectsContext): Promise<WorkRows
   });
   const sent = (t: ProjTaskRow) => t.assignee_id === ctx.userId && t.status === "ready_for_review";
   const own = [...mineById.values()];
+  // The output versions that are waiting for a review or sent back, for the tasks this person owns or reviews (one bounded read through their own session: the version table is only readable
+  // on projects they can see). Failing to read them never hides the task lists.
+  const lookupIds = [...new Set([...own, ...reviews].map((t) => t.id))].slice(0, OUTPUT_LOOKUP_LIMIT);
+  const outputs: Record<string, OutputRef> = {};
+  let outputsFailed = false;
+  if (lookupIds.length > 0) {
+    const versionRes = await supabase.from("proj_task_output_versions").select("id, task_id, version_no, status").in("task_id", lookupIds).in("status", ["awaiting", "changes_requested"]).order("version_no");
+    if (versionRes.error) outputsFailed = true;
+    // Ordered by version number, so the newest open version of a task is the one kept.
+    else for (const v of versionRes.data ?? []) outputs[v.task_id] = { versionId: v.id, versionNo: v.version_no, status: v.status as OutputRef["status"] };
+  }
+  const changesTasks = own.filter((t) => t.assignee_id === ctx.userId && outputs[t.id]?.status === "changes_requested");
   return {
     today, mine: toRows(own.filter((t) => !sent(t))), reviews: toRows(reviews), team: toRows(teamTasks), canSeeTeam: leadIds.length > 0,
-    blockers: toRows([...blockerById.values()]), waiting: toRows(own.filter(sent)),
+    blockers: toRows([...blockerById.values()]), waiting: toRows(own.filter(sent)), changes: toRows(changesTasks), outputs, outputsFailed,
   };
 });

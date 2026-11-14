@@ -92,6 +92,19 @@ describe("Project Plan screen", () => {
     expect(preview).toMatch(/0 hardware lines will be added to the project's draft equipment request\. It is not sent to the warehouse/);
   });
 
+  it("a release names the lines that need attention, links to each and says what unblocks it", () => {
+    const unmatched: DpItem = { ...kiosk, lines: [line({ id: "l9", key: "L0009", section: "hardware", description: "Kiosk screen", inv_item_id: null, assignee_id: null, assignee_name: null })] };
+    render(<DeliveryPlanView {...props(plan({ can_manage: true, items: [wall, unmatched] }), { userId: "pm" })} />);
+    fireEvent.click(screen.getByTestId("dp-release"));
+    const box = screen.getByTestId("dp-release-attention");
+    expect(box.textContent).toMatch(/needs? attention before/);
+    const link = within(box).getAllByRole("link")[0] as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toMatch(/^\/projects\/p1\/delivery#dp-L\d+/);
+    expect(box.textContent).toMatch(/Product kiosk: Kiosk screen/);
+    expect(box.textContent).toMatch(/Choose the stock item/);
+    expect(screen.getByTestId("dp-release-preview").textContent).not.toMatch(/will wait/);
+  });
+
   it("equipment that is with the warehouse cannot be changed from the plan: the form says where to change it and its Save is off", () => {
     render(<DeliveryPlanView {...props(plan({ can_manage: true }), { userId: "pm" })} />);
     fireEvent.click(within(screen.getByTestId("dp-line-L0002")).getByRole("button", { name: "Edit" }));

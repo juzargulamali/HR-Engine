@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fetchRange, barLayout, barRange, calendarHref, entryWhen, filterKinds, isValidTimeZone, mapCompanyRows, mapMyRows, mapProjectRows, neighbourDates, parseCalendarParams, rangeTitle, visibleRange } from "./helpers";
+import { mapSiteActivities, fetchRange, barLayout, barRange, calendarHref, entryWhen, filterKinds, isValidTimeZone, mapCompanyRows, mapMyRows, mapProjectRows, neighbourDates, parseCalendarParams, rangeTitle, visibleRange } from "./helpers";
 import { groupByDay } from "@enginious-hr/domain";
 
 const TODAY = "2026-10-18";
@@ -61,7 +61,7 @@ describe("row mapping", () => {
   it("maps my-calendar rows with project links, kind and status in words", () => {
     const [task, booking] = mapMyRows(my);
     expect(task).toMatchObject({ kindLabel: "Task deadline", statusLabel: "In progress", href: "/projects/p1/work", onDate: "2099-02-15" });
-    expect(booking).toMatchObject({ kindLabel: "Site booking", statusLabel: "Confirmed", href: "/projects/p1/plan?plan=site" });
+    expect(booking).toMatchObject({ kindLabel: "Site booking", statusLabel: "Confirmed", href: "/projects/p1/plan?plan=site&mode=list#bookings" });
   });
   it("keeps a date-only deadline on its day in every viewing zone, and an overnight booking on both nights", () => {
     const entries = mapMyRows(my);
@@ -84,7 +84,7 @@ describe("row mapping", () => {
   it("maps project rows including dependencies with their site-time clock", () => {
     const rows = [{ kind: "dependency", item_id: "d1", title: "Power ready", on_date: "2099-03-04", end_date: "2099-03-04", starts_at: null, ends_at: null, tz: null, status: "pending", who: "Expo Builders", detail: "09:00:00" }];
     const [e] = mapProjectRows(rows, "p1", "REF", "Floor");
-    expect(e).toMatchObject({ kindLabel: "Dependency on others", statusLabel: "Not yet confirmed", href: "/projects/p1/plan?plan=site" });
+    expect(e).toMatchObject({ kindLabel: "Dependency on others", statusLabel: "Not yet confirmed", href: "/projects/p1/plan?plan=site&mode=list" });
     expect(e!.detail).toBe("Expo Builders · at 09:00 site time");
   });
   it("maps company rows to spans carrying summary fields only and drops undated projects", () => {
@@ -117,5 +117,23 @@ describe("bar chart range", () => {
   it("has no range without dated items", () => {
     expect(barRange([])).toBeNull();
     expect(barLayout([])).toBeNull();
+  });
+});
+
+describe("mapSiteActivities", () => {
+  const row = (phase: Record<string, unknown>, over: Record<string, unknown> = {}) => ({
+    id: "a1", project_id: "p1", reference: "UAE-P-1", project_name: "Show", project_status: "in_progress", title: "Setup", kind: "setup", run_label: "Run 1", state: "tentative",
+    start_date: null, end_date: null, starts_at: null, ends_at: null, tz: null, effective: {}, owner_name: "Dawood", crew_total: 0, call_missing: 0, actual_started_at: null,
+    phase: { phase: "scheduled", basis: "activity", first_day: "2099-02-10", last_day: "2099-02-10", started_at: null, kind: "setup", state: "tentative", today: "2099-02-01", ...phase }, ...over,
+  }) as never;
+  it("uses the shared phase words and links to the exact Site schedule row", () => {
+    const [e] = mapSiteActivities([row({})], "2099-02-01", "2099-02-28");
+    expect(e).toMatchObject({ statusLabel: "Tentative Setup on 10 Feb", href: "/projects/p1/plan?plan=site&mode=list#site-a1", kindLabel: "Site activity", title: "Setup · Run 1" });
+  });
+  it("never says started because a date passed, and leaves out undated activities and other periods", () => {
+    const [passed] = mapSiteActivities([row({ phase: "date_passed" })], "2099-02-01", "2099-02-28");
+    expect(passed!.statusLabel).toMatch(/date passed · start unconfirmed/);
+    expect(mapSiteActivities([row({ phase: "no_date", first_day: null, last_day: null })], "2099-02-01", "2099-02-28")).toHaveLength(0);
+    expect(mapSiteActivities([row({})], "2099-03-01", "2099-03-31")).toHaveLength(0);
   });
 });

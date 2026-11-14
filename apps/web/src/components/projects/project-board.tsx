@@ -23,6 +23,10 @@ export interface BoardProject {
   /** Only the accountable PM or a founder may request a status change. */
   canMove: boolean;
   unread: number;
+  /** The project's next commitment in the shared site wording (null = a summary-only project: not shown). */
+  next: { text: string; detail: string | null; href: string | null; needsAction: boolean } | null;
+  /** Set when the team has no leads, or no members besides the Project Manager: the words and where to put it right. */
+  team: { label: string; manageHref: string } | null;
 }
 
 const LANES = DIRECTORY_LANES.map((l) => ({ id: l, label: projectStatusLabel(l) }));
@@ -50,6 +54,13 @@ export function ProjectBoard({ projects }: { projects: BoardProject[] }) {
           <p className="text-sm text-muted-foreground">{p.reference}</p>
           <p className="text-sm">Project Manager {p.pmName}</p>
           <p className="text-sm text-muted-foreground">{p.dates}</p>
+          {p.next ? (
+            <div className="text-sm" data-testid={`project-next-${p.id}`}>
+              {p.next.href ? <Link href={p.next.href} className="break-words font-medium underline-offset-2 hover:underline">{p.next.needsAction ? "⚠ " : ""}{p.next.text}</Link> : <span className="text-muted-foreground">{p.next.text}</span>}
+              {p.next.detail ? <span className="block break-words text-[13px] text-muted-foreground">{p.next.detail}</span> : null}
+            </div>
+          ) : null}
+          {p.team ? <p className="text-sm"><span className="text-[hsl(var(--os-amber))]">⚠ {p.team.label}</span> <Link href={p.team.manageHref} className="font-medium underline underline-offset-2">Manage team</Link></p> : null}
           <KindBadge kind={p.kind} ongoing={p.isOngoing} />
         </div>
       ),

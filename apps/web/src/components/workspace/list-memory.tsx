@@ -23,11 +23,18 @@ export function safeListHref(stored: string | null, fallback: string): string {
   return stored === base || stored.startsWith(`${base}?`) ? stored : fallback;
 }
 
+/** The address a list is remembered by: its filters, search, view and sort, but never an open record (`task`, `version`), so coming back from a record's own page lands on the list, not on the panel again. */
+export function listAddress(pathname: string, search: string): string {
+  const p = new URLSearchParams(search);
+  p.delete("task"); p.delete("version");
+  const qs = p.toString();
+  return qs ? `${pathname}?${qs}` : pathname;
+}
+
 export function RememberList({ section }: { section: string }) {
   const pathname = usePathname();
   const sp = useSearchParams();
-  const qs = sp.toString();
-  const href = qs ? `${pathname}?${qs}` : pathname;
+  const href = listAddress(pathname, sp.toString());
 
   // The address (with every filter) is remembered whenever it changes.
   useEffect(() => { write(key(section, "href"), href); }, [section, href]);

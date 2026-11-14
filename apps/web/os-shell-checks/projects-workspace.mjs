@@ -362,12 +362,12 @@ await step("a task the person may not read (not a member, another company, made-
 await as("mgr@e2e.local", { width: 1280, height: 800 });
 await step("Work opens on 'This week': four cards counted from the tasks, the overdue task is listed, 'View all tasks (4)' opens every open task, the cards filter, and the old overview address lands here with its content", async () => {
   await go(`/projects/${P}/work`); const t = await main();
-  for (const re of [/4 Open tasks/, /1 Need attention/, /1 In review/, /\d+ due this week/, /Upcoming milestones/, /This week/, /Needs action/, /Project details/, /Agreed scope/]) if (!re.test(t)) throw new Error(`missing ${re} on Work: ${t.slice(0, 300)}`);
+  for (const re of [/4 Open tasks/, /1 Need attention/, /1 Tasks in review/, /\d+ due this week/, /Upcoming milestones/, /This week/, /Needs action/, /Project details/, /Agreed scope/]) if (!re.test(t)) throw new Error(`missing ${re} on Work: ${t.slice(0, 300)}`);
   if (!(await rowNames()).includes(T.guide)) throw new Error("the overdue task is not in This week: " + (await rowNames()).join(" | "));
   const all = page.getByRole("link", { name: /^View all tasks \(4\)$/ }); if ((await all.count()) < 1) throw new Error("no 'View all tasks (4)' link");
   await all.first().click(); await until(async () => (await rowNames()).length === 4, "all four open tasks listed");
   await page.getByRole("link", { name: /Need attention/ }).click(); await until(async () => (await rowNames()).join() === T.guide, "Need attention card narrows to the overdue task");
-  await page.getByRole("link", { name: /In review/ }).click(); await until(async () => (await rowNames()).join() === T.shader, "In review card narrows to the review task");
+  await page.getByRole("link", { name: /Tasks in review/ }).click(); await until(async () => (await rowNames()).join() === T.shader, "Tasks in review card narrows to the review task");
   await go(`/projects/${P}`); if (!new URL(page.url()).pathname.endsWith("/work")) throw new Error("overview address did not lead to Work: " + page.url());
   const tabs = await page.getByRole("navigation", { name: "Project sections" }).innerText(); for (const w of ["Work", "Timeline", "Discussion", "Equipment"]) if (!tabs.includes(w)) throw new Error("tab missing: " + w);
 });

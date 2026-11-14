@@ -1,3 +1,4 @@
+import { SCHEDULE_PURPOSES } from "@/lib/projects/plan-view";
 import { notFound, redirect } from "next/navigation";
 import { hasProjCapability, isFinishedProject } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -57,10 +58,12 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
     </div>
   );
   const intro = (
-    <Muted>
-      Plans, not commitments: nothing reaches the client unless an item is marked client-facing and a client timeline is issued from Files &amp; client plan. Changing a date never moves another date.
-      {plan === "site" ? " This page is the Site schedule (where the team is, crew and shipments)." : " This is the Delivery plan of the build; where the team is on site, with crew and shipments, is the Site plan."}
-    </Muted>
+    <p className="text-sm text-muted-foreground" data-testid="plan-intro">
+      {plan === "site" ? SCHEDULE_PURPOSES.site : SCHEDULE_PURPOSES.delivery}
+      <InfoHint label="how plans work" className="ml-1">
+        Plans, not commitments: nothing reaches the client unless an item is marked client-facing and a client timeline is issued from Files &amp; client plan. Changing a date never moves another date. {plan === "site" ? "Where the team is on site: the Site schedule shows each run, its crew and its shipments." : "The Delivery timeline holds dates the client may see; where the team is on site, with crew and shipments, is the Site schedule."}
+      </InfoHint>
+    </p>
   );
 
   // ------------------------------------------------------------------------------------------------ Calendar
@@ -115,6 +118,9 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
     : [null, { data: [] as { id: string; code: string; status: string }[] }, { data: [] as { user_id: string; name: string; is_member: boolean }[], error: null }, { data: null, error: null }];
   const briefings = Object.fromEntries(((briefR.data ?? []) as unknown as SiteBriefing[]).map((b) => [b.id, b]));
   const crewChoices = (techR.data ?? []).length > 0 ? (techR.data ?? []).map((t) => ({ id: t.user_id, name: t.name, siteOnly: !t.is_member })) : memberOptions(view);
+  // Does the Project Plan already hold this project's work? Then the suggested stages are not offered (the same work is planned once). A failed or empty count just keeps the old offer.
+  const dpCount = plan === "delivery" ? (await supabase.from("proj_dp_items").select("id", { count: "exact", head: true }).eq("project_id", id)).count : null;
+  const planHasWork = (dpCount ?? 0) > 0;
   const milestones = milestoneR.data ?? [];
   const milestoneTitle = (mid: string | null) => milestones.find((m) => m.id === mid)?.title ?? null;
   const items = planR.data ?? [];
@@ -133,7 +139,7 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
   const planSection = (
     <PlanSection
       plan={plan} items={sortPlanItems(items.filter((i) => i.plan === plan))} canEdit={canEditPlan} projectId={id} siteTz={siteTz} milestones={milestones}
-      milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"}
+      milestoneTitle={milestoneTitle} defaultBase={plan === "delivery" ? (project.start_date ?? "") : (details.install_start ?? details.event_start ?? "")} bars={mode === "timeline"} planHasWork={planHasWork}
     />
   );
 

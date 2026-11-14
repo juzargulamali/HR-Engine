@@ -7,11 +7,11 @@ vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children:
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }), usePathname: () => "/operations", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/operations", () => ({ saveEnquiryPlanning: vi.fn() }));
 vi.mock("@/lib/projects/format", async (orig) => ({ ...(await orig<typeof import("@/lib/projects/format")>()), todayIso: () => "2027-02-20" }));
-const data = vi.hoisted(() => ({ ctx: null as unknown, overview: null as unknown, upcoming: null as unknown }));
+const data = vi.hoisted(() => ({ ctx: null as unknown, overview: null as unknown, upcoming: null as unknown, sites: null as unknown }));
 vi.mock("@/lib/operations/data", () => ({
   getOperationsContext: async () => data.ctx,
-  pickCompany: (ctx: { companies: { id: string; name: string }[] }, asked?: string) => ctx.companies.find((c) => c.id === asked) ?? ctx.companies[0] ?? null,
-  loadOverview: async () => data.overview, loadUpcoming: async () => data.upcoming,
+  pickCompany: async (ctx: { companies: { id: string; name: string }[] }, asked?: string) => ctx.companies.find((c) => c.id === asked) ?? ctx.companies[0] ?? null,
+  loadOverview: async () => data.overview, loadUpcoming: async () => data.upcoming, loadSiteActivities: async () => data.sites,
 }));
 
 import OperationsOverviewPage from "./page";
@@ -19,7 +19,7 @@ import UpcomingWorkPage from "./upcoming/page";
 import type { Overview, UpcomingRow } from "@/lib/operations/model";
 
 const CO = { id: "c1", name: "Fictional UAE" };
-const ctx = (companies = [CO]) => ({ companies, loadFailed: false, installed: true, projects: { people: [{ id: "u-pm", name: "Pat Manager", companyIds: ["c1"] }, { id: "u-x", name: "Other Company PM", companyIds: ["c2"] }] } });
+const ctx = (companies = [CO]) => ({ companies, loadFailed: false, installed: true, projects: { userId: "u-me", people: [{ id: "u-pm", name: "Pat Manager", companyIds: ["c1"] }, { id: "u-x", name: "Other Company PM", companyIds: ["c2"] }] } });
 const row: UpcomingRow = {
   id: "o1", company_id: "c1", reference: "UAE-O-2027-0007", title: "Expo stand for Fictional Motors", stage: "proposal_sent", owner_id: "u-s", owner: "Sam Sales", flagged_at: "2027-01-05T08:00:00Z", decision_date: "2027-01-15",
   dates_tentative: true, won: false, location: "Dubai", install_start: "2027-02-26", event_start: "2027-03-01", event_end: "2027-03-05", dismantle_date: null,
@@ -43,7 +43,7 @@ const live: Overview["projects"][number] = {
 };
 const renderPage = async (page: (p: { searchParams: Promise<Record<string, string>> }) => Promise<React.ReactNode>, sp: Record<string, string> = {}) => render(<>{await page({ searchParams: Promise.resolve(sp) })}</>);
 
-beforeEach(() => { data.ctx = ctx(); data.overview = { state: "ok", data: overview }; data.upcoming = { state: "ok", data: [row] }; });
+beforeEach(() => { data.ctx = ctx(); data.overview = { state: "ok", data: overview }; data.upcoming = { state: "ok", data: [row] }; data.sites = { state: "not_installed" }; });
 afterEach(cleanup);
 
 describe("Operations Overview", () => {
@@ -55,12 +55,13 @@ describe("Operations Overview", () => {
       ["2Needs my decision", "/operations?company=c1#decisions"], ["1Installations in the next 14 days", "/operations?company=c1#installations"],
       ["2Equipment issues", "/operations?company=c1#equipment"], ["1Upcoming Sales work", "/operations/upcoming?company=c1"]]);
     // every figure is the length of the list it opens
-    expect(screen.getByTestId("ops-decisions").children).toHaveLength(2);
+    expect(within(screen.getByTestId("ops-decisions")).getAllByRole("listitem").filter((li) => li.getAttribute("data-testid")?.startsWith("ops-decision-"))).toHaveLength(2);
     expect(screen.getByTestId("ops-installations").children).toHaveLength(1);
     expect(screen.getByTestId("ops-equipment").children).toHaveLength(2);
     const headings = screen.getAllByRole("heading").map((h) => h.textContent ?? "");
     const at = (re: RegExp) => headings.findIndex((h) => re.test(h));
-    expect(at(/^Needs my decision \(2\)/)).toBeLessThan(at(/^Next installations \(1\)/));
+    expect(at(/^Needs my decision \(2\)/)).toBeLessThan(at(/^Next on site/));
+    expect(at(/^Next on site/)).toBeLessThan(at(/^Next installations \(1\)/));
     expect(at(/^Next installations/)).toBeLessThan(at(/^Delivery timeline/));
     expect(at(/^Delivery timeline/)).toBeLessThan(at(/^Upcoming delivery by week/));
     const item = screen.getByTestId("ops-decision-pm_unassigned");
@@ -74,10 +75,15 @@ describe("Operations Overview", () => {
     data.upcoming = { state: "ok", data: [{ ...row, install_start: "2027-03-10", event_start: "2027-03-12", event_end: "2027-03-14", dismantle_date: "2027-03-15" }] };
     await renderPage(OperationsOverviewPage);
     const tl = screen.getByTestId("ops-timeline");
-    expect([...tl.querySelectorAll("[data-kind]")].map((x) => `${x.getAttribute("data-kind")}:${x.textContent}`)).toEqual([
-      "installation:Installation", "show:Show", "installation:Installation", "show:Show", "dismantling:Dismantling"]);
-    expect(within(tl).getAllByText("Tentative")).toHaveLength(3);                                  // the enquiry's three dates, never the project's
-    expect(tl.textContent).toContain("UAE-P-2027-0002 Fictional Motors launch");
+    // the enquiry's installation, show and dismantling are ONE row marked tentative; the project's own header dates are in Next on site, labelled as header dates
+    expect(tl.querySelectorAll('[data-testid^="ops-group-"]')).toHaveLength(1);
+    expect([...tl.querySelectorAll("[data-kind]")].map((x) => `${x.getAttribute("data-kind")}:${x.textContent}`)).toEqual(["installation:Installation", "show:Show", "dismantling:Dismantling"]);
+    expect(within(tl).getAllByText("Tentative")).toHaveLength(1);
+    expect(tl.textContent).toContain("Sales date · tentative");
+    const next = screen.getByTestId("ops-next-on-site");
+    expect(next.textContent).toContain("UAE-P-2027-0002 Fictional Motors launch");
+    expect(next.textContent).toContain("(from the project header)");
+    expect(next.textContent).not.toMatch(/started/i);
   });
 
   it("draws the week chart as a list whose counts are its projects, and a readiness bar only with a real denominator", async () => {
@@ -105,7 +111,7 @@ describe("Operations Overview", () => {
     expect(label("UAE-P-2027-0004")).toBe("On track");
     expect(screen.getByTestId("ops-health-counts").textContent).toBe("At risk1Needs attention1Not enough information1On track1");
     const risky = screen.getByTestId("ops-project-UAE-P-2027-0002");
-    expect(within(risky).getByRole("link", { name: /Installation starts 2027-02-26: equipment short on UAE-R-00002/ }).getAttribute("href")).toBe("/projects/p2/equipment");
+    expect(within(risky).getByRole("link", { name: /Installation planned 2027-02-26 \(project header\): equipment short on UAE-R-00002/ }).getAttribute("href")).toBe("/projects/p2/equipment");
     expect(within(screen.getByTestId("ops-project-UAE-P-2027-0001")).getByRole("link", { name: "Delivery complete, 3 units still out" }).getAttribute("href")).toBe("/projects/p1/equipment");
     expect(within(screen.getByTestId("ops-project-UAE-P-2027-0001")).getByRole("link", { name: "Project chat" }).getAttribute("href")).toBe("/operations?company=c1&chat=g1");
     // the rules live behind the ⓘ beside the heading (hover, focus or tap), not in the page
@@ -122,7 +128,8 @@ describe("Operations Overview", () => {
     await renderPage(OperationsOverviewPage);
     const issue = screen.getByTestId("ops-equipment-partial_dispatch");
     expect(issue.textContent).toMatch(/Partly dispatched.*UAE-P-2027-0002 Fictional Motors launch.*UAE-R-00002: 1 of 4 lines dispatched · With Warehouse/);
-    expect(within(issue).getByRole("link").getAttribute("href")).toBe("/projects/p2/equipment");
+    expect(within(issue).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual(["/projects/p2/equipment?request=q2", "/projects/p2/equipment?request=q2"]);
+    expect(within(issue).getByTestId("ops-request-UAE-R-00002").textContent).toBe("UAE-R-00002");
     expect(within(screen.getByTestId("ops-summary")).getByRole("link", { name: /Equipment issues/ }).textContent).toContain("1");
     expect(within(screen.getByTestId("ops-install-UAE-P-2027-0002")).getByTestId("ops-edition").textContent).toBe("Fictional Auto Expo · 2027 · Dubai");
     expect(within(screen.getByTestId("ops-project-UAE-P-2027-0002")).getByTestId("ops-edition").textContent).toBe("Fictional Auto Expo · 2027 · Dubai");
@@ -225,5 +232,106 @@ describe("Upcoming Work", () => {
     await renderPage(UpcomingWorkPage);
     expect(screen.queryByText("No enquiry is flagged for Operations")).toBeNull();
     expect(document.body.textContent).toMatch(/could not be loaded|could not load/i);
+  });
+});
+
+describe("Operations Overview: the site activities, company and queues of this round", () => {
+  const phase = (over: Record<string, unknown> = {}) => ({ phase: "scheduled", basis: "activity", first_day: "2027-02-24", last_day: "2027-02-24", started_at: null, kind: "setup", state: "tentative", today: "2027-02-20", ...over });
+  const activity = (over: Record<string, unknown> = {}) => ({
+    id: "a1", project_id: "p2", reference: "UAE-P-2027-0002", project_name: "Fictional Motors launch", project_status: "active", title: "Hall 4 installation", kind: "setup", run_label: "Run 1", state: "tentative",
+    start_date: "2027-02-24", end_date: null, starts_at: null, ends_at: null, tz: "Asia/Dubai", effective: { venue: "Expo Hall 4", venue_source: "activity", start_date: "2027-02-24", end_date: null, date_source: "activity", choice_pending: false, project_start: null, project_end: null },
+    phase: phase(), owner_name: "Eli Engineer", crew_total: 0, call_missing: 0, actual_started_at: null, ...over,
+  });
+
+  it("always names the current company, with a switcher for more than one", async () => {
+    await renderPage(OperationsOverviewPage);
+    expect(screen.getByTestId("ops-company").textContent).toBe("Company Fictional UAE");
+    cleanup();
+    data.ctx = ctx([CO, { id: "c2", name: "Fictional KSA" }]);
+    await renderPage(OperationsOverviewPage, { company: "c2" });
+    const chip = screen.getByTestId("ops-company");
+    expect(chip.getAttribute("data-company-id")).toBe("c2");
+    expect(within(chip).getAllByRole("link").map((a) => a.getAttribute("href"))).toEqual(["/operations?company=c1", "/operations?company=c2"]);
+  });
+
+  it("puts the decisions assigned to the viewer first, then follow-ups with their owners, then Next on site, then the figures", async () => {
+    data.overview = { state: "ok", data: { ...overview, projects: [{ ...overview.projects[0]!, status: "active", equipment_reviews: 1 }, live],
+      output_reviews: [{ version_id: "v1", task_id: "t1", project_id: "p2", reference: "UAE-P-2027-0002", project: "Fictional Motors launch", task: "Stage render", label: "Render", version_no: 2, attached_at: "2027-02-19T08:00:00Z", submitted_by_id: "u-pm", submitted_by: "Pat Manager",
+        assignee_id: "u-eli", assignee: "Eli Engineer", reviewer_id: "u-me", reviewer: "Rana Operations", needs_reviewer: false, pm: "Pat Manager" }] } };
+    data.sites = { state: "ok", data: [activity()] };
+    await renderPage(OperationsOverviewPage);
+    const mine = screen.getByTestId("ops-decisions-mine");
+    expect(within(mine).getAllByRole("listitem")).toHaveLength(1);
+    expect(within(mine).getByRole("link", { name: "Open the version to review it" }).getAttribute("href")).toBe("/projects/p2/work?task=t1&version=v1");
+    const follow = screen.getByTestId("ops-followups");
+    expect(follow.textContent).toMatch(/With Operations/);
+    expect(follow.textContent).toMatch(/With Pat Manager/);
+    const order = ["ops-decisions-mine", "ops-followups", "ops-next-on-site", "ops-summary"].map((id) => document.querySelector(`[data-testid="${id}"]`)!);
+    for (let i = 1; i < order.length; i += 1) expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("lists each dated activity once under Next on site with its exact Site schedule link, and never says started from a date", async () => {
+    data.overview = { state: "ok", data: { ...overview, projects: [live] } };
+    data.sites = { state: "ok", data: [activity(), activity({ id: "a2", title: "Late hall prep", phase: phase({ phase: "date_passed", first_day: "2027-02-10", last_day: "2027-02-10" }), start_date: "2027-02-10" }),
+      activity({ id: "a3", title: "Hall 4 dismantling", kind: "dismantling", phase: phase({ kind: "dismantling", first_day: "2027-03-08", last_day: "2027-03-08" }), start_date: "2027-03-08" })] };
+    await renderPage(OperationsOverviewPage);
+    const next = screen.getByTestId("ops-next-on-site");
+    expect([...next.children].map((li) => li.getAttribute("data-testid"))).toEqual(["ops-activity-a2", "ops-activity-a1", "ops-entry-s:p2"]);   // passed date first, then the next 14 days; the project has no show activity, so its header show date is listed, labelled
+    expect(screen.getByTestId("ops-entry-s:p2").textContent).toContain("Show date (from the project header)");
+    expect(within(screen.getByTestId("ops-activity-a1")).getByRole("link", { name: /Hall 4 installation/ }).getAttribute("href")).toBe("/projects/p2/plan?plan=site&mode=list#site-a1");
+    const late = screen.getByTestId("ops-activity-a2");
+    expect(late.textContent).toContain("Scheduled installation date passed · start unconfirmed");
+    expect(late.textContent).toContain("record the start or move the date");
+    expect(document.body.textContent).not.toMatch(/Installation started|The show started|Already started/);
+    // the later dismantling is in the timeline under its run, once, and not again in Next on site
+    expect(within(screen.getByTestId("ops-timeline")).getByTestId("ops-activity-a3")).toBeTruthy();
+    expect(document.querySelectorAll('[data-testid="ops-activity-a1"]')).toHaveLength(1);
+    expect(screen.queryByTestId("ops-sites-fallback")).toBeNull();
+  });
+
+  it("says plainly when the site activity read is not available and falls back to header dates, labelled", async () => {
+    data.overview = { state: "ok", data: { ...overview, projects: [live] } };
+    data.sites = { state: "error" };
+    await renderPage(OperationsOverviewPage);
+    expect(screen.getByTestId("ops-sites-fallback").textContent).toMatch(/Site activities could not be loaded.*project headers/);
+    expect(screen.getByTestId("ops-next-on-site").textContent).toContain("Installation date (from the project header)");
+  });
+
+  it("links an equipment request code to the exact request and names the next action", async () => {
+    const draft = { ...live, equipment: [{ ...live.equipment[0]!, id: "q5", code: "UAE-R-00005", state: "draft" as const, short_lines: 0, short_rent: 0, needed_from: null, needed_until: null }] };
+    data.overview = { state: "ok", data: { ...overview, projects: [draft] } };
+    await renderPage(OperationsOverviewPage);
+    const issue = screen.getByTestId("ops-equipment-not_sent");
+    expect(within(issue).getByTestId("ops-request-UAE-R-00005").getAttribute("href")).toBe("/projects/p2/equipment?request=q5");
+    expect(issue.textContent).toContain("Set planning dates before submitting to Warehouse");
+  });
+
+  it("team pressure shows both commitments of an overlap with their projects and dates", async () => {
+    data.overview = { state: "ok", data: { ...overview, projects: [live, { ...live, id: "p3", reference: "UAE-P-2027-0003", name: "Roadshow", equipment: [] }],
+      overlaps: [{ user_id: "u-t", person: "Tariq Technician", a: "UAE-P-2027-0002", a_id: "p2", b: "UAE-P-2027-0003", b_id: "p3", from: "2027-02-26", to: "2027-03-01" }] } };
+    data.sites = { state: "ok", data: [activity({ phase: phase({ first_day: "2027-02-26", last_day: "2027-02-27" }), start_date: "2027-02-26" }), activity({ id: "a9", project_id: "p3", reference: "UAE-P-2027-0003", project_name: "Roadshow", title: "Roadshow rigging", phase: phase({ first_day: "2027-02-27", last_day: "2027-02-27" }), start_date: "2027-02-27" })] };
+    await renderPage(OperationsOverviewPage);
+    const pair = screen.getByTestId("ops-pressure-pair");
+    const both = within(pair).getAllByTestId("ops-commitment").map((c) => c.textContent);
+    expect(both).toEqual(["Hall 4 installation · UAE-P-2027-0002 Fictional Motors launch · 26 Feb to 27 Feb", "Roadshow rigging · UAE-P-2027-0003 Roadshow · 27 Feb"]);
+    expect(pair.textContent).toContain("Tariq Technician");
+  });
+});
+
+describe("Upcoming Work: provisional Project Manager and handover lines", () => {
+  const planned = { provisional_pm_id: null, provisional_pm: null, risk: "unknown" as const, risk_note: null, capacity_conflict: false, capacity_note: null, question: null, question_at: null, question_by: null, answer: null, answered_at: null };
+  it("the button says what it does when naming a provisional Project Manager is the next step", async () => {
+    data.upcoming = { state: "ok", data: [{ ...row, to_confirm: null, planning: planned }] };
+    await renderPage(UpcomingWorkPage);
+    expect(screen.getByTestId("ops-plan-UAE-O-2027-0007").textContent).toBe("Name a provisional Project Manager");
+    cleanup();
+    data.upcoming = { state: "ok", data: [row] };                                                   // Sales still has to confirm details: the next step is not Operations'
+    await renderPage(UpcomingWorkPage);
+    expect(screen.getByTestId("ops-plan-UAE-O-2027-0007").textContent).toBe("Plan");
+  });
+  it("a pending handover carries its owner and next step in one line at the top", async () => {
+    data.upcoming = { state: "ok", data: [{ ...row, stage: "won", won: true, dates_tentative: false, handover: { id: "h9", status: "pm_assigned", submitted_at: "2027-02-01T08:00:00Z", pm: "Pat Manager", project_id: null } }] };
+    await renderPage(UpcomingWorkPage);
+    expect(screen.getByTestId("ops-handover-line-UAE-O-2027-0007").textContent).toBe("With Project Manager (Pat Manager) · Next: Accept the handover");
   });
 });

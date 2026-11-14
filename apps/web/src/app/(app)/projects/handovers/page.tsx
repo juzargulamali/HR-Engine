@@ -12,6 +12,7 @@ import { PageTitle } from "@/components/projects/page-title";
 import { LoadError } from "@/components/workspace/states";
 import { formatDateTime } from "@/components/sales/format";
 import { getProjectsContext } from "@/lib/projects/context";
+import { handoverNext } from "@/lib/projects/handover-next";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjHandoverRow } from "@/types/projects";
 import { firstParam, parseRecordId, withParams } from "@/components/workspace/url-state";
@@ -76,6 +77,8 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
   const clarificationOf = (h: ProjHandoverRow) => (h.clarification_note ? { note: h.clarification_note, at: h.clarification_requested_at, answered: h.status !== "clarification_requested" } : null);
   const isMine = (h: ProjHandoverRow) => h.pm_user_id === ctx.userId && (h.status === "pm_assigned" || h.status === "clarification_requested");
 
+  /** Who a handover is with and the next step, in one line (the viewer's own name reads "you"). */
+  const ownerNext = (h: ProjHandoverRow) => handoverNext(h, { pm: nameOf(h.pm_user_id), sales: nameOf(h.prepared_by), viewerId: ctx.userId });
   /** One handover in full: who and where it stands, the decision for the assigned Project Manager first, then the brief. */
   const full = (h: ProjHandoverRow, opened = false) => {
     const people = ctx.people.filter((p) => p.companyIds.includes(h.company_id)).map((p) => ({ id: p.id, name: p.name }));
@@ -84,9 +87,10 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
       <div key={h.id} id={`handover-${h.id}`} className="scroll-mt-24" data-testid={opened ? "handover-opened" : undefined}>
         <Panel title={h.title} description={`${ctx.companyName(h.company_id)} · Sales ${h.crm_reference} · prepared by ${nameOf(h.prepared_by)}${h.submitted_at ? ` · submitted ${formatDateTime(h.submitted_at)}` : ""}`} actions={<HandoverStatusBadge status={h.status} />}>
           <div className="space-y-5">
+            <p className="text-sm" data-testid="handover-owner-next"><span className="font-medium">{ownerNext(h).line}</span></p>
             {isMine(h) && h.status === "pm_assigned" ? <HandoverDecision handoverId={h.id} /> : null}
             {isMine(h) && h.status === "clarification_requested" ? <Alert variant="warning" role="status">You asked Sales a question (below). Sales has not resubmitted yet; you will be told when they do, and can then accept.</Alert> : null}
-            {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link><Link href={`/projects/${h.project_id}/delivery`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the Project Plan</Link></> : null}
+            {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/delivery?from=handover`} className={buttonVariants({ size: "sm" })} data-testid="handover-start-plan">Start the project plan</Link><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link></> : null}
             <HandoverProcess status={h.status} />
             <dl className="grid gap-3 text-sm sm:grid-cols-3">
               <div><dt className="text-muted-foreground">Project Manager</dt><dd className="mt-0.5">{nameOf(h.pm_user_id)}{h.pm_assigned_at ? ` (named ${formatDateTime(h.pm_assigned_at)})` : ""}</dd></div>
@@ -105,6 +109,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
     <li key={h.id} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 py-3">
       <div className="min-w-0">
         <p className="break-words font-medium">{h.title}</p>
+        <p className="text-sm" data-testid="handover-owner-next">{ownerNext(h).line}</p>
         <p className="text-sm text-muted-foreground">
           {ctx.companyName(h.company_id)} · Sales {h.crm_reference} · Project Manager: {nameOf(h.pm_user_id)}
           {h.status === "accepted" && h.accepted_at ? ` · accepted ${formatDateTime(h.accepted_at)}` : h.submitted_at ? ` · submitted ${formatDateTime(h.submitted_at)}` : ""}
@@ -112,7 +117,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <HandoverStatusBadge status={h.status} />
-        {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link><Link href={`/projects/${h.project_id}/delivery`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the Project Plan</Link></> : null}
+        {h.status === "accepted" && h.project_id ? <><Link href={`/projects/${h.project_id}/delivery?from=handover`} className={buttonVariants({ size: "sm" })} data-testid="handover-start-plan">Start the project plan</Link><Link href={`/projects/${h.project_id}/work`} className={buttonVariants({ variant: "outline", size: "sm" })}>Open the project</Link></> : null}
         <Link href={withParams(BASE, sp, { [HANDOVER_PARAM]: h.id })} scroll={false} className={buttonVariants({ variant: "ghost", size: "sm" })}>Open brief</Link>
       </div>
     </li>

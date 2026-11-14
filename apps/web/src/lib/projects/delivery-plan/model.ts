@@ -131,17 +131,19 @@ export function describeChange(ch: Pick<DpChange, "changes">, nameOf: (field: st
 }
 
 /** What release would do, so the confirmation can say it before anything is created. Hardware supplied by buying, renting or the client is followed in the plan, not requested. */
-export function releasePreview(items: readonly DpItem[]): { tasks: number; equipment: number; external: number; waiting: { key: string; reason: string }[] } {
+/** A line a release will leave waiting, with where it is (`label`: the deliverable and the line) and the one thing that unblocks it (`fix`), so the dialog can link straight to it. */
+export type ReleaseWaiting = { key: string; reason: string; label: string; fix: string };
+export function releasePreview(items: readonly DpItem[]): { tasks: number; equipment: number; external: number; waiting: ReleaseWaiting[] } {
   let tasks = 0, equipment = 0, external = 0;
-  const waiting: { key: string; reason: string }[] = [];
+  const waiting: ReleaseWaiting[] = [];
   for (const it of items) for (const l of it.lines) {
     if (l.released_at) continue;
     if (l.section === "hardware") {
       if ((l.supply_route ?? "inventory") !== "inventory") external += 1;
       else if (l.inv_item_id) equipment += 1;
-      else waiting.push({ key: l.key, reason: "needs a stock match" });
+      else waiting.push({ key: l.key, reason: "needs a stock match", label: `${it.title}: ${l.description}`, fix: "Choose the stock item for this line, or mark it bought, rented or client supplied." });
     } else if (l.assignee_id || it.owner_id) tasks += 1;
-    else waiting.push({ key: l.key, reason: "nobody named, and the deliverable has no accountable owner" });
+    else waiting.push({ key: l.key, reason: "nobody named, and the deliverable has no accountable owner", label: `${it.title}: ${l.description}`, fix: "Name who does this line, or give the deliverable an accountable owner." });
   }
   return { tasks, equipment, external, waiting };
 }

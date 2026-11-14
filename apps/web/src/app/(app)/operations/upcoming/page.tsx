@@ -20,7 +20,7 @@ export default async function UpcomingWorkPage({ searchParams }: { searchParams:
   const one = (k: string) => (typeof sp[k] === "string" ? (sp[k] as string) : "");
   const ctx = await getOperationsContext();
   if (!ctx) return null;
-  const company = pickCompany(ctx, one("company"));
+  const company = await pickCompany(ctx, one("company"));
   if (!company) return null;
   const header = <OpsHeader title="Upcoming Work" help={<p>Enquiries that Sales flagged for operational planning. Tentative work is planned here; nothing is booked until the enquiry is won and its handover is accepted. An enquiry leaves this list when its project exists or when Sales removes the flag.</p>} />;
   const res = await loadUpcoming(company.id);

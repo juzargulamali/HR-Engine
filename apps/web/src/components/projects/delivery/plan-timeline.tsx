@@ -168,7 +168,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
 
   const modeButton = (m: TimelineMode, label: string) => (
     <button type="button" aria-pressed={scale?.mode === m} data-testid={`tl-mode-${m}`} onClick={() => setUserMode(m)}
-      className={cn("inline-flex h-7 min-w-14 items-center justify-center rounded px-3 text-[13px] font-medium transition-colors", scale?.mode === m ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</button>
+      className={cn("inline-flex h-9 min-w-16 items-center justify-center rounded px-3 text-sm font-medium transition-colors sm:h-7 sm:min-w-14 sm:text-[13px]", scale?.mode === m ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</button>
   );
 
   return (
@@ -183,7 +183,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
               <p className="mt-1.5">Bars are read-only: change a date on the task or in the Breakdown; it follows the task&apos;s own approval rules.</p>
             </InfoHint>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={jumpToToday} disabled={todayIdx < 0} data-testid="tl-today-jump"
+          <Button type="button" variant="outline" size="sm" onClick={jumpToToday} disabled={todayIdx < 0} data-testid="tl-today-jump" className="h-9 sm:h-8"
             title={todayIdx < 0 ? "Today is outside this schedule" : "Scroll to today"}><CalendarCheck className="h-4 w-4" aria-hidden /> Today</Button>
         </div>
       )}
@@ -196,7 +196,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
               <div data-testid="tl-corner" className="sticky left-0 z-20 border-r border-border bg-muted px-3 py-2">Activation / requirement, with its dates</div>
               <div className="relative h-[4.5rem]" data-testid="tl-header">
                 {scale && todayIdx >= 0 ? (
-                  <span data-testid="tl-today-marker" title={`Today, ${full(today)}`} className="absolute top-0 z-10 -translate-x-1/2 rounded-b bg-[hsl(var(--os-red))] px-1.5 text-[10px] font-semibold leading-4 text-white"
+                  <span data-testid="tl-today-marker" title={`Today, ${full(today)}`} className="absolute top-0 z-10 -translate-x-1/2 rounded-b bg-[hsl(var(--os-red))] px-1.5 text-[11px] font-semibold leading-4 text-white"
                     style={{ left: `${((todayIdx + 0.5) / n) * 100}%` }}>Today</span>
                 ) : null}
                 <div className="absolute inset-x-0 bottom-0 top-4">
@@ -209,9 +209,9 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
                         style={{ left: `${(l.index / n) * 100}%`, width: dayMode ? `${100 / n}%` : "auto", minWidth: dayMode ? undefined : "4.5rem", paddingLeft: dayMode ? 0 : "0.25rem", alignItems: dayMode ? "center" : "flex-start" }}>
                         {dayMode ? (
                           <>
-                            <span className="text-[11px] font-normal">{weekday(l.date)}</span>
+                            <span className="text-xs font-normal">{weekday(l.date)}</span>
                             <span className="text-[13px] text-foreground">{dayNum(l.date)}</span>
-                            <span className="text-[11px] font-normal">{first ? monthOf(l.date) : " "}</span>
+                            <span className="text-xs font-normal">{first ? monthOf(l.date) : " "}</span>
                           </>
                         ) : (
                           <span className="text-[12px] text-foreground">{dayNum(l.date)} {monthOf(l.date)}{l.index === 0 || (l.date.slice(5, 7) === "01" && dayNum(l.date) <= 7) ? ` ${l.date.slice(0, 4)}` : ""}</span>
@@ -227,8 +227,8 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
                 <li key={r.key} className={cn("group grid border-b border-border/70 transition-colors last:border-b-0 hover:bg-muted/30 focus-within:bg-muted/30", cols, r.kind === "activation" && "bg-muted/40")} data-testid={`tl-row-${r.kind}`}>
                   <div className={cn("sticky left-0 z-10 min-w-0 border-r border-border px-3 py-2 transition-colors group-hover:bg-muted group-focus-within:bg-muted", r.kind === "activation" ? "bg-muted" : "bg-card", r.kind === "line" && "pl-5 sm:pl-7")}>
                     <Link href={`/projects/${projectId}/delivery?open=${r.itemKey}#${r.anchor}`} className={cn("block break-words text-sm underline-offset-2 hover:underline", r.kind === "activation" ? "font-semibold" : "")}>{r.label}</Link>
-                    <p className="break-words text-[12px] text-muted-foreground">{r.sub}</p>
-                    <p className="mt-0.5 break-words text-[13px] font-medium" data-testid={`tl-dates-${r.key}`}>
+                    <p className="break-words text-[13px] text-muted-foreground sm:text-[12px]">{r.sub}</p>
+                    <p className="mt-0.5 break-words text-sm font-medium sm:text-[13px]" data-testid={`tl-dates-${r.key}`}>
                       {formatSpan(r.start, r.due, today)}
                       {r.inherited ? <span className="font-normal text-muted-foreground"> (the activation&apos;s date)</span> : null}
                     </p>

@@ -12,7 +12,7 @@ import { TaskDetailBody } from "./task-detail";
  * checked again, so a task they may not read (another project, a summary-only project, a removed membership) produces no panel at all.
  * `projectId` is known on a project's own Work page; on My Work it is looked up from the task.
  */
-export async function TaskPanel({ rawTaskId, projectId, basePath, current, panelParam = "task" }: { rawTaskId: string; projectId?: string; basePath: string; current: Record<string, string>; panelParam?: string }) {
+export async function TaskPanel({ rawTaskId, projectId, basePath, current, panelParam = "task", backFrom }: { rawTaskId: string; projectId?: string; basePath: string; current: Record<string, string>; panelParam?: string; backFrom?: "my-work" }) {
   const taskId = parseRecordId(rawTaskId);
   if (!taskId) return null;
   const ctx = await getProjectsContext();
@@ -21,11 +21,12 @@ export async function TaskPanel({ rawTaskId, projectId, basePath, current, panel
   if (!pid) {
     const supabase = await createClient();
     const { data, error } = await supabase.from("proj_tasks").select("project_id").eq("id", taskId).maybeSingle();
-    if (error) return <TaskLoadError closeHref={withParams(basePath, current, { [panelParam]: null })} />;
+    if (error) return <TaskLoadError closeHref={withParams(basePath, current, { [panelParam]: null, version: null })} />;
     pid = data?.project_id;
   }
-  if (!pid) return <MissingTask closeHref={withParams(basePath, current, { [panelParam]: null })} />;
-  const closeHref = withParams(basePath, current, { [panelParam]: null });
+  if (!pid) return <MissingTask closeHref={withParams(basePath, current, { [panelParam]: null, version: null })} />;
+  // Closing the panel leaves the list exactly as it was (filters, search, view, sort); the version in view goes with the task.
+  const closeHref = withParams(basePath, current, { [panelParam]: null, version: null });
   // A failed read is "could not load", not "Task not available" (which says the task is gone or private).
   let view: Awaited<ReturnType<typeof loadProjectView>> = null;
   let data: Awaited<ReturnType<typeof loadTaskDetail>> = null;
@@ -40,10 +41,19 @@ export async function TaskPanel({ rawTaskId, projectId, basePath, current, panel
   if (failed) return <TaskLoadError closeHref={closeHref} />;
   if (!view || view.level !== "details" || !data) return <MissingTask closeHref={closeHref} />;
   return (
-    <SidePanel title={data.task.title} subtitle={`${view.project.reference} · ${view.project.name}`} closeHref={closeHref} fullPageHref={`/projects/${pid}/work/tasks/${taskId}`}>
-      <TaskDetailBody data={data} view={view} focusVersionId={current.version} taskHref={(id) => withParams(basePath, current, { [panelParam]: id })} />
+    <SidePanel title={data.task.title} subtitle={`${view.project.reference} · ${view.project.name}`} closeHref={closeHref} fullPageHref={fullPage(pid, taskId, current.version, backFrom)}>
+      <TaskDetailBody data={data} view={view} focusVersionId={current.version} taskHref={(id) => withParams(basePath, current, { [panelParam]: id, version: null })} />
     </SidePanel>
   );
+}
+
+/** The task's own page, keeping the version in view and, from My Work, where the Back link returns to. */
+function fullPage(projectId: string, taskId: string, version: string | undefined, backFrom: "my-work" | undefined): string {
+  const q = new URLSearchParams();
+  if (version) q.set("version", version);
+  if (backFrom) q.set("from", backFrom);
+  const qs = q.toString();
+  return `/projects/${projectId}/work/tasks/${taskId}${qs ? `?${qs}` : ""}`;
 }
 
 function TaskLoadError({ closeHref }: { closeHref: string }) {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   pickAttention, feedbackLinks, reviewStateWord,
-  toLocalInput, activityWhen, attentionHref, filterRegister, formatAt, groupByActivation, nextOutputAction, parseRegisterFilter, quantityText, recentText, registerCounts, registerCsv, resolveZone, runGroups, siteRange,
+  toLocalInput, activityWhen, attentionHref, filterRegister, formatAt, groupByActivation, nextOutputAction, parseRegisterFilter, quantityText, recentText, needsViewer, registerCounts, registerCsv, resolveZone, runGroups, siteRange,
   type Register, type RegisterRow, type SiteActivity, type OutputVersion,
 } from "./model";
 
@@ -39,8 +39,24 @@ describe("register", () => {
     expect(filterRegister(rows, "changes").map((r) => r.task_id)).toEqual(["4"]);
     expect(filterRegister(rows, "approved").map((r) => r.task_id)).toEqual(["5"]);
     expect(filterRegister(rows, "all")).toHaveLength(6);
-    expect(registerCounts(rows)).toEqual({ all: 6, missing: 3, awaiting: 1, changes: 1, approved: 1 });
+    expect(registerCounts(rows)).toEqual({ all: 6, next: 0, missing: 3, awaiting: 1, changes: 1, approved: 1 });
     expect(parseRegisterFilter("changes")).toBe("changes"); expect(parseRegisterFilter("bogus")).toBe("all"); expect(parseRegisterFilter(undefined)).toBe("all");
+  });
+  it("Do next is only what THIS reader must act on: a version they may decide, name a reviewer for or send on, and their own missing, short or sent-back outputs", () => {
+    const awaiting = (o: Partial<OutputVersion>) => row({ task_id: "w", state: "awaiting_review", current: ver({ status: "awaiting", ...o }) });
+    expect(needsViewer(awaiting({ can_decide: true }), "me")).toBe(true);
+    expect(needsViewer(awaiting({ can_assign: true }), "me")).toBe(true);
+    expect(needsViewer(awaiting({ can_reroute: true }), "me")).toBe(true);
+    expect(needsViewer(awaiting({}), "me")).toBe(false);
+    expect(needsViewer(row({ state: "changes_requested", assignee_id: "me" }), "me")).toBe(true);
+    expect(needsViewer(row({ state: "changes_requested", assignee_id: "other" }), "me")).toBe(false);
+    expect(needsViewer(row({ state: "missing", assignee_id: "me" }), "me")).toBe(true);
+    expect(needsViewer(row({ state: "approved", assignee_id: "me" }), "me")).toBe(false);
+    const all = [awaiting({ can_decide: true }), row({ task_id: "m", state: "missing", assignee_id: "me" }), row({ task_id: "x", state: "missing", assignee_id: "other" })];
+    expect(filterRegister(all, "next", "me").map((r) => r.task_id)).toEqual(["w", "m"]);
+    expect(filterRegister(all, "next").map((r) => r.task_id)).toEqual(["w"]); // without a person, only what the database says this reader may decide
+    expect(registerCounts(all, "me").next).toBe(2);
+    expect(parseRegisterFilter("next")).toBe("next");
   });
   it("groups by activation with the rows that belong to none last", () => {
     const g = groupByActivation([row({ task_id: "a", activation: { id: "2", key: "D002", title: "B" } }), row({ task_id: "n", activation: null }), row({ task_id: "b", activation: { id: "1", key: "D001", title: "A" } })]);

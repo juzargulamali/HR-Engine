@@ -5,6 +5,9 @@
  * record says so (a handover has no Project Manager, a task is blocked, a date changed while equipment is booked), and each item names its owner, its date and the
  * screen where the authorised person acts. What is not recorded is said to be not recorded.
  */
+import { shortDay, type ActivityKind, type SiteActivityRead } from "@/lib/projects/phase2/model";
+import { describeSitePhase } from "@/lib/projects/site-state";
+
 export const NOT_RECORDED = "Not recorded";
 
 export interface EditionSnapshot { edition_id?: string; event_name: string | null; label: string | null; venue: string | null; city: string | null; start_date: string | null; end_date: string | null }
@@ -92,6 +95,18 @@ export function equipmentLine(q: RequestState): string {
   const reserved = ["reserved", "partially_ready", "short"].includes(q.state) ? ` ${q.reserved_lines} of ${plural(q.lines, "line")} reserved.` : q.state === "draft" && q.lines > 0 ? ` ${plural(q.lines, "line")} on the draft, nothing reserved yet.` : "";
   return `${q.code}: ${STATE_WORDS[q.state] ?? q.state}.${reserved}${short}${out}`.trim();
 }
+const cap = (v: string) => v.charAt(0).toUpperCase() + v.slice(1);
+/**
+ * What a project's header dates say, in words that never claim work started. A passed date is "date passed · start unconfirmed" (nobody has recorded a start); only an explicit
+ * start record on a site activity counts as started, and that comes from the site activity read, not from a date.
+ */
+export function headerDateText(p: Pick<OverviewProject, "install_start" | "event_start">, today: string): { start: string; passed: boolean; lead: string } | null {
+  const start = day(p.install_start) ?? day(p.event_start);
+  if (!start) return null;
+  const word = p.install_start ? "installation" : "show";
+  const passed = start < today;
+  return { start, passed, lead: passed ? `Scheduled ${word} date passed · start unconfirmed (${start}, project header)` : `${cap(word)} planned ${start} (project header)` };
+}
 /** How many tasks are blocked in all (the list carries at most five of them). */
 export const blockedCount = (p: Pick<OverviewProject, "blockers" | "blockers_total">) => Math.max(n(p.blockers_total), p.blockers.length);
 export const unitsOut = (p: Pick<OverviewProject, "equipment">) => p.equipment.reduce((a, q) => a + n(q.units_out), 0);
@@ -100,7 +115,8 @@ export const isFinished = (status: string) => status === "completed" || status =
 export const completeButOut = (p: Pick<OverviewProject, "status" | "equipment">) => isFinished(p.status) && unitsOut(p) > 0;
 
 export type DecisionKind = "pm_unassigned" | "handover_stalled" | "output_review" | "blocker" | "at_risk_installation" | "equipment_review" | "release_failed";
-export interface DecisionItem { kind: DecisionKind; key: string; title: string; detail: string; owner: string; date: string | null; href: string; action: string }
+/** `ownerId` is the person the record names (assigned reviewer, named Project Manager); `mine` is true when that is the viewer. `ownerId` is null where the owner is a role ("Operations"), not a person. */
+export interface DecisionItem { kind: DecisionKind; key: string; title: string; detail: string; owner: string; ownerId: string | null; mine: boolean; date: string | null; href: string; action: string }
 export const DECISION_WORDS: Record<DecisionKind, string> = {
   pm_unassigned: "Project Manager not assigned", handover_stalled: "Handover stalled", output_review: "Output waiting for Operations review", blocker: "Blocker not resolved", at_risk_installation: "Installation at risk",
   equipment_review: "Review equipment booking", release_failed: "Unused reservations not released",
@@ -131,42 +147,47 @@ export function riskReasons(p: OverviewProject, today: string): string[] {
 }
 
 /** "Needs my decision": each item is a recorded fact with its owner, its date and the screen where the authorised person acts. */
-export function decisions(o: Overview, today: string): DecisionItem[] {
+export function decisions(o: Overview, today: string, viewerId?: string | null): DecisionItem[] {
   const out: DecisionItem[] = [];
+  const push = (d: Omit<DecisionItem, "mine" | "ownerId"> & { ownerId?: string | null }) => out.push({ ...d, ownerId: d.ownerId ?? null, mine: !!viewerId && d.ownerId === viewerId });
   for (const h of o.handovers) {
     const href = `/projects/handovers?handover=${h.id}`;
     if (h.status === "submitted") {
-      out.push({ kind: "pm_unassigned", key: `pm:${h.id}`, title: `${h.sales_reference} ${h.title}`, detail: `Handover submitted${h.submitted_at ? ` ${day(h.submitted_at)}` : ""}. No Project Manager is assigned.`, owner: "Operations", date: day(h.submitted_at), href, action: "Assign a Project Manager" });
+      push({ kind: "pm_unassigned", key: `pm:${h.id}`, title: `${h.sales_reference} ${h.title}`, detail: `Handover submitted${h.submitted_at ? ` ${day(h.submitted_at)}` : ""}. No Project Manager is assigned.`, owner: "Operations", date: day(h.submitted_at), href, action: "Assign a Project Manager" });
     } else {
       const since = h.status === "pm_assigned" ? h.pm_assigned_at : h.clarification_requested_at;
       const waited = since ? daysBetween(since, today) : null;
       if (waited === null || waited >= STALLED_DAYS) {
-        out.push({ kind: "handover_stalled", key: `stalled:${h.id}`, title: `${h.sales_reference} ${h.title}`,
+        push({ kind: "handover_stalled", key: `stalled:${h.id}`, title: `${h.sales_reference} ${h.title}`,
           detail: h.status === "pm_assigned" ? `Waiting ${waited === null ? "(since a date that is not recorded)" : `${plural(waited, "day")}`} for ${h.pm ?? "the Project Manager"} to accept.` : `A question went back to Sales ${waited === null ? "on a date that is not recorded" : `${plural(waited, "day")} ago`} and the handover has not been resubmitted.`,
-          owner: h.status === "pm_assigned" ? (h.pm ?? "Project Manager") : "Sales", date: day(since), href, action: h.status === "pm_assigned" ? "Open the handover (you can reassign)" : "Open the handover" });
+          owner: h.status === "pm_assigned" ? (h.pm ?? "Project Manager") : "Sales", ownerId: h.status === "pm_assigned" ? h.pm_id : null, date: day(since), href, action: h.status === "pm_assigned" ? "Open the handover (you can reassign)" : "Open the handover" });
       }
     }
   }
   for (const p of o.projects) {
     for (const b of p.blockers) {
       if (!b.cross_team && daysBetween(b.since, today) < BLOCKER_DAYS) continue;
-      out.push({ kind: "blocker", key: `blocker:${b.task_id}`, title: `${p.reference} ${p.name}`, detail: `"${b.title}" is blocked since ${day(b.since)}${b.reason ? `: ${b.reason}` : ""}. ${b.unblock_owner ? `Waiting on ${b.unblock_owner}` : "Nobody is named to unblock it"}.`,
-        owner: b.unblock_owner ?? p.pm, date: day(b.since), href: `/projects/${p.id}/work?task=${b.task_id}`, action: "Open the task" });
+      push({ kind: "blocker", key: `blocker:${b.task_id}`, title: `${p.reference} ${p.name}`, detail: `"${b.title}" is blocked since ${day(b.since)}${b.reason ? `: ${b.reason}` : ""}. ${b.unblock_owner ? `Waiting on ${b.unblock_owner}` : "Nobody is named to unblock it"}.`,
+        owner: b.unblock_owner ?? p.pm, ownerId: b.unblock_owner ? null : p.pm_id, date: day(b.since), href: `/projects/${p.id}/work?task=${b.task_id}`, action: "Open the task" });
     }
     const reasons = riskReasons(p, today);
-    const start = day(p.install_start) ?? day(p.event_start)!;
-    if (reasons.length > 0) out.push({ kind: "at_risk_installation", key: `risk:${p.id}`, title: `${p.reference} ${p.name}`, detail: `${p.install_start ? "Installation" : "The event"} ${start < today ? "started" : "starts"} ${start}: ${reasons.join("; ")}.`, owner: p.pm, date: day(p.install_start) ?? day(p.event_start), href: `/projects/${p.id}/work`, action: "Open the project" });
-    if (p.equipment_reviews > 0) out.push({ kind: "equipment_review", key: `review:${p.id}`, title: `${p.reference} ${p.name}`, detail: `A committed date changed while equipment is booked. ${plural(p.equipment_reviews, "booking")} to review. The booking itself has not been changed.`, owner: p.pm, date: null, href: `/projects/${p.id}/equipment`, action: "Review equipment booking" });
-    if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, title: `${p.reference} ${p.name}`, detail: "Releasing unused reservations failed when the project finished. The warehouse releases them on the request.", owner: "Warehouse", date: null, href: `/projects/${p.id}/equipment`, action: "Open the Equipment tab" });
+    const hd = headerDateText(p, today);
+    if (reasons.length > 0) push({ kind: "at_risk_installation", key: `risk:${p.id}`, title: `${p.reference} ${p.name}`, detail: `${hd ? hd.lead : "Project header dates"}: ${reasons.join("; ")}.`, owner: p.pm, ownerId: p.pm_id, date: day(p.install_start) ?? day(p.event_start), href: `/projects/${p.id}/work`, action: "Open the project" });
+    if (p.equipment_reviews > 0) push({ kind: "equipment_review", key: `review:${p.id}`, title: `${p.reference} ${p.name}`, detail: `A committed date changed while equipment is booked. ${plural(p.equipment_reviews, "booking")} to review. The booking itself has not been changed.`, owner: p.pm, ownerId: p.pm_id, date: null, href: `/projects/${p.id}/equipment`, action: "Review equipment booking" });
+    if (p.release_failed) push({ kind: "release_failed", key: `release:${p.id}`, title: `${p.reference} ${p.name}`, detail: "Releasing unused reservations failed when the project finished. The warehouse releases them on the request.", owner: "Warehouse", date: null, href: `/projects/${p.id}/equipment`, action: "Open the Equipment tab" });
   }
   for (const r of o.output_reviews ?? []) {
-    out.push({ kind: "output_review", key: `output:${r.version_id}`, title: `${r.reference} ${r.project}`,
+    push({ kind: "output_review", key: `output:${r.version_id}`, title: `${r.reference} ${r.project}`,
       detail: `${r.needs_reviewer ? "Needs an Operations reviewer: " : ""}Version ${r.version_no} of "${r.label ?? r.task}" (${r.task}) was submitted by ${r.submitted_by} and is assigned to ${r.assignee}. ${r.needs_reviewer ? `Nobody else holds the Operations role, so ${r.pm} needs someone with access to People & Access to give it to another person.` : r.reviewer ? `Reviewer: ${r.reviewer}.` : "Not assigned yet: any eligible Operations Manager can take it."}`,
-      owner: r.reviewer ?? (r.needs_reviewer ? r.pm : "Operations"), date: day(r.attached_at), href: `/projects/${r.project_id}/work?task=${r.task_id}&version=${r.version_id}`, action: r.needs_reviewer ? "Open the version (ask for a reviewer)" : "Open the version to review it" });
+      owner: r.reviewer ?? (r.needs_reviewer ? r.pm : "Operations"), ownerId: r.reviewer_id, date: day(r.attached_at), href: `/projects/${r.project_id}/work?task=${r.task_id}&version=${r.version_id}`, action: r.needs_reviewer ? "Open the version (ask for a reviewer)" : "Open the version to review it" });
   }
   const order: DecisionKind[] = ["pm_unassigned", "handover_stalled", "output_review", "blocker", "at_risk_installation", "equipment_review", "release_failed"];
-  return out.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || (a.date ?? "9999").localeCompare(b.date ?? "9999") || a.title.localeCompare(b.title));
+  // Decisions assigned to the viewer lead; then the rest in the usual order.
+  return out.sort((a, b) => Number(b.mine) - Number(a.mine) || order.indexOf(a.kind) - order.indexOf(b.kind) || (a.date ?? "9999").localeCompare(b.date ?? "9999") || a.title.localeCompare(b.title));
 }
+
+/** The decisions assigned to the viewer, and the follow-ups (each with the named owner it waits on) in the order `decisions` returned them. */
+export const splitDecisions = (items: readonly DecisionItem[]): { mine: DecisionItem[]; followUps: DecisionItem[] } => ({ mine: items.filter((d) => d.mine), followUps: items.filter((d) => !d.mine) });
 
 /** The single most relevant unresolved issue of a project, or null when nothing is recorded against it. */
 export function topIssue(p: OverviewProject, today: string): string | null {
@@ -192,17 +213,82 @@ export function upcomingDelivery(o: Overview): OverviewProject[] {
   return o.projects.filter((p) => !isFinished(p.status) || unitsOut(p) > 0 || p.release_failed || p.equipment_reviews > 0).sort((a, b) => key(a).localeCompare(key(b)) || a.reference.localeCompare(b.reference));
 }
 
-export interface PressureItem { kind: "overlap" | "reviews_overdue" | "shortage" | "partial_dispatch" | "overdue_return"; key: string; text: string; href: string }
-/** Team and warehouse pressure, where it is recorded. Overlaps need both projects to have dates; nothing is estimated. */
-export function pressure(o: Overview): PressureItem[] {
+/** One thing a person or crew is committed to: the project, the activity (or the project header window it falls back to) and when. */
+export interface Commitment { project: string; title: string; when: string; href: string; source: "activity" | "project_header" }
+export interface PressureItem { kind: "overlap" | "crew_overlap" | "reviews_overdue" | "shortage" | "partial_dispatch" | "overdue_return"; key: string; text: string; href: string; /** Both sides of an overlap. */ commitments?: Commitment[]; who?: string }
+
+/** The site schedule link of one activity: the exact row on the project's Site schedule. */
+export const siteHref = (a: { project_id: string; id: string }) => `/projects/${a.project_id}/plan?plan=site&mode=list#site-${a.id}`;
+
+const dayRange = (a: string | null, b: string | null) => (!a ? "no date" : !b || b === a ? shortDay(a) : `${shortDay(a)} to ${shortDay(b)}`);
+const clock = (iso: string, tz: string | null) => new Intl.DateTimeFormat("en-GB", { timeZone: tz ?? "UTC", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso));
+/** "14 Nov, 09:00–17:00" when the activity has a time window, otherwise the dates. */
+export function activityWhen(a: Pick<SiteActivityRead, "phase" | "starts_at" | "ends_at" | "tz">): string {
+  const first = a.phase.first_day; const last = a.phase.last_day;
+  if (a.starts_at && first) {
+    const to = a.ends_at ? clock(a.ends_at, a.tz) : null;
+    return last && last !== first ? `${shortDay(first)} ${clock(a.starts_at, a.tz)} to ${shortDay(last)}${to ? ` ${to}` : ""}` : `${shortDay(first)}, ${clock(a.starts_at, a.tz)}${to ? `–${to}` : ""}`;
+  }
+  return dayRange(first, last);
+}
+/** The span an activity occupies, in milliseconds: its time window when it has one, otherwise whole days. Null when it has no date. */
+function span(a: Pick<SiteActivityRead, "phase" | "starts_at" | "ends_at">): [number, number] | null {
+  if (a.starts_at) { const s0 = Date.parse(a.starts_at); const e0 = a.ends_at ? Date.parse(a.ends_at) : s0 + 3_600_000; return [s0, Math.max(e0, s0 + 1)]; }
+  if (!a.phase.first_day) return null;
+  return [Date.parse(`${a.phase.first_day}T00:00:00Z`), Date.parse(`${a.phase.last_day ?? a.phase.first_day}T00:00:00Z`) + 86_400_000];
+}
+const overlaps = (x: [number, number], y: [number, number]) => x[0] < y[1] && y[0] < x[1];
+const activityCommitment = (a: SiteActivityRead): Commitment => ({ project: `${a.reference} ${a.project_name}`, title: a.title, when: activityWhen(a), href: siteHref(a), source: "activity" });
+
+/**
+ * Team pressure, where it is recorded. Both sides of every overlap are shown (title, project, date or time window), never just two project names:
+ *   - a PERSON on two live projects whose delivery windows overlap (the existing overview read); each side is named by the project's dated site activities that fall in the overlap, else by its
+ *     header window, labelled as such;
+ *   - two CONFIRMED site activities of different projects that overlap in time and both have crew places. This is the activity-level part of the existing conflict rule (a confirmed commitment
+ *     that overlaps another); it cannot say WHICH person is on both, because the activity read carries crew counts, not people, so it asks for that check on the Site schedule.
+ * Nothing is estimated.
+ */
+export function pressure(o: Overview, activities?: readonly SiteActivityRead[] | null): PressureItem[] {
   const out: PressureItem[] = [];
-  for (const x of o.overlaps) out.push({ kind: "overlap", key: `overlap:${x.user_id}:${x.a_id}:${x.b_id}`, text: `${x.person} is on ${x.a} and ${x.b}, whose delivery dates overlap ${day(x.from)} to ${day(x.to)}.`, href: `/projects/${x.a_id}/people` });
+  const acts = activities ?? [];
+  const byProject = new Map<string, SiteActivityRead[]>();
+  for (const a of acts) { const l = byProject.get(a.project_id) ?? []; l.push(a); byProject.set(a.project_id, l); }
+  const project = new Map(o.projects.map((p) => [p.id, p]));
+  const covered = new Set<string>();
+  const pairKey = (x: string, y: string) => [x, y].sort().join("|");
+  for (const x of o.overlaps) {
+    covered.add(pairKey(x.a_id, x.b_id));
+    const win: [number, number] = [Date.parse(`${day(x.from)}T00:00:00Z`), Date.parse(`${day(x.to)}T00:00:00Z`) + 86_400_000];
+    const side = (id: string, ref: string): Commitment[] => {
+      const p = project.get(id);
+      const inside = (byProject.get(id) ?? []).filter((a) => { const sp = span(a); return sp ? overlaps(sp, win) : false; });
+      if (inside.length > 0) return inside.slice(0, 3).map(activityCommitment);
+      const from = day(p?.install_start) ?? day(p?.event_start); const to = day(p?.event_end);
+      return [{ project: p ? `${p.reference} ${p.name}` : ref, title: "Project delivery window (from the project header)", when: dayRange(from, to), href: `/projects/${id}/plan?plan=site&mode=list`, source: "project_header" }];
+    };
+    const commitments = [...side(x.a_id, x.a), ...side(x.b_id, x.b)];
+    out.push({ kind: "overlap", key: `overlap:${x.user_id}:${x.a_id}:${x.b_id}`, who: x.person, commitments, href: commitments[0]?.href ?? `/projects/${x.a_id}/people`,
+      text: `${x.person} is on ${x.a} and ${x.b}, whose delivery dates overlap ${day(x.from)} to ${day(x.to)}.` });
+  }
+  // Activity-level: confirmed crewed activities of different projects that overlap in time.
+  const crewed = acts.filter((a) => a.state === "confirmed" && a.crew_total > 0 && span(a));
+  let pairs = 0;
+  for (let i = 0; i < crewed.length && pairs < 20; i += 1) {
+    for (let j = i + 1; j < crewed.length && pairs < 20; j += 1) {
+      const a = crewed[i]!; const b = crewed[j]!;
+      if (a.project_id === b.project_id || covered.has(pairKey(a.project_id, b.project_id))) continue;
+      if (!overlaps(span(a)!, span(b)!)) continue;
+      pairs += 1;
+      out.push({ kind: "crew_overlap", key: `crew:${a.id}:${b.id}`, commitments: [activityCommitment(a), activityCommitment(b)], href: siteHref(a),
+        text: `${a.reference} ${a.title} and ${b.reference} ${b.title} are both confirmed with crew and overlap. Check on the Site schedule whether the same people are on both.` });
+    }
+  }
   for (const p of o.projects) {
     if (p.reviews_overdue > 0) out.push({ kind: "reviews_overdue", key: `reviews:${p.id}`, text: `${p.reference}: ${plural(p.reviews_overdue, "review")} past the task's due date.`, href: `/projects/${p.id}/work` });
     for (const q of p.equipment) {
-      if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, text: `${p.reference}: ${equipmentLine(q)}`, href: `/projects/${p.id}/equipment` });
-      if (q.state === "partially_dispatched") out.push({ kind: "partial_dispatch", key: `partial:${q.id}`, text: `${p.reference}: ${q.code} is partly dispatched (${q.dispatched_lines} of ${plural(q.lines, "line")}).`, href: `/projects/${p.id}/equipment` });
-      if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, text: `${p.reference}: ${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at)} and not returned${isFinished(p.status) ? " (the project is complete)" : ""}.`, href: `/projects/${p.id}/equipment` });
+      if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, text: `${p.reference}: ${equipmentLine(q)}`, href: requestHref(p.id, q.id) });
+      if (q.state === "partially_dispatched") out.push({ kind: "partial_dispatch", key: `partial:${q.id}`, text: `${p.reference}: ${q.code} is partly dispatched (${q.dispatched_lines} of ${plural(q.lines, "line")}).`, href: requestHref(p.id, q.id) });
+      if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, text: `${p.reference}: ${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at)} and not returned${isFinished(p.status) ? " (the project is complete)" : ""}.`, href: requestHref(p.id, q.id) });
     }
   }
   return out;
@@ -230,7 +316,7 @@ export function projectHealth(p: OverviewProject, today: string): ProjectHealth 
   const start = day(p.install_start) ?? day(p.event_start);
   const windowed = riskReasons(p, today);
   if (windowed.length > 0 && start) {
-    const lead = `${p.install_start ? "Installation" : "The show"} ${start < today ? "started" : "starts"} ${start}`;
+    const lead = headerDateText(p, today)!.lead;
     for (const r of windowed) risk.push({ text: `${lead}: ${r}`, href: /equipment|warehouse/.test(r) ? equip : /delivery plan/.test(r) ? `/projects/${p.id}/delivery` : work });
   }
   if (p.release_failed) risk.push({ text: "Unused reservations were not released at completion", href: equip });
@@ -282,54 +368,150 @@ export type EquipmentIssueKind = "shortage" | "booking_review" | "overdue_return
 export const EQUIPMENT_ISSUE_WORDS: Record<EquipmentIssueKind, string> = {
   shortage: "Shortage", booking_review: "Booking to review", overdue_return: "Return overdue", release_failed: "Reservations not released", partial_dispatch: "Partly dispatched", not_sent: "Request not sent", still_out: "Complete, still out",
 };
-export interface EquipmentIssue { kind: EquipmentIssueKind; key: string; project: string; text: string; owner: string; href: string }
-/** Recorded equipment problems, most pressing kind first. "Request not sent" is listed only inside the 14-day window: a draft far ahead of its dates is not a problem. */
+/** `href` opens the exact request on the project's Equipment tab (`?request=<id>`), the same request Work shows; `code` is its reference (for example UAE-R-00005). `next` is the next action, in words. */
+export interface EquipmentIssue { kind: EquipmentIssueKind; key: string; project: string; text: string; owner: string; href: string; code: string | null; requestId: string | null; next: string }
+/** The exact request on the project's Equipment tab. */
+export const requestHref = (projectId: string, requestId: string) => `/projects/${projectId}/equipment?request=${requestId}`;
+/** A draft request is not ready to submit while its planning dates (needed from and until) are not set. */
+export const missingPlanningDates = (q: Pick<RequestState, "state" | "needed_from" | "needed_until">) => q.state === "draft" && (!q.needed_from || !q.needed_until);
+/** Recorded equipment problems, most pressing kind first. "Request not sent" is listed inside the 14-day window, and always when its planning dates are missing (it cannot be submitted without them). */
 export function equipmentIssues(o: Overview, today: string): EquipmentIssue[] {
   const out: EquipmentIssue[] = [];
   const soon = new Set(installationsWithin(o, today).map((p) => p.id));
   for (const p of o.projects) {
     const href = `/projects/${p.id}/equipment`; const project = `${p.reference} ${p.name}`;
     for (const q of p.equipment) {
-      if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, project, text: equipmentLine(q), owner: "Warehouse", href });
-      if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, project, text: `${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at) ?? "on a date that is not recorded"}`, owner: "Warehouse", href });
-      if (q.state === "partially_dispatched") out.push({ kind: "partial_dispatch", key: `partial:${q.id}`, project, text: `${q.code}: ${q.dispatched_lines} of ${plural(q.lines, "line")} dispatched`, owner: "Warehouse", href });
-      if (q.state === "draft" && soon.has(p.id)) out.push({ kind: "not_sent", key: `draft:${q.id}`, project, text: `${q.code} has not been sent to the warehouse`, owner: p.pm, href });
+      const rh = requestHref(p.id, q.id);
+      if (q.short_lines > 0) out.push({ kind: "shortage", key: `short:${q.id}`, project, text: equipmentLine(q), owner: "Warehouse", href: rh, code: q.code, requestId: q.id, next: "Warehouse buys, rents or re-plans the short lines; open the request" });
+      if (q.return_overdue) out.push({ kind: "overdue_return", key: `return:${q.id}`, project, text: `${plural(n(q.units_out), "unit")} from ${q.code} due back ${day(q.expected_return_at) ?? "on a date that is not recorded"}`, owner: "Warehouse", href: rh, code: q.code, requestId: q.id, next: "Chase the return; open the request" });
+      if (q.state === "partially_dispatched") out.push({ kind: "partial_dispatch", key: `partial:${q.id}`, project, text: `${q.code}: ${q.dispatched_lines} of ${plural(q.lines, "line")} dispatched`, owner: "Warehouse", href: rh, code: q.code, requestId: q.id, next: "Dispatch the remaining lines; open the request" });
+      if (q.state === "draft" && (soon.has(p.id) || missingPlanningDates(q))) {
+        const gap = missingPlanningDates(q);
+        out.push({ kind: "not_sent", key: `draft:${q.id}`, project, text: `${q.code} has not been sent to the warehouse${gap ? "; its planning dates are not set" : ""}`, owner: p.pm, href: rh, code: q.code, requestId: q.id, next: gap ? "Set planning dates before submitting to Warehouse" : "Submit to Warehouse" });
+      }
     }
-    if (p.equipment_reviews > 0) out.push({ kind: "booking_review", key: `review:${p.id}`, project, text: `${plural(p.equipment_reviews, "booking")} to review after a committed date changed`, owner: p.pm, href });
-    if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, project, text: "Unused reservations were not released at completion", owner: "Warehouse", href });
-    if (completeButOut(p) && !p.equipment.some((q) => q.return_overdue)) out.push({ kind: "still_out", key: `out:${p.id}`, project, text: `Delivery complete, ${plural(unitsOut(p), "unit")} still out`, owner: "Warehouse", href });
+    if (p.equipment_reviews > 0) out.push({ kind: "booking_review", key: `review:${p.id}`, project, text: `${plural(p.equipment_reviews, "booking")} to review after a committed date changed`, owner: p.pm, href, code: null, requestId: null, next: "Review the booking on the Equipment tab" });
+    if (p.release_failed) out.push({ kind: "release_failed", key: `release:${p.id}`, project, text: "Unused reservations were not released at completion", owner: "Warehouse", href, code: null, requestId: null, next: "The warehouse releases them on the request" });
+    if (completeButOut(p) && !p.equipment.some((q) => q.return_overdue)) out.push({ kind: "still_out", key: `out:${p.id}`, project, text: `Delivery complete, ${plural(unitsOut(p), "unit")} still out`, owner: "Warehouse", href, code: null, requestId: null, next: "Receive the equipment back" });
   }
   const order: EquipmentIssueKind[] = ["shortage", "release_failed", "overdue_return", "booking_review", "partial_dispatch", "not_sent", "still_out"];
   return out.sort((a, b) => order.indexOf(a.kind) - order.indexOf(b.kind) || a.project.localeCompare(b.project));
 }
 
-export type TimelineKind = "installation" | "show" | "dismantling";
-export const TIMELINE_WORDS: Record<TimelineKind, string> = { installation: "Installation", show: "Show", dismantling: "Dismantling" };
-export interface TimelineEntry { key: string; kind: TimelineKind; date: string; until: string | null; title: string; who: string; href: string; tentative: boolean }
+export type TimelineKind = "installation" | "show" | "dismantling" | "activity";
+export const TIMELINE_WORDS: Record<TimelineKind, string> = { installation: "Installation", show: "Show", dismantling: "Dismantling", activity: "Activity" };
+/** Where a dated entry comes from: a site activity (its own date, or a suggested project date it borrows), the project header of a project with no site activity, or a Sales enquiry with no project yet. */
+export type EntrySource = "activity" | "project_header" | "sales";
+export interface TimelineEntry {
+  key: string; kind: TimelineKind; date: string; until: string | null; title: string; who: string; href: string; tentative: boolean; source: EntrySource;
+  /** The words for where this stands ("Tentative Installation on 11 Nov", "Scheduled installation date passed · start unconfirmed", "Sales date · tentative"). Never "started" without a recorded start. */
+  statusLabel: string; started: boolean; passed: boolean;
+  /** Entries of one project run (or one enquiry) share a group, so they are listed under one row. */
+  groupKey: string; groupTitle: string; groupHref: string; activityId?: string; activityTitle?: string; runLabel?: string | null; venue?: string | null; when?: string;
+}
 export const TIMELINE_DAYS = 30;
-/**
- * The next 30 days in date order: installation and show dates of live projects, and the installation, show and dismantling dates Sales recorded on flagged
- * enquiries that have no project yet (marked tentative while Sales has not confirmed the dates and the enquiry is not won). A project carries no dismantling date, so dismantling appears only for enquiries.
- */
-export function timeline(o: Overview, upcoming: readonly UpcomingRow[] | null, today: string, days = TIMELINE_DAYS): TimelineEntry[] {
+/** The most dated site activities one Operations page reads (one bounded read, shared by Next on site, the timeline and team pressure). */
+export const SITE_ACTIVITY_LIMIT = 300;
+export const NEXT_ON_SITE_DAYS = 14;
+const ACTIVITY_KIND: Record<ActivityKind, TimelineKind> = { setup: "installation", show: "show", dismantling: "dismantling", mockup: "activity", other: "activity" };
+
+/** The dated site activities of the live projects as entries, each once, worded by the shared site-state helper. Activities with no date are not entries (they have nothing to place). */
+function activityEntries(o: Overview, acts: readonly SiteActivityRead[]): TimelineEntry[] {
+  const pm = new Map(o.projects.map((p) => [p.id, p]));
   const out: TimelineEntry[] = [];
-  const inWindow = (d: string | null, until?: string | null) => !!d && daysBetween(today, d) <= days && daysBetween(today, until ?? d) >= 0;
+  for (const a of acts) {
+    const first = a.phase?.first_day;
+    if (!first) continue;
+    const last = a.phase.last_day && a.phase.last_day !== first ? a.phase.last_day : null;
+    const text = describeSitePhase(a.phase);
+    const p = pm.get(a.project_id);
+    out.push({
+      key: `a:${a.id}`, kind: ACTIVITY_KIND[a.kind ?? "other"] ?? "activity", date: first, until: last, title: `${a.reference} ${a.project_name}`, who: a.owner_name ?? p?.pm ?? "Nobody named",
+      href: siteHref(a), tentative: a.state === "tentative", source: "activity", statusLabel: text.label, started: text.started, passed: a.phase.phase === "date_passed",
+      groupKey: `p:${a.project_id}:${a.run_label ?? ""}`, groupTitle: `${a.reference} ${a.project_name}${a.run_label ? ` · ${a.run_label}` : ""}`, groupHref: `/projects/${a.project_id}/plan?plan=site&mode=list`,
+      activityId: a.id, activityTitle: a.title, runLabel: a.run_label, venue: a.effective?.venue ?? p?.venue ?? null, when: activityWhen(a),
+    });
+  }
+  return out;
+}
+
+/**
+ * Every dated entry Operations shows, each once:
+ *   - the dated site activities of live projects (from the one site activity read);
+ *   - a project's header installation / show date ONLY for a project that has no dated site activity (a labelled fallback: "from the project header"); a project that has dated activities
+ *     never also gets a header row. When the activity read is unavailable (`acts` is null) every project falls back to its header and says so;
+ *   - the dates Sales recorded on flagged enquiries that have no project yet, labelled as Sales dates and tentative until the enquiry is won. An enquiry that already has a project is dropped.
+ * Date order, `until` set for a range. A passed date is `passed` and never `started`.
+ */
+function allEntries(o: Overview, upcoming: readonly UpcomingRow[] | null, acts: readonly SiteActivityRead[] | null | undefined, today: string): TimelineEntry[] {
+  const out: TimelineEntry[] = [];
+  const fromActivities = acts ? activityEntries(o, acts) : [];
+  out.push(...fromActivities);
+  const withActivities = new Set(fromActivities.map((e) => e.groupKey.split(":")[1]));
+  const showActivityProjects = new Set(fromActivities.filter((e) => e.kind === "show").map((e) => e.groupKey.split(":")[1]));
   for (const p of o.projects) {
     if (isFinished(p.status)) continue;
-    const title = `${p.reference} ${p.name}`; const href = `/projects/${p.id}/work`;
-    if (inWindow(day(p.install_start))) out.push({ key: `i:${p.id}`, kind: "installation", date: day(p.install_start)!, until: null, title, who: p.pm, href, tentative: false });
-    if (inWindow(day(p.event_start), day(p.event_end))) out.push({ key: `s:${p.id}`, kind: "show", date: day(p.event_start)!, until: day(p.event_end), title, who: p.pm, href, tentative: false });
+    const has = withActivities.has(p.id); const hasShow = showActivityProjects.has(p.id);
+    const title = `${p.reference} ${p.name}`; const href = `/projects/${p.id}/work`; const gk = `h:${p.id}`;
+    const base = { who: p.pm, href, tentative: false, source: "project_header" as const, started: false, groupKey: gk, groupTitle: title, groupHref: href, title, venue: p.venue };
+    const inst = day(p.install_start);
+    if (inst && !has) {
+      const passed = inst < today;
+      out.push({ ...base, key: `i:${p.id}`, kind: "installation", date: inst, until: null, passed, statusLabel: passed ? "Scheduled installation date passed · start unconfirmed" : "Installation date (from the project header)" });
+    }
+    const ev = day(p.event_start);
+    // A project with dated activities never also gets a header installation row; its header show date is listed only while no show activity carries it.
+    if (ev && !hasShow) out.push({ ...base, key: `s:${p.id}`, kind: "show", date: ev, until: day(p.event_end), passed: false, statusLabel: "Show date (from the project header)" });
   }
   for (const r of upcoming ?? []) {
-    if (r.handover?.project_id) continue;
+    if (r.handover?.project_id || r.handover?.status === "accepted") continue;
     const title = `${r.reference} ${r.title}`; const href = `/operations/upcoming?company=${r.company_id}&q=${encodeURIComponent(r.reference)}`; const tentative = r.dates_tentative && !r.won;
     const who = r.handover?.pm ?? (r.planning?.provisional_pm ? `${r.planning.provisional_pm} (provisional)` : r.owner);
-    if (inWindow(day(r.install_start))) out.push({ key: `i:${r.id}`, kind: "installation", date: day(r.install_start)!, until: null, title, who, href, tentative });
-    if (inWindow(day(r.event_start), day(r.event_end))) out.push({ key: `s:${r.id}`, kind: "show", date: day(r.event_start)!, until: day(r.event_end), title, who, href, tentative });
-    if (inWindow(day(r.dismantle_date))) out.push({ key: `d:${r.id}`, kind: "dismantling", date: day(r.dismantle_date)!, until: null, title, who, href, tentative });
+    const label = r.won ? "Sales date · enquiry won" : tentative ? "Sales date · tentative" : "Sales date · confirmed by Sales, not won";
+    const base = { who, href, tentative, source: "sales" as const, started: false, passed: false, statusLabel: label, groupKey: `e:${r.id}`, groupTitle: title, groupHref: href, title };
+    if (r.install_start) out.push({ ...base, key: `i:${r.id}`, kind: "installation", date: day(r.install_start)!, until: null });
+    if (r.event_start) out.push({ ...base, key: `s:${r.id}`, kind: "show", date: day(r.event_start)!, until: day(r.event_end) });
+    if (r.dismantle_date) out.push({ ...base, key: `d:${r.id}`, kind: "dismantling", date: day(r.dismantle_date)!, until: null });
   }
-  const order: TimelineKind[] = ["installation", "show", "dismantling"];
+  const order: TimelineKind[] = ["installation", "show", "dismantling", "activity"];
   return out.sort((a, b) => a.date.localeCompare(b.date) || order.indexOf(a.kind) - order.indexOf(b.kind) || a.title.localeCompare(b.title));
+}
+
+/**
+ * The next 30 days in date order (entries whose range touches the window and has not wholly passed). Where site activities are read they ARE the project dates; see `allEntries` for the
+ * de-duplication rules. A project has no dismantling date of its own, so dismantling appears for a project only as a dated site activity.
+ */
+export function timeline(o: Overview, upcoming: readonly UpcomingRow[] | null, today: string, days = TIMELINE_DAYS, acts?: readonly SiteActivityRead[] | null): TimelineEntry[] {
+  return allEntries(o, upcoming, acts, today).filter((e) => daysBetween(today, e.date) <= days && daysBetween(today, e.until ?? e.date) >= 0 && !e.passed);
+}
+/** Activities and project dates whose scheduled date has passed with no recorded start. They need a decision (record the start, or move the date), not a "started" label. */
+export function passedEntries(o: Overview, acts: readonly SiteActivityRead[] | null | undefined, today: string): TimelineEntry[] {
+  return allEntries(o, null, acts, today).filter((e) => e.passed && e.source !== "sales" && !e.started);
+}
+/**
+ * Next on site: first the activities whose date has passed with no recorded start, then everything dated today or in the next 14 days that is a site activity or a labelled project-header
+ * fallback (never an enquiry: those stay in the timeline as Sales dates). The timeline below lists the rest, so no activity appears in both.
+ */
+export function nextOnSite(o: Overview, acts: readonly SiteActivityRead[] | null | undefined, today: string, days = NEXT_ON_SITE_DAYS): TimelineEntry[] {
+  const soon = allEntries(o, null, acts, today).filter((e) => e.source !== "sales" && !e.passed && daysBetween(today, e.date) <= days && daysBetween(today, e.until ?? e.date) >= 0);
+  return [...passedEntries(o, acts, today), ...soon];
+}
+/** Entries in the timeline that Next on site does not already list (the activities after the next 14 days, project-header fallbacks after them, and Sales dates). */
+export function laterEntries(o: Overview, upcoming: readonly UpcomingRow[] | null, acts: readonly SiteActivityRead[] | null | undefined, today: string, days = TIMELINE_DAYS): TimelineEntry[] {
+  const shown = new Set(nextOnSite(o, acts, today).map((e) => e.key));
+  return timeline(o, upcoming, today, days, acts).filter((e) => !shown.has(e.key));
+}
+
+export interface TimelineGroup { key: string; title: string; href: string; source: EntrySource; tentative: boolean; entries: TimelineEntry[] }
+/** Installation, show and dismantling of one enquiry or one project run under one row, in date order; groups ordered by their first date. */
+export function groupEntries(entries: readonly TimelineEntry[]): TimelineGroup[] {
+  const groups = new Map<string, TimelineGroup>();
+  for (const e of entries) {
+    const g = groups.get(e.groupKey) ?? { key: e.groupKey, title: e.groupTitle, href: e.groupHref, source: e.source, tentative: e.tentative, entries: [] };
+    g.entries.push(e); groups.set(e.groupKey, g);
+  }
+  return [...groups.values()].map((g) => ({ ...g, entries: [...g.entries].sort((a, b) => a.date.localeCompare(b.date)), tentative: g.entries.every((e) => e.tentative) }))
+    .sort((a, b) => a.entries[0]!.date.localeCompare(b.entries[0]!.date) || a.title.localeCompare(b.title));
 }
 
 export interface WeekBucket { key: string; label: string; from: string | null; to: string | null; projects: OverviewProject[] }
@@ -337,8 +519,8 @@ export const CHART_WEEKS = 6;
 /** Monday of the week a date falls in. */
 export const weekStart = (iso: string) => addDays(iso, -((new Date(`${iso}T00:00:00Z`).getUTCDay() + 6) % 7));
 /**
- * Upcoming delivery by week: unfinished projects by the week their installation (or show) starts, this week and the five after it, then "Later", "Already started"
- * and "No date recorded". Every bucket carries its projects, so the chart and the list under it are the same records and the counts cannot differ.
+ * Upcoming delivery by week: unfinished projects by the week their installation (or show) starts, this week and the five after it, then "Later", "Date passed · start unconfirmed"
+ * and "No date recorded". A passed date never says the work started: only an explicit start record on a site activity does. Every bucket carries its projects, so the chart and the list under it are the same records and the counts cannot differ.
  */
 export function deliveryByWeek(o: Overview, today: string, weeks = CHART_WEEKS): WeekBucket[] {
   const first = weekStart(today);
@@ -347,17 +529,17 @@ export function deliveryByWeek(o: Overview, today: string, weeks = CHART_WEEKS):
     return { key: from, label: i === 0 ? "This week" : i === 1 ? "Next week" : `Week of ${from}`, from, to: addDays(from, 6), projects: [] };
   });
   const later: WeekBucket = { key: "later", label: "Later", from: addDays(first, weeks * 7), to: null, projects: [] };
-  const started: WeekBucket = { key: "started", label: "Already started", from: null, to: addDays(first, -1), projects: [] };
+  const passed: WeekBucket = { key: "passed", label: "Date passed · start unconfirmed", from: null, to: addDays(first, -1), projects: [] };
   const none: WeekBucket = { key: "none", label: "No date recorded", from: null, to: null, projects: [] };
   for (const p of o.projects) {
     if (isFinished(p.status)) continue;
     const start = day(p.install_start) ?? day(p.event_start);
     if (!start) { none.projects.push(p); continue; }
     const i = Math.floor(daysBetween(first, start) / 7);
-    (i < 0 ? started : i >= weeks ? later : buckets[i]!).projects.push(p);
+    (i < 0 ? passed : i >= weeks ? later : buckets[i]!).projects.push(p);
   }
-  for (const b of [...buckets, later, started, none]) b.projects.sort((a, c) => (day(a.install_start) ?? day(a.event_start) ?? "9999").localeCompare(day(c.install_start) ?? day(c.event_start) ?? "9999") || a.reference.localeCompare(c.reference));
-  return [started, ...buckets, later, none].filter((b) => b.projects.length > 0 || (b.from !== null && b.to !== null && b.key !== "started"));
+  for (const b of [...buckets, later, passed, none]) b.projects.sort((a, c) => (day(a.install_start) ?? day(a.event_start) ?? "9999").localeCompare(day(c.install_start) ?? day(c.event_start) ?? "9999") || a.reference.localeCompare(c.reference));
+  return [passed, ...buckets, later, none].filter((b) => b.projects.length > 0 || (b.from !== null && b.to !== null && b.key !== "passed"));
 }
 
 /** The next unresolved item of a flagged enquiry, in a few words, for the scannable Upcoming Work row. */

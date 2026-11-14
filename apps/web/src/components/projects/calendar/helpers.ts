@@ -1,5 +1,7 @@
 import { addDays, addMonths, barPosition, daysBetween, describeTimedEvent, monthEnd, monthStart, startOfWeek, isDateOnly, type CalendarEntry } from "@enginious-hr/domain";
 import { COMMON_TIME_ZONES } from "@/lib/projects/format";
+import { describeSitePhase } from "@/lib/projects/site-state";
+import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import type { ProjCompanyCalendarRow, ProjMyCalendarRow, ProjProjectCalendarRow } from "@/types/projects";
 
 /** Pure helpers for the Projects calendars: query-string parsing, visible range, row mapping, filtering and text. */
@@ -102,7 +104,7 @@ export interface DisplayEntry extends CalendarEntry {
 
 const KIND_LABELS: Record<string, string> = {
   task: "Task deadline", review: "Review requested", milestone: "Milestone", deliverable: "Deliverable", booking: "Site booking",
-  plan_delivery: "Delivery timeline", plan_site: "Site timeline", dependency: "Dependency on others", project: "Project",
+  plan_delivery: "Delivery timeline", plan_site: "Site timeline", site_activity: "Site activity", dependency: "Dependency on others", project: "Project",
 };
 export const kindLabel = (k: string) => KIND_LABELS[k] ?? k;
 
@@ -118,15 +120,17 @@ export function mapMyRows(rows: readonly ProjMyCalendarRow[]): DisplayEntry[] {
   return rows.map((r) => ({
     kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
     kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: r.project_reference, projectName: r.project_name,
-    href: r.kind === "booking" ? `/projects/${r.project_id}/plan?plan=site` : `/projects/${r.project_id}/work`,
+    href: r.kind === "booking" ? `/projects/${r.project_id}/plan?plan=site&mode=list#bookings` : `/projects/${r.project_id}/work`,
     detail: r.detail,
   }));
 }
 
 /** Where an entry of the project calendar leads: timeline items, bookings and dependencies are in the Plan section, the rest in Work. */
-function planEntryHref(projectId: string, kind: string): string {
-  if (kind === "plan_delivery") return `/projects/${projectId}/plan?plan=delivery`;
-  if (kind === "booking" || kind === "plan_site" || kind === "dependency") return `/projects/${projectId}/plan?plan=site`;
+function planEntryHref(projectId: string, kind: string, itemId?: string): string {
+  if (kind === "plan_delivery") return `/projects/${projectId}/plan?plan=delivery&mode=list`;
+  if (kind === "plan_site") return `/projects/${projectId}/plan?plan=site&mode=list${itemId ? `#site-${itemId}` : ""}`;
+  if (kind === "booking") return `/projects/${projectId}/plan?plan=site&mode=list#bookings`;
+  if (kind === "dependency") return `/projects/${projectId}/plan?plan=site&mode=list`;
   return `/projects/${projectId}/work`;
 }
 
@@ -134,9 +138,31 @@ export function mapProjectRows(rows: readonly ProjProjectCalendarRow[], projectI
   return rows.map((r) => ({
     kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
     kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: reference, projectName: name,
-    href: planEntryHref(projectId, r.kind),
+    href: planEntryHref(projectId, r.kind, r.item_id),
     detail: [r.who, r.kind === "dependency" && r.detail ? `at ${r.detail.slice(0, 5)} site time` : r.detail].filter(Boolean).join(" · ") || null,
   }));
+}
+
+/**
+ * Site activities as calendar entries, with the SAME words every other screen uses (describeSitePhase from the database phase): a suggested project date, a scheduled activity, a
+ * passed date that nobody has confirmed as started, or an explicit start. An activity with no date has no day to sit on and is left out (the Site schedule lists it). Only the part
+ * inside from..to is kept. Each entry leads to its exact row in the Site schedule.
+ */
+export function mapSiteActivities(rows: readonly SiteActivityRead[], from: string, to: string): DisplayEntry[] {
+  const out: DisplayEntry[] = [];
+  for (const a of rows) {
+    const first = a.phase.first_day ?? a.start_date;
+    if (!first) continue;
+    const last = a.phase.last_day ?? a.end_date ?? first;
+    if (last < from || first > to) continue;
+    const t = describeSitePhase(a.phase);
+    out.push({
+      kind: "site_activity", id: `site_activity:${a.id}`, title: a.run_label ? `${a.title} · ${a.run_label}` : a.title, onDate: first, endDate: last, startsAt: a.starts_at, endsAt: a.ends_at, tz: a.tz,
+      kindLabel: kindLabel("site_activity"), status: a.phase.phase, statusLabel: t.label, projectRef: a.reference, projectName: a.project_name,
+      href: `/projects/${a.project_id}/plan?plan=site&mode=list#site-${a.id}`, detail: [t.detail, a.owner_name ? `Owner ${a.owner_name}` : null].filter(Boolean).join(" · ") || null,
+    });
+  }
+  return out;
 }
 
 /** Company calendar: one span per project, summary fields only. */

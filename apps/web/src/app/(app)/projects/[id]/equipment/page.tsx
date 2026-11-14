@@ -16,6 +16,7 @@ import { RequestStatusBadge } from "@/components/inventory/planning/status";
 import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId } from "@/components/workspace/url-state";
 import { formatDateTime } from "@/lib/projects/format";
+import { formatAt, type SiteSchedule } from "@/lib/projects/phase2/model";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { asArray, asRecord, formatInZone, num, progressFromDb, shortageLabel, str, windowLabel } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations } from "@/lib/inventory/planning-data";
@@ -27,7 +28,8 @@ import { isNotInstalled } from "@/lib/projects/errors";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadProjectView } from "@/lib/projects/data";
 import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
-import { READINESS_LOAD_ERROR, stillOutAfterDelivery } from "@/lib/projects/equipment-readiness-model";
+import { requestNextStep, shipmentsByRun } from "@/lib/projects/equipment-next-step";
+import { READINESS_LOAD_ERROR, requestHref, stillOutAfterDelivery } from "@/lib/projects/equipment-readiness-model";
 import { createClient } from "@/lib/supabase/server";
 
 export const metadata = { title: "Project equipment" };
@@ -146,6 +148,15 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   const readiness = readinessRes.state === "ok" ? readinessRes.readiness : null;
   const readinessOf = new Map((readiness?.requests ?? []).map((q) => [q.id, q] as const));
   const afterDelivery = readiness ? stillOutAfterDelivery(readiness) : null;
+  // Which requests carry lines released from the Project Plan (so a draft says where its lines came from: the Sales handover, the Project Plan, or typed in). One bounded read; a failure only hides the origin note.
+  const { data: planLineRows } = await db.from("proj_dp_lines").select("request_line_id").eq("project_id", id).not("request_line_id", "is", null).is("removed_at", null).limit(500);
+  const planLineIds = new Set((planLineRows ?? []).map((l) => l.request_line_id).filter((x): x is string => !!x));
+  // Shipments, grouped under the site run they supply. The Site schedule's own read; a failure only hides this panel (and says so).
+  const schedRes = await db.rpc("proj_site_schedule", { p_project_id: id });
+  const schedule = !schedRes.error && schedRes.data ? (schedRes.data as unknown as SiteSchedule) : null;
+  const scheduleFailed = !!schedRes.error && !isNotInstalled(schedRes.error);
+  const shipmentGroups = schedule ? shipmentsByRun(schedule.shipments, schedule.activities) : [];
+  const fromPlan = (m: (typeof models)[number]) => m.lines.some((l) => planLineIds.has(l.id));
   // Whoever manages the project, or the warehouse of its company (the database function decides; this only chooses whether to offer the button). Also on a finished project.
   const canReview = view.canManage || canResolveNoteFor(project.company_id);
   // There is NO automatic recovery when releasing unused reservations fails at completion: the completion trigger writes one line to the import log and carries on, nothing
@@ -242,10 +253,36 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
         </Panel>
       ) : null}
 
+      {shipmentGroups.length > 0 || scheduleFailed ? (
+        <Panel title="Shipments by site run" hint="Each shipment sits under the site run it supplies. Its request carries the reservation, dispatch and return; set or move the dates in the Site schedule.">
+          {scheduleFailed ? <Alert variant="destructive" role="alert">Shipments could not be loaded. Reload to try again; the requests below are still shown.</Alert> : (
+            <div className="space-y-3" data-testid="equipment-shipments">
+              {shipmentGroups.map((g) => (
+                <div key={g.key}>
+                  <h4 className="text-sm font-semibold">{g.heading}</h4>
+                  <ul className="divide-y divide-border text-sm">
+                    {g.shipments.map((sh) => (
+                      <li key={sh.id} className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5 py-1.5" data-testid={`shipment-${sh.id}`}>
+                        <span className="min-w-0 break-words font-medium">{sh.label}{sh.carrier ? <span className="font-normal text-muted-foreground"> · {sh.carrier}</span> : null}</span>
+                        <span className="text-muted-foreground">
+                          {sh.departs_at ? `departs ${formatAt(sh.departs_at, sh.departs_tz)}` : "departure not set"} · {sh.arrives_at ? `arrives ${formatAt(sh.arrives_at, sh.arrives_tz)}` : "arrival not set"}
+                          {sh.request ? <> · <Link href={requestHref(sh.request.id)} className="font-mono font-medium text-accent underline-offset-4 hover:underline">{sh.request.code}</Link></> : " · no request linked"}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+              <p><Link href={`/projects/${id}/plan?plan=site&mode=list#shipments`} className="text-sm font-medium text-accent underline-offset-4 hover:underline">Open the Site schedule</Link></p>
+            </div>
+          )}
+        </Panel>
+      ) : null}
+
       <section aria-label="Equipment requests" className="space-y-3">
         <h3 className="text-sm font-semibold">Requests ({models.length})</h3>
         {models.length === 0 ? (
-          <EmptyState title="No equipment requested for this project yet" description={canEditList ? "Start with New equipment request." : "The project manager or the warehouse prepares a request; it appears here."} />
+          <EmptyState title="No equipment requested for this project yet" description={canEditList ? "Start with New equipment request." : "Ask the Project Manager or the warehouse to prepare a request; it appears here."} />
         ) : (
           models.map((m) => {
             const r = m.request;
@@ -257,9 +294,21 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                   <span className="font-mono font-medium">{r.code}</span>
                   <RequestStatusBadge status={r.status} />
                   {r.source === "sales_handover" ? <Badge variant="outline">Imported from the Sales handover</Badge> : null}
+                  {fromPlan(m) ? <Badge variant="outline" data-testid={`request-origin-plan-${r.id}`}>Lines from the Project Plan</Badge> : null}
                   <span className="min-w-0 break-words font-medium">{r.title ?? ""}</span>
                   <span className="text-muted-foreground">{windowLabel(r)}</span>
                   <span className="text-muted-foreground">{total === 0 ? "No lines" : `${total} ${total === 1 ? "line" : "lines"}`}{stillOutSummary(returnsByRequest.get(r.id) ?? [])}</span>
+                  <span className="basis-full" data-testid={`request-next-${r.id}`}>{(() => {
+                    const n = requestNextStep({ status: r.status, neededFrom: r.needed_from, neededUntil: r.needed_until, openLines: total, readiness: readinessOf.get(r.id) ?? null });
+                    return (
+                      <>
+                        <span className="text-muted-foreground">{["Submit", "Reserve", "Dispatch", "Return"].map((st, i, a) => <span key={st} className={n.current === st ? "font-semibold text-foreground" : n.done.includes(st as never) ? "text-foreground" : ""}>{n.done.includes(st as never) ? "✓ " : ""}{st}{i < a.length - 1 ? " → " : ""}</span>)}</span>
+                        <span className={n.warning ? "ml-2 font-medium text-[hsl(var(--os-amber))]" : "ml-2"}>{n.owner !== "Nobody" ? `${n.owner}: ` : ""}{n.action.replace(/^⚠ (Warehouse: )?/, "")}</span>
+                        {n.warning ? <span aria-label="Needs attention"> ⚠</span> : null}
+                        <Link href={requestHref(r.id)} className="ml-2 font-medium text-accent underline-offset-4 hover:underline" data-testid={`request-link-${r.id}`}>Open {r.code}</Link>
+                      </>
+                    );
+                  })()}</span>
                   {readinessOf.has(r.id) ? <span className="basis-full"><ReadinessLine request={readinessOf.get(r.id)!} /></span> : readinessRes.state === "error" && r.status !== "cancelled" ? <span className="basis-full text-destructive">{READINESS_LOAD_ERROR}</span> : null}
                 </summary>
                 <div className="border-t border-border p-4">

@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRef, useState } from "react";
 import {
   addPlanSequence, decidePlanChange, decidePlanCorrection, delegatePlanSection, raisePlanCorrection, reconcilePlanTask, releaseDeliveryPlan, removeDeliverable, removePlanLine, saveDeliverable,
@@ -365,7 +366,7 @@ export function RemoveDialog({ projectId, kind, id, name }: { projectId: string;
 }
 
 /** Release, with what it will create said first. The equipment request stays a draft; submitting it is the existing action on the Equipment tab. */
-export function ReleaseDialog({ projectId, itemId, label, preview }: { projectId: string; itemId?: string; label: string; preview: { tasks: number; equipment: number; external?: number; waiting: { key: string; reason: string }[] } }) {
+export function ReleaseDialog({ projectId, itemId, label, preview }: { projectId: string; itemId?: string; label: string; preview: { tasks: number; equipment: number; external?: number; waiting: { key: string; reason: string; label?: string; fix?: string }[] } }) {
   const nothing = preview.tasks + preview.equipment === 0;
   const external = preview.external ?? 0;
   return (
@@ -376,11 +377,23 @@ export function ReleaseDialog({ projectId, itemId, label, preview }: { projectId
           <input type="hidden" name="projectId" value={projectId} />
           {itemId ? <input type="hidden" name="itemId" value={itemId} /> : null}
           <ul className="list-disc space-y-1 pl-5 text-sm" data-testid="dp-release-preview">
-            <li>{preview.tasks} task{preview.tasks === 1 ? "" : "s"} will be created and assigned.</li>
-            <li>{preview.equipment} hardware line{preview.equipment === 1 ? "" : "s"} will be added to the project&apos;s <strong>draft</strong> equipment request. It is not sent to the warehouse: you review and submit it on the Equipment tab.</li>
+            <li data-testid="dp-release-tasks">{preview.tasks} task{preview.tasks === 1 ? "" : "s"} will be created and assigned.</li>
+            <li data-testid="dp-release-equipment">{preview.equipment} hardware line{preview.equipment === 1 ? "" : "s"} will be added to the project&apos;s <strong>draft</strong> equipment request. It is not sent to the warehouse: you review and submit it on the Equipment tab.</li>
             {external > 0 ? <li>{external} hardware line{external === 1 ? " is" : "s are"} bought, rented or client supplied: followed in the plan, not sent to the warehouse.</li> : null}
-            {preview.waiting.length > 0 ? <li>{preview.waiting.length} line{preview.waiting.length === 1 ? "" : "s"} will wait: {preview.waiting.map((w) => `${w.key} (${w.reason})`).join("; ")}.</li> : null}
           </ul>
+          {preview.waiting.length > 0 ? (
+            <div className="mt-3 rounded-md border border-[hsl(var(--os-amber)/0.4)] p-3" data-testid="dp-release-attention">
+              <p className="text-sm font-medium">⚠ {preview.waiting.length} line{preview.waiting.length === 1 ? " needs" : "s need"} attention before {preview.waiting.length === 1 ? "it" : "they"} can be released</p>
+              <ul className="mt-1 space-y-1.5 text-sm">
+                {preview.waiting.map((w) => (
+                  <li key={w.key} data-testid={`dp-release-wait-${w.key}`}>
+                    <Link href={`/projects/${projectId}/delivery#dp-${w.key}`} className="font-medium underline underline-offset-2">{w.label ?? w.key}</Link>
+                    <span className="block text-[13px] text-muted-foreground">{w.reason.charAt(0).toUpperCase() + w.reason.slice(1)}. {w.fix ?? ""}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </ActionForm>
       )}
     </FormDialog>

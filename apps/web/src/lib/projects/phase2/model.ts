@@ -82,13 +82,29 @@ export function feedbackLinks(f: { activation_id?: string | null; output_version
 export const NEEDS_REVIEWER_HELP = "Nobody can review this: the Operations role is held only by the person who submitted it and the person it is assigned to, or by nobody. The Project Manager can ask someone with access to People & Access to give the Operations role to another person; the review then appears in their queue.";
 export const VERSION_STATUS_LABELS: Record<OutputVersion["status"], string> = { awaiting: "Awaiting review", changes_requested: "Changes requested", approved: "Approved", superseded: "Replaced by a newer version" };
 
-export type RegisterFilter = "all" | "missing" | "awaiting" | "changes" | "approved";
-export const REGISTER_FILTERS: { key: RegisterFilter; label: string }[] = [{ key: "all", label: "All" }, { key: "missing", label: "Missing" }, { key: "awaiting", label: "Awaiting review" }, { key: "changes", label: "Changes requested" }, { key: "approved", label: "Approved" }];
+export type RegisterFilter = "all" | "next" | "missing" | "awaiting" | "changes" | "approved";
+export const REGISTER_FILTERS: { key: RegisterFilter; label: string }[] = [
+  { key: "all", label: "All" }, { key: "next", label: "Do next" }, { key: "awaiting", label: "Waiting for review" }, { key: "changes", label: "Changes requested" }, { key: "missing", label: "Missing" }, { key: "approved", label: "Approved" },
+];
 export const parseRegisterFilter = (v: string | string[] | undefined): RegisterFilter => { const s = Array.isArray(v) ? v[0] : v; return REGISTER_FILTERS.some((f) => f.key === s) ? (s as RegisterFilter) : "all"; };
-const matches = (s: OutputState, f: RegisterFilter) => f === "all" || (f === "missing" && (s === "missing" || s === "partial")) || (f === "awaiting" && s === "awaiting_review") || (f === "changes" && s === "changes_requested") || (f === "approved" && s === "approved");
-export const filterRegister = (rows: readonly RegisterRow[], f: RegisterFilter) => rows.filter((r) => matches(r.state, f));
-export const registerCounts = (rows: readonly RegisterRow[]): Record<RegisterFilter, number> => ({
-  all: rows.length, missing: filterRegister(rows, "missing").length, awaiting: filterRegister(rows, "awaiting").length, changes: filterRegister(rows, "changes").length, approved: filterRegister(rows, "approved").length,
+/**
+ * Whether the next step on this output is THIS person's, from what the register returned for them: a version they may decide, name a reviewer for or send on to Operations, or an output of
+ * theirs that is missing, short or sent back. Never guessed from roles: `can_decide`, `can_assign` and `can_reroute` are the database's answers for this reader.
+ */
+export function needsViewer(r: RegisterRow, userId: string): boolean {
+  const c = r.current;
+  if (r.state === "awaiting_review") return !!(c && c.status === "awaiting" && (c.can_decide || c.can_assign || c.can_reroute));
+  if (r.state === "changes_requested" || r.state === "missing" || r.state === "partial") return !!userId && r.assignee_id === userId;
+  return false;
+}
+const matches = (r: RegisterRow, f: RegisterFilter, userId: string) => {
+  const s = r.state;
+  return f === "all" || (f === "next" && needsViewer(r, userId)) || (f === "missing" && (s === "missing" || s === "partial")) || (f === "awaiting" && s === "awaiting_review") || (f === "changes" && s === "changes_requested") || (f === "approved" && s === "approved");
+};
+/** `userId` is needed for "Do next" to include the reader's own missing, short or sent-back outputs (a version they may decide counts without it). */
+export const filterRegister = (rows: readonly RegisterRow[], f: RegisterFilter, userId = "") => rows.filter((r) => matches(r, f, userId));
+export const registerCounts = (rows: readonly RegisterRow[], userId = ""): Record<RegisterFilter, number> => ({
+  all: rows.length, next: filterRegister(rows, "next", userId).length, missing: filterRegister(rows, "missing").length, awaiting: filterRegister(rows, "awaiting").length, changes: filterRegister(rows, "changes").length, approved: filterRegister(rows, "approved").length,
 });
 /** Rows grouped by activation (those without one last), in the order given. */
 export function groupByActivation(rows: readonly RegisterRow[]): { key: string; title: string; rows: RegisterRow[] }[] {
@@ -157,13 +173,16 @@ export const READY_LABELS: Record<ReadyLevel, string> = { unknown: "Not recorded
 
 /** What a reader is shown after the database joins the hand-entered value with the Project Plan: Not applicable and Not recorded are different things. */
 export type EffectiveState = "ready" | "not_ready" | "not_applicable" | "not_recorded";
-export interface EffectiveReady { state: EffectiveState; source: "pm" | "plan" | null; detail?: string | null }
-export interface EffectiveReadiness { hardware: EffectiveReady; content: EffectiveReady; app: EffectiveReady; note?: string | null }
+/** `source`: "pm" = the Project Manager's own assessment; "run" = evidence linked to THIS run (its equipment requests, the plan lines that share its milestone); "plan" = older project-wide figure. */
+export interface EffectiveReady { state: EffectiveState; source: "pm" | "run" | "plan" | null; detail?: string | null }
+/** The Project Plan's counts for the whole project: always labelled "Project-wide" where shown, never presented as one run's readiness. */
+export interface ProjectReadiness { hardware: { state: EffectiveState; detail?: string | null }; content: { state: EffectiveState; detail?: string | null }; app: { state: EffectiveState; detail?: string | null } }
+export interface EffectiveReadiness { hardware: EffectiveReady; content: EffectiveReady; app: EffectiveReady; note?: string | null; project?: ProjectReadiness }
 export const EFFECTIVE_LABELS: Record<EffectiveState, string> = { ready: "Ready", not_ready: "Not ready", not_applicable: "Not applicable", not_recorded: "Not recorded" };
 export const effectiveTone = (s: EffectiveState): "green" | "amber" | "quiet" => (s === "ready" ? "green" : s === "not_ready" ? "amber" : "quiet");
 /** "Not ready (1 of 2 ready, from the Project Plan)", "Not applicable (set by hand)", "Not recorded". */
 export function effectiveReadyText(r: EffectiveReady): string {
-  const bits = [r.detail ? r.detail.charAt(0).toLowerCase() + r.detail.slice(1) : null, r.source === "plan" ? "from the Project Plan" : r.source === "pm" ? "set by hand" : null].filter(Boolean);
+  const bits = [r.detail ? r.detail.charAt(0).toLowerCase() + r.detail.slice(1) : null, r.source === "plan" ? "from the Project Plan" : r.source === "run" ? "linked to this run" : r.source === "pm" ? "set by hand" : null].filter(Boolean);
   return `${EFFECTIVE_LABELS[r.state]}${bits.length > 0 ? ` (${bits.join(", ")})` : ""}`;
 }
 /** The venue and date an activity effectively has: its own, else the project's recorded venue / committed date when the link is unambiguous. */
@@ -175,6 +194,7 @@ export type BriefingGap = "venue" | "date" | "choose_run" | "call_time" | "readi
 /** The Project Manager's view of what is missing from one activity's briefing, beside Assign crew (proj_site_briefing). */
 export interface SiteBriefing {
   id: string; effective: ActivityEffective; ready: EffectiveReadiness; crew_total: number; call_missing: number;
+  phase?: import("@/lib/projects/site-state").SitePhaseInfo; calls?: { user_id: string; name: string | null; role: CrewRole; call_at: string | null; site_only: boolean }[];
   candidates: { id: string; title: string; run_label: string | null }[]; gaps: BriefingGap[];
 }
 export function gapText(g: BriefingGap, b: SiteBriefing, kind: string): string {
@@ -275,4 +295,11 @@ export function recentText(r: OverviewRecent): string {
   if (r.field === "added") return `${who} added the shipment ${r.to}`;
   if (r.field === "removed") return `${who} removed the shipment ${r.from}`;
   return `${who} ${r.to === "confirmed" ? "confirmed" : "updated"} the shipment ${what}`;
+}
+
+/** One dated site activity as `proj_site_activities_read` returns it for Operations, Calendar and Work: the same fields everywhere, with the phase from the database. */
+export interface SiteActivityRead {
+  id: string; project_id: string; reference: string; project_name: string; project_status: string; title: string; kind: ActivityKind | null; run_label: string | null; state: "tentative" | "confirmed";
+  start_date: string | null; end_date: string | null; starts_at: string | null; ends_at: string | null; tz: string | null; effective: ActivityEffective;
+  phase: import("@/lib/projects/site-state").SitePhaseInfo; owner_name: string | null; crew_total: number; call_missing: number; actual_started_at: string | null;
 }

@@ -41,7 +41,7 @@ export function CalendarToolbar(p: CalendarProps) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <div role="group" aria-label="Calendar view" className="inline-flex overflow-hidden rounded-md border border-input">
+        <div role="group" aria-label="Calendar view" data-testid="calendar-view-switch" className="inline-flex overflow-hidden rounded-md border border-input">
           {CALENDAR_VIEWS.map((v) => (
             <Link key={v} href={hrefFor(p, { view: v })} aria-current={p.params.view === v ? "true" : undefined}
               className={cn("px-3 py-1.5 text-sm font-medium", p.params.view === v ? "bg-secondary text-foreground" : "text-muted-foreground hover:bg-secondary/60")}>
@@ -124,7 +124,7 @@ export function AgendaView({ entries, from, to, viewTz, showProject, today, empt
   const days = [...byDay.keys()].filter((d) => d >= from && d <= to).sort();
   if (days.length === 0) return <EmptyState title="Nothing in this period" description={emptyText} dense />;
   return (
-    <ol className="divide-y divide-border rounded-lg border border-border bg-card">
+    <ol className="divide-y divide-border rounded-lg border border-border bg-card" data-testid="calendar-agenda">
       {days.map((day) => (
         <li key={day} className="grid gap-2 p-3 sm:grid-cols-[11rem_1fr]">
           <h3 className="text-sm font-semibold">{dayLabel(day)}{day === today ? <span className="ml-2 rounded-full bg-accent px-2 text-[13px] text-accent-foreground">Today</span> : null}</h3>

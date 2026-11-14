@@ -61,10 +61,14 @@ await step("the technician's card on the two-run project: the project's venue (l
   if (!/Date not set yet/.test(await t("sa-when"))) throw new Error(`when: ${await t("sa-when")}`);
   if (!/Fictional Expo Centre, Hall 3 \(the project's venue\)/.test(await t("sa-venue"))) throw new Error(`venue: ${await t("sa-venue")}`);
   if (!/Not set yet/.test(await t("sa-call"))) throw new Error(`call: ${await t("sa-call")}`);
-  const r = await t("sa-ready-detail");
-  if (!/Hardware: Not ready \(0 of 1 ready, from the Project Plan\)/.test(r)) throw new Error(`hardware: ${r}`);
-  if (!/Content: Not ready \(1 of 2 ready, from the Project Plan\)/.test(r)) throw new Error(`content: ${r}`);
-  if (!/App: Not applicable/.test(r)) throw new Error(`app: ${r}`);
+  // Run-specific readiness never borrows the Project Plan's counts: nothing is linked to this run, so it reads Not recorded; the project-wide counts sit on their own labelled line.
+  const r = await t("sa-ready");
+  if (!/Hardware: not recorded/.test(r) || !/Content: not recorded/.test(r) || !/App: not recorded/.test(r)) throw new Error(`run readiness: ${r}`);
+  const pw = await t("sa-project-ready");
+  if (!/^Project-wide readiness:/.test(pw)) throw new Error(`project-wide label: ${pw}`);
+  if (!/hardware not ready \(0 of 1 equipment lines reserved or sent\)/.test(pw)) throw new Error(`project hardware: ${pw}`);
+  if (!/content not ready \(0 of 2 outputs approved\)/.test(pw)) throw new Error(`project content (a finished task alone must not count): ${pw}`);
+  if (!/app not applicable/.test(pw)) throw new Error(`project app: ${pw}`);
   if (/Secret/.test(await body())) throw new Error("a plan line or task name reached the technician");
   await page.screenshot({ path: `${SHOTS}/technician-two-runs-desktop.png`, fullPage: true });
 });

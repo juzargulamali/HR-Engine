@@ -12,7 +12,7 @@ afterEach(cleanup);
 // Fictional data only.
 const none: MilestoneSummary = { total: 0, accepted: 0, open: 0, overdue: 0, next: null };
 const some: MilestoneSummary = { total: 4, accepted: 1, open: 3, overdue: 1, next: { id: "m2", title: "Final render", due: "2027-02-01", status: "in_progress" } };
-const counts = { all: 3, missing: 1, awaiting: 1, changes: 0, approved: 1 };
+const counts = { all: 3, next: 1, missing: 1, awaiting: 1, changes: 0, approved: 1 };
 const outputs: OutputSummary = { total: 3, counts };
 const lines: OutputLine[] = [
   { taskId: "t1", title: "Logo reveal", output: "Logo video", state: "awaiting_review", stateText: "Awaiting Operations review · Lena", tone: "blue", version: 2, href: "/projects/P/work?task=t1&version=v1", assignee: "Cara" },
@@ -28,7 +28,7 @@ describe("Work summary", () => {
     expect(row.textContent).toContain("Awaiting Operations review · Lena · v2");
     expect(screen.getByTestId("summary-output-t2").textContent).toContain("Missing");
     expect(screen.getByRole("link", { name: /1 more, all 3 outputs/ }).getAttribute("href")).toContain("view=deliverables");
-    expect(screen.getByTestId("summary-output-counts").textContent).toContain("Awaiting review 1");
+    expect(screen.getByTestId("summary-output-counts").textContent).toContain("Outputs awaiting approval 1");
   });
   it("shows milestone progress, the next one and the overdue flag, each linked", () => {
     render(<WorkSummary {...base} milestones={some} canManage />);

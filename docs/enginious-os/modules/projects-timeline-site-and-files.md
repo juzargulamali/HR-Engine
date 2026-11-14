@@ -321,6 +321,13 @@ Who can open them: the redirect itself makes no access check; the Plan page it l
 | `packages/rls-tests/test/projects.rls.test.ts` | Calendars and time zones; site bookings (who may book, overlaps with allowances, withdrawal on change, concurrency, cancellation); client timeline (payload, issue, immutability, outdated, sent and accepted, read access); files (links, restricted, refused types, registration from a validated attempt, private buckets, removal and completion evidence) |
 | `apps/web/os-shell-checks/projects-flow.mjs` | Browser flow: suggested stages on both plans, all six plan and mode combinations without data change, both legacy redirects, add and confirm a booking, the overlap refusal, the founder override |
 
+## 14. Finish Phase 2 (draft PR; migration `20270109000100`, not applied by Claude)
+
+* **Site schedule:** each activity has a phase line (same words as the technician card, Work, Calendar and Operations), **Preview briefing** beside Crew, **Record started** / **Clear start record**, and this run's readiness separate from **Project-wide readiness**. Details: `projects-phase-2-deliverables-and-site.md` section 13.
+* **Schedules and purposes:** Delivery timeline (the older delivery plan) and Site schedule are named and explained behind an ⓘ; the Project Plan links to the Site schedule. Once the Project Plan holds work, the Delivery timeline no longer offers suggested stages; it points to the Work schedule and Files & client plan.
+* **Files & client plan** reads 1 **Choose what the client sees** (tick boxes over milestones and plan items; `saveClientTimelineSelection` writes only changed boxes through `proj_save_milestone` / `proj_save_plan_item`), 2 **Preview**, 3 **Issued versions (frozen)**. Issued versions are never touched by a new choice. Individual tasks cannot be put on the client timeline (needs a migration: tasks have no client-facing flag and `proj_build_plan_payload` has no slot).
+* **Release plan** has a needs-attention block (each waiting line links to its row with the unblock step). **Feedback & changes** link both ways (a scope change shows what it was raised from; feedback links its scope change).
+
 ## Coverage rows
 
 | Entry | Kind (screen / tab / panel / dialog / form / filter / download / legacy route) | How to reach it | Who can see it | Purpose | Reference (section number in this file) | Status (Documented or Unverified: what) |

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { EFFECTIVE_LABELS, effectiveReadyText, gapText, READY_LABELS, type SiteBriefing } from "@/lib/projects/phase2/model";
-import { assignmentWhen, callWord, venueWord, type SiteAssignment } from "@/lib/projects/site-assignments";
+import { assignmentWhen, callWord, contactWord, needsProvisionalNote, projectReadyText, reportingText, siteChangesByActivity, venueWord, type SiteAssignment } from "@/lib/projects/site-assignments";
 
 const base = {
   assignment_id: "a", activity_id: "x", project_name: "Fictional job", title: "Setup", run_label: null, kind: "setup", state: "tentative", role: "installation", location: null,
@@ -16,6 +16,7 @@ describe("the crew card words", () => {
     expect(effectiveReadyText({ state: "not_applicable", source: "pm" })).toBe("Not applicable (set by hand)");
     expect(effectiveReadyText({ state: "not_applicable", source: "plan", detail: "Nothing of this kind in the Project Plan" })).toBe("Not applicable (nothing of this kind in the Project Plan, from the Project Plan)");
     expect(effectiveReadyText({ state: "not_ready", source: "plan", detail: "1 of 2 ready" })).toBe("Not ready (1 of 2 ready, from the Project Plan)");
+    expect(effectiveReadyText({ state: "not_ready", source: "run", detail: "0 of 1 ready" })).toBe("Not ready (0 of 1 ready, linked to this run)");
     expect(Object.values(EFFECTIVE_LABELS)).toEqual(["Ready", "Not ready", "Not applicable", "Not recorded"]);
   });
   it("a call time is explicit: nothing is invented, and the person is told it is still to come", () => {
@@ -42,5 +43,34 @@ describe("what the Project Manager is told is missing", () => {
     expect(gapText("call_time", b, "Setup")).toBe("2 of 3 without a call time");
     expect(gapText("readiness", b, "Setup")).toBe("Readiness not recorded: hardware, app");
     expect(gapText("choose_run", b, "Setup / installation")).toMatch(/setup \/ installation date is 2027-01-12: choose which run/);
+  });
+});
+
+describe("the crew card's status words", () => {
+  it("names who to ask and what is still to come", () => {
+    expect(contactWord(base)).toBeNull();
+    expect(contactWord({ ...base, contact: { name: "Fictional Eli", role: "Site lead" } })).toBe("Site lead: Fictional Eli");
+    expect(contactWord({ ...base, contact: { name: null, role: "Project Manager" } })).toBe("Project Manager: not named yet");
+    expect(reportingText({ ...base, reporting: { complete: false, missing: ["date", "venue", "call_time"] } }).text).toBe("Still to come: the date, the venue, your call time");
+    expect(reportingText({ ...base, reporting: { complete: true, missing: [] } }).complete).toBe(true);
+  });
+  it("the provisional note is only for a TENTATIVE assignment whose date passed with details missing", () => {
+    const passed = { phase: "date_passed", basis: "activity", first_day: "2027-11-11", last_day: "2027-11-11", started_at: null, kind: "setup", state: "tentative", today: "2027-11-20" } as const;
+    expect(needsProvisionalNote({ ...base, phase: passed, reporting: { complete: false, missing: ["venue"] } })).toBe(true);
+    expect(needsProvisionalNote({ ...base, phase: passed, reporting: { complete: true, missing: [] } })).toBe(false);
+    expect(needsProvisionalNote({ ...base, state: "confirmed", phase: { ...passed, state: "confirmed" }, reporting: { complete: false, missing: ["venue"] } })).toBe(false);
+    expect(needsProvisionalNote({ ...base, phase: { ...passed, phase: "scheduled" }, reporting: { complete: false, missing: ["venue"] } })).toBe(false);
+  });
+  it("project-wide readiness is one labelled line, absent when the database sent no project block", () => {
+    expect(projectReadyText(undefined)).toBeNull();
+    expect(projectReadyText({ hardware: { state: "not_recorded", source: null }, content: { state: "not_recorded", source: null }, app: { state: "not_recorded", source: null } })).toBeNull();
+    expect(projectReadyText({ hardware: { state: "not_recorded", source: null }, content: { state: "not_recorded", source: null }, app: { state: "not_recorded", source: null }, project: { hardware: { state: "ready", detail: "2 of 2 ready" }, content: { state: "not_applicable" }, app: { state: "not_recorded" } } }))
+      .toBe("Project-wide readiness: hardware ready (2 of 2 ready), content not applicable, app not recorded");
+  });
+  it("groups unread change notices by activity and ignores anything malformed", () => {
+    const got = siteChangesByActivity([
+      { payload: { activity_id: "a", changes: [{ field: "date", from: "A", to: "B" }] } }, { payload: { activity_id: "a", changes: [{ field: "venue", from: "X", to: "Y" }, { field: 1 }] } },
+      { payload: { activity_id: 7, changes: [] } }, { payload: null }, { payload: { activity_id: "b", changes: "no" } }]);
+    expect(got).toEqual({ a: [{ field: "date", from: "A", to: "B" }, { field: "venue", from: "X", to: "Y" }] });
   });
 });

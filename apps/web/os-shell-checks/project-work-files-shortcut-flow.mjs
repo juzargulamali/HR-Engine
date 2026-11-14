@@ -24,7 +24,7 @@ for (const [who, label] of [["mgr", "the Project Manager"], ["lead", "a project 
     await page.waitForLoadState("networkidle"); await page.waitForTimeout(1500);
     if (!page.url().endsWith(`/projects/${P}/documents`)) throw new Error(`bounced to ${page.url()}`);
     const txt = await page.locator("main").innerText();
-    if (!/Files and links/.test(txt)) throw new Error("the Files page did not render");
+    if (!/Project files/.test(txt)) throw new Error("the Files page did not render");
     if (!/Fictional brief/.test(txt) || !/Completion evidence/.test(txt)) throw new Error("the files are not listed");
     const restrictedShown = /Restricted/.test(txt);
     if (who === "mgr" && !restrictedShown) throw new Error("the Project Manager cannot see the restricted link");

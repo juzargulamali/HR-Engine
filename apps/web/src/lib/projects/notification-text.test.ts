@@ -86,4 +86,10 @@ describe("equipment review and Operations planning notices", () => {
     expect(n?.text).toContain("Reason: Pat is on leave");
     expect(n?.text).toContain("You stay on the project as a member.");
   });
+  it("tells a crew member what moved, with the previous and new values and a link to their briefing", () => {
+    const n = describeNotification("project_site_change", { ...base, title: "Setup", run_label: "Run 1", activity_id: "a7",
+      changes: [{ field: "date", from: "11 Nov 2026", to: "12 Nov 2026" }, { field: "call time", from: "11 Nov 2026 07:30 Asia/Dubai", to: "12 Nov 2026 08:00 Asia/Dubai" }] });
+    expect(n.text).toBe("Setup (Run 1) changed: date: 11 Nov 2026 → 12 Nov 2026; call time: 11 Nov 2026 07:30 Asia/Dubai → 12 Nov 2026 08:00 Asia/Dubai. Open your briefing.");
+    expect(n.href).toBe("/site-assignments?activity=a7");
+  });
 });

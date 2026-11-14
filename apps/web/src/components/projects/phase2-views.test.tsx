@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children: React.ReactNode; href: string }) => <a href={href} {...(rest as Record<string, unknown>)}>{children}</a> }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/projects/p1/delivery", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/projectsPhase2", () => ({
-  saveTaskOutput: vi.fn(), submitTaskOutput: vi.fn(), decideTaskOutput: vi.fn(), linkFeedbackToOutput: vi.fn(), saveSiteActivity: vi.fn(), addSiteActivities: vi.fn(), setSiteCrew: vi.fn(), saveShipment: vi.fn(), removeShipment: vi.fn(), setActivityReadiness: vi.fn(), setupProjectTeams: vi.fn(), assignOutputReviewer: vi.fn(),
+  saveTaskOutput: vi.fn(), submitTaskOutput: vi.fn(), decideTaskOutput: vi.fn(), linkFeedbackToOutput: vi.fn(), saveSiteActivity: vi.fn(), addSiteActivities: vi.fn(), recordSiteStart: vi.fn(), clearSiteStart: vi.fn(), previewSiteAssignment: vi.fn(), setSiteCrew: vi.fn(), saveShipment: vi.fn(), removeShipment: vi.fn(), setActivityReadiness: vi.fn(), setupProjectTeams: vi.fn(), assignOutputReviewer: vi.fn(),
 }));
 vi.mock("@/lib/actions/projectsFiles", () => ({ prepareProjectUpload: vi.fn(), finalizeProjectUpload: vi.fn(), getProjectFileUrl: vi.fn() }));
 vi.mock("@/lib/supabase/client", () => ({ createClient: () => ({}) }));
@@ -16,7 +16,8 @@ vi.mock("@/lib/actions/projectsDeliveryPlan", () => ({
 import { RegisterView, TaskOutputSection } from "./deliverables/output-views";
 import { SiteSchedulePanel, SiteTimelineStrip } from "./site/site-views";
 import { WorkOverviewAreas } from "./work-overview";
-import type { OutputVersion, RegisterRow, SiteActivity, SiteSchedule, SiteShipment, WorkOverview } from "@/lib/projects/phase2/model";
+import { previewSiteAssignment } from "@/lib/actions/projectsPhase2";
+import type { OutputVersion, RegisterRow, SiteActivity, SiteBriefing, SiteSchedule, SiteShipment, WorkOverview } from "@/lib/projects/phase2/model";
 
 HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogElement) { this.setAttribute("open", ""); };
 HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
@@ -52,6 +53,8 @@ describe("task output section", () => {
     expect(within(h).getByTestId("output-version-1").textContent).toMatch(/Changes requested.*Too dark/s);
     expect(within(h).getByTestId("output-version-2").textContent).toMatch(/Awaiting review/);
     expect(within(h).getByTestId("output-version-1").textContent).toMatch(/Changes requested: 10 Nov 2027, 13:00 Asia\/Dubai/);   // the decision time is its own time
+    // The reviewer sees what was asked for right beside the new version, without opening the history.
+    expect(screen.getByTestId("output-prior-feedback").textContent).toMatch(/Earlier feedback, on version 1 \(Fictional Eli\): Too dark/);
   });
 
   it("approval time is separate from the attachment time; a mutable link is called out; a restricted file shows no name or link; read-only draws no buttons", () => {
@@ -88,7 +91,7 @@ describe("deliverables register", () => {
     expect(screen.getByTestId("deliverables-filter-approved").textContent).toBe("Approved1");
     expect(screen.getByTestId("deliverables-filter-changes").getAttribute("href")).toBe("/x?f=changes");
     expect(screen.getByTestId("deliverables-export").getAttribute("href")).toBe("/api/projects/p1/deliverables/export");
-    expect(within(screen.getByTestId("deliverable-a")).getByRole("link", { name: "Storyboard" }).getAttribute("href")).toBe("/projects/p1/work?task=a");
+    expect(within(screen.getByTestId("deliverable-a")).getByRole("link", { name: "Storyboard" }).getAttribute("href")).toBe("/projects/p1/work?task=a&version=v1");
     expect(screen.getAllByTestId("output-approved-at").length).toBeGreaterThan(0);
   });
   it("says so when there is nothing yet, or nothing matches the filter", () => {
@@ -154,6 +157,70 @@ describe("site schedule (RAF)", () => {
     expect(screen.getByText(/No site activities yet/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Add activity" }));
     expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+});
+
+describe("site schedule: phase wording, start record and the crew briefing preview", () => {
+  const eff = { venue: null, venue_source: null, start_date: "2027-11-11", end_date: "2027-11-11", date_source: "project" as const, choice_pending: false, project_start: "2027-11-11", project_end: "2027-11-11" };
+  const brief = (o: Partial<SiteBriefing> = {}): SiteBriefing => ({ id: "a1", effective: eff, ready: { hardware: { state: "not_ready", source: "run", detail: "0 of 1 ready" }, content: { state: "not_recorded", source: null }, app: { state: "not_applicable", source: "pm" },
+    project: { hardware: { state: "ready", detail: "2 of 2 ready" }, content: { state: "not_recorded" }, app: { state: "not_recorded" } } }, crew_total: 1, call_missing: 1, candidates: [], gaps: ["venue", "call_time"],
+    phase: { phase: "scheduled", basis: "project_header", first_day: "2027-11-11", last_day: "2027-11-11", started_at: null, kind: "setup", state: "tentative", today: "2027-11-01" }, ...o });
+  const one = (a: SiteActivity, b: SiteBriefing) => render(<SiteSchedulePanel projectId="p1" schedule={{ ...RAF, activities: [a], shipments: [] }} canEdit members={[{ id: "c1", name: "Fictional Cara" }]} requests={[]} briefings={{ [a.id]: b }} />);
+
+  it("reads a suggested project date as Tentative Setup on 11 Nov (from the project header), not as a scheduled or started activity", () => {
+    one(act({ state: "tentative", starts_at: null, ends_at: null, start_date: null, end_date: null, location: null }), brief());
+    expect(screen.getByTestId("site-phase-a1").textContent).toMatch(/Tentative Setup on 11 Nov \(from the project header\)/);
+    expect(screen.getByTestId("site-phase-a1").textContent).not.toMatch(/started/i);
+    expect(screen.getByTestId("site-record-start-a1").textContent).toBe("Record started");
+    expect(screen.queryByTestId("site-clear-start-a1")).toBeNull();
+  });
+  it("a passed date reads 'start unconfirmed'; only an explicit record reads Started and then offers Clear start record", () => {
+    one(act(), brief({ phase: { phase: "date_passed", basis: "activity", first_day: "2027-11-11", last_day: "2027-11-11", started_at: null, kind: "setup", state: "confirmed", today: "2027-11-20" } }));
+    expect(screen.getByTestId("site-phase-a1").textContent).toMatch(/Scheduled installation date passed · start unconfirmed/);
+    cleanup();
+    one(act(), brief({ phase: { phase: "started", basis: "activity", first_day: "2027-11-11", last_day: "2027-11-11", started_at: "2027-11-11T06:00:00Z", kind: "setup", state: "confirmed", today: "2027-11-20" } }));
+    expect(screen.getByTestId("site-phase-a1").textContent).toMatch(/Installation started 11 Nov/);
+    expect(screen.queryByTestId("site-record-start-a1")).toBeNull();
+    expect(screen.getByTestId("site-clear-start-a1").textContent).toBe("Clear start record");
+  });
+  it("no date reads 'No date', and 'No date · choose which run' while several runs share the project date", () => {
+    one(act({ starts_at: null, ends_at: null }), brief({ phase: { phase: "no_date", basis: "none", first_day: null, last_day: null, started_at: null, kind: "setup", state: "tentative", today: "2027-11-01" } }));
+    expect(screen.getByTestId("site-phase-a1").textContent).toMatch(/^No date/);
+    cleanup();
+    one(act({ starts_at: null, ends_at: null }), brief({ phase: { phase: "no_date", basis: "none", first_day: null, last_day: null, started_at: null, kind: "setup", state: "tentative", today: "2027-11-01", choice_pending: true } }));
+    expect(screen.getByTestId("site-phase-a1").textContent).toMatch(/No date · choose which run/);
+  });
+  it("the Record started dialog says it records that work actually began, and takes an optional note", () => {
+    one(act(), brief());
+    fireEvent.click(screen.getByTestId("site-record-start-a1"));
+    const dlg = screen.getByRole("dialog");
+    expect(dlg.textContent).toMatch(/records that work actually began/);
+    expect(within(dlg).getByLabelText(/Note \(optional\)/)).toBeTruthy();
+  });
+  it("run readiness and project-wide readiness are on separate lines, with the source named", () => {
+    one(act(), brief());
+    expect(screen.getByTestId("site-ready-a1").textContent).toMatch(/hardware not ready \(0 of 1 ready, linked to this run\), content not recorded, app not applicable \(set by hand\)/);
+    expect(screen.getByTestId("site-project-ready-a1").textContent).toMatch(/^Project-wide readiness: hardware ready \(2 of 2 ready\), content not recorded, app not recorded/);
+    expect(screen.getByTestId("site-ready-a1").textContent).not.toMatch(/Project-wide/);
+  });
+  it("Preview briefing shows the same card as the crew sees, labelled by person, with the missing details and shortcuts", async () => {
+    vi.mocked(previewSiteAssignment).mockResolvedValue({ error: null, assignment: {
+      assignment_id: "x", activity_id: "a1", project_name: "Fictional job", title: "Setup (run 1)", run_label: "Run 1", kind: "setup", state: "tentative", role: "installation", location: null, start_date: null, end_date: null, starts_at: null, ends_at: null, tz: "Asia/Dubai",
+      call_at: null, call_tz: null, instructions: null, crew_instructions: null, ready: { hardware: "unknown", content: "unknown", app: "unknown", note: null }, hardware_state: null, site_only: false, preview: true, person: "Fictional Cara",
+      phase: { phase: "scheduled", basis: "project_header", first_day: "2027-11-11", last_day: "2027-11-11", started_at: null, kind: "setup", state: "tentative", today: "2027-11-01" }, contact: { name: "Fictional Eli", role: "Site lead" },
+      reporting: { complete: false, missing: ["venue", "call_time"] } } });
+    one(act({ location: null }), brief());
+    fireEvent.click(screen.getByTestId("site-preview-a1"));
+    await waitFor(() => expect(screen.getByTestId("site-preview-label").textContent).toBe("As Fictional Cara sees it"));
+    expect(previewSiteAssignment).toHaveBeenCalledWith("a1", "c1");
+    const frame = screen.getByTestId("site-preview-frame");
+    expect(within(frame).getByTestId("sa-phase").textContent).toMatch(/Tentative Setup on 11 Nov \(from the project header\)/);
+    expect(within(frame).getByTestId("sa-reporting").textContent).toMatch(/Still to come: the venue, your call time/);
+    expect(within(frame).getByTestId("sa-contact").textContent).toBe("Site lead: Fictional Eli");
+    const miss = screen.getByTestId("site-preview-missing");
+    expect(within(miss).getByRole("button", { name: "Add the venue" })).toBeTruthy();
+    expect(within(miss).getByRole("button", { name: "Set call time" })).toBeTruthy();
+    expect(within(miss).queryByRole("button", { name: "Add the date" })).toBeNull();
   });
 });
 

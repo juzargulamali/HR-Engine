@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { addSiteActivities, applyProjectDates, removeShipment, saveShipment, saveSiteActivity, setActivityReadiness, setSiteCrew } from "@/lib/actions/projectsPhase2";
+import { useEffect, useState } from "react";
+import { addSiteActivities, applyProjectDates, clearSiteStart, previewSiteAssignment, recordSiteStart, removeShipment, saveShipment, saveSiteActivity, setActivityReadiness, setSiteCrew } from "@/lib/actions/projectsPhase2";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,11 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { FormDialog, type Done, type Option } from "@/components/projects/delivery/delivery-forms";
 import { InfoHint } from "@/components/ui/info-hint";
+import { Modal } from "@/components/ui/modal";
+import { SiteAssignmentList } from "@/components/projects/site/site-assignments";
+import type { SiteAssignment } from "@/lib/projects/site-assignments";
 import { dateText } from "@/lib/projects/format";
-import { ACTIVITY_KIND_LABELS, ACTIVITY_KINDS, CREW_ROLE_LABELS, CREW_ROLES, dayIn, READY_LABELS, timeIn, toLocalInput, type ActivityKind, type CrewRole, type ReadyLevel, type SiteActivity, type SiteShipment } from "@/lib/projects/phase2/model";
+import { ACTIVITY_KIND_LABELS, ACTIVITY_KINDS, CREW_ROLE_LABELS, CREW_ROLES, crewName, dayIn, READY_LABELS, timeIn, toLocalInput, type ActivityKind, type CrewRole, type ReadyLevel, type SiteActivity, type SiteShipment } from "@/lib/projects/phase2/model";
 import { COMMON_TIME_ZONES } from "@/lib/projects/format";
 
 const zones = (tz: string | null, extra: (string | null | undefined)[] = []) => [...new Set([tz, ...extra, ...COMMON_TIME_ZONES].filter((z): z is string => !!z))];
@@ -180,7 +183,10 @@ export function ReadinessDialog({ projectId, activity, label }: { projectId: str
   return (
     <FormDialog label={label ?? "Brief"} title={`Brief for the crew: ${activity.title}`} testId={`site-brief-${activity.id}`}
       description="Everyone assigned sees this, their own role, the venue and their call time, and nothing else about the project."
-      help="Leave a value on Not recorded to use what the Project Plan says; choose Not applicable when that area does not apply.">
+      help={<>
+        <p>Your assessment here overrides everything else for this run. Leave a value on Not recorded and the crew sees what is linked to this run: its equipment requests and the approved outputs of the plan lines that share its milestone.</p>
+        <p className="mt-1">Project-wide figures are shown on a separate line, never as this run&apos;s readiness. A finished task alone does not make an output approved or equipment ready. Choose Not applicable when an area does not apply.</p>
+      </>}>
       {(done) => (
         <ActionForm action={setActivityReadiness} submitLabel="Save brief" onDone={(s) => done(s as Done)}>
           <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="itemId" value={activity.id} />
@@ -239,5 +245,103 @@ export function RemoveShipmentDialog({ projectId, shipment }: { projectId: strin
         </ActionForm>
       )}
     </FormDialog>
+  );
+}
+
+/** Record that work on this activity actually began. Only this explicit record makes an activity "started": a date passing never does. */
+export function RecordStartDialog({ projectId, activity, label = "Record started" }: { projectId: string; activity: SiteActivity; label?: string }) {
+  return (
+    <FormDialog label={label} title={`Record started: ${activity.title}`} testId={`site-record-start-${activity.id}`}
+      description="This records that work actually began, now. The schedule, the crew's cards and My Day then show it as started. You can clear it if it was recorded by mistake."
+      help="Until you record it, an activity whose date has passed reads “Scheduled date passed · start unconfirmed”. Nothing is started because a date went by.">
+      {(done) => (
+        <ActionForm action={recordSiteStart} submitLabel="Record that work began" onDone={(s) => done(s as Done)}>
+          <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="itemId" value={activity.id} />
+          <Field label="Note (optional)" htmlFor={`rs-note-${activity.id}`}><Input id={`rs-note-${activity.id}`} name="note" maxLength={300} placeholder="For example: crew on site, rigging started" /></Field>
+        </ActionForm>
+      )}
+    </FormDialog>
+  );
+}
+
+/** Take a start record back. The activity returns to its date-based state; nothing else changes. */
+export function ClearStartDialog({ projectId, activity }: { projectId: string; activity: SiteActivity }) {
+  return (
+    <FormDialog label="Clear start record" title={`Clear the start record: ${activity.title}`} testId={`site-clear-start-${activity.id}`}
+      description="The activity goes back to its date-based state (scheduled, or date passed · start unconfirmed). Use this when it was recorded by mistake.">
+      {(done) => (
+        <ActionForm action={clearSiteStart} submitLabel="Clear the start record" onDone={(s) => done(s as Done)}>
+          <input type="hidden" name="projectId" value={projectId} /><input type="hidden" name="itemId" value={activity.id} />
+        </ActionForm>
+      )}
+    </FormDialog>
+  );
+}
+
+type Preview = SiteAssignment & { preview?: boolean; person?: string | null };
+
+/**
+ * "Preview briefing": exactly what one assigned person will see, rendered with the SAME card the technician uses (the data comes from the same database function, so it cannot drift).
+ * Whatever is missing for them (date, venue, their call time) is shown in the preview, with a shortcut to add it here.
+ */
+export function PreviewBriefingDialog({ projectId, activity, members, tz }: { projectId: string; activity: SiteActivity; members: (Option & { siteOnly?: boolean })[]; tz: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [user, setUser] = useState(activity.crew[0]?.user_id ?? "");
+  // The result is stored with the request it answers: while the key moved on (another person, a saved shortcut, Refresh) the card reads "Loading", with no state set inside the effect body.
+  const [res, setRes] = useState<{ key: string; error: string | null; assignment: Preview | null } | null>(null);
+  const [nonce, setNonce] = useState(0);
+  const stamp = [activity.start_date, activity.starts_at, activity.location, activity.state, ...activity.crew.map((c) => `${c.user_id}${c.call_at ?? ""}`)].join("|");
+  const key = `${activity.id}|${user}|${stamp}|${nonce}`;
+  useEffect(() => {
+    if (!open || !user) return;
+    let live = true;
+    previewSiteAssignment(activity.id, user)
+      .then((r) => { if (live) setRes({ key, ...r }); })
+      .catch(() => { if (live) setRes({ key, error: "The preview could not be loaded. Try again.", assignment: null }); });
+    return () => { live = false; };
+  }, [open, user, activity.id, key]);
+  const data: "loading" | { error: string | null; assignment: Preview | null } = res && res.key === key ? res : "loading";
+  const person = activity.crew.find((c) => c.user_id === user);
+  const shown = data === "loading" ? null : data;
+  const name = shown?.assignment?.person || person?.name || "this person";
+  const a = shown?.assignment ?? null;
+  const missing = a?.reporting?.missing ?? [];
+  return (
+    <>
+      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)} disabled={activity.crew.length === 0} title={activity.crew.length === 0 ? "Assign crew first" : undefined} data-testid={`site-preview-${activity.id}`}>Preview briefing</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title={`Preview briefing: ${activity.title}`} size="wide"
+        description="This is the card the person sees on their phone, built from the same data. Nothing here is sent or changed."
+        help="Use it to check that the date, venue, their own call time and the contact are set before the crew relies on it. The call time is personal to each person.">
+        <div className="space-y-3">
+          <Field label="Preview for" htmlFor={`pv-person-${activity.id}`}>
+            <Select id={`pv-person-${activity.id}`} value={user} onChange={(e) => setUser(e.target.value)} data-testid="site-preview-person">
+              {activity.crew.map((c) => <option key={`${c.user_id}-${c.role}`} value={c.user_id}>{crewName(c)} · {CREW_ROLE_LABELS[c.role]}</option>)}
+            </Select>
+          </Field>
+          {data === "loading" ? <p className="text-sm text-muted-foreground" role="status">Loading the preview…</p> : null}
+          {shown?.error ? <Alert role="alert">{shown.error}</Alert> : null}
+          {shown && !shown.error && !a ? <Alert role="note">This person is no longer assigned to the activity.</Alert> : null}
+          {a ? (
+            <div className="mx-auto w-[22.5rem] max-w-full space-y-2" data-testid="site-preview-frame">
+              <p className="text-center text-[13px] font-medium text-muted-foreground" data-testid="site-preview-label">As {name} sees it</p>
+              <div className="rounded-[1.75rem] border-4 border-border bg-background p-2.5 shadow-inner">
+                <SiteAssignmentList rows={[a]} />
+              </div>
+            </div>
+          ) : null}
+          {a && missing.length > 0 ? (
+            <div className="space-y-1.5 rounded-md border border-border/70 bg-muted/30 px-2.5 py-2 text-[13px]" data-testid="site-preview-missing">
+              <p className="font-medium text-[hsl(var(--os-amber))]">⚠ {name} would see these as still to come</p>
+              <div className="flex flex-wrap items-center gap-2">
+                {missing.includes("date") ? <ActivityDialog projectId={projectId} activity={activity} members={members} tz={tz} label="Add the date" triggerVariant="ghost" /> : null}
+                {missing.includes("venue") ? <ActivityDialog projectId={projectId} activity={activity} members={members} tz={tz} label="Add the venue" triggerVariant="ghost" /> : null}
+                {missing.includes("call_time") ? <CrewDialog projectId={projectId} activity={activity} members={members} label="Set call time" /> : null}
+              </div>
+            </div>
+          ) : null}
+          <div className="flex justify-end"><Button type="button" variant="outline" size="sm" onClick={() => setNonce((n) => n + 1)}>Refresh preview</Button></div>
+        </div>
+      </Modal>
+    </>
   );
 }

@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
+import type { SiteAssignment } from "@/lib/projects/site-assignments";
 import { setupNotice } from "@/lib/projects/teams/model";
 import { fail, firstIssue, ok, optionalDate, optionalText, optionalUuid, refreshProjects, uuid, type ProjectActionState } from "@/lib/projects/action-utils";
 
@@ -188,6 +189,38 @@ export async function applyProjectDates(_prev: S, fd: FormData): Promise<S> {
   if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return { error: null, notice: (data as { unchanged?: boolean } | null)?.unchanged ? "That activity already has a date." : "The project date was used for this activity." };
+}
+
+/** Record that work on a site activity actually began. Only an explicit record counts as started: a date that has passed never does. Project Manager (the database checks). The note is optional. */
+export async function recordSiteStart(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid, note: optionalText }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { error } = await (await createClient()).rpc("proj_record_site_start", { p_item_id: p.data.itemId, p_started_at: null, p_note: p.data.note ?? null });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: "Recorded that work began. The crew and the schedule now show it as started." };
+}
+
+/** Take a start record back (recorded by mistake). The activity goes back to its date-based state; nothing else changes. */
+export async function clearSiteStart(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid, itemId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const { error } = await (await createClient()).rpc("proj_clear_site_start", { p_item_id: p.data.itemId });
+  if (error) return fail(error.message);
+  refreshProjects(p.data.projectId);
+  return { error: null, notice: "The start record was cleared." };
+}
+
+/**
+ * What one crew member's briefing looks like to them (Project Manager preview). The database builds it with the same function the technician's own read uses (`proj_preview_site_assignment`),
+ * so the preview cannot drift from what they see. A read, not a change: it returns the JSON or a sentence.
+ */
+export async function previewSiteAssignment(activityId: string, userId: string): Promise<{ error: string | null; assignment: (SiteAssignment & { preview?: boolean; person?: string | null }) | null }> {
+  const p = z.object({ a: uuid, u: uuid }).safeParse({ a: activityId, u: userId });
+  if (!p.success) return { error: "Choose a person on this activity.", assignment: null };
+  const { data, error } = await (await createClient()).rpc("proj_preview_site_assignment", { p_item_id: p.data.a, p_user_id: p.data.u });
+  if (error) return { error: fail(error.message).error, assignment: null };
+  return { error: null, assignment: (data ?? null) as (SiteAssignment & { preview?: boolean; person?: string | null }) | null };
 }
 
 /** Choose the project teams in one go, each with an optional lead. The database never duplicates a team or replaces a lead, and asks for explicit confirmation before it adds a lead to the project. */

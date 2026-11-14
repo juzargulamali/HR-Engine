@@ -82,7 +82,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
               const canUpdate = !finished && (view.canManage || (f.responsible_user_id === ctx.userId && view.standing.isMember));
               const linked = changes.find((c) => c.id === f.scope_change_id);
               return (
-                <li key={f.id} className="rounded-md border border-border p-3">
+                <li key={f.id} id={`feedback-${f.id}`} className="scroll-mt-24 rounded-md border border-border p-3" data-testid={`feedback-${f.id}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <FeedbackStatusBadge status={f.status} />
                     <Badge variant="outline" className="whitespace-nowrap">{f.kind === "in_scope_correction" ? "Correction to what was agreed" : "Proposed change"}</Badge>
@@ -101,7 +101,7 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
                     <Fact label="Deadline">{dateText(f.due_date)}</Fact>
                     {f.resolution ? <Fact label={`Resolution${f.resolved_at ? ` (${formatDateTime(f.resolved_at)})` : ""}`} className="sm:col-span-2">{f.resolution}</Fact> : null}
                     {f.evidence_note ? <Fact label="Evidence">{f.evidence_note}</Fact> : null}
-                    {linked ? <Fact label="Scope change">{linked.title} ({SCOPE_STATUS[linked.status] ?? linked.status})</Fact> : null}
+                    {linked ? <Fact label="Scope change"><a href={`#scope-${linked.id}`} className="underline underline-offset-2" data-testid={`feedback-scope-link-${f.id}`}>{linked.title}</a> ({SCOPE_STATUS[linked.status] ?? linked.status})</Fact> : null}
                   </dl>
                 </li>
               );
@@ -142,8 +142,10 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
             {changes.map((c) => {
               const cost = commercialBy.get(c.id);
               const proposed = c.status === "proposed";
+              const source = feedback.find((f) => f.scope_change_id === c.id);
+              const sourceLinks = source ? feedbackLinks(source, id, linkLook) : null;
               return (
-                <li key={c.id} className="rounded-md border border-border p-3">
+                <li key={c.id} id={`scope-${c.id}`} className="scroll-mt-24 rounded-md border border-border p-3" data-testid={`scope-change-${c.id}`}>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className={c.status === "approved" ? "border-[hsl(var(--os-green)/0.4)] text-[hsl(var(--os-green))]" : c.status === "proposed" ? "border-[hsl(var(--os-amber)/0.4)] text-[hsl(var(--os-amber))]" : "text-muted-foreground"}>{SCOPE_STATUS[c.status] ?? c.status}</Badge>
                     <h3 className="text-sm font-semibold">{c.title}</h3>
@@ -155,6 +157,15 @@ export default async function ChangesPage({ params }: { params: Promise<{ id: st
                   </div>
                   <dl className="mt-3 grid gap-3 sm:grid-cols-2">
                     <Fact label="Proposed scope" className="sm:col-span-2"><span className="whitespace-pre-wrap">{c.proposed_scope}</span></Fact>
+                    {source ? (
+                      <Fact label="Raised from" className="sm:col-span-2">
+                        <span data-testid={`scope-source-${c.id}`}>
+                          <a href={`#feedback-${source.id}`} className="underline underline-offset-2">Client feedback from {source.source}, {formatDate(source.received_on)}</a>
+                          {sourceLinks?.version ? <>, about {sourceLinks.version.href ? <Link href={sourceLinks.version.href} className="underline underline-offset-2">{sourceLinks.version.text}</Link> : sourceLinks.version.text}</> : null}
+                          {sourceLinks?.activation ? <>, activation {sourceLinks.activation.href ? <Link href={sourceLinks.activation.href} className="underline underline-offset-2">{sourceLinks.activation.text}</Link> : sourceLinks.activation.text}</> : null}
+                        </span>
+                      </Fact>
+                    ) : null}
                     <Fact label="Effect on dates">{c.effect_on_dates ?? "Not stated"}</Fact>
                     <Fact label="Proposed">{view.nameOf(c.proposed_by)}, {formatDateTime(c.proposed_at)}</Fact>
                     {c.decided_at ? <Fact label="Decision">{c.status === "approved" ? "Approved" : "Rejected"} by {view.nameOf(c.decided_by)}, {formatDateTime(c.decided_at)}</Fact> : null}

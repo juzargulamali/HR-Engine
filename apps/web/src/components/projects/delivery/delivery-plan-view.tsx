@@ -1,3 +1,4 @@
+import { SCHEDULE_PURPOSES } from "@/lib/projects/plan-view";
 import Link from "next/link";
 import { Download, FileSpreadsheet, Upload } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
@@ -241,6 +242,15 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
       <div className={briefOnly ? "grid items-start gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]" : "space-y-5"}>
         <div className="min-w-0 space-y-5">
           <nav aria-label="Plan views" className="flex w-fit flex-wrap items-center gap-1 rounded-lg border border-border p-1">{viewLink("breakdown", "Breakdown")}{viewLink("timeline", "Work schedule")}{viewLink("deliverables", "Deliverables")}</nav>
+          <p className="text-[13px] text-muted-foreground" data-testid="dp-schedules-links">
+            Other schedules: <Link href={`${base}/plan?plan=site`} className="font-medium underline underline-offset-2" data-testid="dp-site-schedule-link">Site schedule</Link> (who is where on site), <Link href={`${base}/plan?plan=delivery`} className="font-medium underline underline-offset-2">Delivery timeline</Link> (dates the client sees) and <Link href={`${base}/plan?mode=calendar`} className="font-medium underline underline-offset-2">Calendar</Link>.
+            <InfoHint label="which schedule is which" className="ml-1" testId="dp-schedule-purposes">
+              <p><strong>Work schedule</strong>: {SCHEDULE_PURPOSES.work}</p>
+              <p className="mt-1.5"><strong>Delivery timeline</strong>: {SCHEDULE_PURPOSES.delivery}</p>
+              <p className="mt-1.5"><strong>Site schedule</strong>: {SCHEDULE_PURPOSES.site}</p>
+              <p className="mt-1.5"><strong>Calendar</strong>: {SCHEDULE_PURPOSES.calendar}</p>
+            </InfoHint>
+          </p>
 
           {proposed.length > 0 ? (
             <Panel title={`Proposed changes to released work (${proposed.length})`} description="Nothing that was released changes until the Project Manager approves it."

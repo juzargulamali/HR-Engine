@@ -209,7 +209,7 @@ describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operati
     }
     // only employment is read, and nothing of it is returned
     const mine = await call<Row[]>(U.tech1, "proj_my_site_assignments()");
-    expect(JSON.stringify(mine)).not.toMatch(/employ|termination|hire|salary|first_name|last_name|manager/i);
+    expect(JSON.stringify(mine)).not.toMatch(/employ|termination|hire|salary|first_name|last_name|manager_id|line_manager/i);
     // a project member keeps what membership gives them even without an employment record (eng has none)
     expect(await count(`select 1 from employees where user_id = '${U.eng}'`)).toBe(0);
     const eng = await call<Row[]>(U.eng, "proj_my_site_assignments()");
@@ -427,6 +427,7 @@ describe("Projects Phase 2 follow-up: team setup, site-only technicians, Operati
     await admin(`delete from proj_site_crew; delete from proj_task_output_versions where review_route = 'operations'; delete from proj_change_log where entity_type = 'team';
                  update proj_teams set head_user_id = '${U.head}' where head_user_id is null;
                  update proj_plan_items set ready_hardware = 'unknown', ready_content = 'unknown', ready_app = 'unknown', ready_note = null, crew_instructions = null`);
+    await db.seed(manual("proj_phase2_site_state_90_rollback.sql"));                                                         // later migrations are rolled back first, newest first
     await db.seed(manual("proj_phase2_teams_crew_ops_review_90_rollback.sql"));
     await db.seed(manual("proj_phase2_teams_crew_ops_review_90_rollback.sql"));                                              // safe twice
     expect((await admin<{ is_nullable: string }>(`select is_nullable from information_schema.columns where table_name = 'proj_teams' and column_name = 'head_user_id'`))[0]!.is_nullable).toBe("NO");

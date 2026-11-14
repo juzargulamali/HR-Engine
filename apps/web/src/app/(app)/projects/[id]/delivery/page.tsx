@@ -59,7 +59,7 @@ export default async function DeliveryPlanPage({ params, searchParams }: { param
     if (reg.state === "ok") {
       const { data: fb } = view.canManage && !readOnly ? await db.from("proj_feedback").select("id, source, request_text").eq("project_id", id).order("received_on", { ascending: false }).limit(50) : { data: [] };
       deliverablesSlot = (
-        <RegisterView projectId={id} register={reg.data} filter={filter} rows={filterRegister(reg.data.rows, filter as RegisterFilter)} feedback={(fb ?? []).map((f) => ({ id: f.id, name: `${f.source}: ${f.request_text.slice(0, 80)}` }))}
+        <RegisterView projectId={id} register={reg.data} filter={filter} userId={ctx.userId} rows={filterRegister(reg.data.rows, filter as RegisterFilter, ctx.userId)} feedback={(fb ?? []).map((f) => ({ id: f.id, name: `${f.source}: ${f.request_text.slice(0, 80)}` }))}
           activations={plan.items.map((i) => ({ id: i.id, name: `${i.key} ${i.title}` }))} hrefFor={(f) => `/projects/${id}/delivery?view=deliverables${f === "all" ? "" : `&f=${f}`}`}
           isReviewer={(r) => !readOnly && r.assignee_id !== ctx.userId && (view.canManage || (!!r.team_id && view.headOfTeamIds.includes(r.team_id)))} />
       );

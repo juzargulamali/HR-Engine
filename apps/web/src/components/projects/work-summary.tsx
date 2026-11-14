@@ -58,7 +58,7 @@ export function WorkSummary({ projectId, milestones, milestonesHref, outputs, ou
             <p className="text-[13px]"><Link href={reg} className="font-medium underline-offset-4 hover:underline">{outputsMore > 0 ? `${outputsMore} more, ` : ""}all {outputs.total} {outputs.total === 1 ? "output" : "outputs"}</Link></p>
             <p className="flex flex-wrap gap-1.5" data-testid="summary-output-counts">
               <Link href={`${reg}&f=missing`} className={chip}>Missing {outputs.counts.missing}</Link>
-              <Link href={`${reg}&f=awaiting`} className={chip}>Awaiting review {outputs.counts.awaiting}</Link>
+              <Link href={`${reg}&f=awaiting`} className={chip}>Outputs awaiting approval {outputs.counts.awaiting}</Link>
               <Link href={`${reg}&f=changes`} className={chip}>Changes requested {outputs.counts.changes}</Link>
               <Link href={`${reg}&f=approved`} className={chip}>Approved {outputs.counts.approved}</Link>
             </p>

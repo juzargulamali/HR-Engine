@@ -92,4 +92,13 @@ describe("Handovers page", () => {
     expect(html).toContain("You asked Sales a question");
     expect(html).not.toContain("data-decision");
   });
+  it("every pending handover carries who it is with and the next step in one line; an accepted one leads to the live project's plan", async () => {
+    tables = { proj_handovers: rows([HANDOVER, pending(OLD, "Assigned job", "2026-03-01T08:00:00Z"), accepted(1)]) };
+    const html = renderToStaticMarkup(await HandoversPage());
+    expect(html).toContain("With Operations (Operations) · Next: Assign a Project Manager");
+    expect(html).toContain("With you (Project Manager) · Next: Accept the handover");
+    expect(html.split('data-testid="handover-owner-next"').length - 1).toBeGreaterThanOrEqual(3);
+    expect(html).toContain('href="/projects/p-1/delivery?from=handover"');
+    expect(html).toContain("Start the project plan");
+  });
 });

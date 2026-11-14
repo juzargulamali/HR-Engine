@@ -34,6 +34,15 @@ export function describeNotification(type: string, payload: Record<string, unkno
       if (until) return { text: `You were given temporary project leadership of ${project} until ${until}.`, href: projectLink };
       return { text: `You were made responsible for ${project}.`, href: projectLink };
     }
+    case "project_site_change": {
+      // A confirmed date or venue moved, or a personal call time moved: the previous and new values, with a link to the briefing. Only the people on that assignment get this.
+      const act = str(payload.title) ?? "your site activity";
+      const run = str(payload.run_label);
+      const changes = Array.isArray(payload.changes) ? (payload.changes as { field?: unknown; from?: unknown; to?: unknown }[]) : [];
+      const parts = changes.map((c) => `${String(c.field ?? "detail")}: ${String(c.from ?? "not set")} → ${String(c.to ?? "not set")}`);
+      const aid = str(payload.activity_id);
+      return { text: `${act}${run ? ` (${run})` : ""} changed: ${parts.length > 0 ? parts.join("; ") : "details moved"}. Open your briefing.`, href: aid ? `/site-assignments?activity=${aid}` : "/site-assignments" };
+    }
     case "project_assignment": {
       const deliverable = str(payload.deliverable);
       if (payload.site_assignment === true) {

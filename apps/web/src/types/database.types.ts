@@ -1695,7 +1695,7 @@ export interface Database {
       proj_deliverables: ProjReadOnlyTable<ProjDeliverableRow>;
       proj_tasks: ProjReadOnlyTable<ProjTaskRow>;
       proj_dp_items: ProjReadOnlyTable<{ id: string; project_id: string; item_key: string; zone: string; title: string; qty: number | null; removed_at: string | null }>;
-      proj_dp_lines: ProjReadOnlyTable<{ id: string; project_id: string; item_id: string; line_key: string; section: string; description: string; task_id: string | null; removed_at: string | null }>;
+      proj_dp_lines: ProjReadOnlyTable<{ id: string; project_id: string; item_id: string; line_key: string; section: string; description: string; task_id: string | null; request_line_id: string | null; removed_at: string | null }>;
       proj_task_collaborators: ProjReadOnlyTable<ProjTaskCollaboratorRow>;
       proj_task_dependencies: ProjReadOnlyTable<ProjTaskDependencyRow>;
       proj_task_events: ProjReadOnlyTable<ProjTaskEventRow>;
@@ -2142,6 +2142,10 @@ export interface Database {
       proj_reroute_output_review: { Args: { p_version_id: string }; Returns: unknown };
       proj_site_briefing: { Args: { p_project_id: string }; Returns: unknown };
       proj_apply_project_dates: { Args: { p_item_id: string }; Returns: unknown };
+      proj_record_site_start: { Args: { p_item_id: string; p_started_at?: string | null; p_note?: string | null }; Returns: unknown };
+      proj_clear_site_start: { Args: { p_item_id: string }; Returns: unknown };
+      proj_preview_site_assignment: { Args: { p_item_id: string; p_user_id: string }; Returns: unknown };
+      proj_site_activities_read: { Args: { p_company_id: string; p_project_id?: string | null; p_limit?: number }; Returns: unknown };
       proj_save_shipment: { Args: { p_project_id: string; p_shipment_id: string | null; p_fields: Record<string, unknown> }; Returns: unknown };
       proj_remove_shipment: { Args: { p_shipment_id: string }; Returns: undefined };
       proj_site_schedule: { Args: { p_project_id: string }; Returns: unknown };
