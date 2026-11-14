@@ -49,6 +49,16 @@ const choose = (label: string, text: string) => { const el = screen.getByRole("c
 beforeEach(() => { address = "view=week&add=1"; sessionStorage.clear(); });
 afterEach(() => { cleanup(); createOpportunity.mockReset(); createOrganisation.mockReset(); push.mockReset(); });
 
+describe("the full form: the company card", () => {
+  it("says 'Company' once: the labelled field, with no section heading repeating the word above it", () => {
+    full({ id: UAE, from: "home" });
+    const card = screen.getByTestId("enquiry-company-card");
+    expect(within(card).getByLabelText("Company")).toBeTruthy();
+    expect((card.textContent ?? "").match(/Company/g)?.length).toBe(1);
+    expect(screen.queryByRole("heading", { name: "Company" })).toBeNull();
+  });
+});
+
 describe.each([["the full form", full], ["Quick Add", quick]] as const)("%s: company and currency", (_name, show) => {
   it("starts in the active company (context, remembered or home), never the first by name, and says company and currency together before Save", () => {
     for (const from of ["context", "remembered", "home"] as const) {

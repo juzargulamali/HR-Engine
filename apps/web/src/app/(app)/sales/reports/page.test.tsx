@@ -203,6 +203,9 @@ describe("Sales reports", () => {
     for (const title of ["Open pipeline by stage", "Open pipeline by owner", "Follow-ups"]) { expect(first).toContain(`>${title}<`); expect(second).not.toContain(`>${title}<`); }
     for (const title of ["Timeliness", "Won and lost", "Lost reasons", "Enquiries by source", "Won value", "Won value against invoice and payment references"]) { expect(second).toContain(`>${title}<`); expect(first).not.toContain(`>${title}<`); }
     expect(first).toContain("Enginious UAE</strong>, as of now.");
+    // The group line says "as of now" once: the group's own note is not allowed to repeat it straight after.
+    expect(first.replace(/<!-- -->/g, "")).toContain("Enginious UAE</strong>, as of now. The dates above do not change these figures.");
+    expect(first.replace(/<!-- -->/g, "")).not.toMatch(/as of now\.\s*As of now/);
     expect(second).toContain("Enginious UAE</strong>, 1 Aug to 30 Oct 2026.");
     expect(first).toContain("3 open enquiries, Enginious UAE, as of now. Currency: AED");
     expect(first).toContain("0 open follow-ups, Enginious UAE, as of now");

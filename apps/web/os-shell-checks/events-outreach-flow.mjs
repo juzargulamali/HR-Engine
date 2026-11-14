@@ -143,8 +143,8 @@ await step("the event link can be changed and cleared from Edit details, and an 
   await dlg.getByRole("button", { name: /^Clear Event/ }).click();
   await dlg.getByRole("button", { name: "Save changes" }).click(); await dlg.waitFor({ state: "detached" });
   eq(sql(`select coalesce(event_edition_id::text, 'none') from crm_opportunities where id = '${oppId}'`), "none", "cleared");
-  if (!/Not linked to an event/.test(await mainText(empPage))) { await go(empPage, `/sales/opportunities/${oppId}`); }
-  if (!/Not linked to an event/.test(await mainText(empPage))) throw new Error("the page does not say the enquiry is not linked");
+  // The page refreshes just after the dialog closes: wait for it on this tab (Edit details is a button here; on Overview it is under More).
+  await empPage.waitForFunction(() => /Not linked to an event/.test(document.querySelector("main").innerText), null, { timeout: 15000 }).catch(() => { throw new Error("the page does not say the enquiry is not linked"); });
   // an enquiry created with NO event still works end to end (the way every older enquiry was made)
   const plain = asDb(5, `select crm_create_opportunity(p_company_id => '${UAE}', p_title => 'Fictional plain enquiry', p_source => 'agency_call', p_next_title => 'Call', p_next_due => now() + interval '2 days', p_client_org_id => '${orbit}')`);
   eq(sql(`select coalesce(event_edition_id::text, 'none') from crm_opportunities where id = '${plain}'`), "none", "an enquiry without an event");

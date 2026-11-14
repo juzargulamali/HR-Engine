@@ -338,7 +338,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
           <section key={g.id} aria-labelledby={`report-group-${g.id}`} className="space-y-3" data-testid={`report-group-${g.id}`}>
             <div>
               <h2 id={`report-group-${g.id}`} className="text-lg font-semibold">{g.title}</h2>
-              <p className="text-sm text-muted-foreground"><strong className="font-medium text-foreground">{all ? "All your companies" : companyLabel}</strong>, {g.id === "now" ? "as of now" : when}. {g.basis}</p>
+              <p className="text-sm text-muted-foreground"><strong className="font-medium text-foreground">{all ? "All your companies" : companyLabel}</strong>, {g.id === "now" ? "as of now" : when}. {/* the first group's note opens with "As of now.", which the line has just said */}{g.id === "now" ? g.basis.replace(/^As of now\.\s*/, "") : g.basis}</p>
             </div>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
               {g.reports.map((id) => (

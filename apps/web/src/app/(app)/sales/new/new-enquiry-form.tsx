@@ -449,10 +449,13 @@ export function NewEnquiryForm({
           ) : null}
           {prefillIgnored.length > 0 ? <Alert variant="warning" role="status">Part of the link could not be used and was left out ({prefillIgnored.join(", ")}): it did not match anything you can choose here. Fill those in yourself.</Alert> : null}
 
-          <Section title="Company" help="An enquiry belongs to one Enginious company. That decides its reference, its default currency and who can see it.">
-            <CompanyField id="enq-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
-            <NoSettingsAlert company={company} />
-          </Section>
+          {/* No section title here: the field is labelled "Company" itself (with the same explanation behind its ⓘ), and a "Company" heading above it said the word twice. */}
+          <Card data-testid="enquiry-company-card">
+            <CardContent className="space-y-4 pt-6">
+              <CompanyField id="enq-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
+              <NoSettingsAlert company={company} />
+            </CardContent>
+          </Card>
 
           {/* Until a company is chosen nothing below can be filled in: a disabled fieldset turns every field and button inside it off at once. */}
           <fieldset disabled={!company} className={cn("m-0 min-w-0 space-y-6 border-0 p-0", !company && "opacity-60")} aria-label="Enquiry details">

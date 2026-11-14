@@ -39,7 +39,12 @@ export function DropdownMenu({
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") setOpen(false);
+      if (e.key !== "Escape") return;
+      // A keyboard user is inside the list when they press Escape: the list becomes inert, so without this the focus would fall back to the top of
+      // the page. It returns to the button that opened the list (the first control in this wrapper). A mouse user's focus is left where it is.
+      const inside = !!menuRef.current?.contains(document.activeElement);
+      setOpen(false);
+      if (inside) Array.from(ref.current?.querySelectorAll<HTMLElement>("button, a[href]") ?? []).find((el) => !menuRef.current?.contains(el))?.focus();
     }
     document.addEventListener("pointerdown", onDocPointerDown);
     document.addEventListener("keydown", onKey);
