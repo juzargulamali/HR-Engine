@@ -113,7 +113,7 @@ export async function loadOpportunities(ctx: CrmContext, scope: OpportunityScope
   const nextBy = new Map<string, CrmFollowUpRow>();
   const countBy = new Map<string, number>();
   for (const f of [...followUps].sort((a, b) => a.due_at.localeCompare(b.due_at))) {
-    if (!f.opportunity_id) continue;   // a follow-up on an account with no inquiry belongs to no opportunity
+    if (!f.opportunity_id) continue;   // a follow-up on an account with no enquiry belongs to no opportunity
     if (!nextBy.has(f.opportunity_id)) nextBy.set(f.opportunity_id, f);
     countBy.set(f.opportunity_id, (countBy.get(f.opportunity_id) ?? 0) + 1);
   }
@@ -290,7 +290,7 @@ export async function loadOpportunityDetail(ctx: CrmContext, id: string): Promis
 
 export interface FollowUpListItem {
   followUp: CrmFollowUpRow;
-  /** Null for a follow-up on an account with no inquiry (then `account` names the account). */
+  /** Null for a follow-up on an account with no enquiry (then `account` names the account). */
   opportunity: Pick<CrmOpportunityRow, "id" | "reference" | "title" | "stage" | "company_id" | "owner_id"> | null;
   account: { id: string; name: string; companyId: string } | null;
   assigneeName: string;
@@ -298,7 +298,7 @@ export interface FollowUpListItem {
   party: string;
 }
 
-/** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. Follow-ups on accounts with no inquiry are listed alongside. */
+/** Open follow-ups across everything the user can see, soonest first, plus the most recent completed ones. Follow-ups on accounts with no enquiry are listed alongside. */
 export async function loadFollowUps(ctx: CrmContext): Promise<{ open: FollowUpListItem[]; done: FollowUpListItem[] }> {
   const supabase = await createClient();
   const [openRes, doneRes] = await Promise.all([

@@ -197,7 +197,7 @@ describe("the account page", () => {
     loadAccount.mockResolvedValue(account());
     const { container } = await showAccount({ company: UAE });
     const text = container.textContent ?? "";
-    const at = ["Contacts (1)", "Open enquiries (1)", "Follow-ups (2 open, 1 overdue)", "Outreach section", "Figures for Fictional Beta UAE", "Profile", "History", "Inquiries (2)"].map((t) => text.indexOf(t));
+    const at = ["Contacts (1)", "Open enquiries (1)", "Follow-ups (2 open, 1 overdue)", "Outreach section", "Figures for Fictional Beta UAE", "Profile", "History", "Enquiries (2)"].map((t) => text.indexOf(t));
     expect(at.every((n) => n >= 0)).toBe(true);
     expect(at).toEqual([...at].sort((a, b) => a - b));
     // the next follow-up is named at the top, and Add follow-up and Add contact are there too

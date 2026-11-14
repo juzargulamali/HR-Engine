@@ -153,7 +153,8 @@ export function SettingsForm({
         {error && errorSection !== section && sent?.from === section ? <Alert variant="destructive">Not saved for {companyName}: there is a problem under {SECTION_NAME[errorSection!]}. Nothing on this page was saved.</Alert> : null}
         {saved && sent.from === section ? <Alert variant="success" role="status" data-testid="settings-saved">{savedMessage(companyName, sent.sections, sent.first)}</Alert> : null}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <Button type="submit" data-section={section} disabled={pending}>{pending && sent?.from === section ? "Saving…" : exists ? `Save ${lower(section)} for ${companyName}` : `Set up Sales for ${companyName}`}</Button>
+          {/* The label names the company, so it can be longer than a phone is wide: it wraps instead of pushing the page sideways. */}
+          <Button type="submit" data-section={section} disabled={pending} className="h-auto min-h-9 max-w-full whitespace-normal text-left">{pending && sent?.from === section ? "Saving…" : exists ? `Save ${lower(section)} for ${companyName}` : `Set up Sales for ${companyName}`}</Button>
           {dirty.includes(section) ? <span className="flex items-center gap-1.5 text-sm text-[hsl(var(--os-amber))]"><span className="os-dot" data-tone="amber" aria-hidden />Changes not saved yet</span> : null}
           {others.length > 0 ? <span className="text-sm text-muted-foreground">Also saves your changes under {listOf(others.map((s) => SECTION_NAME[s]))}.</span> : null}
           {!exists ? <span className="text-sm text-muted-foreground">The first save writes every section of this page together.</span> : null}

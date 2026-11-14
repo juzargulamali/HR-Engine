@@ -89,7 +89,7 @@ Shared meanings:
 | (4) Permissions | **Any Sales grant** of the company (not only the owner); completing a follow-up needs the follow-up actor rule |
 | (5) Starting states | Not Lost ("A lost opportunity can no longer be updated"); an activity cannot be dated in the future (the app dates it now) |
 | (6) Changes | New `crm_activities` row; first call, email or meeting sets `first_response_at`; optional follow-up done and/or a new follow-up |
-| (7) Side effects | Completing writes an internal note "Follow-up done: ..."; a refused second step is reported as a partial result (the first part stays). **2026-11-14 branch (draft PR #96):** when the activity completes a follow-up and its kind is **Note**, `crm_add_activity` is NOT called: the completion's own internal note already holds the same words, so no second Note row is written (a call, email, meeting or client response is still written). A note the person meant as non-internal is therefore kept only as the internal system note (open owner decision 17). The timeline shows a completion once either way (display only, [enquiries 9.5](./sales-enquiries.md)) |
+| (7) Side effects | Completing writes an internal note "Follow-up done: ..."; a refused second step is reported as a partial result (the first part stays). **2026-11-14 branch (draft PR #96):** when the activity completes a follow-up, the person's own row is ALWAYS written through `crm_add_activity`, whatever its kind, so the **Internal note** choice, the kind of contact and the first-response time are kept (`addActivity`, `apps/web/src/lib/actions/crm.ts`; tests `lib/actions/crm.test.ts`, ticked and unticked). Both records stay; the timeline shows that completion once by matching them (display only, `opportunities/[id]/timeline.ts` `matchCompletions`, [enquiries 9.5](./sales-enquiries.md)) |
 | (8) Verify | Timeline shows the activity; Follow-ups shows the next step |
 | (9) STOP | No |
 | (10) Retry | **Duplicate risk** (another timeline row each time); partial success possible: read the timeline and follow-ups first |
@@ -821,7 +821,7 @@ Added 2026-11-12 (merged as PR #86, merge `5b75ade`; commit `d9e8338`, read at `
 | (2) Record | `crm_outreach` |
 | (3) Inputs | Status (not started, in progress, waiting for reply, meeting booked, closed); closing needs a reason (500) |
 | (4) Permissions | The assignee or an `assign_owner` holder |
-| (5) Starting states | Not closed; Inquiry raised can only be followed by Closed |
+| (5) Starting states | Not closed; Enquiry raised can only be followed by Closed |
 | (6) Changes | Status; history entry; Closed is final |
 | (7) Side effects | None |
 | (8) Verify | Status badge |
@@ -832,12 +832,12 @@ Added 2026-11-12 (merged as PR #86, merge `5b75ade`; commit `d9e8338`, read at `
 #### `sales.outreach.link_inquiry`
 | Field | Entry |
 |---|---|
-| (1) Reached | `linkOutreachInquiry` -> `crm_outreach_link_inquiry` (also called by `createOpportunity` for "Create inquiry") |
+| (1) Reached | `linkOutreachInquiry` -> `crm_outreach_link_inquiry` (also called by `createOpportunity` for "Create enquiry") |
 | (2) Record | `crm_outreach` |
 | (3) Inputs | An enquiry of the same company on which the account is agency or end client |
 | (4) Permissions | The assignee or an `assign_owner` holder |
 | (5) Starting states | Outreach open |
-| (6) Changes | `opportunity_id`; status Inquiry raised |
+| (6) Changes | `opportunity_id`; status Enquiry raised |
 | (7) Side effects | Events `inquiry_linked` and a status event |
 | (8) Verify | Outreach card shows the linked enquiry |
 | (9) STOP | No |

@@ -177,10 +177,15 @@ describe("log an update and plan the next step in one step", () => {
     expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
     expect(rpc.mock.calls[0]![1]).toMatchObject({ p_follow_up_id: F, p_outcome: "Spoke to Hana", p_next_title: "Send options", p_next_kind: "proposal" });
   });
-  it("a plain note that completes a follow-up is not written a second time: the completion already records those words", async () => {
-    expect((await addActivity({ error: null }, fd({ ...upd, kind: "note", completeFollowUpId: F }))).error).toBeNull();
-    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up"]);
-    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_follow_up_id: F, p_outcome: "Spoke to Hana" });
+  it("a note that completes a follow-up keeps the person's Internal note choice: the note is written with it, ticked or not", async () => {
+    expect((await addActivity({ error: null }, fd({ ...upd, kind: "note", internal: "on", completeFollowUpId: F }))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
+    expect(rpc).toHaveBeenLastCalledWith("crm_add_activity", expect.objectContaining({ p_kind: "note", p_body: "Spoke to Hana", p_internal: true }));
+    rpc.mockClear();
+    const { internal: _unticked, ...plain } = { ...upd, kind: "note", internal: undefined, completeFollowUpId: F } as Record<string, string | undefined>;
+    expect((await addActivity({ error: null }, fd(plain as Record<string, string>))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
+    expect(rpc).toHaveBeenLastCalledWith("crm_add_activity", expect.objectContaining({ p_kind: "note", p_internal: false }));
   });
   it("logs nothing when completing the only follow-up is refused for lack of a next step", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: "Add a next action or put the opportunity on hold before completing the last follow-up" } });

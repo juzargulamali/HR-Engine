@@ -44,7 +44,7 @@ describe("filters and sort", () => {
 });
 
 describe("definitions", () => {
-  it("offers the outcome lists per kind, with Replied only for e-mail and Spoke only for calls, and never lets a person pick Inquiry raised by hand", () => {
+  it("offers the outcome lists per kind, with Replied only for e-mail and Spoke only for calls, and never lets a person pick Enquiry raised by hand", () => {
     expect(OUTREACH_OUTCOMES_BY_KIND.call).toEqual(["no_answer", "left_message", "spoke", "call_back_requested", "not_interested"]);
     expect(OUTREACH_OUTCOMES_BY_KIND.email).toEqual(["sent", "replied", "bounced", "not_interested"]);
     expect(OUTREACH_OUTCOMES_BY_KIND.meeting).toEqual(["meeting_booked", "meeting_held", "rescheduled", "no_show", "not_interested"]);
@@ -92,7 +92,7 @@ describe("definitions", () => {
     expect(describeEvent(ev({ kind: "email", outcome: "sent", note: "Portfolio" }), who, () => "")).toBe("Email · Sent: Portfolio");
     expect(describeEvent(ev({ kind: "reassigned", from_user: "s", to_user: "o" }), who, () => "")).toBe("Reassigned from Sara to Omar");
     expect(describeEvent(ev({ kind: "status", from_status: "not_started", to_status: "in_progress", note: "First activity logged" }), who, () => "")).toBe("Status: Not started to In progress (First activity logged)");
-    expect(describeEvent(ev({ kind: "inquiry_linked", opportunity_id: "x" }), who, () => "UAE-1: Gala")).toBe("Inquiry linked: UAE-1: Gala");
+    expect(describeEvent(ev({ kind: "inquiry_linked", opportunity_id: "x" }), who, () => "UAE-1: Gala")).toBe("Enquiry linked: UAE-1: Gala");
   });
 });
 

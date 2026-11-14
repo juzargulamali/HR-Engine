@@ -1,7 +1,7 @@
 import type { CrmOutreachEventRow, CrmOutreachKind, CrmOutreachOutcome, CrmOutreachRow, CrmOutreachStatus } from "@/types/crm";
 
 /**
- * Pre-inquiry outreach: the pure rules the screens share (labels, overdue, filters, sort). The database owns who may do what and every status
+ * Pre-enquiry outreach: the pure rules the screens share (labels, overdue, filters, sort). The database owns who may do what and every status
  * change (migration 20261219000100 section 8); nothing here infers a reply or moves a status.
  */
 
@@ -10,9 +10,9 @@ export const OUTREACH_LIMIT = 1000;
 
 export const OUTREACH_STATUSES: readonly CrmOutreachStatus[] = ["not_started", "in_progress", "waiting_for_reply", "meeting_booked", "inquiry_raised", "closed"];
 export const OUTREACH_STATUS_LABEL: Record<CrmOutreachStatus, string> = {
-  not_started: "Not started", in_progress: "In progress", waiting_for_reply: "Waiting for reply", meeting_booked: "Meeting booked", inquiry_raised: "Inquiry raised", closed: "Closed",
+  not_started: "Not started", in_progress: "In progress", waiting_for_reply: "Waiting for reply", meeting_booked: "Meeting booked", inquiry_raised: "Enquiry raised", closed: "Closed",
 };
-/** What a person may choose by hand. Inquiry raised comes only from linking an inquiry; Closed needs a reason. */
+/** What a person may choose by hand. Enquiry raised comes only from linking an enquiry; Closed needs a reason. */
 export const OUTREACH_SETTABLE_STATUSES: readonly CrmOutreachStatus[] = ["not_started", "in_progress", "waiting_for_reply", "meeting_booked", "closed"];
 
 export const OUTREACH_KINDS: readonly CrmOutreachKind[] = ["call", "email", "meeting"];
@@ -41,7 +41,7 @@ export const isOutcomeValidForKind = (kind: string, outcome: string): boolean =>
 /** Keeps the chosen outcome when it fits the (new) kind, else clears it so the person must choose again. */
 export const outcomeAfterKindChange = (kind: string, outcome: string): string => (isOutcomeValidForKind(kind, outcome) ? outcome : "");
 export const OUTREACH_EVENT_LABEL: Record<CrmOutreachEventRow["kind"], string> = {
-  assigned: "Assigned", reassigned: "Reassigned", call: "Call", email: "Email", meeting: "Meeting", status: "Status", next_action: "Next action", inquiry_linked: "Inquiry linked",
+  assigned: "Assigned", reassigned: "Reassigned", call: "Call", email: "Email", meeting: "Meeting", status: "Status", next_action: "Next action", inquiry_linked: "Enquiry linked",
 };
 export const ASSIGN_RESULT_LABEL: Record<string, string> = {
   assigned: "Assigned", reassigned: "Reassigned (it already had open outreach for someone else; history kept)", already: "Already has open outreach for that person: nothing changed", not_found: "Account not found",
@@ -49,7 +49,7 @@ export const ASSIGN_RESULT_LABEL: Record<string, string> = {
 
 /** The date the person is waiting on: the next action's due date, else the target date. */
 export const dueOn = (o: Pick<CrmOutreachRow, "next_due" | "target_date">): string => o.next_due ?? o.target_date;
-/** Finished from the salesperson's side: no overdue marker for an outreach that raised an inquiry or was closed. */
+/** Finished from the salesperson's side: no overdue marker for an outreach that raised an enquiry or was closed. */
 export const isOutreachOpen = (o: Pick<CrmOutreachRow, "status">): boolean => o.status !== "closed" && o.status !== "inquiry_raised";
 /** Overdue = still being worked and its due date (Dubai calendar date, YYYY-MM-DD) is before today. */
 export const isOverdue = (o: Pick<CrmOutreachRow, "status" | "next_due" | "target_date">, today: string): boolean => isOutreachOpen(o) && dueOn(o) < today;
@@ -82,7 +82,7 @@ export function summariseAssignResults(results: readonly { organisation_id: stri
   return counts;
 }
 
-/** One history line in words. `who` names people, `inquiry` names a linked inquiry. */
+/** One history line in words. `who` names people, `enquiry` names a linked enquiry. */
 export function describeEvent(e: CrmOutreachEventRow, who: (id: string | null) => string, inquiry: (id: string | null) => string): string {
   const label = OUTREACH_EVENT_LABEL[e.kind];
   switch (e.kind) {

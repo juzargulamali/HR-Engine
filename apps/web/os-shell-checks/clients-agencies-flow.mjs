@@ -47,7 +47,7 @@ const ID = Object.fromEntries(Object.entries(names).map(([k, n]) => [k, orgId(n)
 const BASE_ORGS = orgCount();
 
 // -------------------------------------------------------------------------------------------------------------------------------------------
-// 1. Role-aware inquiry pickers
+// 1. Role-aware enquiry pickers
 // -------------------------------------------------------------------------------------------------------------------------------------------
 page = await newPage(browser); watch(page); await login(page, "emp@e2e.local");
 let oppId = "";
@@ -59,7 +59,7 @@ await step("create: the multi-role organisation is offered as agency AND end cli
   for (const k of ["atlas", "client", "quiet", "stale"]) if (!c.includes(ID[k])) throw new Error(`client picker lacks ${k}`);
   for (const k of ["agency", "tech"]) if (c.includes(ID[k])) throw new Error(`client picker offers ${k}`);
 });
-await step("create: ONE organisation selected as agency and as end client saves one inquiry and no new organisation", async () => {
+await step("create: ONE organisation selected as agency and as end client saves one enquiry and no new organisation", async () => {
   await page.getByLabel("What is the enquiry?").fill("Fictional Atlas pitch");
   await page.locator("#enq-source").selectOption("agency_call");
   await pick(page.locator("#enq-agency"), "atlas"); await pick(page.locator("#enq-client"), "atlas");
@@ -107,12 +107,12 @@ await step("the database refuses a role the organisation lacks, even when the fo
 });
 
 // -------------------------------------------------------------------------------------------------------------------------------------------
-// 2. A dated follow-up on an account with no inquiry
+// 2. A dated follow-up on an account with no enquiry
 // -------------------------------------------------------------------------------------------------------------------------------------------
 const ceo = await newPage(browser); watch(ceo); await login(ceo, "ceo@e2e.local");
 const accountUrl = `${BASE}/sales/accounts/${ID.quiet}?company=${CO}`;
 let fuId = "";
-await step("founder assigns the account owner, then adds a dated follow-up for emp@ on the account with no inquiry", async () => {
+await step("founder assigns the account owner, then adds a dated follow-up for emp@ on the account with no enquiry", async () => {
   page = ceo; await ceo.goto(accountUrl, { waitUntil: "networkidle" });
   await ceo.getByRole("button", { name: /Assign owner|Change owner/ }).click();
   let d = ceo.locator("dialog[open]"); await d.locator("#owner-pick").selectOption(U.mgr);
@@ -137,7 +137,7 @@ await step("the assignee sees it on Follow-ups (Today) and on My Day, both point
   page = emp; await emp.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" });
   const row = emp.locator("tr", { hasText: "Fictional introduction call" }).first(); await row.waitFor();
   const t = (await row.innerText()).replace(/\s+/g, " ");
-  if (!/Fictional Quiet Account/.test(t) || !/Account follow-up \(no inquiry\)/.test(t)) throw new Error("row: " + t);
+  if (!/Fictional Quiet Account/.test(t) || !/Account follow-up \(no enquiry\)/.test(t)) throw new Error("row: " + t);
   await row.getByRole("link", { name: "Fictional Quiet Account" }).first().click(); await emp.waitForURL(new RegExp(`/sales/accounts/${ID.quiet}`), { timeout: 15000 });
   await emp.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const my = (await emp.locator("main").innerText()).replace(/\s+/g, " ");

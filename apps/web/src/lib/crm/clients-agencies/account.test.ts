@@ -13,7 +13,7 @@ const ok = <T,>(data: T): Section<T> => ({ status: "ok", data });
 const base = { companyId: CO, now: NOW, proposals: [] as ProposalLite[], zoho: [] as ZohoLite[], activities: [] as ActivityLite[], followUps: [] as FollowUpLite[], projects: ok<ProjectLite[]>([]), handovers: ok(new Map<string, string>()) };
 
 describe("how the work came", () => {
-  it("derives direct, through an agency and as the agency from the inquiry's own organisations", () => {
+  it("derives direct, through an agency and as the agency from the enquiry's own organisations", () => {
     expect(inquiryRoute({ agency_org_id: null, client_org_id: CLIENT }, CLIENT)).toEqual({ route: "direct", counterpartId: null });
     expect(inquiryRoute({ agency_org_id: AGENCY, client_org_id: CLIENT }, CLIENT)).toEqual({ route: "through_agency", counterpartId: AGENCY });
     expect(inquiryRoute({ agency_org_id: AGENCY, client_org_id: CLIENT }, AGENCY)).toEqual({ route: "as_agency", counterpartId: CLIENT });
@@ -38,18 +38,18 @@ describe("counts: once per account, won apart from completed, company only", () 
     { id: "p3", reference: "PRJ-3", name: "Three", status: "in_progress", completed_at: null, crm_opportunity_id: "3" },
   ];
   const v = deriveAccount({ ...base, orgId: CLIENT, opportunities: opps, projects: ok(projects), handovers: ok(new Map([["5", "accepted"]])) });
-  it("counts each inquiry once and only for the selected company", () => {
+  it("counts each enquiry once and only for the selected company", () => {
     expect(v.counts).toMatchObject({ inquiries: 5, open: 1, won: 3, lost: 1, direct: 3, throughAgency: 2, asAgency: 0 });
     expect(v.counts.direct + v.counts.throughAgency + v.counts.asAgency).toBe(v.counts.inquiries);
   });
-  it("keeps won inquiries apart from completed projects and says what it cannot see", () => {
+  it("keeps won enquiries apart from completed projects and says what it cannot see", () => {
     expect(v.counts.won).toBe(3);
     expect(v.counts.completedProjects).toBe(1);
     expect(v.counts.projectsNotVisible).toBe(1);
     expect(v.inquiries.find((i) => i.opp.id === "5")?.project).toEqual({ kind: "handover", status: "accepted" });
     expect(v.inquiries.find((i) => i.opp.id === "3")?.project).toMatchObject({ kind: "project", completed: false });
   });
-  it("shows the same inquiry on the agency's page as work done as the agency, not added to the client", () => {
+  it("shows the same enquiry on the agency's page as work done as the agency, not added to the client", () => {
     const a = deriveAccount({ ...base, orgId: AGENCY, opportunities: opps });
     expect(a.counts).toMatchObject({ inquiries: 2, asAgency: 2, throughAgency: 0, direct: 0 });
   });
@@ -67,7 +67,7 @@ describe("quotes: 'awaiting reply' only where the data supports it", () => {
   const proposals: ProposalLite[] = [
     { id: "a", opportunity_id: "1", version: 1, status: "sent", sent_on: "2026-11-01" },      // no reply: awaiting
     { id: "b", opportunity_id: "2", version: 1, status: "sent", sent_on: "2026-11-01" },      // client responded after: not awaiting
-    { id: "c", opportunity_id: "3", version: 1, status: "sent", sent_on: "2026-10-01" },      // inquiry closed: plain status
+    { id: "c", opportunity_id: "3", version: 1, status: "sent", sent_on: "2026-10-01" },      // enquiry closed: plain status
     { id: "d", opportunity_id: "1", version: 2, status: "draft", sent_on: null },             // draft: plain
     { id: "e", opportunity_id: "4", version: 1, status: "sent", sent_on: "2026-11-01" },      // on hold: plain
   ];
@@ -79,7 +79,7 @@ describe("quotes: 'awaiting reply' only where the data supports it", () => {
   const zoho: ZohoLite[] = [{ opportunity_id: "1", quote_ref: "Q-FICT-1", quote_sent_on: "2026-11-02" }, { opportunity_id: "2", quote_ref: "Q-FICT-2", quote_sent_on: null }];
   const v = deriveAccount({ ...base, orgId: CLIENT, opportunities: opps, proposals, activities, zoho });
   const q = (key: string) => v.quotes.find((x) => x.key === key)!;
-  it("flags a sent quote on an open inquiry with no later client response, and nothing else", () => {
+  it("flags a sent quote on an open enquiry with no later client response, and nothing else", () => {
     expect(q("p-a")).toMatchObject({ awaitingReply: true, display: "Awaiting reply" });
     expect(q("z-1")).toMatchObject({ awaitingReply: true });
     expect(q("p-b")).toMatchObject({ awaitingReply: false, display: "Sent · reply recorded 2026-11-03" });
@@ -88,7 +88,7 @@ describe("quotes: 'awaiting reply' only where the data supports it", () => {
     expect(q("p-e")).toMatchObject({ awaitingReply: false, display: "Sent" });
     expect(q("z-2")).toMatchObject({ awaitingReply: false, display: "Not sent" });
   });
-  it("counts an inquiry once even when it has a proposal and a Zoho quote awaiting reply", () => {
+  it("counts an enquiry once even when it has a proposal and a Zoho quote awaiting reply", () => {
     expect(v.counts.inquiriesAwaitingReply).toBe(1);
   });
 });

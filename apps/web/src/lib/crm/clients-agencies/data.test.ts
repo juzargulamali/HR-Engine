@@ -50,7 +50,7 @@ describe("a failed read is an error, never an empty or zero page", () => {
     const rows = await loadDirectory(CO, new Date("2026-11-08T08:00:00Z"));
     expect(rows[0]).toMatchObject({ stats: { total: 1, won: 1, open: 0 } });
   });
-  it("the account page throws when the organisation or the inquiries cannot be read", async () => {
+  it("the account page throws when the organisation or the enquiries cannot be read", async () => {
     tables = good({ crm_opportunities: boom });
     await expect(loadAccount(ctx, CO, ORG)).rejects.toThrow(/could not be loaded/);
     tables = good({ crm_organisations: boom });
@@ -64,7 +64,7 @@ describe("a failed read is an error, never an empty or zero page", () => {
     expect(page?.view.counts.completedProjects).toBeNull();
     expect(page?.view.counts.won).toBe(1);
   });
-  it("a failed handover check marks the won inquiry's project as unknown", async () => {
+  it("a failed handover check marks the won enquiry's project as unknown", async () => {
     tables = good();
     rpcs = { proj_handover_for_opportunity: boom };
     const page = await loadAccount(ctx, CO, ORG);

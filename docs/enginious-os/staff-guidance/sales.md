@@ -257,7 +257,7 @@ Outreach is your list of accounts to approach before any enquiry exists. Each ro
 1. Open Outreach in Sales and check the company named above the list.
 2. Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.
 3. Choose a status or tick Overdue only to decide what to do first.
-4. When the client is ready, open the account and press Create inquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.
+4. When the client is ready, open the account and press Create enquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.
 5. Accounts are assigned from Clients & Agencies by the people who manage Sales assignments.
 
 ## Sales reports

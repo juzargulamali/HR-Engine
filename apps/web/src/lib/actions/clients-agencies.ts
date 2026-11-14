@@ -88,7 +88,7 @@ export async function saveAccountProfile(_prev: ActionState, formData: FormData)
 
 const ownerSchema = z.object({ orgId: uuid, companyId: uuid, ownerId: optionalUuid });
 
-/** Assign, reassign or clear (no person chosen = Unassigned) the ACCOUNT owner for the selected company. Does not touch any follow-up or inquiry owner. */
+/** Assign, reassign or clear (no person chosen = Unassigned) the ACCOUNT owner for the selected company. Does not touch any follow-up or enquiry owner. */
 export async function assignAccountOwner(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = ownerSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: "Choose the account owner, or Unassigned." };
@@ -102,7 +102,7 @@ export async function assignAccountOwner(_prev: ActionState, formData: FormData)
 
 const reassignSchema = z.object({ followUpId: uuid, assigneeId: uuid });
 
-/** Hand an open follow-up to another person. Changes only the follow-up: never the account owner or the inquiry owner. */
+/** Hand an open follow-up to another person. Changes only the follow-up: never the account owner or the enquiry owner. */
 export async function reassignFollowUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = reassignSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: "Choose who the follow-up is for." };

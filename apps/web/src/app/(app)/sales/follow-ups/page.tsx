@@ -112,7 +112,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   const openByOpp = new Map<string, number>();
   for (const f of loaded.open) if (f.opportunity) openByOpp.set(f.opportunity.id, (openByOpp.get(f.opportunity.id) ?? 0) + 1);
   const open = (id: string) => here({ open: id });
-  /** Where a row leads: an inquiry opens in the side panel; a follow-up on an account with no inquiry opens that account (which can come back here: `from`). */
+  /** Where a row leads: an enquiry opens in the side panel; a follow-up on an account with no enquiry opens that account (which can come back here: `from`). */
   const target = (f: FollowUpListItem) => f.opportunity
     ? { href: open(f.opportunity.id), panel: true, selected: openId === f.opportunity.id }
     : { href: `/sales/accounts/${f.account!.id}?company=${f.account!.companyId}&from=follow-ups`, panel: false, selected: false };
@@ -295,7 +295,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                     <TableHead scope="col">Next action</TableHead>
                     <TableHead scope="col">Enquiry or account</TableHead>
                     <TableHead scope="col">Due</TableHead>
-                    <TableHead scope="col">Owner</TableHead>
+                    <TableHead scope="col">Assigned to</TableHead>
                     <TableHead scope="col"><span className="sr-only">Actions</span></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -317,7 +317,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                         </TableCell>
                         <TableCell data-label="Enquiry" className="min-w-[10rem]"><Subject f={f} href={target(f).href} company={showCompany ? ctx.companyName(fu.company_id) : null} /></TableCell>
                         <TableCell data-label="Due"><DueText dueAt={fu.due_at} className="whitespace-normal" /></TableCell>
-                        <TableCell data-label="Owner" className="break-words">{f.assigneeName}</TableCell>
+                        <TableCell data-label="Assigned to" className="break-words">{f.assigneeName}</TableCell>
                         <TableCell className="min-w-[9rem]">
                           {canAct ? (
                             <FollowUpRowActions followUp={{ id: fu.id, title: fu.title, kind: fu.kind, dueAt: fu.due_at, opportunityId: fu.opportunity_id, isOnlyOpen }} />
@@ -351,7 +351,7 @@ function Subject({ f, href, company }: { f: FollowUpListItem; href: string; comp
         ? <PanelLink href={href} className="break-words underline-offset-2 hover:underline">{opp.title}</PanelLink>
         : <Link href={href} className="break-words underline-offset-2 hover:underline">{f.account!.name}</Link>}
       <div className="break-words text-sm text-muted-foreground">
-        {opp ? <><span className="font-mono">{opp.reference}</span>{f.party ? ` · ${f.party}` : ""}</> : "Account follow-up (no inquiry)"}
+        {opp ? <><span className="font-mono">{opp.reference}</span>{f.party ? ` · ${f.party}` : ""}</> : "Account follow-up (no enquiry)"}
         {company ? ` · ${company}` : ""}
       </div>
     </>

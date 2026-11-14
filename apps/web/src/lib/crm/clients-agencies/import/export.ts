@@ -38,9 +38,9 @@ export interface SummaryInputs {
 
 export const SUMMARY_DEFINITIONS = [
   "Derived figures for the selected company only, counted exactly as on each account page. Changing a number here has no effect: the import ignores this sheet.",
-  "Inquiries: every inquiry of the company naming the account as its agency or its end client, counted once. Open: not won or lost. Won and Lost: by stage.",
-  "Direct, Through an agency and As the agency add up to Inquiries. Quotes: proposals and recorded quote references. Awaiting reply: quote sent, inquiry open, no client response recorded since.",
-  "A won inquiry is not a completed project. Completed projects counts projects you can open, once each; 'Could not load' means the projects could not be read.",
+  "Enquiries: every enquiry of the company naming the account as its agency or its end client, counted once. Open: not won or lost. Won and Lost: by stage.",
+  "Direct, Through an agency and As the agency add up to Enquiries. Quotes: proposals and recorded quote references. Awaiting reply: quote sent, enquiry open, no client response recorded since.",
+  "A won enquiry is not a completed project. Completed projects counts projects you can open, once each; 'Could not load' means the projects could not be read.",
 ] as const;
 
 export function summaryTable(rows: readonly DirectoryRow[], input: SummaryInputs, now: Date = new Date()): SheetTable {
@@ -60,7 +60,7 @@ export function summaryTable(rows: readonly DirectoryRow[], input: SummaryInputs
   });
   return {
     name: SUMMARY_SHEET,
-    headers: ["Organisation name", "Inquiries", "Open", "Won", "Lost", "Direct", "Through an agency", "As the agency", "Quotes", "Quotes awaiting reply", "Completed projects"],
+    headers: ["Organisation name", "Enquiries", "Open", "Won", "Lost", "Direct", "Through an agency", "As the agency", "Quotes", "Quotes awaiting reply", "Completed projects"],
     rows: lines, widths: [34, 12, 10, 10, 10, 10, 18, 14, 10, 20, 20], footer: SUMMARY_DEFINITIONS,
   };
 }

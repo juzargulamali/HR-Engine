@@ -11,7 +11,7 @@ const legacyClient = org("legacy-client", "client");           // roles not reco
 const legacyAgency = org("legacy-agency", "agency", []);
 const all = [both, agency, client, direct, tech, legacyClient, legacyAgency];
 
-describe("which organisations each inquiry field offers", () => {
+describe("which organisations each enquiry field offers", () => {
   it("one organisation with roles agency + client is offered in BOTH fields", () => {
     expect(offeredFor(all, "agency").map((o) => o.id)).toContain("both");
     expect(offeredFor(all, "client").map((o) => o.id)).toContain("both");
@@ -25,7 +25,7 @@ describe("which organisations each inquiry field offers", () => {
     expect(effectiveRoles(legacyClient)).toEqual(["client"]);
     expect(effectiveRoles(legacyAgency)).toEqual(["agency"]);
   });
-  it("the one already selected stays listed so an older inquiry still shows what it has", () => {
+  it("the one already selected stays listed so an older enquiry still shows what it has", () => {
     expect(offeredFor(all, "agency", "client").map((o) => o.id)).toContain("client");
     expect(offeredFor(all, "agency", "").map((o) => o.id)).not.toContain("client");
   });

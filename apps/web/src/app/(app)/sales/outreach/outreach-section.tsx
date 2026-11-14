@@ -20,7 +20,7 @@ export function OutreachSection({ items, orgId, orgName, companyId, today, canAs
 }) {
   if (items === "error") return <section id="outreach" aria-label="Outreach"><LoadError what="outreach for this account" /></section>;
   if (items.length === 0 && !canAssign) return null;
-  const inquiryLabel = (id: string | null) => inquiries.find((i) => i.id === id)?.label ?? "an inquiry";
+  const inquiryLabel = (id: string | null) => inquiries.find((i) => i.id === id)?.label ?? "an enquiry";
   return (
     <section id="outreach" aria-labelledby="acc-outreach" className="space-y-3">
       <h2 id="acc-outreach" className="text-lg font-semibold">Outreach</h2>

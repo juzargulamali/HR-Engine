@@ -2,9 +2,9 @@ import type { EnquiryStats } from "./account";
 
 /**
  * The ONE relationship badge of an account in the directory. Precedence, first match wins:
- *  1. none     "No enquiries recorded": no linked inquiry at all;
- *  2. dormant  "Dormant": the newest linked inquiry was recorded DORMANT_DAYS or more days ago (Dubai calendar days) AND no linked inquiry is open;
- *  3. won      "Won work": at least one linked inquiry is in stage Won (a project in progress or completed is a different thing and is not looked at);
+ *  1. none     "No enquiries recorded": no linked enquiry at all;
+ *  2. dormant  "Dormant": the newest linked enquiry was recorded DORMANT_DAYS or more days ago (Dubai calendar days) AND no linked enquiry is open;
+ *  3. won      "Won work": at least one linked enquiry is in stage Won (a project in progress or completed is a different thing and is not looked at);
  *  4. no_wins  "No wins yet".
  * Open and won are the account page's own definitions (`isOpenStage`, `isWonStage`).
  */

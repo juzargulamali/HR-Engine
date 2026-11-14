@@ -32,14 +32,14 @@ export function inquiryRoute(opp: Pick<OppLite, "agency_org_id" | "client_org_id
   return null;
 }
 
-/** An inquiry is open until it is won or lost (On hold counts as open). The account page and the directory both use this. */
+/** An enquiry is open until it is won or lost (On hold counts as open). The account page and the directory both use this. */
 export const isOpenStage = (stage: string) => stage !== "won" && stage !== "lost";
-/** A recorded win is an inquiry in stage Won. It is not a project in progress and not a completed project. */
+/** A recorded win is an enquiry in stage Won. It is not a project in progress and not a completed project. */
 export const isWonStage = (stage: string) => stage === "won";
 
 /**
- * THE definition of "an account's inquiries": the selected company's inquiries that name the account as agency or end client, each counted ONCE
- * (an inquiry naming the account in both roles is one inquiry). The account page, the directory table and the export all count through this.
+ * THE definition of "an account's enquiries": the selected company's enquiries that name the account as agency or end client, each counted ONCE
+ * (an enquiry naming the account in both roles is one inquiry). The account page, the directory table and the export all count through this.
  */
 export function linkedInquiries<T extends Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id">>(opps: readonly T[], orgId: string, companyId: string): { opp: T; route: Route; counterpartId: string | null }[] {
   const seen = new Set<string>();
@@ -54,7 +54,7 @@ export function linkedInquiries<T extends Pick<OppLite, "id" | "company_id" | "a
   return out;
 }
 
-/** What the directory shows per account (this company only). `lastEnquiryOn` is the Dubai calendar day the newest linked inquiry was recorded; null when there is none. */
+/** What the directory shows per account (this company only). `lastEnquiryOn` is the Dubai calendar day the newest linked enquiry was recorded; null when there is none. */
 export interface EnquiryStats { total: number; open: number; won: number; lastEnquiryOn: string | null }
 
 export function enquiryStats(opps: readonly (Pick<OppLite, "id" | "company_id" | "agency_org_id" | "client_org_id" | "stage" | "created_at">)[], orgId: string, companyId: string): EnquiryStats {
@@ -86,7 +86,7 @@ export interface QuoteRow {
   status: string;
   sentOn: string | null;
   replyOn: string | null;
-  /** True ONLY when the quote is recorded as sent, the inquiry is still open and no client response is recorded since. Otherwise the plain status is shown. */
+  /** True ONLY when the quote is recorded as sent, the enquiry is still open and no client response is recorded since. Otherwise the plain status is shown. */
   awaitingReply: boolean;
   /** The words shown. */
   display: string;
@@ -133,7 +133,7 @@ export interface AccountView {
   inquiries: InquiryRow[];
   quotes: QuoteRow[];
   followUps: { followUp: FollowUpLite; opp: OppLite; state: "overdue" | "today" | "upcoming" }[];
-  /** Open follow-ups placed on the account itself because it has no inquiry (they belong to no opportunity). Counted with the others. */
+  /** Open follow-ups placed on the account itself because it has no enquiry (they belong to no opportunity). Counted with the others. */
   accountFollowUps: { followUp: FollowUpLite; state: "overdue" | "today" | "upcoming" }[];
   lastActivity: { at: string; kind: string; opp: OppLite } | null;
   hasHistory: boolean;
@@ -142,18 +142,18 @@ export interface AccountView {
     direct: number; throughAgency: number; asAgency: number;
     /** null when the projects could not be read. Counted once per project; only projects this person can open. */
     completedProjects: number | null;
-    /** Won inquiries whose handover exists but whose project this person cannot open (so their completion is not counted). */
+    /** Won enquiries whose handover exists but whose project this person cannot open (so their completion is not counted). */
     projectsNotVisible: number;
     inquiriesAwaitingReply: number; openFollowUps: number; overdueFollowUps: number;
   };
 }
 
 export const COUNT_DEFINITIONS = [
-  "Inquiries: every inquiry of the selected company that names this account as its agency or its end client, counted once (even if the account is both).",
-  "Direct: this account is the end client and no other agency is recorded. Through an agency: this account is the end client and another agency is recorded. As the agency: this account is the agency. The three add up to the inquiries.",
-  "Won inquiries are inquiries confirmed as won. A won inquiry is not a completed project: completed projects are counted separately, once per project, and only for projects you can open.",
-  "An inquiry shows on the agency's page and again on its end client's page, because each page shows that account's own work. Do not add two accounts' counts together.",
-  "Awaiting reply is shown only where the quote is recorded as sent, the inquiry is still open and no client response has been recorded since it was sent. Otherwise the plain status is shown.",
+  "Enquiries: every enquiry of the selected company that names this account as its agency or its end client, counted once (even if the account is both).",
+  "Direct: this account is the end client and no other agency is recorded. Through an agency: this account is the end client and another agency is recorded. As the agency: this account is the agency. The three add up to the enquiries.",
+  "Won enquiries are enquiries confirmed as won. A won enquiry is not a completed project: completed projects are counted separately, once per project, and only for projects you can open.",
+  "An enquiry shows on the agency's page and again on its end client's page, because each page shows that account's own work. Do not add two accounts' counts together.",
+  "Awaiting reply is shown only where the quote is recorded as sent, the enquiry is still open and no client response has been recorded since it was sent. Otherwise the plain status is shown.",
 ];
 
 export function deriveAccount(input: {
@@ -166,7 +166,7 @@ export function deriveAccount(input: {
   activities: readonly ActivityLite[];
   followUps: readonly FollowUpLite[];
   projects: Section<readonly ProjectLite[]>;
-  /** Handover status per won inquiry id (from the Sales-readable handover check); absent = none recorded. Only consulted when no readable project exists. */
+  /** Handover status per won enquiry id (from the Sales-readable handover check); absent = none recorded. Only consulted when no readable project exists. */
   handovers: Section<ReadonlyMap<string, string>>;
 }): AccountView {
   const inquiries: InquiryRow[] = linkedInquiries(input.opportunities, input.orgId, input.companyId).map((i) => ({ ...i, project: { kind: "none" } as ProjectInfo }));

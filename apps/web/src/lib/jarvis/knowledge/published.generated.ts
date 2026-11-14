@@ -3175,7 +3175,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open Outreach in Sales and check the company named above the list.",
       "Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.",
       "Choose a status or tick Overdue only to decide what to do first.",
-      "When the client is ready, open the account and press Create inquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.",
+      "When the client is ready, open the account and press Create enquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.",
       "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
     ],
     "links": [

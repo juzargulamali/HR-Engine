@@ -366,7 +366,7 @@ interface AttentionOpp {
 
 interface AttentionFollowUp {
   followUp: { id?: string; assigned_to: string; title: string; due_at: string; status: string };
-  /** Null for a follow-up on an account with no inquiry; then `account` names it. */
+  /** Null for a follow-up on an account with no enquiry; then `account` names it. */
   opportunity: { id: string; reference: string; title: string } | null;
   account?: { id: string; name: string; companyId: string } | null;
 }

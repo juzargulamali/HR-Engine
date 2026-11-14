@@ -31,6 +31,18 @@ describe("a completed follow-up is shown once", () => {
     expect(list.find((i) => i.id === "fd-f1")).toMatchObject({ label: "Call", firstResponse: true, internal: false, mergedRows: 3 });
     expect(list.map((i) => i.id).sort()).toEqual(["fd-f1", "fp-f1"]);
   });
+  it("Log activity + complete with a Note keeps the person's Internal note choice on the one entry shown, ticked or not", () => {
+    const f = followUp();
+    // The server's own note is always internal; the person's note a moment later carries what they chose. Both records stay; one entry is shown.
+    const server = activity({ id: "n1", body: completionNoteBody(f), is_internal: true });
+    for (const ticked of [true, false]) {
+      const own = activity({ id: "p1", kind: "note", body: "Venue confirmed the hall", is_internal: ticked, occurred_at: "2026-11-06T08:00:01.500Z", created_at: "2026-11-06T08:00:01.500Z" });
+      const list = items([f], [server, own]);
+      expect(completed(list).map((i) => i.id)).toEqual(["fd-f1"]);
+      expect(list.find((i) => i.id === "fd-f1")).toMatchObject({ label: "Note", internal: ticked, mergedRows: 3 });
+      expect(list.some((i) => i.id === "a-p1" || i.id === "a-n1")).toBe(false);
+    }
+  });
   it("genuinely distinct entries stay: different words, a different person, or a different time", () => {
     const f = followUp();
     const otherWords = activity({ id: "x1", body: "Follow-up done: Call the venue. They also want a second screen" });

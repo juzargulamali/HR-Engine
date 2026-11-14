@@ -144,8 +144,8 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   });
   if (error) return fail(error.message);
   refresh();
-  // Raised from an outreach ("Create inquiry" on the account's Outreach section): link it, which sets Inquiry raised. The inquiry exists either way; if the
-  // link is refused the person lands on the account, where the Outreach section says so and offers "Link an inquiry".
+  // Raised from an outreach ("Create enquiry" on the account's Outreach section): link it, which sets Enquiry raised. The enquiry exists either way; if the
+  // link is refused the person lands on the account, where the Outreach section says so and offers "Link an enquiry".
   if (fromOutreach.success) {
     const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
     if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);
@@ -498,10 +498,9 @@ export async function addActivity(_prev: ActionState, formData: FormData): Promi
       p_hold_reason: null, p_hold_review_date: null,
     });
     if (done.error) return fail(done.error.message);
-    // Completing a follow-up already writes its own note with these words ('Follow-up done: <title>. <outcome>', crm_complete_follow_up). A plain Note would be
-    // the same words a second time, so it is not written again. A call, email, meeting or client response IS still written: only that row carries what kind of
-    // contact it was, and the first call, email or meeting sets the first-response time. The timeline shows the completion once either way (timeline.ts).
-    if (d.kind === "note") { refresh(d.id); return { error: null }; }
+    // The person's own update is always written, whatever its kind: only that row carries their Internal note choice, the kind of contact, and (for the
+    // first call, email or meeting) the first-response time. Completing the follow-up also writes its own note with the same words; the two records are
+    // kept, and the timeline shows that one completion once by matching them (timeline.ts, matchCompletions).
     const logged = await supabase.rpc("crm_add_activity", { p_id: d.id, p_kind: d.kind, p_body: d.body, p_internal: d.internal === "on" });
     refresh(d.id);
     if (logged.error) return { error: null, warning: `The follow-up was completed${planNext ? " and the next step planned" : ""}, but the update could not be added to the timeline: ${friendlyCrmError(logged.error.message)}` };

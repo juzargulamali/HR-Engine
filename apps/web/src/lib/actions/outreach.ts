@@ -10,7 +10,7 @@ import { isOutcomeValidForKind, OUTREACH_KINDS, OUTREACH_OUTCOME_LABEL, OUTREACH
 import type { ActionState } from "./companies";
 
 /**
- * Pre-inquiry outreach server actions. Thin wrappers over the crm_* functions of migration 20261219000100 (section 8): the database decides who may assign
+ * Pre-enquiry outreach server actions. Thin wrappers over the crm_* functions of migration 20261219000100 (section 8): the database decides who may assign
  * (assign_owner), who may act on an outreach (its assignee or an assign_owner holder) and every status rule, so a forged request gets the same refusal.
  * The only check made here first is the assign_owner capability for assigning, read from the caller's own grants.
  */
@@ -85,7 +85,7 @@ export async function setOutreachNextAction(_prev: ActionState, formData: FormDa
 
 const statusSchema = z.object({ outreachId: uuid, status: z.enum(OUTREACH_SETTABLE_STATUSES as unknown as [string, ...string[]], { message: "Choose a status" }), reason: optText(500) });
 
-/** Set the progress status by hand. Closed needs a reason; Inquiry raised can only come from linking an inquiry. */
+/** Set the progress status by hand. Closed needs a reason; Enquiry raised can only come from linking an enquiry. */
 export async function setOutreachStatus(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = statusSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
@@ -97,9 +97,9 @@ export async function setOutreachStatus(_prev: ActionState, formData: FormData):
   return { error: null };
 }
 
-const linkSchema = z.object({ outreachId: uuid, opportunityId: z.string().uuid("Choose the inquiry to link.") });
+const linkSchema = z.object({ outreachId: uuid, opportunityId: z.string().uuid("Choose the enquiry to link.") });
 
-/** Link an existing inquiry of this account: sets Inquiry raised. Creates nothing. */
+/** Link an existing enquiry of this account: sets Enquiry raised. Creates nothing. */
 export async function linkOutreachInquiry(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = linkSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };

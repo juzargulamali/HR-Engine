@@ -118,7 +118,7 @@ describe("Outreach rows", () => {
     loadOutreach.mockResolvedValue([row("E", { status: "inquiry_raised", opportunity_id: "opp-9", target_date: "2026-01-01" })]);
     await show({ company: UAE, status: "inquiry_raised" });
     const r = rowFor("Fictional Account E");
-    expect(r.textContent).toContain("Inquiry raised");
+    expect(r.textContent).toContain("Enquiry raised");
     expect(r.textContent).not.toContain("Overdue");
     expect(within(r).getByRole("link", { name: /Open the enquiry/ }).getAttribute("href")).toBe("/sales/opportunities/opp-9");
     expect(within(r).queryByRole("button")).toBeNull();
@@ -180,9 +180,9 @@ describe("the account's Outreach section: outreach to enquiry", () => {
     <OutreachSection items={[{ outreach: { ...row("x"), id: OUT, organisation_id: ORG, ...o }, events }] as never} orgId={ORG} orgName="Fictional Harbour Studio" companyId={UAE} today="2026-11-07" canAssign={false}
       nameOf={() => "Fictional Sara"} inquiries={[{ id: "opp-9", label: "OPP-9: Fictional lobby screens" }]} onlyContactId={onlyContactId} />,
   );
-  it("Create inquiry carries the company, account, outreach, contact, a title and a short brief to the New enquiry form", () => {
+  it("Create enquiry carries the company, account, outreach, contact, a title and a short brief to the New enquiry form", () => {
     section({ status: "in_progress", objective: "Introduce the LED tunnel" });
-    const href = screen.getByRole("link", { name: "Create inquiry" }).getAttribute("href")!;
+    const href = screen.getByRole("link", { name: "Create enquiry" }).getAttribute("href")!;
     expect(href.startsWith("/sales/new?")).toBe(true);
     expect(Object.fromEntries(new URLSearchParams(href.split("?")[1]))).toEqual({
       company: UAE, org: ORG, outreach: OUT, contact: CONTACT, title: "Fictional Harbour Studio: Introduce the LED tunnel",
@@ -192,20 +192,20 @@ describe("the account's Outreach section: outreach to enquiry", () => {
   });
   it("sends no contact when the account has none or several", () => {
     section({ status: "in_progress" }, null);
-    expect(new URLSearchParams(screen.getByRole("link", { name: "Create inquiry" }).getAttribute("href")!.split("?")[1]).has("contact")).toBe(false);
+    expect(new URLSearchParams(screen.getByRole("link", { name: "Create enquiry" }).getAttribute("href")!.split("?")[1]).has("contact")).toBe(false);
   });
   it("an outreach that already has an enquiry says so and links to it: no second enquiry can be created or linked", () => {
     section({ status: "inquiry_raised", opportunity_id: "opp-9" });
     const linked = screen.getByTestId("outreach-enquiry-linked");
     expect(linked.textContent).toBe("Enquiry already created: open OPP-9: Fictional lobby screens");
     expect(within(linked).getByRole("link").getAttribute("href")).toBe("/sales/opportunities/opp-9");
-    expect(screen.queryByRole("link", { name: "Create inquiry" })).toBeNull();
-    expect(screen.queryByRole("button", { name: /Link an inquiry/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Create enquiry" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Link an enquiry/ })).toBeNull();
   });
   it("a closed outreach that had raised an enquiry still shows the enquiry and offers nothing else", () => {
     section({ status: "closed", opportunity_id: "opp-9", closed_reason: "Done" });
     expect(screen.getByTestId("outreach-enquiry-linked")).toBeTruthy();
-    expect(screen.queryByRole("link", { name: "Create inquiry" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Create enquiry" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Log activity/ })).toBeNull();
   });
 });

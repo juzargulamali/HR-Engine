@@ -168,7 +168,7 @@ describe("the action-first summary", () => {
     // Every cell after the title carries its label for the phone card.
     expect(html).toContain('data-label="Enquiry"');
     expect(html).toContain('data-label="Due"');
-    expect(html).toContain('data-label="Owner"');
+    expect(html).toContain('data-label="Assigned to"');
   });
 
   it("a row the person cannot change says 'View only', with the reason behind the ⓘ rather than a sentence in the row", async () => {

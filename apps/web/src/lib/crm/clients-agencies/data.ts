@@ -50,7 +50,7 @@ export interface AccountPage {
   contacts: CrmContactRow[];
   profile: CrmAccountProfileRow | null;
   view: AccountView;
-  /** Names of the other organisations on this account's inquiries (agency or end client). */
+  /** Names of the other organisations on this account's enquiries (agency or end client). */
   orgNames: Map<string, string>;
 }
 
@@ -77,7 +77,7 @@ export async function loadAccount(ctx: CrmContext, companyId: string, orgId: str
     ids.length ? supabase.from("crm_proposals").select("id, opportunity_id, version, status, sent_on").in("opportunity_id", ids) : none,
     ids.length ? supabase.from("crm_zoho_references").select("opportunity_id, quote_ref, quote_sent_on").in("opportunity_id", ids) : none,
     ids.length ? supabase.from("crm_activities").select("id, opportunity_id, kind, occurred_at").in("opportunity_id", ids) : none,
-    // The inquiries' open follow-ups, and the ones placed on this account itself (no inquiry), for the selected company only.
+    // The enquiries' open follow-ups, and the ones placed on this account itself (no inquiry), for the selected company only.
     supabase.from("crm_follow_ups").select("id, opportunity_id, organisation_id, title, due_at, status, assigned_to, created_by, company_id").eq("company_id", companyId).eq("status", "open")
       .or(ids.length ? `opportunity_id.in.(${ids.join(",")}),and(opportunity_id.is.null,organisation_id.eq.${orgId})` : `and(opportunity_id.is.null,organisation_id.eq.${orgId})`),
     (() => {
@@ -134,7 +134,7 @@ async function readAll<T>(page: (from: number, to: number) => PromiseLike<{ data
 
 /**
  * Everything the export's Summary sheet needs to count inquiries, quotes and completed projects the way the account page does, for every
- * organisation at once. Inquiries, quotes and replies fail the whole load; projects fail softly into "could not load" cells.
+ * organisation at once. Enquiries, quotes and replies fail the whole load; projects fail softly into "could not load" cells.
  */
 export async function loadSummaryInputs(companyId: string): Promise<SummaryInputs> {
   const supabase = await createClient();

@@ -212,7 +212,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   return (
     <div className="space-y-5">
       {back}
-      {sp.outreach_link === "failed" ? <Alert variant="warning" role="alert">The enquiry was created, but it could not be linked to the outreach. Use <a href="#outreach" className="font-medium underline underline-offset-2">Link an inquiry in the Outreach section</a> to link it.</Alert> : null}
+      {sp.outreach_link === "failed" ? <Alert variant="warning" role="alert">The enquiry was created, but it could not be linked to the outreach. Use <a href="#outreach" className="font-medium underline underline-offset-2">Link an enquiry in the Outreach section</a> to link it.</Alert> : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0 space-y-2">
           <h1 className="break-words text-2xl font-semibold">{org.name}</h1>
@@ -258,8 +258,8 @@ export default async function AccountPageRoute({ params, searchParams }: { param
         </h2>
         <dl className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {([
-            ["Inquiries", String(c.inquiries), `${c.open} open · ${c.lost} lost`],
-            ["Won inquiries", String(c.won), "confirmed as won"],
+            ["Enquiries", String(c.inquiries), `${c.open} open · ${c.lost} lost`],
+            ["Won enquiries", String(c.won), "confirmed as won"],
             ["Completed projects", c.completedProjects === null ? "Could not load" : String(c.completedProjects), c.projectsNotVisible > 0 ? `${c.projectsNotVisible} project(s) you cannot open not counted` : "projects you can open"],
             ["Direct", String(c.direct), "no agency recorded"],
             ["Through an agency", String(c.throughAgency), "this account is the end client"],
@@ -335,7 +335,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
         <Card>
           <CardContent className="space-y-2 pt-4 text-sm">
             <p>{NO_ACTIVITY}</p>
-            <p className="text-muted-foreground">No inquiry, quote{view.accountFollowUps.length === 0 ? ", project or follow-up" : " or project"} is linked to this account for {company.name} yet. <Link className="underline underline-offset-2" href={newEnquiryHref}>Record an enquiry</Link> to start its history.</p>
+            <p className="text-muted-foreground">No enquiry, quote{view.accountFollowUps.length === 0 ? ", project or follow-up" : " or project"} is linked to this account for {company.name} yet. <Link className="underline underline-offset-2" href={newEnquiryHref}>Record an enquiry</Link> to start its history.</p>
           </CardContent>
         </Card>
       ) : (
@@ -348,7 +348,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
           </Card>
 
           <Card>
-            <CardHeader className="pb-2"><CardTitle>Inquiries ({c.inquiries})</CardTitle></CardHeader>
+            <CardHeader className="pb-2"><CardTitle>Enquiries ({c.inquiries})</CardTitle></CardHeader>
             <CardContent>
               <ul className="divide-y divide-border">
                 {view.inquiries.map((i) => (
@@ -360,14 +360,14 @@ export default async function AccountPageRoute({ params, searchParams }: { param
                   </li>
                 ))}
               </ul>
-              {c.projectsNotVisible > 0 ? <Alert className="mt-3">{c.projectsNotVisible} won {c.projectsNotVisible === 1 ? "inquiry has a project" : "inquiries have projects"} you cannot open, so {c.projectsNotVisible === 1 ? "its" : "their"} completion is not counted here.</Alert> : null}
+              {c.projectsNotVisible > 0 ? <Alert className="mt-3">{c.projectsNotVisible} won {c.projectsNotVisible === 1 ? "enquiry has a project" : "enquiries have projects"} you cannot open, so {c.projectsNotVisible === 1 ? "its" : "their"} completion is not counted here.</Alert> : null}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2"><CardTitle>Quotes ({view.quotes.length}){c.inquiriesAwaitingReply ? ` · ${c.inquiriesAwaitingReply} awaiting reply` : ""}</CardTitle></CardHeader>
             <CardContent>
-              {view.quotes.length === 0 ? <p className="text-sm text-muted-foreground">No quote or proposal recorded on this account&apos;s inquiries.</p> : (
+              {view.quotes.length === 0 ? <p className="text-sm text-muted-foreground">No quote or proposal recorded on this account&apos;s enquiries.</p> : (
                 <ul className="divide-y divide-border">
                   {view.quotes.map((q) => {
                     const opp = view.inquiries.find((i) => i.opp.id === q.opportunityId)?.opp;

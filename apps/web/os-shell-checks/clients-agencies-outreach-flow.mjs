@@ -1,7 +1,7 @@
-// Pre-inquiry outreach in a real browser, one full journey. LOCAL STACK ONLY, fictional data only. Needs `seed/sales.sh` (ceo@ founder, mgr@ and emp@ plain
+// Pre-enquiry outreach in a real browser, one full journey. LOCAL STACK ONLY, fictional data only. Needs `seed/sales.sh` (ceo@ founder, mgr@ and emp@ plain
 // Sales, admin@ no grant; UAE settings) and writes to the database it drives, so reseed before every run. Run: `node os-shell-checks/clients-agencies-outreach-flow.mjs`.
-//   import a fictional prospect from an in-memory .xlsx -> a Sales lead assigns outreach with NO inquiry -> the assignee logs a call and an email (status is
-//   In progress, never Replied) -> sets the next action -> marks Meeting booked -> creates a REAL inquiry from the outreach -> Inquiry raised, history still on the
+//   import a fictional prospect from an in-memory .xlsx -> a Sales lead assigns outreach with NO enquiry -> the assignee logs a call and an email (status is
+//   In progress, never Replied) -> sets the next action -> marks Meeting booked -> creates a REAL enquiry from the outreach -> Enquiry raised, history still on the
 //   account; the lead sees it in All outreach; a plain salesperson and a person without the grant are refused.
 import { createRequire } from "node:module";
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
@@ -46,7 +46,7 @@ await step("import a fictional prospect from an in-memory workbook (no file on d
   await ceo.getByRole("button", { name: "Confirm import" }).click();
   await until(async () => /The import finished/.test(await main(ceo)), "the import result");
   orgId = sql(`select id from crm_organisations where name='${NAME}'`);
-  eq(sql("select count(*) from crm_opportunities"), 0, "inquiries");
+  eq(sql("select count(*) from crm_opportunities"), 0, "enquiries");
 });
 
 await step("a Sales lead selects the prospect and assigns outreach to a salesperson: no inquiry, no deal, owner untouched", async () => {
@@ -62,7 +62,7 @@ await step("a Sales lead selects the prospect and assigns outreach to a salesper
   await d.getByRole("button", { name: "Done" }).click();
   outreachId = sql(`select id from crm_outreach where organisation_id='${orgId}'`);
   eq(sql(`select assigned_to || '|' || status || '|' || target_date from crm_outreach where id='${outreachId}'`), `${U.emp}|not_started|2027-01-15`, "outreach");
-  eq(sql("select count(*) from crm_opportunities"), 0, "inquiries after assigning");
+  eq(sql("select count(*) from crm_opportunities"), 0, "enquiries after assigning");
   eq(sql(`select coalesce((select owner_id::text from crm_account_profiles where organisation_id='${orgId}'), 'none')`), "none", "account owner");
 });
 
@@ -104,18 +104,18 @@ await step("set the next action and mark Meeting booked", async () => {
   d = emp.locator("dialog[open]"); await d.getByLabel("Status").selectOption("meeting_booked");
   await d.getByRole("button", { name: "Save status" }).click(); await d.waitFor({ state: "hidden", timeout: 15000 });
   eq(sql(`select status || '|' || next_action || '|' || next_due from crm_outreach where id='${outreachId}'`), "meeting_booked|Visit the studio and present the LED wall options|2027-01-20", "outreach");
-  // Closed needs a reason (the form requires it) and Inquiry raised is not offered by hand.
+  // Closed needs a reason (the form requires it) and Enquiry raised is not offered by hand.
   await emp.getByRole("button", { name: /^Status:/ }).click();
   d = emp.locator("dialog[open]");
   const opts = await d.getByLabel("Status").locator("option").evaluateAll((o) => o.map((x) => x.value));
-  if (opts.includes("inquiry_raised")) throw new Error("Inquiry raised is offered by hand");
+  if (opts.includes("inquiry_raised")) throw new Error("Enquiry raised is offered by hand");
   await d.getByLabel("Status").selectOption("closed");
   if (!(await d.getByLabel("Why is it closed?").isVisible())) throw new Error("no reason field for Closed");
   await d.getByRole("button", { name: "Cancel" }).click();
 });
 
-await step("the assignee creates a REAL inquiry from the outreach: pre-filled, then Inquiry raised, history kept", async () => {
-  await emp.getByRole("link", { name: "Create inquiry" }).click();
+await step("the assignee creates a REAL enquiry from the outreach: pre-filled, then Enquiry raised, history kept", async () => {
+  await emp.getByRole("link", { name: "Create enquiry" }).click();
   await emp.waitForURL(/\/sales\/new\?/, { timeout: 15000 });
   eq(await emp.locator('input[name="agencyOrgId"]').inputValue(), orgId, "agency pre-filled"); eq(await emp.locator("#enq-agency").inputValue(), NAME, "agency shown by name"); // the search field shows the name; the chosen id is posted by the hidden input
   await emp.getByLabel("What is the enquiry?").fill("Fictional LED wall for the Prospect Studio launch");
@@ -124,18 +124,18 @@ await step("the assignee creates a REAL inquiry from the outreach: pre-filled, t
   await emp.getByRole("button", { name: "Record enquiry" }).click();
   await emp.waitForURL(/\/sales\/opportunities\/[0-9a-f-]{36}/, { timeout: 20000 });
   oppId = emp.url().match(/opportunities\/([0-9a-f-]{36})/)[1];
-  eq(sql(`select status || '|' || opportunity_id from crm_outreach where id='${outreachId}'`), `inquiry_raised|${oppId}`, "outreach after the inquiry");
-  eq(sql("select count(*) from crm_opportunities"), 1, "inquiries (one real one, no placeholder)");
+  eq(sql(`select status || '|' || opportunity_id from crm_outreach where id='${outreachId}'`), `inquiry_raised|${oppId}`, "outreach after the enquiry");
+  eq(sql("select count(*) from crm_opportunities"), 1, "enquiries (one real one, no placeholder)");
   await emp.goto(`${BASE}/sales/accounts/${orgId}?company=${CO}`, { waitUntil: "networkidle" });
   const t = await main(emp);
-  if (!/Inquiry raised/.test(t) || !/Rang the studio twice/.test(t) || !/Sent the portfolio/.test(t) || !/Inquiry linked/.test(t)) throw new Error("account page: " + t.slice(0, 600));
+  if (!/Enquiry raised/.test(t) || !/Rang the studio twice/.test(t) || !/Sent the portfolio/.test(t) || !/Enquiry linked/.test(t)) throw new Error("account page: " + t.slice(0, 600));
   eq(sql(`select owner_id is null from crm_account_profiles where organisation_id='${orgId}'`), "t", "account owner still unassigned");
 });
 
 await step("the Sales lead sees it in All outreach with last contact, latest outcome and status, filtered by assignee", async () => {
   page = ceo; await ceo.goto(`${BASE}/sales/outreach?company=${CO}&view=all&assignee=${U.emp}&status=inquiry_raised`, { waitUntil: "networkidle" });
   const t = await main(ceo);
-  if (!t.includes(NAME) || !/Inquiry raised/.test(t) || !/Sent/.test(t) || !/Email/.test(t)) throw new Error("All outreach: " + t.slice(0, 500));
+  if (!t.includes(NAME) || !/Enquiry raised/.test(t) || !/Sent/.test(t) || !/Email/.test(t)) throw new Error("All outreach: " + t.slice(0, 500));
   await ceo.goto(`${BASE}/sales/outreach?company=${CO}&view=all&assignee=${U.mgr}`, { waitUntil: "networkidle" });
   if (!/Nothing matches|No outreach yet/.test(await main(ceo))) throw new Error("the assignee filter did not narrow the list");
 });
