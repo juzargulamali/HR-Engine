@@ -191,7 +191,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Event start" htmlFor="qa-es"><Input id="qa-es" name="eventStart" type="date" value={eventStart} onChange={(e) => setEventStart(e.target.value)} /></Field>
               <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} /></Field>
-              <Field label="Installation date" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
+              <Field label="Installation" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
             </div>
             {dates.note}
             <Field label="Location" htmlFor="qa-loc" help={ENQUIRY_HELP.location}><Input id="qa-loc" name="location" maxLength={200} value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
