@@ -7,6 +7,7 @@ import { cleanup, render, screen } from "@testing-library/react";
  * that keeps the company, the sort, the view and the calendar's month.
  */
 let address = "";
+vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }), usePathname: () => "/sales/x", useSearchParams: () => new URLSearchParams(address) }));
 vi.mock("next/link", () => ({ default: ({ children, href, scroll: _scroll, ...rest }: { children: React.ReactNode; href: string; scroll?: boolean }) => <a href={href} {...(rest as Record<string, unknown>)}>{children}</a> }));
 const C1 = "11111111-1111-4111-8111-111111111111";
@@ -88,7 +89,9 @@ describe("Events & Exhibitions filters", () => {
     await show(EventsPage, { scope: "all", when: "past", from: "2027-03-01", archived: "1" });
     expect(select("When").value).toBe("past");
     expect(screen.getByLabelText("2 in use")).toBeTruthy();
-    expect(select("Enquiry figures for").value).toBe("all");
+    // Whose enquiry figures are counted is the company chooser above the list (not a filter): "All my companies" is the one in use.
+    expect(screen.getByRole("link", { name: "All my companies" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.queryByLabelText("Enquiry figures for")).toBeNull();
     expect(clear()).toBe("/sales/events?scope=all");
   });
   it("Calendar: When and the dates are not offered; Clear keeps the Calendar view and its month", async () => {

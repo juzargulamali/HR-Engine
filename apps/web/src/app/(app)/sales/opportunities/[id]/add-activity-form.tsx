@@ -25,10 +25,10 @@ export function AddActivityForm({ opportunityId, onDone, completable = [], sugge
     <ActionForm action={addActivity} submitLabel={completeId ? "Complete and add to timeline" : "Add to timeline"} resetOnSuccess onDone={() => { setPlan(false); setCompleteId(""); onDone?.(); }} className="space-y-3">
       <input type="hidden" name="id" value={opportunityId} />
       <div className="grid gap-3 sm:grid-cols-[12rem_1fr]">
-        <Field label="What kind" htmlFor="act-kind">
+        <Field label="What kind" htmlFor="act-kind" help="A first call, email or meeting sets the first-response time. Choose Client response only when the client actually replied. A note is for anything else.">
           <Select id="act-kind" name="kind" defaultValue="note">{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
         </Field>
-        <Field label="What happened" htmlFor="act-body">
+        <Field label="What happened (the outcome)" htmlFor="act-body">
           <Textarea id="act-body" name="body" rows={2} required placeholder="e.g. Spoke to Hana; she will confirm the dates on Thursday." />
         </Field>
       </div>
@@ -37,7 +37,7 @@ export function AddActivityForm({ opportunityId, onDone, completable = [], sugge
         <span>Internal note <span className="text-muted-foreground">(about our own thinking, not something the client said or did)</span></span>
       </label>
       {completable.length > 0 ? (
-        <Field label="This was one of the planned follow-ups" htmlFor="act-complete" hint="Choose it to complete it with this update as its outcome.">
+        <Field label="This was one of the planned follow-ups" htmlFor="act-complete" hint="Choose it to complete it with this update as its outcome." help="The follow-up is completed once, with these words as its outcome, and appears once in the timeline. A call, email, meeting or client response is also kept as that kind of contact.">
           <Select id="act-complete" name="completeFollowUpId" value={completeId} onChange={(e) => setCompleteId(e.target.value)}>
             <option value="">No, just add an update</option>
             {completable.map((f) => <option key={f.id} value={f.id}>{f.title}</option>)}
@@ -59,7 +59,7 @@ export function AddActivityForm({ opportunityId, onDone, completable = [], sugge
           </div>
         </div>
       ) : null}
-      <p className="text-sm text-muted-foreground">This only records it. Nothing is sent to the client or anyone else. A first call, email or meeting sets the first-response time.</p>
+      <p className="text-sm text-muted-foreground">This only records it. Nothing is sent to the client or anyone else.</p>
     </ActionForm>
   );
 }

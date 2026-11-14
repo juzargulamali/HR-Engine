@@ -3,7 +3,9 @@ import { notFound } from "next/navigation";
 import { ArrowLeft, CheckCircle2, Circle } from "lucide-react";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { InfoHint } from "@/components/ui/info-hint";
 import { LoadError } from "@/components/workspace/states";
+import { SalesCompanyMemory } from "@/components/sales/company-memory";
 import { AvailabilityBadge, StageBadge } from "@/components/sales/badges";
 import { formatDate, formatDateTime, formatMoney } from "@/components/sales/format";
 import { displayNameFor, getCrmContext } from "@/lib/crm/context";
@@ -124,6 +126,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
   const zoho = detail.zoho;
   const earlierRecord = !!handover && (status !== "draft" || !!pmId || !!(handover.notes ?? "").trim());
   // Only used when Projects & Tasks is not installed in this environment (the older, Sales-side record is then the only handover there is).
+  const usesProjects = projectHandover.installed && !projectHandover.failed;
   const steps = [
     { label: "Commercially won", done: true, detail: `${pkg.evidenceLabel ?? "Evidence"} ${pkg.evidenceReference ?? ""}, dated ${formatDate(pkg.evidenceDate)}` },
     { label: "Handover package", done: !handoverFailed && status !== "draft", detail: handoverFailed ? "Could not load" : (HANDOVER_STATUS_LABELS[status] ?? status) },
@@ -131,6 +134,8 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
 
   return (
     <div className="space-y-5">
+      {/* The enquiry's company is the context here, so the next Sales page opens in it. */}
+      <SalesCompanyMemory companyId={opp.company_id} />
       <header className="space-y-2">
         {back}
         <div>
@@ -139,7 +144,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
           <p className="mt-1 text-sm text-muted-foreground">Everything the Project Manager needs to start, taken from the opportunity as it stands. It is a summary of agreed facts, not a project.</p>
         </div>
         {projectHandover.installed ? (
-          <p className="text-sm text-muted-foreground">One process: prepare the delivery brief, submit it, a founder assigns the Project Manager, and the Project Manager accepts it, which creates the project. Commercially won: {pkg.evidenceLabel ?? "evidence"} {pkg.evidenceReference ?? ""}, dated {formatDate(pkg.evidenceDate)}.</p>
+          <p className="text-sm text-muted-foreground">One process: prepare the delivery brief, submit it, a founder or Operations Manager assigns the Project Manager, and the Project Manager accepts it, which creates the project. Commercially won: {pkg.evidenceLabel ?? "evidence"} {pkg.evidenceReference ?? ""}, dated {formatDate(pkg.evidenceDate)}.</p>
         ) : (
           <Alert role="status">Projects &amp; Tasks is not installed in this environment, so only the Sales-side package below can be recorded here.</Alert>
         )}
@@ -161,9 +166,10 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         </ol>
       )}
 
+      {/* With Projects & Tasks installed the enquiry's open points are listed in "Needs attention" of the readiness block below (one place, and it says they do not block submitting). */}
       {packageFailed ? (
         <LoadError what="the checklist of gaps" retryHref={retry} note="The proposals, files or contacts it is built from could not be read, so it is not shown as complete or as having no gaps." />
-      ) : pkg.gaps.length > 0 ? (
+      ) : pkg.gaps.length > 0 && !usesProjects ? (
         <Alert variant="warning">
           <p className="font-medium">{pkg.gaps.length} {pkg.gaps.length === 1 ? "gap" : "gaps"} to resolve before this is complete</p>
           <ul className="mt-1 list-disc space-y-0.5 pl-5">{pkg.gaps.map((g) => <li key={g}>{g}</li>)}</ul>
@@ -198,6 +204,7 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         opportunityId={opp.id}
         canEdit={canEdit}
         personName={(id) => (id ? ctx.personName(id) : "Unknown")}
+        facts={{ edition: edition?.label ?? null, contactCount: failed.has("contacts") ? null : detail.contacts.length, salesGaps: packageFailed ? [] : pkg.gaps }}
         defaults={{
           title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: suggestion.zone, siteTimezoneNote: suggestion.because, installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
           eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: editionNote, technologies: opp.technologies, risks: opp.risks,
@@ -223,6 +230,15 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         </details>
       ) : null}
 
+      {/* Everything below is the enquiry as Sales holds it today. It is NOT what the Project Manager receives: that is the brief above. */}
+      <div>
+        <h2 className="flex items-center gap-1 font-heading text-lg font-semibold">On the enquiry now (Sales only)
+          <InfoHint label="the Sales record">
+            <p>The enquiry&apos;s current facts, for you to check the brief against. The Project Manager does not see this section: prices, payment terms, proposals, files and contacts stay in Sales &amp; CRM.</p>
+            <p className="mt-1.5">Changing the enquiry does not change a brief that is already saved. Edit the brief above if the Project Manager needs the change.</p>
+          </InfoHint>
+        </h2>
+      </div>
       <div className="grid gap-6 md:grid-cols-2">
         <Panel title="Accepted scope">
           {pkg.scope ? <p className="whitespace-pre-wrap break-words text-sm">{pkg.scope}</p> : <Muted>Not written down.</Muted>}

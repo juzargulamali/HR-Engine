@@ -180,7 +180,7 @@ describe("edit: Edit details offers the same fields", () => {
     expect(screen.getByText(/Could not load the events/)).toBeTruthy();
     expect(screen.queryByRole("combobox", { name: /Event/ })).toBeNull();
   });
-  it("an older inquiry whose organisation lacks the role still shows it as the current choice", async () => {
+  it("an older enquiry whose organisation lacks the role still shows it as the current choice", async () => {
     loadInquiryOrganisations.mockResolvedValue(ok);
     open({ agencyOrgId: "client" });
     await ready();

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { boardColumnFor, boardColumns, boardMoveKind, boardMoveTargets, installOrShowDate, sortEnquiries, type EnquirySortKey, enquiryNeeds, needCounts, parseNeed } from "./enquiry-list";
+import {
+  boardColumnFor, boardColumns, boardMoveCheck, boardMoveKind, boardMoveTargets, installOrShowDate, sortEnquiries, type EnquirySortKey, enquiryNeeds, needCounts, parseNeed,
+  ENQUIRY_ALL_COLUMNS, ENQUIRY_DEFAULT_COLUMNS, enquiryCountSentence, enquiryFilterChips, enquiryRowAction,
+} from "./enquiry-list";
+import { stageMoveRequirement } from "@/app/(app)/sales/opportunities/[id]/helpers";
 import type { OpportunityListItem } from "./data";
 
 const item = (id: string, over: Partial<OpportunityListItem["opp"]> & { value?: number | null; due?: string | null; owner?: string; agency?: string | null; client?: string | null } = {}): OpportunityListItem =>
@@ -115,5 +119,79 @@ describe("what an enquiry needs now (the quick filters)", () => {
     expect(parseNeed("overdue")).toBe("overdue");
     expect(parseNeed("handover")).toBe("");
     expect(parseNeed("anything")).toBe("");
+  });
+});
+
+describe("the line above the list (enquiryCountSentence)", () => {
+  const base = { matched: 6, total: 11, status: "open" as const, companyName: "Fictional UAE", multiCompany: true, narrowed: false, handover: false, scope: null };
+  it("default with the breakdown: exact reasons, in words", () => {
+    expect(enquiryCountSentence({ ...base, scope: { inCompany: 9, won: 2, lost: 1 } })).toEqual({ shown: "Showing 6 open enquiries in Fictional UAE.", hidden: "5 more are not shown: 2 won and 1 lost in Fictional UAE, 2 in your other companies." });
+    expect(enquiryCountSentence({ ...base, total: 9, scope: { inCompany: 9, won: 3, lost: 0 } }).hidden).toBe("3 more are not shown: 3 won in Fictional UAE.");
+    expect(enquiryCountSentence({ ...base, matched: 1, total: 2, scope: { inCompany: 1, won: 0, lost: 0 } })).toEqual({ shown: "Showing 1 open enquiry in Fictional UAE.", hidden: "1 more is not shown: 1 in your other companies." });
+  });
+  it("without the breakdown it names the possible reasons and invents no number", () => {
+    expect(enquiryCountSentence(base).hidden).toBe("5 more are won, lost or in your other companies.");
+    expect(enquiryCountSentence({ ...base, multiCompany: false }).hidden).toBe("5 more are won or lost.");
+    expect(enquiryCountSentence({ ...base, companyName: null })).toEqual({ shown: "Showing 6 open enquiries across all your companies.", hidden: "5 more are won or lost." });
+    expect(enquiryCountSentence({ ...base, status: "closed", companyName: null }).hidden).toBe("5 more are open.");
+    expect(enquiryCountSentence({ ...base, status: "all" }).hidden).toBe("5 more are in your other companies.");
+  });
+  it("a breakdown that does not add up to the rest (the two reads raced) is not used", () => {
+    expect(enquiryCountSentence({ ...base, scope: { inCompany: 9, won: 1, lost: 1 } }).hidden).toBe("5 more are won, lost or in your other companies.");
+    expect(enquiryCountSentence({ ...base, scope: { inCompany: 20, won: 2, lost: 1 } }).hidden).toBe("5 more are won, lost or in your other companies.");
+  });
+  it("nothing hidden says nothing more; filters say that they decide", () => {
+    expect(enquiryCountSentence({ ...base, matched: 11, status: "all", companyName: null })).toEqual({ shown: "Showing all 11 enquiries across all your companies.", hidden: null });
+    expect(enquiryCountSentence({ ...base, matched: 3, narrowed: true })).toEqual({ shown: "Showing 3 enquiries in Fictional UAE that match your filters.", hidden: "8 of the 11 enquiries you can see are not shown by these filters." });
+    expect(enquiryCountSentence({ ...base, matched: 0, narrowed: true }).shown).toBe("No enquiries in Fictional UAE match your filters.");
+    expect(enquiryCountSentence({ ...base, matched: 0 }).shown).toBe("No open enquiries in Fictional UAE.");
+    expect(enquiryCountSentence({ ...base, matched: 2, handover: true }).shown).toBe("Showing 2 of your won enquiries in Fictional UAE whose handover is not accepted yet.");
+  });
+});
+
+describe("filter chips, the row action and the default columns", () => {
+  it("one removable chip per filter in use; the default has none", () => {
+    expect(enquiryFilterChips({ q: "", stageLabel: "", ownerLabel: "", status: "open", need: "", handover: false })).toEqual([]);
+    expect(enquiryFilterChips({ q: "expo", stageLabel: "Qualified", ownerLabel: "mine", status: "closed", need: "overdue", handover: false }).map((c) => [c.label, c.clear])).toEqual([
+      ["Search: expo", ["q"]], ["Owner: mine", ["owner", "mine"]], ["Stage: Qualified", ["stage"]], ["Show: won and lost", ["status"]], ["Overdue", ["need"]],
+    ]);
+    expect(enquiryFilterChips({ q: "x", stageLabel: "", ownerLabel: "", status: "open", need: "", handover: true }).map((c) => c.label)).toEqual(["My won: handover open"]);
+  });
+  it("the due time is inside Next action by default; Due stays available as its own column", () => {
+    expect(ENQUIRY_DEFAULT_COLUMNS).toEqual(["enquiry", "party", "owner", "stage", "next", "dates"]);
+    expect(ENQUIRY_ALL_COLUMNS).toContain("due");
+  });
+  it("one action per row: late first, then a missing next action, then the first response, then the stage", () => {
+    const now = new Date("2026-11-14T08:00:00Z");
+    const row = (stage: string, o: { due?: string; responded?: boolean } = {}) => ({ opp: { stage, first_response_at: o.responded === false ? null : "2026-11-01T00:00:00Z" }, nextFollowUp: o.due ? { due_at: o.due } : null, openFollowUps: o.due ? 1 : 0 });
+    expect(enquiryRowAction(row("qualified", { due: "2026-11-01T08:00:00Z", responded: false }), now)).toEqual({ label: "Follow up now", tab: "", tone: "red" });
+    expect(enquiryRowAction(row("qualified"), now)).toEqual({ label: "Plan next action", tab: "", tone: "amber" });
+    expect(enquiryRowAction(row("new", { due: "2026-12-01T08:00:00Z", responded: false }), now)).toEqual({ label: "Log first response", tab: "activity", tone: "amber" });
+    expect(enquiryRowAction(row("proposal_prep", { due: "2026-12-01T08:00:00Z" }), now)).toEqual({ label: "Prepare proposal", tab: "proposals", tone: null });
+    expect(enquiryRowAction(row("negotiation", { due: "2026-12-01T08:00:00Z" }), now).label).toBe("Open");
+    expect(enquiryRowAction(row("on_hold"), now).label).toBe("Review hold");
+    expect(enquiryRowAction(row("won"), now).label).toBe("View");
+  });
+});
+
+describe("the board's check before a move (the same rule as the Move stage dialog)", () => {
+  const none = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
+  it("says what is missing for the three stages that need evidence, and where to record it", () => {
+    for (const to of ["proposal_sent", "estimate_sent", "quote_sent"]) expect(boardMoveCheck(to, none)?.message).toBe(stageMoveRequirement(to, none));
+    expect(boardMoveCheck("proposal_sent", none)).toMatchObject({ tab: "proposals" });
+    expect(boardMoveCheck("estimate_sent", none)).toMatchObject({ tab: "quotations" });
+    expect(boardMoveCheck("quote_sent", none)).toMatchObject({ tab: "commercial", message: expect.stringMatching(/Zoho/) });
+  });
+  it("each stage needs its OWN evidence: a sent proposal does not unlock Estimate sent, a sent estimate does not unlock Proposal sent", () => {
+    expect(boardMoveCheck("estimate_sent", { ...none, hasSentProposal: true })).not.toBeNull();
+    expect(boardMoveCheck("proposal_sent", { ...none, hasSentEstimate: true })).not.toBeNull();
+    expect(boardMoveCheck("proposal_sent", { ...none, hasSentProposal: true })).toBeNull();
+    expect(boardMoveCheck("estimate_sent", { ...none, hasSentEstimate: true })).toBeNull();
+    expect(boardMoveCheck("quote_sent", { ...none, hasQuoteRef: true })).toBeNull();
+  });
+  it("stages without an evidence rule are never stopped here, and unknown evidence assumes nothing (the database decides)", () => {
+    for (const to of ["new", "qualified", "proposal_prep", "negotiation"]) expect(boardMoveCheck(to, none)).toBeNull();
+    expect(boardMoveCheck("quote_sent", null)).toBeNull();
+    expect(boardMoveCheck("quote_sent", undefined)).toBeNull();
   });
 });

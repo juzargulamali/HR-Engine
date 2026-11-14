@@ -1,5 +1,6 @@
 import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, followUpTiming, isCrmActive, isCrmOpen } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
+import { stageMoveRequirement } from "@/app/(app)/sales/opportunities/[id]/helpers";
 import { organisationLabel } from "./reports";
 
 /**
@@ -19,6 +20,7 @@ export const ENQUIRY_COLUMNS: readonly { id: EnquiryColumn; label: string; requi
   { id: "owner", label: "Owner" },
   { id: "stage", label: "Stage" },
   { id: "next", label: "Next action" },
+  // The due time is part of the Next action cell. This is the same time in a column of its own, for a person who wants it (and for saved links that name it).
   { id: "due", label: "Due" },
   { id: "dates", label: "Installation / show" },
   { id: "value", label: "Value" },
@@ -29,7 +31,7 @@ export const ENQUIRY_COLUMNS: readonly { id: EnquiryColumn; label: string; requi
 ];
 
 export const ENQUIRY_ALL_COLUMNS: readonly EnquiryColumn[] = ENQUIRY_COLUMNS.map((c) => c.id);
-export const ENQUIRY_DEFAULT_COLUMNS: readonly EnquiryColumn[] = ["enquiry", "party", "owner", "stage", "next", "due", "dates"];
+export const ENQUIRY_DEFAULT_COLUMNS: readonly EnquiryColumn[] = ["enquiry", "party", "owner", "stage", "next", "dates"];
 
 export type EnquirySortKey = "enquiry" | "party" | "owner" | "stage" | "due" | "dates" | "value" | "created";
 export const ENQUIRY_SORT_KEYS: readonly EnquirySortKey[] = ["enquiry", "party", "owner", "stage", "due", "dates", "value", "created"];
@@ -208,4 +210,151 @@ export function listFromItems<T extends SortableEnquiry>(all: readonly T[], quer
     ? [...by.values()].flatMap((rows) => [...rows].sort(byDue).slice(0, Math.max(0, query.perStage ?? 0)))
     : sortEnquiries(sel, query.sort).slice(Math.max(0, query.offset), Math.max(0, query.offset) + Math.max(1, query.limit));
   return { matched: sel.length, needs, stages, items };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Board: the detail page's evidence rules, checked before a move is sent
+// ---------------------------------------------------------------------------------------------------------------
+
+/** The recorded facts three stages need before the database lets an enquiry into them (crm_move_stage, migration 20261228000100). */
+export interface StageEvidence { hasSentProposal: boolean; hasQuoteRef: boolean; hasSentEstimate: boolean }
+export interface BoardRefusal {
+  /** What is missing, in the same words as the Move stage dialog on the enquiry's own page. */
+  message: string;
+  /** The tab of the enquiry's page where it is added, and the words of the link to it. */
+  tab: string;
+  linkLabel: string;
+}
+
+const EVIDENCE_PLACE: Record<string, { tab: string; linkLabel: string }> = {
+  proposal_sent: { tab: "proposals", linkLabel: "Open Proposals & files to record it" },
+  estimate_sent: { tab: "quotations", linkLabel: "Open Estimates to record it" },
+  quote_sent: { tab: "commercial", linkLabel: "Open Commercial to record it" },
+};
+
+/**
+ * Whether a plain move to `to` would be refused for missing evidence, using the SAME rule as the enquiry's own page (`stageMoveRequirement`): Proposal sent needs
+ * a proposal recorded as sent, Estimate sent an estimate recorded as sent, Quote sent the Zoho Books quote reference. Null = nothing is missing as far as is
+ * known. `evidence` null means it could not be read: nothing is assumed either way, the move is sent and the database decides, as it always does.
+ * This only answers sooner and says where to go; it never allows a move the database refuses.
+ */
+export function boardMoveCheck(to: string, evidence: StageEvidence | null | undefined): BoardRefusal | null {
+  if (!evidence) return null;
+  const message = stageMoveRequirement(to, evidence);
+  const place = EVIDENCE_PLACE[to];
+  return message && place ? { message, ...place } : null;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// The line above the list: what is shown, what is not, and why
+// ---------------------------------------------------------------------------------------------------------------
+
+/** Every enquiry of the chosen company the person may see (all stages), and how many of them are won and lost. From a second, count-only read. */
+export interface EnquiryScopeCounts { inCompany: number; won: number; lost: number }
+
+export interface CountInput {
+  /** Enquiries that match everything chosen (company, Show, search, filters). */
+  matched: number;
+  /** Every enquiry the person may see, in every company and stage. */
+  total: number;
+  status: "open" | "closed" | "all";
+  /** The chosen company's name, or null when every company is shown. */
+  companyName: string | null;
+  /** The person has Sales access to more than one company. */
+  multiCompany: boolean;
+  /** A search, an owner, a stage or a quick filter is on (anything beyond the company and Show). */
+  narrowed: boolean;
+  /** The "My won: handover open" view. */
+  handover: boolean;
+  /** The breakdown for the chosen company, when it was read. Null = not known: the sentence then says only what the two counts prove. */
+  scope: EnquiryScopeCounts | null;
+}
+
+const enquiries = (n: number) => (n === 1 ? "enquiry" : "enquiries");
+const isAre = (n: number) => (n === 1 ? "is" : "are");
+
+/**
+ * In words: what the list is showing, and why the rest is not shown. Only counts the database returned are used; where a breakdown is not known the sentence
+ * names the possible reasons instead of inventing numbers.
+ */
+export function enquiryCountSentence(i: CountInput): { shown: string; hidden: string | null } {
+  const where = i.companyName ? ` in ${i.companyName}` : i.multiCompany ? " across all your companies" : "";
+  const n = i.matched;
+  const rest = Math.max(0, i.total - i.matched);
+  let shown: string;
+  if (i.handover) shown = n === 0 ? `None of your won enquiries${where} is waiting for its handover to be accepted.` : `Showing ${n} of your won ${enquiries(n)}${where} whose handover is not accepted yet.`;
+  else if (i.narrowed) shown = n === 0 ? `No ${enquiries(2)}${where} match your filters.` : `Showing ${n} ${enquiries(n)}${where} that ${n === 1 ? "matches" : "match"} your filters.`;
+  else if (i.status === "open") shown = n === 0 ? `No open enquiries${where}.` : `Showing ${n} open ${enquiries(n)}${where}.`;
+  else if (i.status === "closed") shown = n === 0 ? `No won or lost enquiries${where}.` : `Showing ${n} won and lost ${enquiries(n)}${where}.`;
+  else shown = n === 0 ? `No enquiries${where}.` : `Showing all ${n} ${enquiries(n)}${where}.`;
+  if (rest === 0) return { shown, hidden: null };
+
+  if (i.handover || i.narrowed) return { shown, hidden: `${rest} of the ${i.total} ${enquiries(i.total)} you can see ${isAre(rest)} not shown by these filters.` };
+
+  const elsewhere = i.companyName && i.multiCompany;
+  if (i.companyName && i.scope) {
+    const s = i.scope;
+    const other = i.total - s.inCompany;
+    const open = s.inCompany - s.won - s.lost;
+    const parts: string[] = [];
+    let sum = 0;
+    if (i.status === "open") {
+      const closed = [s.won > 0 ? `${s.won} won` : "", s.lost > 0 ? `${s.lost} lost` : ""].filter(Boolean).join(" and ");
+      if (closed) parts.push(`${closed} in ${i.companyName}`);
+      sum += s.won + s.lost;
+    } else if (i.status === "closed" && open > 0) { parts.push(`${open} open in ${i.companyName}`); sum += open; }
+    if (other > 0) { parts.push(`${other} in your other companies`); sum += other; }
+    // The two reads are separate: if something changed between them the parts no longer add up, and the general sentence below is used instead.
+    if (sum === rest && other >= 0 && open >= 0 && parts.length > 0) return { shown, hidden: `${rest} more ${isAre(rest)} not shown: ${parts.join(", ")}.` };
+  }
+  const reasons = i.status === "open" ? (elsewhere ? "won, lost or in your other companies" : "won or lost")
+    : i.status === "closed" ? (elsewhere ? "open or in your other companies" : "open")
+      : "in your other companies";
+  return { shown, hidden: `${rest} more ${isAre(rest)} ${reasons}.` };
+}
+
+/** The view "Clear filters" returns to, in words. The company is not a filter: it stays as chosen. */
+export const ENQUIRY_DEFAULT_VIEW = "open enquiries, any owner and stage";
+
+export interface FilterChip { id: string; label: string; /** The address parameters that removing this chip clears. */ clear: readonly string[] }
+
+/** The filters in use, one removable chip each. The company and the view (Table or Board) are not filters. */
+export function enquiryFilterChips(f: { q: string; stageLabel: string; ownerLabel: string; status: "open" | "closed" | "all"; need: EnquiryNeed | ""; handover: boolean }): FilterChip[] {
+  const chips: FilterChip[] = [];
+  if (f.handover) return [{ id: "handover", label: "My won: handover open", clear: ["need"] }];
+  if (f.q) chips.push({ id: "q", label: `Search: ${f.q}`, clear: ["q"] });
+  if (f.ownerLabel) chips.push({ id: "owner", label: `Owner: ${f.ownerLabel}`, clear: ["owner", "mine"] });
+  if (f.stageLabel) chips.push({ id: "stage", label: `Stage: ${f.stageLabel}`, clear: ["stage"] });
+  if (f.status !== "open") chips.push({ id: "status", label: f.status === "closed" ? "Show: won and lost" : "Show: everything", clear: ["status"] });
+  const need = ENQUIRY_NEEDS.find((n) => n.id === f.need);
+  if (need) chips.push({ id: "need", label: need.label, clear: ["need"] });
+  return chips;
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// One obvious action per row
+// ---------------------------------------------------------------------------------------------------------------
+
+export interface RowAction {
+  label: string;
+  /** The tab of the enquiry's own page the action opens ("" = its first tab). */
+  tab: string;
+  /** "amber" = something is waiting on the person; "red" = it is late. The label says so in words. */
+  tone: "red" | "amber" | null;
+}
+
+/**
+ * The next step for an enquiry, as one link to its own page: the late or missing next action first, then the first response, then what its stage is waiting for.
+ * It opens a page and changes nothing; the row itself still opens the side panel.
+ */
+export function enquiryRowAction(i: NeedInput, now: Date = new Date()): RowAction {
+  const stage = i.opp.stage;
+  if (stage === "won" || stage === "lost") return { label: "View", tab: "", tone: null };
+  if (stage === "on_hold") return { label: "Review hold", tab: "", tone: null };
+  const needs = enquiryNeeds(i, now);
+  if (needs.includes("overdue")) return { label: "Follow up now", tab: "", tone: "red" };
+  if (needs.includes("no_next_action")) return { label: "Plan next action", tab: "", tone: "amber" };
+  if (needs.includes("no_first_response")) return { label: "Log first response", tab: "activity", tone: "amber" };
+  if (stage === "proposal_prep") return { label: "Prepare proposal", tab: "proposals", tone: null };
+  return { label: "Open", tab: "", tone: null };
 }

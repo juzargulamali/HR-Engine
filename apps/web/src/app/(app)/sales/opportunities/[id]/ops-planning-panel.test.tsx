@@ -133,7 +133,7 @@ describe("Operations planning: flagged", () => {
     expect(pm.textContent).toContain("Layla Haddad");
     expect(pm.textContent).toContain(OPS_PROVISIONAL_NOTE);
     expect(OPS_PROVISIONAL_NOTE).toBe("Provisional. No project, crew or stock is booked by this.");
-    const risk = screen.getByText("Risk").nextElementSibling!;
+    const risk = screen.getByText("Operational risk").nextElementSibling!;
     expect(risk.textContent).toContain("Medium");
     expect(risk.textContent).toContain("Tight build window");
     const capacity = screen.getAllByText("Capacity conflict")[0]!.nextElementSibling!;
@@ -146,7 +146,7 @@ describe("Operations planning: flagged", () => {
     render(<OpsPlanningPanel opp={flaggedOpp} canEdit read={fromOps({ question: "Is the venue ceiling rigged?", questionBy: "Omar Nasser", questionAt: "2026-11-04T09:30:00Z" })} />);
     expect(screen.getByText("Is the venue ceiling rigged?")).toBeTruthy();
     expect(screen.getByText(/Asked by Omar Nasser on /)).toBeTruthy();
-    expect(screen.getByText("Not answered yet.")).toBeTruthy();
+    expect(screen.getByText("Not answered yet. Operations is waiting for this.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Your answer"), { target: { value: "Yes, three points at 500 kg" } });
     fireEvent.click(screen.getByRole("button", { name: "Send answer to Operations" }));
     await waitFor(() => expect(actions.answerOpsQuestion).toHaveBeenCalledTimes(1));
@@ -157,9 +157,9 @@ describe("Operations planning: flagged", () => {
 
   it("an answered question shows the answer, and the owner can replace it", () => {
     render(<OpsPlanningPanel opp={flaggedOpp} canEdit read={fromOps({ question: "Is the venue ceiling rigged?", answer: "Yes, three points", answeredAt: "2026-11-05T10:00:00Z" })} />);
-    expect(screen.getByText(/^Answer from Sales, /)).toBeTruthy();
-    expect(screen.getByText(/^Answer from Sales, /).nextElementSibling?.textContent).toBe("Yes, three points");
-    expect(screen.queryByText("Not answered yet.")).toBeNull();
+    expect(screen.getByText(/^Sales answered /)).toBeTruthy();
+    expect(screen.getByText(/^Sales answered /).nextElementSibling?.textContent).toBe("Yes, three points");
+    expect(screen.queryByText(/Not answered yet/)).toBeNull();
     expect((screen.getByLabelText("Change your answer") as HTMLTextAreaElement).value).toBe("Yes, three points");
     expect(screen.getByRole("button", { name: "Replace the answer" })).toBeTruthy();
   });

@@ -28,7 +28,10 @@ describe("Work summary", () => {
     expect(row.textContent).toContain("Awaiting Operations review · Lena · v2");
     expect(screen.getByTestId("summary-output-t2").textContent).toContain("Missing");
     expect(screen.getByRole("link", { name: /1 more, all 3 outputs/ }).getAttribute("href")).toContain("view=deliverables");
-    expect(screen.getByTestId("summary-output-counts").textContent).toContain("Outputs awaiting approval 1");
+    // The awaiting-approval count is shown once on the Work page (the "Where the work stands" card), so it is not repeated among these filters.
+    const chips = screen.getByTestId("summary-output-counts");
+    expect(chips.textContent).not.toMatch(/awaiting approval/i);
+    expect(within(chips).getAllByRole("link").map((a) => a.textContent)).toEqual(["Missing 1", "Changes requested 0", "Approved 1"]);
   });
   it("shows milestone progress, the next one and the overdue flag, each linked", () => {
     render(<WorkSummary {...base} milestones={some} canManage />);

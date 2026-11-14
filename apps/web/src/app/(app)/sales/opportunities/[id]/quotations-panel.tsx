@@ -36,7 +36,13 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
     : `The enquiry is at ${crmStageLabel(opp.stage)}, so its stage stays as it is. Only the estimate is recorded as sent.`;
   return (
     <div className="space-y-6">
-      <Panel title="Estimates" description="Build the priced estimate here, then finalise it. Finalising makes a frozen copy; nothing is sent to the client from this screen, and nothing is reserved or promised. After you have sent a finalised estimate to the client yourself, record it as sent here.">
+      <Panel title="Estimates" hint="A priced bill of quantities built in the app. Each estimate is also a proposal version, but never an official quotation. Only the enquiry owner or a founder can start or change one.">
+        {/* The three steps and what each one does, always visible: finalising freezes, and recording as sent only records. */}
+        <ol className="mb-4 grid gap-2 text-sm sm:grid-cols-3" aria-label="How an estimate goes out">
+          <li className="rounded-md border border-border p-3"><p className="font-semibold">1. Create draft</p><p className="mt-0.5 text-muted-foreground">Starts an editable draft with a new reference. Nothing is sent, reserved or promised.</p></li>
+          <li className="rounded-md border border-border p-3"><p className="font-semibold">2. Finalise</p><p className="mt-0.5 text-muted-foreground">Makes a frozen copy: a finalised version cannot be edited again (a change needs a new revision). Nothing is sent.</p></li>
+          <li className="rounded-md border border-border p-3"><p className="font-semibold">3. Record as sent</p><p className="mt-0.5 text-muted-foreground">After you have sent a finalised estimate to the client yourself, record it as sent here. It only records the date: nothing is emailed from here.</p></li>
+        </ol>
         {sendsFailed ? <p role="alert" className="mb-3 text-sm text-destructive">Could not load which estimates were recorded as sent, so that is not shown and cannot be recorded right now. Reload the page.</p> : null}
         {items.length === 0 ? <Muted>No estimate yet.{canEdit && isOpen ? " Start one below." : ""}</Muted> : (
           <ul className="divide-y divide-border/70">
@@ -53,6 +59,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
                     {header.issue_date ? `finalised ${formatDate(header.issue_date)}` : `updated ${formatDate(header.content_changed_at)}`}{totalGross && header.currency ? ` · ${money(totalGross, header.currency)} incl. VAT` : ""}
                   </span>
                   {/* Only a finalised revision that was not replaced, on an enquiry that is not closed, by the owner or a founder; the database repeats each of these. */}
+                  {state !== "issued" && state !== "superseded" && canEdit && isOpen ? <Link href={`/sales/opportunities/${opp.id}/quotations/${proposal.id}`} className="ml-auto text-sm font-medium underline underline-offset-2">Continue the draft, then finalise</Link> : null}
                   {state === "issued" && canEdit && isOpen && detail.estimateSendsInstalled && !sendsFailed && !sentBy.has(proposal.id) ? (
                     <span className="ml-auto">
                       <RecordEstimateSentButton proposalId={proposal.id} opportunityId={opp.id} version={opp.version} label={`${header.reference} · revision ${header.revision}`} issueDate={header.issue_date}
@@ -66,7 +73,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
         )}
       </Panel>
       {canEdit && isOpen ? (
-        <Panel title="New estimate" description="Starts a draft with a new reference. Everything can stay incomplete until you finalise it.">
+        <Panel title="New estimate" description="Step 1. Starts a draft with a new reference and opens it. Everything can stay incomplete until you finalise it.">
           <ActionForm action={createQuotation} submitLabel="Create draft estimate" pendingLabel="Creating…">
             <input type="hidden" name="opportunityId" value={opp.id} />
           </ActionForm>

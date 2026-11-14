@@ -108,9 +108,9 @@ await step("PM: the waiting handover is called out in My Work and on Projects, o
 });
 await step("PM: asks Sales to clarify; Sales answers; PM accepts; exactly one project", async () => {
   await go("/projects/handovers");
-  await page.getByRole("button", { name: /ask sales to clarify/i }).first().click();
+  await page.getByRole("button", { name: /ask sales a question/i }).first().click();
   await page.getByRole("textbox").last().fill("Which hours can we access the hall?");
-  await page.getByRole("button", { name: /send|request clarification|ask sales/i }).last().click();
+  await page.getByRole("button", { name: /send question to sales/i }).click();
   await page.waitForFunction(() => /Clarification requested/i.test(document.querySelector("main").innerText), null, { timeout: 12000 });
   if (db("select status from proj_handovers") !== "clarification_requested") throw new Error("status not clarification_requested");
 });
@@ -126,7 +126,7 @@ await step("PM: accept (double click safe) opens the new project", async () => {
   await go("/projects/handovers");
   const btn = page.getByRole("button", { name: /^accept/i }).first();
   await Promise.all([page.waitForURL(/\/projects\/[0-9a-f-]{36}/, { timeout: 20000 }), btn.dblclick()]);
-  P = page.url().split("/").pop(); url = `${BASE}/projects/${P}`;
+  P = page.url().match(/\/projects\/([0-9a-f-]{36})/)[1]; url = `${BASE}/projects/${P}`; // accepting lands on the new project's plan (…/delivery?from=handover)
   await seen(/Floor projection for the Orbit launch/);
   if (db("select count(*) from proj_projects") !== "1") throw new Error("not exactly one project");
   if (!/^UAE-P-\d{4}-0001$/.test(db("select reference from proj_projects"))) throw new Error("reference");
@@ -150,7 +150,7 @@ const pickByText = async (scope, labelText, optionText) => { const sel = scope.g
 await as("mgr@e2e.local");
 await step("PM: create the Programming team with lead@ as head (head is added as a member)", async () => {
   await go(`/projects/${P}/people`);
-  await page.getByRole("button", { name: /add department team/i }).first().click();
+  await page.getByRole("button", { name: /add project team/i }).first().click();
   await dialog().getByLabel(/name/i).first().fill("Programming");
   await dialog().locator("select").first().selectOption({ label: "lead" });
   await dialog().getByRole("button", { name: /save team/i }).click(); await closed();

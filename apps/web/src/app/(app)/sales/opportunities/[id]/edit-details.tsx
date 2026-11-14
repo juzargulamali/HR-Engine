@@ -75,7 +75,7 @@ function TechnologiesEditor({ initial }: { initial: { name: string; qty: number 
 type PartyOrganisation = { id: string; name: string; kind: string; roles: string[]; place: string | null; country: string | null; website: string | null };
 
 /**
- * Agency, end client and Event / Exhibition of the inquiry, each ONE search-as-you-type field. Each party list offers only organisations that hold that role: one
+ * Agency, end client and Event / Exhibition of the enquiry, each ONE search-as-you-type field. Each party list offers only organisations that hold that role: one
  * recorded as both an agency and an end client is in both; one recorded as neither is in neither. Saving a role the organisation lacks is also refused by the database.
  * A field is posted ONLY when changed, so saving other details never rewrites (or logs a change to) the agency, end client or event link.
  */

@@ -90,7 +90,7 @@ function AssignDialog({ onClose, companyId, people, selected, onDone }: { onClos
   const names = new Map(selected);
   const close = onClose;
   return (
-    <Modal open onClose={close} title="Assign outreach" description="Give the selected accounts to a salesperson to approach or re-engage, with a target date. No inquiry is needed or created, and the account owner does not change.">
+    <Modal open onClose={close} title="Assign outreach" description="Give the selected accounts to a salesperson to approach or re-engage, with a target date. No enquiry is needed or created, and the account owner does not change.">
       {done ? (
         <div className="space-y-3">
           <ul className="divide-y divide-border text-sm" aria-label="Result for each account">

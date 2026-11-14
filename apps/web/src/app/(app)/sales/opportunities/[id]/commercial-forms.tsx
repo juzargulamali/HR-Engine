@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { confirmAvailability, decideApproval, saveZohoReference } from "@/lib/actions/crm";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
@@ -32,14 +33,17 @@ export function ZohoForm({ opportunityId, values, currency }: { opportunityId: s
         return <input key={f} type="hidden" name={ZOHO_SEEN_PREFIX + key} value={seen ?? ""} />;
       })}
       <div className="grid gap-3 sm:grid-cols-2">
-        <Field label="Quote reference (Zoho Books)" htmlFor="z-qref" hint="Needed before the opportunity can move to Quote sent."><Input id="z-qref" name="quoteRef" defaultValue={values.quoteRef ?? ""} /></Field>
+        <Field label="Quote reference (Zoho Books)" htmlFor="z-qref" hint="Needed before the enquiry can move to Quote sent."><Input id="z-qref" name="quoteRef" defaultValue={values.quoteRef ?? ""} /></Field>
         <Field label="Quote sent on" htmlFor="z-qdate"><Input id="z-qdate" name="quoteSentOn" type="date" defaultValue={values.quoteSentOn ?? ""} /></Field>
         <Field label="Invoice reference (Zoho Books)" htmlFor="z-iref"><Input id="z-iref" name="invoiceRef" defaultValue={values.invoiceRef ?? ""} /></Field>
         <Field label="Invoice issued on" htmlFor="z-idate"><Input id="z-idate" name="invoiceIssuedOn" type="date" defaultValue={values.invoiceIssuedOn ?? ""} /></Field>
         <Field label="Payment received on" htmlFor="z-pdate"><Input id="z-pdate" name="paymentReceivedOn" type="date" defaultValue={values.paymentReceivedOn ?? ""} /></Field>
         <Field label={`Amount paid (${currency})`} htmlFor="z-paid"><Input id="z-paid" name="paidAmount" type="number" min={0} step="0.01" inputMode="decimal" defaultValue={values.paidAmount ?? ""} /></Field>
       </div>
-      <p className="text-sm text-muted-foreground">Entered by hand from Zoho Books. A quote sent, an invoice issued and a payment received are three separate facts. Only the fields you change are saved, so a colleague&apos;s change to another field is kept; empty a field to clear it. Once the enquiry has reached Quote sent, the quote reference cannot be cleared: replace it with the correct one instead.</p>
+      <p className="flex items-center gap-1 text-sm text-muted-foreground">
+        Only the fields you change are saved. Empty a field to clear it.
+        <InfoHint label="Saving the Zoho references">A colleague&apos;s change to another field is kept, because only the fields you change are saved. Once the enquiry has reached Quote sent, the quote reference cannot be cleared: replace it with the correct one instead.</InfoHint>
+      </p>
     </ActionForm>
   );
 }

@@ -7,7 +7,8 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/link", () => ({ default: ({ children, href, className }: { children: React.ReactNode; href: string; className?: string }) => <a href={href} className={className}>{children}</a> }));
-vi.mock("@/components/sales/follow-up-dialogs", () => ({ NewFollowUpButton: () => "ACTION:add-follow-up" as unknown as null }));
+// The summary's buttons are tested on their own (summary.test.tsx): here only which main action the guide chose.
+vi.mock("./summary-actions", () => ({ SummaryActions: ({ primary }: { primary: { label: string; href?: string } | null }) => (primary ? `PRIMARY:${primary.label}${primary.href ? `:${primary.href}` : ""}` : "PRIMARY:none") as unknown as null }));
 let marks = new Map<string, { finalised: boolean }>();
 let marksFail = false;
 vi.mock("@/lib/crm/data", () => ({ loadEstimateMarks: async () => { if (marksFail) throw new Error("down"); return marks; } }));
@@ -18,6 +19,7 @@ import type { DetailSection } from "@/lib/crm/data";
 import { handoverGuide, nextAction, stageGuide, type GuideFacts } from "@/lib/crm/enquiry-guide";
 import { DetailTabs, TabLink } from "./detail-tabs";
 import { EnquiryGuide } from "./enquiry-guide";
+import { LatestActivity } from "./latest-activity";
 import { timelineItems } from "./timeline";
 import { TimelineList } from "./timeline-list";
 import { buildOppView } from "./view";
@@ -125,25 +127,29 @@ describe("the guide on the page", () => {
       item: { opp: { ...opp, ...o.opp }, value: 100, companyName: "Fictional Co", ownerName: "Fictional Fiona", agency: null, client: null, nextFollowUp: followUps[0] ?? null, openFollowUps: followUps.length, availability: "unverified" },
       contacts: [], activities: o.activities ?? [], followUps, events: o.events ?? [], files: [], proposals: o.proposals ?? [], zoho: null, approvals: [], handover: null, closures: [], estimateSends: o.sends ?? [], estimateSendsInstalled: true,
     };
-    return renderToStaticMarkup(await EnquiryGuide({ view: buildOppView(ctx as never, detail as never, new Set(o.failed ?? [])), currentUserId: "u1" }) as React.ReactElement);
+    const view = buildOppView(ctx as never, detail as never, new Set(o.failed ?? []));
+    return renderToStaticMarkup(<>{await EnquiryGuide({ view })}<LatestActivity view={view} /></>);
   };
-  it("shows the next action with its owner and due date, the stage guidance and the latest entries with a way into the full history", async () => {
+  it("one summary: the next action with who it is for and when, the main button, stage, owner and value, the stage guidance; the latest entries sit on the Overview with a way into the full history", async () => {
     const html = await page({ activities: [{ id: "a1", kind: "call", body: "Fictional call about the stand", is_internal: false, occurred_at: "2026-11-03T08:00:00Z", created_by: "u1", created_at: "2026-11-03T08:00:00Z" }] });
     expect(html).toContain("Call the client");
-    expect(html).toContain("Owner of this action: <span class=\"font-medium text-foreground\">Fictional Sami</span>");
+    expect(html).toContain("For <span class=\"font-medium text-foreground\">Fictional Sami</span>");
     expect(html).toContain("No first response is recorded yet");
+    expect(html).toContain("PRIMARY:Log first response");
+    expect(html.match(/Next action/g)!.length).toBeGreaterThan(0);
+    for (const fact of ["Stage", "Owner", "Value", "Fictional Fiona", "Qualified"]) expect(html).toContain(fact);
     expect(html).toContain("Call: Fictional call about the stand");
-    expect(html).toContain("Open the full activity and comments");
-    expect(html).not.toContain("ACTION:add-follow-up");
+    expect(html).toContain("Open the full history");
+    expect(html).not.toContain("PRIMARY:Add next action");
   });
   it("no follow-up: says so and offers to add one; failed follow-ups: says it could not load and offers nothing", async () => {
     const none = await page({ followUps: [] });
     expect(none).toContain("No next action is recorded");
-    expect(none).toContain("ACTION:add-follow-up");
+    expect(none).toContain("PRIMARY:Add next action");
     const failed = await page({ followUps: [], failed: ["followUps"] });
     expect(failed).toContain("The follow-ups could not be loaded");
     expect(failed).not.toContain("No next action is recorded");
-    expect(failed).not.toContain("ACTION:add-follow-up");
+    expect(failed).toContain("PRIMARY:none");
   });
   it("a finalised estimate not yet recorded leads to Estimates; a recorded one is named with its revision; an ordinary sent proposal is told apart from an estimate", async () => {
     marks = new Map([["p-est", { finalised: true }]]);
@@ -151,10 +157,19 @@ describe("the guide on the page", () => {
     const html = await page({ proposals });
     expect(html).toContain("A finalised estimate is not recorded as sent");
     expect(html).toContain("Proposal version 1 recorded as sent on 2 Nov 2026.");
-    expect(html).toContain("Record estimate as sent");
+    expect(html).toContain("PRIMARY:Record estimate as sent");
     const sent = await page({ opp: { stage: "estimate_sent" }, proposals, sends: [{ id: "s1", proposal_id: "p-est", reference: "EST-QA-2026-0007", revision: 2, sent_on: "2026-11-06", recorded_at: "2026-11-06T09:00:00Z" }] });
     expect(sent).toContain("Estimate EST-QA-2026-0007, revision 2, recorded as sent on 6 Nov 2026.");
     expect(sent).not.toContain("A finalised estimate is not recorded as sent");
+  });
+  it("what is in the way is said in the summary: a hold with its reason, and availability that must be repeated with the way to Commercial", async () => {
+    const hold = await page({ opp: { stage: "on_hold", stage_before_hold: "qualified", hold_reason: "Client postponed event", hold_review_date: "2031-01-10" }, followUps: [] });
+    expect(hold).toContain("On hold. Reason: Client postponed event. Review date 10 Jan 2031.");
+    expect(hold).toContain("PRIMARY:Resume");
+    const stale = renderToStaticMarkup(await EnquiryGuide({ view: buildOppView(ctx as never, { item: { opp, value: 100, companyName: "Fictional Co", ownerName: "Fictional Fiona", agency: null, client: null, nextFollowUp: fu, openFollowUps: 1, availability: "needs_recheck" }, contacts: [], activities: [], followUps: [fu], events: [], files: [], proposals: [], zoho: null, approvals: [], handover: null, closures: [], estimateSends: [], estimateSendsInstalled: true } as never, new Set()) }) as React.ReactElement);
+    expect(stale).toContain("Availability must be checked again");
+    expect(stale).toContain('href="/sales/opportunities/o1?tab=commercial"');
+    expect(stale).toContain("PRIMARY:Request availability check");
   });
   it("a failed read of which versions are estimates is said, never shown as 'nothing sent'", async () => {
     marksFail = true;
@@ -167,13 +182,11 @@ describe("the guide on the page", () => {
     const q = await page({ opp: { stage: "won", closed_at: "2026-11-05T00:00:00Z" }, followUps: [] });
     expect(q).toContain("PM asked a question");
     expect(q).toContain("Fictional Petra asked: Final installation dates?");
-    expect(q).toContain("Answer and resubmit");
-    expect(q).toContain("/sales/opportunities/o1/handover");
+    expect(q).toContain("PRIMARY:Answer and resubmit:/sales/opportunities/o1/handover");
     handover = { status: "ok", handover: { status: "accepted", pmName: "Fictional Petra", projectId: "p1", projectReference: "PRJ-QA-2026-0003", clarificationNote: null } };
     const made = await page({ opp: { stage: "won" }, followUps: [] });
     expect(made).toContain("Project created");
-    expect(made).toContain('href="/projects/p1"');
-    expect(made).toContain("Open project PRJ-QA-2026-0003");
+    expect(made).toContain("PRIMARY:Open project PRJ-QA-2026-0003:/projects/p1");
     handover = { status: "ok", handover: { status: "accepted", pmName: "Fictional Petra", projectId: "p1", projectReference: null, clarificationNote: null } };
     const hidden = await page({ opp: { stage: "won" }, followUps: [] });
     expect(hidden).not.toContain("/projects/p1");
@@ -198,7 +211,8 @@ describe("the timeline", () => {
   }, name);
   it("is one chronological list, newest first, of staff entries and app-recorded entries, each with who and when", () => {
     expect(items.map((i) => i.id)).toEqual(["e-e3", "e-e2", "fd-f1", "a-a2", "fp-f1", "e-e1", "a-a1"]);
-    expect(items.filter((i) => i.type === "staff").map((i) => i.label)).toEqual(["Note", "Call"]);
+    // A completed follow-up carries the person's outcome, so it is one of the people's updates.
+    expect(items.filter((i) => i.type === "staff").map((i) => i.label)).toEqual(["Follow-up", "Note", "Call"]);
     expect(items.find((i) => i.id === "e-e2")).toMatchObject({ type: "system", label: "Estimate", text: "Estimate EST-QA-2026-0007 revision 2 recorded as sent to the client on 2026-11-06.", who: "Fictional Fiona", link: { href: "/sales/opportunities/o1/quotations/p-est", label: "Open that estimate revision" } });
     expect(items.find((i) => i.id === "fd-f1")).toMatchObject({ text: "Follow-up completed: Send the estimate. Outcome: Sent by email", who: "Fictional Sami" });
     expect(items.find((i) => i.id === "fp-f1")!.text).toMatch(/^Follow-up planned: Send the estimate\. Due .* for Fictional Sami\.$/);
@@ -208,18 +222,31 @@ describe("the timeline", () => {
     expect(items.find((i) => i.id === "a-a1")).toMatchObject({ firstResponse: true, internal: false });
     expect(items.find((i) => i.id === "a-a2")).toMatchObject({ firstResponse: false, internal: true });
   });
-  it("Comments and notes shows only what people wrote; All activity shows everything; the two look different", () => {
+  it("the filter: People's updates shows only what people wrote, System only what the app recorded, All everything; the two kinds look different", () => {
     render(<TimelineList items={items} />);
     expect(screen.getAllByRole("listitem")).toHaveLength(7);
-    expect(screen.getAllByText("recorded by the app")).toHaveLength(5);
-    fireEvent.click(screen.getByRole("tab", { name: /Comments and notes 2/ }));
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getAllByText("recorded by the app")).toHaveLength(4);
+    fireEvent.click(screen.getByRole("tab", { name: /System 4/ }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(4);
+    expect(screen.queryByText("Fictional first call")).toBeNull();
+    expect(screen.getByText(/Stage changed/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /People's updates 3/ }));
+    expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.getByText("Fictional first call")).toBeTruthy();
     expect(screen.queryByText(/Stage changed/)).toBeNull();
     expect(screen.getByText("First response")).toBeTruthy();
     expect(screen.getByText("Internal note")).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: /All activity 7/ }));
+    fireEvent.click(screen.getByRole("tab", { name: /^All 7/ }));
     expect(screen.getByRole("link", { name: "Open that estimate revision" }).getAttribute("href")).toBe("/sales/opportunities/o1/quotations/p-est");
+  });
+  it("a long entry starts folded and opens in place", () => {
+    const long = { ...items[0]!, id: "a-long", type: "staff" as const, text: "Fictional long note. ".repeat(40) };
+    render(<TimelineList items={[long, items[1]!]} />);
+    const toggle = screen.getByRole("button", { name: "Show more" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getAllByRole("button", { name: /Show (more|less)/ })).toHaveLength(1);
+    fireEvent.click(toggle);
+    expect(screen.getByRole("button", { name: "Show less" }).getAttribute("aria-expanded")).toBe("true");
   });
   it("a link elsewhere on the page opens the tab it names without leaving the page", () => {
     render(<><TabLink tab="activity" href="?tab=activity">Open the full activity</TabLink><DetailTabs initial="overview" tabs={[{ id: "overview", label: "Overview", content: <p>overview body</p> }, { id: "activity", label: "Activity & history", content: <p>activity body</p> }]} /></>);

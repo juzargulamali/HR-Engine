@@ -77,7 +77,8 @@ function Groups({ rows, only }: { rows: PreviewRow[]; only?: "all" | "skipped" }
   );
 }
 
-export function ImportFlow() {
+/** `listHref`: Events & Exhibitions for the company the person came from, showing all editions (so what was just imported is in view). */
+export function ImportFlow({ listHref = "/sales/events?when=all" }: { listHref?: string }) {
   const [step, setStep] = useState<Step>("upload");
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -141,7 +142,12 @@ export function ImportFlow() {
           <Card>
             <CardHeader><CardTitle>2. Preview: nothing has been saved yet</CardTitle></CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm text-muted-foreground">{file?.name} · into the shared calendar</p>
+              <p className="text-sm" data-testid="import-scope"><span className="break-all font-medium">{file?.name}</span> goes into the <strong>one shared calendar</strong>: every Enginious company sees the same events, so no company is chosen and the result is the same whichever company you work in. Only events and editions are added: no enquiry, account or observation is created or changed.</p>
+              <ul className="space-y-1 text-sm" aria-label="What confirming will do" data-testid="import-plan">
+                <li><strong>Created:</strong> {s.newEvents} new event{s.newEvents === 1 ? "" : "s"} and {s.newEditions} edition{s.newEditions === 1 ? "" : "s"}.</li>
+                <li><strong>Skipped:</strong> {s.present} row{s.present === 1 ? "" : "s"} already in the calendar with the same dates.</li>
+                <li className={cn(s.needsCorrection > 0 && "font-medium text-warning")}><strong>Blocking:</strong> {s.needsCorrection} row{s.needsCorrection === 1 ? "" : "s"} to correct{s.needsCorrection > 0 ? ". Nothing can be saved until the file is corrected." : "."}</li>
+              </ul>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
                 <Stat label="Rows in the file" value={s.fileRows} />
                 <Stat label="New events" value={s.newEvents} />
@@ -185,7 +191,7 @@ export function ImportFlow() {
               </div>
               <p className="text-sm text-muted-foreground">Importing the same file again adds nothing.</p>
               <div className="flex flex-wrap gap-2">
-                <Link href="/sales/events?when=all" className={buttonVariants({})}>View Events &amp; Exhibitions</Link>
+                <Link href={listHref} className={buttonVariants({})}>View Events &amp; Exhibitions</Link>
                 <Button type="button" variant="outline" onClick={reset}>Import another file</Button>
               </div>
             </CardContent>

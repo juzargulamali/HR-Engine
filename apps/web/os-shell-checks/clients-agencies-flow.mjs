@@ -31,7 +31,11 @@ const eq = (a, b, what) => { if (String(a) !== String(b)) throw new Error(`${wha
 const main = async (p = page) => (await p.locator("main").innerText()).replace(/\s+/g, " ");
 const orgId = (name) => sql(`select id from crm_organisations where name='${name}'`);
 const orgCount = () => Number(sql("select count(*) from crm_organisations"));
-const options = async (sel) => (await sel.locator("option").evaluateAll((o) => o.map((x) => x.value))).filter(Boolean);
+// Agency and End client are search-as-you-type fields (type part of a name, then choose a match; typing alone selects nothing).
+// offered(): which of the named organisations the field offers when their name is typed. pick(): choose one by name.
+const offered = async (field, keys) => { const out = []; for (const k of keys) { await field.click(); await field.fill(names[k]); await sleep(250); if (await field.page().getByRole("option", { name: names[k] }).count()) out.push(ID[k]); } await field.fill(""); return out; };
+const pick = async (field, k) => { await field.click(); await field.fill(names[k]); await field.page().getByRole("option", { name: names[k] }).first().click(); };
+const ALL = ["atlas", "agency", "client", "tech", "quiet", "stale"];
 const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Dubai" });
 const watch = (p) => p.on("dialog", (d) => d.accept());
 
@@ -43,22 +47,22 @@ const ID = Object.fromEntries(Object.entries(names).map(([k, n]) => [k, orgId(n)
 const BASE_ORGS = orgCount();
 
 // -------------------------------------------------------------------------------------------------------------------------------------------
-// 1. Role-aware inquiry pickers
+// 1. Role-aware enquiry pickers
 // -------------------------------------------------------------------------------------------------------------------------------------------
 page = await newPage(browser); watch(page); await login(page, "emp@e2e.local");
 let oppId = "";
 await step("create: the multi-role organisation is offered as agency AND end client; organisations without the role are not", async () => {
   await page.goto(`${BASE}/sales/new`, { waitUntil: "networkidle" });
-  const a = await options(page.locator("#enq-agency")); const c = await options(page.locator("#enq-client"));
+  const a = await offered(page.locator("#enq-agency"), ALL); const c = await offered(page.locator("#enq-client"), ALL);
   for (const k of ["atlas", "agency"]) if (!a.includes(ID[k])) throw new Error(`agency picker lacks ${k}`);
   for (const k of ["client", "tech", "quiet", "stale"]) if (a.includes(ID[k])) throw new Error(`agency picker offers ${k}`);
   for (const k of ["atlas", "client", "quiet", "stale"]) if (!c.includes(ID[k])) throw new Error(`client picker lacks ${k}`);
   for (const k of ["agency", "tech"]) if (c.includes(ID[k])) throw new Error(`client picker offers ${k}`);
 });
-await step("create: ONE organisation selected as agency and as end client saves one inquiry and no new organisation", async () => {
-  await page.getByLabel("Requirement").fill("Fictional Atlas pitch");
+await step("create: ONE organisation selected as agency and as end client saves one enquiry and no new organisation", async () => {
+  await page.getByLabel("What is the enquiry?").fill("Fictional Atlas pitch");
   await page.locator("#enq-source").selectOption("agency_call");
-  await page.locator("#enq-agency").selectOption(ID.atlas); await page.locator("#enq-client").selectOption(ID.atlas);
+  await pick(page.locator("#enq-agency"), "atlas"); await pick(page.locator("#enq-client"), "atlas");
   await page.locator("#enq-next-title").fill("Call to qualify the brief"); await page.locator("#enq-next-date").fill("2027-01-15");
   await page.getByRole("button", { name: "Record enquiry" }).click();
   await page.waitForURL(/\/sales\/opportunities\/[0-9a-f-]{36}/, { timeout: 20000 });
@@ -68,22 +72,22 @@ await step("create: ONE organisation selected as agency and as end client saves 
 });
 const openEdit = async () => {
   await page.goto(`${BASE}/sales/opportunities/${oppId}`, { waitUntil: "networkidle" });
-  await page.getByRole("button", { name: "Edit details" }).first().click();
+  await page.getByRole("group", { name: "Enquiry actions" }).getByRole("button", { name: "More", exact: true }).click(); await page.getByRole("menuitem", { name: "Edit details" }).click(); // every action but the main one is in the More menu
   const d = page.locator("dialog[open]"); await d.waitFor();
   await until(async () => !(await d.locator("#ed-agency").isDisabled()), "the edit pickers to load");
   return d;
 };
 await step("edit: the same role-aware pickers; choose other organisations, then the multi-role one again, in each field", async () => {
   let d = await openEdit();
-  const a = await options(d.locator("#ed-agency")); const c = await options(d.locator("#ed-client"));
+  const a = await offered(d.locator("#ed-agency"), ALL); const c = await offered(d.locator("#ed-client"), ALL);
   if (!a.includes(ID.atlas) || !a.includes(ID.agency) || a.includes(ID.client) || a.includes(ID.tech)) throw new Error("edit agency picker wrong: " + a.length);
   if (!c.includes(ID.atlas) || !c.includes(ID.client) || c.includes(ID.agency) || c.includes(ID.tech)) throw new Error("edit client picker wrong: " + c.length);
-  await d.locator("#ed-agency").selectOption(ID.agency); await d.locator("#ed-client").selectOption(ID.client);
+  await pick(d.locator("#ed-agency"), "agency"); await pick(d.locator("#ed-client"), "client");
   await d.getByRole("button", { name: "Save changes" }).click(); await d.waitFor({ state: "hidden", timeout: 15000 });
   eq(sql(`select agency_org_id || '|' || client_org_id from crm_opportunities where id='${oppId}'`), `${ID.agency}|${ID.client}`, "after the first edit");
   await sleep(800);
   d = await openEdit();
-  await d.locator("#ed-agency").selectOption(ID.atlas); await d.locator("#ed-client").selectOption(ID.atlas);
+  await pick(d.locator("#ed-agency"), "atlas"); await pick(d.locator("#ed-client"), "atlas");
   await d.getByRole("button", { name: "Save changes" }).click(); await d.waitFor({ state: "hidden", timeout: 15000 });
   eq(sql(`select agency_org_id || '|' || client_org_id from crm_opportunities where id='${oppId}'`), `${ID.atlas}|${ID.atlas}`, "after the second edit");
   eq(orgCount(), BASE_ORGS, "organisation count after editing");
@@ -103,12 +107,12 @@ await step("the database refuses a role the organisation lacks, even when the fo
 });
 
 // -------------------------------------------------------------------------------------------------------------------------------------------
-// 2. A dated follow-up on an account with no inquiry
+// 2. A dated follow-up on an account with no enquiry
 // -------------------------------------------------------------------------------------------------------------------------------------------
 const ceo = await newPage(browser); watch(ceo); await login(ceo, "ceo@e2e.local");
 const accountUrl = `${BASE}/sales/accounts/${ID.quiet}?company=${CO}`;
 let fuId = "";
-await step("founder assigns the account owner, then adds a dated follow-up for emp@ on the account with no inquiry", async () => {
+await step("founder assigns the account owner, then adds a dated follow-up for emp@ on the account with no enquiry", async () => {
   page = ceo; await ceo.goto(accountUrl, { waitUntil: "networkidle" });
   await ceo.getByRole("button", { name: /Assign owner|Change owner/ }).click();
   let d = ceo.locator("dialog[open]"); await d.locator("#owner-pick").selectOption(U.mgr);
@@ -133,7 +137,7 @@ await step("the assignee sees it on Follow-ups (Today) and on My Day, both point
   page = emp; await emp.goto(`${BASE}/sales/follow-ups`, { waitUntil: "networkidle" });
   const row = emp.locator("tr", { hasText: "Fictional introduction call" }).first(); await row.waitFor();
   const t = (await row.innerText()).replace(/\s+/g, " ");
-  if (!/Fictional Quiet Account/.test(t) || !/Account follow-up \(no inquiry\)/.test(t)) throw new Error("row: " + t);
+  if (!/Fictional Quiet Account/.test(t) || !/Account follow-up \(no enquiry\)/.test(t)) throw new Error("row: " + t);
   await row.getByRole("link", { name: "Fictional Quiet Account" }).first().click(); await emp.waitForURL(new RegExp(`/sales/accounts/${ID.quiet}`), { timeout: 15000 });
   await emp.goto(`${BASE}/`, { waitUntil: "networkidle" });
   const my = (await emp.locator("main").innerText()).replace(/\s+/g, " ");

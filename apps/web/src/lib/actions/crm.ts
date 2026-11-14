@@ -12,6 +12,7 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
+import { panelReturnHref } from "@/app/(app)/sales/new/enquiry-form-shared";
 import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
@@ -88,7 +89,7 @@ const createOpportunitySchema = z.object({
   contactIds: z.array(uuid).default([]),
 });
 
-export async function createOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState> {
+export async function createOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState & { /** Set when the outreach this was raised from already has an enquiry: nothing was created, and this is that enquiry. */ existingEnquiryId?: string }> {
   const raw = { ...Object.fromEntries(formData), contactIds: formData.getAll("contactIds").filter((x) => x !== "") };
   const parsed = createOpportunitySchema.safeParse(raw);
   if (!parsed.success) return { error: firstIssue(parsed.error) };
@@ -97,7 +98,27 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   const nextDue = dueIso(d.nextDate, d.nextTime);
   if (!nextDue) return { error: "The next action needs a valid date and time." };
 
+  // The company comes from the form, so it is checked here against the companies the person holds Sales access to before anything is sent. The database
+  // function checks the same thing again (crm_has_access, and that the company has Sales settings), so a changed request can never save to another company;
+  // this check only answers sooner and in plain words. An access list that could not be read saves nothing: it is never treated as "no access".
+  const ctx = await getCrmContext();
+  if (!ctx || ctx.loadFailed) return { error: "Your Sales access could not be checked, so the enquiry was not saved. Nothing you typed is lost: try again." };
+  const company = ctx.companies.find((c) => c.id === d.companyId);
+  if (!company) return { error: "You do not have Sales access to that company, so the enquiry was not saved. Choose one of your companies." };
+  if (!company.settings) return { error: `${company.name} has no Sales settings yet (reference code and default currency), so an enquiry cannot be recorded for it.` };
+
   const supabase = await createClient();
+  // Raised from an outreach: an outreach holds ONE enquiry (crm_outreach.opportunity_id, set by crm_outreach_link_inquiry). A tab left open after the enquiry was
+  // already raised would otherwise create a second, unlinked one. So the outreach is read first, as the signed-in person: if it already has an enquiry nothing is
+  // created and the person is sent to that one. A check that fails saves nothing and says so; it never goes ahead as if there were none. (An outreach the person
+  // cannot read comes back as no row: the enquiry is created and the link step below reports its own refusal, as before.)
+  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
+  if (fromOutreach.success) {
+    const outreach = await (supabase as unknown as SupabaseClient).from("crm_outreach").select("opportunity_id").eq("id", fromOutreach.data).maybeSingle();
+    if (outreach.error) return { error: "Could not check whether this outreach already has an enquiry, so nothing was saved. What you entered is still here: try again." };
+    const existing = (outreach.data as { opportunity_id: string | null } | null)?.opportunity_id;
+    if (existing) return { error: "This outreach already has an enquiry, so a second one was not created. Open the existing enquiry instead.", existingEnquiryId: existing };
+  }
   const { data, error } = await supabase.rpc("crm_create_opportunity", {
     p_company_id: d.companyId,
     p_title: d.title,
@@ -123,9 +144,8 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   });
   if (error) return fail(error.message);
   refresh();
-  // Raised from an outreach ("Create inquiry" on the account's Outreach section): link it, which sets Inquiry raised. The inquiry exists either way; if the
-  // link is refused the person lands on the account, where the Outreach section says so and offers "Link an inquiry".
-  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
+  // Raised from an outreach ("Create enquiry" on the account's Outreach section): link it, which sets Enquiry raised. The enquiry exists either way; if the
+  // link is refused the person lands on the account, where the Outreach section says so and offers "Link an enquiry".
   if (fromOutreach.success) {
     const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
     if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);
@@ -138,7 +158,9 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     if (linked.error) { console.error("[crm] event link after create refused", linked.error.message); linkFailed = true; }
   }
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
-  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? `/sales/opportunities?open=${data}` : `/sales/opportunities/${data}`);
+  // Quick Add returns to the list it was opened from (Follow-ups or Enquiries, with its filters), and the new enquiry opens beside it.
+  const returnTo = formData.get("returnTo");
+  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? panelReturnHref(typeof returnTo === "string" ? returnTo : null, String(data)) : `/sales/opportunities/${data}`);
 }
 
 /** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */
@@ -476,6 +498,9 @@ export async function addActivity(_prev: ActionState, formData: FormData): Promi
       p_hold_reason: null, p_hold_review_date: null,
     });
     if (done.error) return fail(done.error.message);
+    // The person's own update is always written, whatever its kind: only that row carries their Internal note choice, the kind of contact, and (for the
+    // first call, email or meeting) the first-response time. Completing the follow-up also writes its own note with the same words; the two records are
+    // kept, and the timeline shows that one completion once by matching them (timeline.ts, matchCompletions).
     const logged = await supabase.rpc("crm_add_activity", { p_id: d.id, p_kind: d.kind, p_body: d.body, p_internal: d.internal === "on" });
     refresh(d.id);
     if (logged.error) return { error: null, warning: `The follow-up was completed${planNext ? " and the next step planned" : ""}, but the update could not be added to the timeline: ${friendlyCrmError(logged.error.message)}` };
@@ -747,8 +772,30 @@ export async function saveCrmSettings(_prev: ActionState, formData: FormData): P
   return { error: null };
 }
 
-export async function markRemindersRead(reminderId?: string): Promise<void> {
+export interface MarkRemindersReadResult { error: string | null; marked: number; failed: number }
+
+/**
+ * Marks reminders read. With no argument: all of the person's unread reminders (one call). With ids: those rows, one database call each, because
+ * crm_mark_reminder_read takes a single id; the Follow-ups page shows one reminder per follow-up and passes every row behind it, so dismissing the one
+ * shown never leaves its twin unread. The database only ever touches the caller's own rows. A refusal is reported, never swallowed: when some rows were
+ * marked and some were not, the message says how many.
+ */
+export async function markRemindersRead(reminderIds?: string | readonly string[]): Promise<MarkRemindersReadResult> {
   const supabase = await createClient();
-  await supabase.rpc("crm_mark_reminder_read", { p_reminder_id: reminderId ?? null });
+  // undefined means "all"; an empty list means nothing (it must never widen to "all").
+  const ids: (string | null)[] = reminderIds === undefined ? [null] : [...new Set(typeof reminderIds === "string" ? [reminderIds] : reminderIds)].slice(0, 100);
+  const results = await Promise.all(ids.map(async (id) => {
+    try {
+      const { data, error } = await supabase.rpc("crm_mark_reminder_read", { p_reminder_id: id });
+      return error ? { ok: false, n: 0 } : { ok: true, n: typeof data === "number" ? data : 0 };
+    } catch {
+      return { ok: false, n: 0 };
+    }
+  }));
+  const failed = results.filter((r) => !r.ok).length;
+  const marked = results.reduce((n, r) => n + r.n, 0);
   revalidatePath("/sales", "layout");
+  if (failed === 0) return { error: null, marked, failed };
+  if (failed === ids.length) return { error: reminderIds === undefined ? "The reminders could not be marked read. Try again." : "The reminder could not be dismissed. Try again.", marked, failed };
+  return { error: `Only partly dismissed: ${ids.length - failed} of ${ids.length} reminder records were marked read. Try again to clear the rest.`, marked, failed };
 }

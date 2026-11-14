@@ -1,4 +1,4 @@
-import { CRM_ALLOWED_FILE_SUMMARY, canRemoveFile } from "@enginious-hr/domain";
+import { canRemoveFile } from "@enginious-hr/domain";
 import { FileText, Link2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { formatDate, formatFileSize } from "@/components/sales/format";
@@ -61,8 +61,7 @@ export function FilesPanel({ view }: { view: OppView }) {
         <Muted className="mt-4">A lost opportunity can no longer be updated, so nothing can be added.</Muted>
       ) : (
         <div className="mt-5 border-t border-border/70 pt-4">
-          <h3 className="mb-2 text-sm font-semibold">Add a file or link</h3>
-          <p className="mb-3 text-sm text-muted-foreground">Allowed: {CRM_ALLOWED_FILE_SUMMARY}. Executables and macro-enabled files are refused. Choose what it is so the history can tell a proposal from a purchase order.</p>
+          <h3 className="mb-3 text-sm font-semibold">Add a file or link</h3>
           <AddFileForms opportunityId={opp.id} />
         </div>
       )}

@@ -1,6 +1,7 @@
 import { hasCrmCapability, isAnyCrmFounder } from "@enginious-hr/domain";
 import { AskForAccess } from "@/components/os/ask-for-access";
 import { AccessNotice } from "@/components/os/access-notice";
+import { OsScope } from "@/components/os/scope";
 import { SalesTabs, type SalesTab } from "@/components/sales/sales-tabs";
 import { LoadError } from "@/components/workspace/states";
 import { getCrmContext } from "@/lib/crm/context";
@@ -35,12 +36,13 @@ export default async function SalesLayout({ children }: { children: React.ReactN
     ...(manageSettings || isAnyCrmFounder(ctx.grants) ? [{ href: "/sales/settings", label: "Settings" }] : []),
   ];
   return (
-    <div className="space-y-6">
+    // The v2 design scope: the same surfaces, type and tokens as Projects & Tasks and Operations (components/os/scope.tsx).
+    <OsScope className="space-y-6">
       {/* On desktop the same pages are in the sidebar under Sales & CRM; the strip stays for small screens, where the sidebar is a drawer. */}
       <div className="lg:hidden">
         <SalesTabs tabs={tabs} />
       </div>
       {children}
-    </div>
+    </OsScope>
   );
 }

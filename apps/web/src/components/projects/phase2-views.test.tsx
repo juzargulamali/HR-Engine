@@ -227,7 +227,7 @@ describe("site schedule: phase wording, start record and the crew briefing previ
 describe("work overview", () => {
   const o: WorkOverview = { tz: "Asia/Dubai", today: "2027-11-10", next_on_site: act({ id: "n1", title: "Setup soon", state: "tentative" }), recent: [{ at: "2027-11-10T06:05:00Z", actor: "Fictional Eli", entity: "task_output", entity_id: "t1", field: "version", from: null, to: "v2", note: null, title: "Storyboard" }],
     attention: [{ kind: "output_missing", task_id: "t9", title: "Logo", detail: 'Required output "Logo" is missing', who: ["Fictional Cara"] }, { kind: "shipment_conflict", shipment_id: "s1", title: "Late crates", detail: 'Arrives after "Setup" starts', who: ["Fictional Pm"] }] };
-  it("shows the next activity, what needs attention with who can act and where to fix it, and recent changes", () => {
+  it("shows the next activity and what needs attention with who can act and where to fix it; recent changes are left to the page's one Recent activity block", () => {
     render(<WorkOverviewAreas projectId="p1" overview={o} />);
     expect(screen.getByTestId("overview-next-when").textContent).toBe("11 Nov, 09:00–18:00 Asia/Dubai");
     expect(within(screen.getByTestId("overview-next")).getByText("Tentative")).toBeTruthy();
@@ -235,12 +235,12 @@ describe("work overview", () => {
     expect(a.textContent).toMatch(/Who can act: Fictional Cara/);
     expect(within(a).getByRole("link", { name: "Logo" }).getAttribute("href")).toBe("/projects/p1/work?task=t9");
     expect(within(screen.getByTestId("attention-shipment_conflict")).getByRole("link", { name: "Late crates" }).getAttribute("href")).toBe("/projects/p1/plan?plan=site&mode=list#ship-s1");
-    expect(screen.getByTestId("overview-recent").textContent).toMatch(/Fictional Eli submitted v2 of Storyboard.*10 Nov 2027, 10:05 Asia\/Dubai/);
+    expect(screen.queryByTestId("overview-recent")).toBeNull();
+    expect(document.body.textContent).not.toMatch(/Recent changes/);
   });
   it("reads as empty, not as broken, when nothing is recorded", () => {
     render(<WorkOverviewAreas projectId="p1" overview={{ tz: "UTC", today: "2027-11-10", next_on_site: null, attention: [], recent: [] }} />);
     expect(screen.getByTestId("overview-next").textContent).toMatch(/Nothing is recorded on the site schedule yet/);
     expect(screen.getByTestId("overview-attention").textContent).toMatch(/Nothing is waiting/);
-    expect(screen.getByTestId("overview-recent").textContent).toMatch(/No new output version/);
   });
 });

@@ -3,16 +3,18 @@ import { Badge } from "@/components/ui/badge";
 import { CancelFollowUpButton, CompleteFollowUpButton, NewFollowUpButton, RescheduleFollowUpButton } from "@/components/sales/follow-up-dialogs";
 import { DueText } from "@/components/sales/badges";
 import { formatDateTime } from "@/components/sales/format";
-import { isOnlyOpenFollowUp } from "./helpers";
+import { isOnlyOpenFollowUp, planNextProps } from "./helpers";
+import { LogActivityButton } from "./log-activity-button";
 import { Muted, Panel } from "./parts";
 import { LoadError } from "@/components/workspace/states";
-import { anyFailed, type OppView } from "./view";
+import { anyFailed, planNextInput, type OppView } from "./view";
 
 const KIND_LABEL = { call: "Call", email: "Email", meeting: "Meeting", proposal: "Proposal work", other: "Other" } as const;
 
 /** The next actions on this opportunity. Completing the last one of an active opportunity forces a next step or a hold (dialog and database agree). */
-export function FollowUpsPanel({ view }: { view: OppView }) {
-  const { detail, ctx, opp, isOpen, isActive } = view;
+/** `withLog` (the enquiry's own page) adds "Log activity" beside "Add follow-up": what happened and the next step in one dialog. */
+export function FollowUpsPanel({ view, withLog = false }: { view: OppView; withLog?: boolean }) {
+  const { detail, ctx, opp, isOpen, isActive, isLost } = view;
   const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
   const open = view.openFollowUps;
   // A failed read is not "No open follow-up": say so and offer no follow-up action (Add, Complete, Reschedule, Cancel all depend on this list).
@@ -24,7 +26,13 @@ export function FollowUpsPanel({ view }: { view: OppView }) {
     <Panel
       title="Follow-ups"
       description="What happens next, and who does it."
-      actions={isOpen ? <NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /> : undefined}
+      hint="Complete a follow-up with what came of it, or reschedule it. Completing the only next action of an active enquiry asks for the next one, or to put the enquiry on hold: an active enquiry always has a next action. Only its assignee, the enquiry's owner or a founder can change a follow-up."
+      actions={isOpen || (withLog && !isLost) ? (
+        <>
+          {withLog && !isLost ? <LogActivityButton opportunityId={opp.id} {...planNextProps(planNextInput(view))} /> : null}
+          {isOpen ? <NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /> : null}
+        </>
+      ) : undefined}
     >
       {open.length === 0 ? (
         <Muted>{isOpen ? (isActive ? "No open follow-up. Add one so this opportunity is not forgotten." : "No open follow-ups.") : "A closed opportunity has no follow-ups."}</Muted>

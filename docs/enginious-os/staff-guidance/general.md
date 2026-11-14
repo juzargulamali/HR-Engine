@@ -16,6 +16,7 @@ My Day is the home page. It shows what needs you today, according to what you ha
 2. Read Needs me first. Each line opens the screen where you act.
 3. Operations Managers: on the Operations card, press the number under Waiting for a decision to open that list in Operations.
 4. Press an installation or the most urgent issue to open that project or record.
+5. The Task & milestone health card counts your live projects as Blocked, At risk or On track from their tasks and milestones only. Press the i beside its title for the rule.
 
 ## Decisions waiting for you
 - id: approvals

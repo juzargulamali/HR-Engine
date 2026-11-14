@@ -87,5 +87,11 @@ describe("SearchCombobox", () => {
     expect(field.value).toBe("");
     type(field, "nothing like this");
     expect(screen.getByText(/Nothing matches/)).toBeTruthy();
+    // With no match the box stays in the flow, so it cannot cover the "Add …" button a form puts under the field; with matches it floats.
+    const empty = screen.getByRole("listbox");
+    expect(empty.getAttribute("data-empty")).toBe("true");
+    expect(empty.className).not.toMatch(/\babsolute\b/);
+    type(field, "Orbit");
+    expect(screen.getByRole("listbox").className).toMatch(/\babsolute\b/);
   });
 });

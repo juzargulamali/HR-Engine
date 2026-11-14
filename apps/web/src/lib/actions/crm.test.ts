@@ -9,6 +9,9 @@ const rpc = vi.fn();
 let current: number | null = null;
 const from = () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: current === null ? null : { version: current } }) }) }) });
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
+// createOpportunity checks the posted company against the person's own Sales companies before it calls the database. `salesContext` is what that check sees.
+let salesContext: unknown = null;
+vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => salesContext }));
 
 import { friendlyCrmError } from "@/lib/crm/errors";
 import {
@@ -26,7 +29,10 @@ const fd = (o: Record<string, string | string[]>) => {
 };
 const base = { companyId: C, title: "Floor projection", source: "agency_call", agencyOrgId: O, nextTitle: "Call agency", nextDate: "2026-10-20", nextTime: "11:00" };
 
-beforeEach(() => { current = null; rpc.mockReset().mockResolvedValue({ data: "new-id", error: null }); });
+beforeEach(() => {
+  current = null; rpc.mockReset().mockResolvedValue({ data: "new-id", error: null });
+  salesContext = { userId: U, grants: [{ companyId: C, capabilities: [] }], companies: [{ id: C, name: "Fictional Co", settings: { default_quote_currency: "AED" } }], people: [] };
+});
 
 describe("friendlyCrmError", () => {
   it("never shows raw database wording for permission and constraint failures", () => {
@@ -170,6 +176,16 @@ describe("log an update and plan the next step in one step", () => {
     expect((await addActivity({ error: null }, fd({ ...upd, ...next, completeFollowUpId: F }))).error).toBeNull();
     expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
     expect(rpc.mock.calls[0]![1]).toMatchObject({ p_follow_up_id: F, p_outcome: "Spoke to Hana", p_next_title: "Send options", p_next_kind: "proposal" });
+  });
+  it("a note that completes a follow-up keeps the person's Internal note choice: the note is written with it, ticked or not", async () => {
+    expect((await addActivity({ error: null }, fd({ ...upd, kind: "note", internal: "on", completeFollowUpId: F }))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
+    expect(rpc).toHaveBeenLastCalledWith("crm_add_activity", expect.objectContaining({ p_kind: "note", p_body: "Spoke to Hana", p_internal: true }));
+    rpc.mockClear();
+    const { internal: _unticked, ...plain } = { ...upd, kind: "note", internal: undefined, completeFollowUpId: F } as Record<string, string | undefined>;
+    expect((await addActivity({ error: null }, fd(plain as Record<string, string>))).error).toBeNull();
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_complete_follow_up", "crm_add_activity"]);
+    expect(rpc).toHaveBeenLastCalledWith("crm_add_activity", expect.objectContaining({ p_kind: "note", p_internal: false }));
   });
   it("logs nothing when completing the only follow-up is refused for lack of a next step", async () => {
     rpc.mockResolvedValueOnce({ data: null, error: { message: "Add a next action or put the opportunity on hold before completing the last follow-up" } });

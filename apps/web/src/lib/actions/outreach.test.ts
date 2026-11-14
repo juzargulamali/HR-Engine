@@ -88,7 +88,7 @@ describe("logging, status, next action and linking", () => {
     await setOutreachNextAction({ error: null }, fd({ outreachId: OUT, nextAction: "Send quote", nextDue: "2026-11-20" }));
     expect(rpc).toHaveBeenCalledWith("crm_outreach_set_next", { p_outreach: OUT, p_text: "Send quote", p_due: "2026-11-20" });
   });
-  it("Closed needs a reason, and Inquiry raised cannot be chosen by hand", async () => {
+  it("Closed needs a reason, and Enquiry raised cannot be chosen by hand", async () => {
     expect((await setOutreachStatus({ error: null }, fd({ outreachId: OUT, status: "closed" }))).error).toMatch(/why it is closed/);
     expect((await setOutreachStatus({ error: null }, fd({ outreachId: OUT, status: "inquiry_raised" }))).error).toMatch(/Choose a status/);
     expect(rpc).not.toHaveBeenCalled();
@@ -98,8 +98,8 @@ describe("logging, status, next action and linking", () => {
     await setOutreachStatus({ error: null }, fd({ outreachId: OUT, status: "meeting_booked" }));
     expect(rpc).toHaveBeenCalledWith("crm_outreach_set_status", { p_outreach: OUT, p_status: "meeting_booked", p_reason: null });
   });
-  it("links an existing inquiry through the link function only, and shows the database's refusal", async () => {
-    expect((await linkOutreachInquiry({ error: null }, fd({ outreachId: OUT, opportunityId: "" }))).error).toMatch(/Choose the inquiry/);
+  it("links an existing enquiry through the link function only, and shows the database's refusal", async () => {
+    expect((await linkOutreachInquiry({ error: null }, fd({ outreachId: OUT, opportunityId: "" }))).error).toMatch(/Choose the enquiry/);
     expect(await linkOutreachInquiry({ error: null }, fd({ outreachId: OUT, opportunityId: OPP }))).toEqual({ error: null });
     expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_outreach_link_inquiry"]);
     rpc.mockResolvedValue({ data: null, error: { message: "Only the person this outreach is assigned to, or someone with the assign owners right, can change it" } });

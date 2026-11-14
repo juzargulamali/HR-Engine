@@ -11,18 +11,20 @@ const MAX_PER_DAY = 3;
  * script: Previous, Next and Today are addresses. On a wide screen it is a month grid (whole weeks, so a show crossing a month boundary is visible on both sides);
  * on a phone it is the days of the month that have a show, as a list, because seven columns leave no room for a name.
  */
-export function EventsCalendar({ month, today, rows, href, dayHref }: {
+export function EventsCalendar({ month, today, rows, href, dayHref, showHref }: {
   month: string; today: string; rows: readonly EditionRow[];
   /** The address of this calendar for another month (undefined = the current month). */
   href: (month?: string) => string;
   /** The list of editions on one day (for "+2 more"). */
   dayHref: (date: string) => string;
+  /** The page of one edition, with the company the list is counted for. */
+  showHref: (show: CalendarShow) => string;
 }) {
   const weeks = calendarWeeks(month, rows);
   const days = weeks.flat();
   const busy = days.filter((d) => d.inMonth && d.shows.length > 0);
   const show = (s: CalendarShow, className: string) => (
-    <Link href={`/sales/events/${s.eventId}?edition=${s.editionId}`} title={s.name} className={className}>{s.name}</Link>
+    <Link href={showHref(s)} title={s.name} className={className}>{s.name}</Link>
   );
   return (
     <section aria-label={`Calendar, ${monthLabel(month)}`} className="space-y-3">

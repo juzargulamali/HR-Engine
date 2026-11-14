@@ -131,7 +131,7 @@ await step("New enquiry: one field each for Agency, End client and Event; simila
   await empPage.getByRole("link", { name: "Fictional Expo Global · 2026 · Dubai" }).waitFor();
 });
 await step("the event link can be changed and cleared from Edit details, and an enquiry made before it existed (no link) still works", async () => {
-  await go(empPage, `/sales/opportunities/${oppId}`);
+  await go(empPage, `/sales/opportunities/${oppId}?tab=scope`);
   const open = async () => { await empPage.getByRole("button", { name: "Edit details" }).first().click(); const dlg = empPage.getByRole("dialog"); await dlg.waitFor(); await dlg.getByRole("combobox", { name: /^Agency/ }).waitFor(); await empPage.waitForFunction(() => !document.querySelector('[role=dialog] input[role=combobox][disabled]')); return dlg; };
   let dlg = await open();
   eq(await dlg.getByRole("combobox", { name: /^Event/ }).inputValue(), "Fictional Expo Global · 2026 · Dubai", "the current event in the dialog");
@@ -143,8 +143,8 @@ await step("the event link can be changed and cleared from Edit details, and an 
   await dlg.getByRole("button", { name: /^Clear Event/ }).click();
   await dlg.getByRole("button", { name: "Save changes" }).click(); await dlg.waitFor({ state: "detached" });
   eq(sql(`select coalesce(event_edition_id::text, 'none') from crm_opportunities where id = '${oppId}'`), "none", "cleared");
-  if (!/Not linked to an event/.test(await mainText(empPage))) { await go(empPage, `/sales/opportunities/${oppId}`); }
-  if (!/Not linked to an event/.test(await mainText(empPage))) throw new Error("the page does not say the enquiry is not linked");
+  // The page refreshes just after the dialog closes: wait for it on this tab (Edit details is a button here; on Overview it is under More).
+  await empPage.waitForFunction(() => /Not linked to an event/.test(document.querySelector("main").innerText), null, { timeout: 15000 }).catch(() => { throw new Error("the page does not say the enquiry is not linked"); });
   // an enquiry created with NO event still works end to end (the way every older enquiry was made)
   const plain = asDb(5, `select crm_create_opportunity(p_company_id => '${UAE}', p_title => 'Fictional plain enquiry', p_source => 'agency_call', p_next_title => 'Call', p_next_due => now() + interval '2 days', p_client_org_id => '${orbit}')`);
   eq(sql(`select coalesce(event_edition_id::text, 'none') from crm_opportunities where id = '${plain}'`), "none", "an enquiry without an event");
@@ -195,8 +195,7 @@ await step("the linked edition's figures follow each viewer's own permissions: U
   await go(mgrPage, `/sales/events/${event}?edition=${e26}`);
   const mgrDefault = (await figures(mgrPage)).text;
   if (mgrDefault !== "2,1,1,0,1" && mgrDefault !== "2,1,1,1,0") throw new Error(`default scope should be ONE company: ${mgrDefault}`);
-  await mgrPage.locator("#ev-scope").selectOption("all");
-  await mgrPage.getByRole("button", { name: "Apply" }).click();
+  await mgrPage.getByRole("navigation", { name: "Company" }).getByRole("link", { name: "All my companies" }).click();
   await mgrPage.waitForURL(/scope=all/);
   await mgrPage.getByRole("table", { name: "Editions of this event" }).waitFor();
   eq((await figures(mgrPage)).text, "4,2,2,1,1", "figures under All my companies");

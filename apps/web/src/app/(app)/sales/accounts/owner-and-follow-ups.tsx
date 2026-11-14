@@ -18,7 +18,7 @@ export function AssignOwnerButton({ orgId, companyId, ownerId, people }: { orgId
   return (
     <>
       <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>{ownerId ? "Change owner" : "Assign owner"}</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Account owner" description="Who owns this account for this company. This does not change who is following up, or who owns any inquiry.">
+      <Modal open={open} onClose={() => setOpen(false)} title="Account owner" description="Who owns this account for this company. This does not change who is following up, or who owns any enquiry.">
         <ActionForm action={assignAccountOwner} submitLabel="Save owner" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="orgId" value={orgId} />
           <input type="hidden" name="companyId" value={companyId} />
@@ -40,7 +40,7 @@ export function ReassignFollowUpButton({ followUpId, assigneeId, people, title }
   return (
     <>
       <Button type="button" variant="ghost" size="sm" onClick={() => setOpen(true)}>Reassign<span className="sr-only"> follow-up: {title}</span></Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Reassign follow-up" description="Who is following this up. The account owner and the inquiry owner stay as they are.">
+      <Modal open={open} onClose={() => setOpen(false)} title="Reassign follow-up" description="Who is following this up. The account owner and the enquiry owner stay as they are.">
         <ActionForm action={reassignFollowUp} submitLabel="Save" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="followUpId" value={followUpId} />
           <Field label="Follow-up for" htmlFor={`fu-who-${followUpId}`}>
@@ -59,10 +59,10 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on one of this account's open inquiries, for whoever should do it.">
+      <Button type="button" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on one of this account's open inquiries, for whoever should do it. It is recorded here only: nothing is sent to the client.">
         <ActionForm action={createFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
-          <Field label="Inquiry" htmlFor="fu-opp"><Select id="fu-opp" name="id" defaultValue={inquiries[0]?.id}>{inquiries.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}</Select></Field>
+          <Field label="Enquiry" htmlFor="fu-opp"><Select id="fu-opp" name="id" defaultValue={inquiries[0]?.id}>{inquiries.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}</Select></Field>
           <Field label="What to do" htmlFor="fu-title"><Input id="fu-title" name="title" required autoComplete="off" placeholder="e.g. Follow up the exhibition introduction" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Due date" htmlFor="fu-date"><Input id="fu-date" name="date" type="date" required defaultValue={todayInDubai()} /></Field>
@@ -76,7 +76,7 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
 }
 
 /**
- * A dated follow-up on this account when it has no inquiry to hang one on. The person chosen must have Sales access for this company (the list holds only
+ * A dated follow-up on this account when it has no enquiry to hang one on. The person chosen must have Sales access for this company (the list holds only
  * them) and only someone with the assign owners right may choose anyone but themselves (`canAssign`; the database checks it again). The account owner is untouched.
  */
 export function AddAccountFollowUpButton({ orgId, companyId, people, currentUserId, canAssign }: { orgId: string; companyId: string; people: PersonOption[]; currentUserId: string; canAssign: boolean }) {
@@ -84,8 +84,8 @@ export function AddAccountFollowUpButton({ orgId, companyId, people, currentUser
   const choices = canAssign ? people : people.filter((p) => p.id === currentUserId);
   return (
     <>
-      <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
-      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on this account, which has no inquiry yet. It does not change the account owner.">
+      <Button type="button" size="sm" onClick={() => setOpen(true)}><CalendarPlus className="h-4 w-4" aria-hidden /> Add follow-up</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Add follow-up" description="A dated task on this account, which has no open enquiry. It does not change the account owner. It is recorded here only: nothing is sent to the client.">
         <ActionForm action={createAccountFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>
           <input type="hidden" name="orgId" value={orgId} />
           <input type="hidden" name="companyId" value={companyId} />

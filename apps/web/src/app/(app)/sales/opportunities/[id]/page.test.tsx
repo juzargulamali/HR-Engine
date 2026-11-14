@@ -7,23 +7,18 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 vi.mock("next/navigation", () => ({ notFound: () => { throw new Error("notFound"); }, useRouter: () => ({ refresh: vi.fn(), push: vi.fn() }), usePathname: () => "/", useSearchParams: () => new URLSearchParams() }));
 const { mark } = vi.hoisted(() => ({ mark: (name: string) => () => `ACTION:${name}` as unknown as null }));
-vi.mock("@/components/workspace/list-memory", () => ({ BackLink: ({ children }: { children: React.ReactNode }) => <span data-back="enquiries">{children}</span> }));
-vi.mock("@/components/sales/won-handover-prompt", () => ({ WonHandoverPrompt: mark("won-handover-prompt") }));
-vi.mock("@/components/sales/follow-up-dialogs", () => ({ NewFollowUpButton: mark("add-follow-up") }));
+vi.mock("@/components/workspace/list-memory", () => ({ BackLink: ({ children, section, fallback }: { children: React.ReactNode; section: string; fallback: string }) => <span data-back={section} data-fallback={fallback}>{children}</span> }));
+vi.mock("@/components/sales/company-memory", () => ({ SalesCompanyMemory: ({ companyId }: { companyId: string }) => <span data-company-memory={companyId} /> }));
 vi.mock("./activity-panel", () => ({ ActivityPanel: mark("panel-activity") }));
-vi.mock("./assign-owner", () => ({ AssignOwnerButton: mark("assign-owner") }));
 vi.mock("./commercial-panel", () => ({ CommercialPanel: mark("panel-commercial") }));
-vi.mock("./edit-details", () => ({ EditDetailsButton: mark("edit-details") }));
 vi.mock("./files-panel", () => ({ FilesPanel: mark("panel-files") }));
 vi.mock("./overview-panel", () => ({ OverviewPanel: mark("panel-overview") }));
 vi.mock("./proposals-panel", () => ({ ProposalsPanel: mark("panel-proposals") }));
 vi.mock("./quotations-panel", () => ({ QuotationsPanel: mark("panel-quotations") }));
-vi.mock("./reopen-dialog", () => ({ ReopenButton: mark("reopen") }));
 vi.mock("./scope-panel", () => ({ ScopePanel: mark("panel-scope"), toEditable: () => ({}) }));
-vi.mock("./stage-actions", () => ({ HoldButton: mark("hold"), MoveStageButton: mark("move-stage"), ResumeButton: mark("resume") }));
 vi.mock("./enquiry-guide", () => ({ EnquiryGuide: mark("guide") }));
 vi.mock("react", async (orig) => ({ ...(await orig<typeof import("react")>()), Suspense: ({ children }: { children: React.ReactNode }) => children }));
-vi.mock("./detail-tabs", () => ({ DetailTabs: () => "TABS" as unknown as null }));
+vi.mock("./detail-tabs", () => ({ DetailTabs: ({ initial, syncAddress }: { initial: string; syncAddress?: boolean }) => `TABS:${initial}:${syncAddress ? "synced" : "unsynced"}` as unknown as null }));
 
 const opp = { id: "o1", company_id: "c1", owner_id: "u1", reference: "OPP-UAE-2026-0001", title: "Launch", stage: "new", currency: "AED", value: 100, version: 3, closed_at: null, evidence_type: null, hold_review_date: null, stage_before_close: null };
 const ctx = { userId: "u1", grants: [{ companyId: "c1", capabilities: ["founder"] }], companies: [{ id: "c1", name: "Enginious UAE", countryCode: "AE", settings: null }], people: [], personName: () => "Sales Owner", companyName: () => "Enginious UAE" };
@@ -41,7 +36,7 @@ vi.mock("@/lib/crm/data", () => ({
 }));
 
 import OpportunityPage from "./page";
-const render = async () => renderToStaticMarkup(await OpportunityPage({ params: Promise.resolve({ id: "o1" }), searchParams: Promise.resolve({}) }));
+const render = async (search: { tab?: string; from?: string } = {}) => renderToStaticMarkup(await OpportunityPage({ params: Promise.resolve({ id: "o1" }), searchParams: Promise.resolve(search) }));
 beforeEach(() => { outcome = { kind: "ok" }; failedSections = []; followUps = [{ id: "f1", status: "open", title: "Call", due_at: new Date().toISOString(), assigned_to: "u1", kind: "call" }]; });
 
 describe("Enquiry page: a failed read is 'Could not load', distinct from not found, no access and an empty result", () => {
@@ -65,38 +60,37 @@ describe("Enquiry page: a failed read is 'Could not load', distinct from not fou
     expect(html).not.toContain("Could not load");
     expect(html).not.toContain("ACTION:");
   });
-  it("a successful read shows the header actions and the tabs", async () => {
+  it("a successful read shows the title, the company and currency, ONE summary and the tabs; the actions are the summary's (tested in summary.test.tsx)", async () => {
     const html = await render();
-    expect(html).toContain("TABS");
-    expect(html).toContain("Close as won");
-    expect(html).toContain("ACTION:move-stage");
+    expect(html).toContain("TABS:overview:synced");
+    expect(html).toContain("OPP-UAE-2026-0001");
+    expect(html).toContain("Enginious UAE");
+    expect(html).toContain("AED");
+    expect(html.match(/ACTION:guide/g)).toHaveLength(1);
     expect(html).not.toContain("Could not load");
+    // The old row of equal buttons and the repeated status alerts are gone from the page itself.
+    for (const gone of ["Opportunity actions", "Close as won", "Put on hold"]) expect(html).not.toContain(gone);
   });
-  it("the next action, the stage guidance and the latest activity are the guide's (tested in enquiry-guide.test.tsx): the page always renders it for a read enquiry", async () => {
+  it("the summary is always rendered for a read enquiry, whatever part of it failed", async () => {
     followUps = [];
     expect(await render()).toContain("ACTION:guide");
-    failedSections = ["followUps"];
-    const html = await render();
-    expect(html).toContain("ACTION:guide");
-    expect(html).not.toContain("None scheduled");
+    failedSections = ["followUps", "proposals", "zoho", "handover"];
+    expect(await render()).toContain("ACTION:guide");
   });
-  it("failed proposals or Zoho references: no stage move is offered (its requirement hints would be wrong) and it says why; hold and close stay", async () => {
-    for (const s of ["proposals", "zoho"]) {
-      failedSections = [s];
-      const html = await render();
-      expect(html, s).toContain("Stage moves are not offered because the proposals or Zoho references could not be loaded");
-      expect(html, s).not.toContain("ACTION:move-stage");
-      expect(html, s).toContain("ACTION:hold");
-    }
+  it("opens on the tab the address names, and the tabs keep the address in step", async () => {
+    expect(await render({ tab: "commercial" })).toContain("TABS:commercial:synced");
   });
-  it("a failed handover read: Reopen is not offered on a Won enquiry and it says why", async () => {
-    Object.assign(opp, { stage: "won", closed_at: "2026-11-02T00:00:00Z", evidence_type: "purchase_order" });
-    try {
-      expect(await render()).toContain("ACTION:reopen");
-      failedSections = ["handover"];
-      const html = await render();
-      expect(html).not.toContain("ACTION:reopen");
-      expect(html).toContain("Reopen is not offered because the handover record could not be loaded");
-    } finally { Object.assign(opp, { stage: "new", closed_at: null, evidence_type: null }); }
+  it("remembers the enquiry's company for the next Sales page", async () => {
+    expect(await render()).toContain('data-company-memory="c1"');
+  });
+  it("Back returns to the list the person came from: Follow-ups with from=follow-ups, otherwise Enquiries (also on a failed read)", async () => {
+    expect(await render()).toContain('data-back="enquiries" data-fallback="/sales/opportunities"');
+    const fromFollowUps = await render({ from: "follow-ups" });
+    expect(fromFollowUps).toContain('data-back="follow-ups" data-fallback="/sales/follow-ups"');
+    expect(fromFollowUps).toContain(">Follow-ups<");
+    // Any other value is ignored: only the two known lists are ever used.
+    expect(await render({ from: "https://elsewhere.example" })).toContain('data-back="enquiries"');
+    outcome = { kind: "error" };
+    expect(await render({ from: "follow-ups" })).toContain('data-back="follow-ups"');
   });
 });

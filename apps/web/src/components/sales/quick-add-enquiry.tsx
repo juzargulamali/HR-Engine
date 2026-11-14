@@ -1,4 +1,5 @@
 import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
+import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
@@ -10,10 +11,15 @@ import { QuickAddEnquiryForm } from "./quick-add-enquiry-form";
  * The one "Add enquiry" action of the Sales workspace (Follow-ups and Enquiries). Server side it decides what the person is allowed
  * to see in the form (their companies, whether they may give the enquiry to a colleague); the form posts to the same createOpportunity
  * action as the full page, so every rule and the duplicate warning are the same. Renders nothing for someone with no Sales company.
+ *
+ * The form starts in the active Sales company: `companyId` when the page gives its own (the company it is showing), otherwise the company used last in Sales,
+ * then the person's own employing company (lib/crm/active-company.ts). With several companies and no reliable default it starts with none and asks; it never
+ * starts on the first company by name. A company in `companyId` the person has no Sales access to is ignored.
  */
-export async function QuickAddEnquiry() {
+export async function QuickAddEnquiry({ companyId }: { companyId?: string | null } = {}) {
   const ctx = await getCrmContext();
   if (!ctx || ctx.companies.length === 0) return null;
+  const active = await pickSalesCompany(ctx, companyId ?? null);
   let organisations: Awaited<ReturnType<typeof loadOrganisations>>["organisations"] = [];
   try {
     organisations = (await loadOrganisations()).organisations;
@@ -45,6 +51,7 @@ export async function QuickAddEnquiry() {
       currentUserId={ctx.userId}
       currentUserName={ctx.fullName ?? "Me"}
       today={todayInDubai()}
+      activeCompany={{ id: active.company?.id ?? null, from: active.from }}
     />
   );
 }

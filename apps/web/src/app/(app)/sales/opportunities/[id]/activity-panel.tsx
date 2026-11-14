@@ -24,14 +24,14 @@ export function ActivityPanel({ view, showForm = true }: { view: OppView; showFo
       {isLost ? (
         <Muted>A lost opportunity can no longer be updated until it is reopened. The history below is kept.</Muted>
       ) : !showForm ? null : next === null ? (
-        <Panel title="Log an activity"><LoadError what="the follow-ups" retryHref={retry} note="An activity cannot be logged here until they load, because logging one can plan the next step." /></Panel>
+        <Panel title="Log activity"><LoadError what="the follow-ups" retryHref={retry} note="An activity cannot be logged here until they load, because logging one can plan the next step." /></Panel>
       ) : (
-        <Panel title="Log an activity" description="Anyone with Sales access can add to the timeline. Log a call and plan the next step here, in one go.">
+        <Panel title="Log activity" description="What happened and the next step, in one go." hint="Anyone with Sales access can add to the timeline. If this was one of the planned follow-ups, choose it and your update becomes its outcome. Choose Client response only when the client actually replied.">
           <AddActivityForm opportunityId={opp.id} {...next} />
         </Panel>
       )}
       <ClosureHistory view={view} />
-      <Panel title="Timeline" id="timeline" description="Everything recorded on this enquiry, newest first: what people wrote, and what the app recorded (stage changes, follow-ups, estimates and proposals recorded as sent, handover).">
+      <Panel title="Timeline" id="timeline" hint="Everything recorded on this enquiry, newest first: what people wrote, and what the app recorded (stage changes, follow-ups, estimates and proposals recorded as sent, handover). A completed follow-up is one entry, with its outcome. Filter to People's updates to follow the conversation, or System for the changes the app recorded.">
         {timelineFailed ? (
           <LoadError what="the timeline" retryHref={retry} note="It is not empty: the activities or the history could not be read." />
         ) : (

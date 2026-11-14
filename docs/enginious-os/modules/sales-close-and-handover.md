@@ -100,3 +100,46 @@ Project Manager assignment, acceptance and the Projects screens are the Projects
 
 1. **Fixed (migration `20261222000100`, applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)):** the Won "date on the document" was validated as not-future only in the form; `crm_mark_won` now refuses it too (section 1).
 2. `proj_submit_handover` treats a repeat on `submitted`, `pm_assigned` or `accepted` as success without change; `proj_accept_handover` on an already accepted handover returns the same project to the assigned Project Manager. These are the only idempotent steps of the handover flow.
+
+## 6. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+
+Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+
+Where a row of section 2 or 2.2 differs from this section, this section wins. No database function changed: the facts below about what a handover carries were read in the SQL and are now said on the page.
+
+### 6.1 Reaching Close and Handover from the enquiry
+
+Close as won and Close as lost are under the summary's **More** menu, with what each needs ("Needs a purchase order or an authorised email, and a value"; "Needs a reason"). **Handover package** is under More for a won enquiry, and the handover step is the summary's main button until the project exists; then the main button is **Open project <reference>** (`summary-actions.tsx`, `primary-action.ts`). The Close page and its rules are unchanged.
+
+### 6.2 "Ready for handover" (`handover/readiness.ts`, `handover/handover-readiness.tsx`, `project-handover.tsx`, `handover/page.tsx`)
+
+A block on the project handover panel. Its heading is **Ready for handover** or **Not ready for handover** while the brief is being prepared, "Submitted: what the project will receive" (or "Submitted, but the scope of work is now empty") once submitted, and **What the project received** once accepted.
+
+| List | Content | Source |
+|---|---|---|
+| **What transfers to the project** | Project name, Scope of work, Exclusions, Client, Location, Installation date, Show dates, Site time zone, Technologies and quantities, Risks and, when the enquiry is linked to one, the Event edition ("copied as it stands when you submit"), each with the value it will carry or the words for missing | `proj_save_handover`, `proj_accept_handover` (`20261120000200_proj_projects_handover_functions.sql`); the edition snapshot (`20270102000100_ops_phase2b.sql` section 4) |
+| **Needs attention, before or after** | **Blocks submitting:** the scope of work is empty (`proj_submit_handover` refuses a blank scope). **Check:** no installation or show date; no location; no technologies; and the enquiry's own open points (they do not block). **Not copied** (always listed): contacts; the notes for the Project Manager; the value, payment terms, purchase order or authorised email, proposals, estimates and files; and that technologies become Project Plan rows only when the Project Manager brings them in | `handoverReadiness` |
+
+**Findings from the SQL, now stated on the page:**
+
+1. **The notes do NOT transfer to the project.** They stay on the brief; the Project Manager reads them under Projects, Handovers. The insert of `proj_accept_handover` copies name, Project Manager and dates to the project and client, location, site time zone, installation date, show dates, scope, exclusions, technologies and risks to its details; `notes` is not in it.
+2. **The event edition is copied as a structured snapshot**: onto the brief while it is prepared and again when it is submitted, and from the brief onto the project when it is created (`20270102000100_ops_phase2b.sql`).
+3. **Contacts are not copied.** No function copies contacts, proposals, estimates, files, the value, payment terms or the purchase order. When the contacts could not be read the line says so and never "no contacts".
+
+Whether the project should receive the contacts and the notes is open owner decision 8 (`../05-data-tests-and-release-ledger.md` section D); it needs a database change.
+
+### 6.3 Other changes on the handover page
+
+| Point | Behaviour | Source |
+|---|---|---|
+| Who is told on submit | "Founders, Operations Managers and anyone who can assign Project Managers in this company get a notification in the app, and the handover appears under Projects, Handovers. One of them names the Project Manager, who accepts it: that creates the project. Nothing is sent to the client." | `SUBMIT_TELLS` (`readiness.ts`); `proj_submit_handover` and the Operations trigger of `20270102000100` |
+| Who is told on resubmit | "The Project Manager gets a notification in the app that you have answered, and can then accept it. Nothing is sent to the client." | `RESUBMIT_TELLS` |
+| Withdraw, what it does | "Withdrawing takes this handover off the Projects list, so nobody can accept it and no project is created from it. Nobody is notified: tell the Project Manager yourself if one was named. The reason is added to the brief's notes, and you can prepare a new handover for this enquiry afterwards." | `WITHDRAW_CONSEQUENCE`; `proj_withdraw_handover` (no notify call; the reason is appended to `notes`) |
+| Withdraw, when it is offered | Only while Sales can still edit the brief: draft, submitted or clarification requested (`editable` in `project-handover.tsx`). The database also allows withdrawing while the Project Manager holds it (`pm_assigned`; it refuses only an accepted handover), but the page does not offer it then (open owner decision 10) | `project-handover.tsx`; `proj_withdraw_handover` |
+| A submitted brief | The brief is shown as the Project Manager sees it; the form is behind **Edit the submitted brief** with "Changes you save are seen by whoever picks it up; nobody is notified again." | `project-handover.tsx` |
+| Accepted | **Open <project reference>** is the primary button with "One project exists for this enquiry. Submitting or accepting again opens this same project, never a second one."; the brief is headed "The accepted brief (kept as agreed, read-only)" | same |
+| The page text | "a founder or Operations Manager assigns the Project Manager" (it said "a founder") | `handover/page.tsx` |
+| The Sales record below the brief | Headed **On the enquiry now (Sales only)** with an ⓘ: the Project Manager does not see it, and changing the enquiry does not change a saved brief. With Projects & Tasks installed the enquiry's open points are listed once, in Needs attention | `handover/page.tsx` |
+| Two saves at once | A second first save is refused by the database's one-open-handover rule and the page says "A handover for this enquiry was saved a moment ago, so a second one was not created. Reload the page to see it and carry on from there." | `saveHandover` wording (`lib/actions/projectsCore.ts`; index `uq_proj_handovers_open`) |
+
+Tests: `handover/readiness.test.ts`, `project-handover.test.tsx`, `project-handover-forms.test.tsx`, `handover/page.test.tsx`, `lib/actions/projectsCore.handover.test.ts`.

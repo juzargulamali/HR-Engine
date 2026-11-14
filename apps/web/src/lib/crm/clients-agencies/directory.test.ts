@@ -44,7 +44,7 @@ const rows = buildDirectoryRows({
 const names = (f: Partial<typeof EMPTY_FILTERS>) => filterDirectory(rows, { ...EMPTY_FILTERS, ...f }).map((r) => r.org.name);
 
 describe("directory rows", () => {
-  it("shows only the selected company's profile, owner and inquiry counts", () => {
+  it("shows only the selected company's profile, owner and enquiry counts", () => {
     const a = rows.find((r) => r.org.id === "o1")!;
     expect(a.profile?.owner_id).toBe(SARA);
     expect(a.stats?.total).toBe(1);

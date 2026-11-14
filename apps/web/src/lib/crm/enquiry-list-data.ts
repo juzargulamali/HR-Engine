@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/server";
 import type { CrmFollowUpRow, CrmOpportunityRow } from "@/types/crm";
 import type { CrmContext } from "./context";
 import { loadOpportunities, num } from "./data";
-import { listFromItems, type EnquiryListQuery, type EnquiryNeed } from "./enquiry-list";
+import { listFromItems, type EnquiryListQuery, type EnquiryNeed, type EnquiryScopeCounts, type StageEvidence } from "./enquiry-list";
 
 /** The columns of an enquiry the list and the board show or act on. Nothing else is read for them (no brief, scope, notes or commercial text). */
 export type ListOpp = Pick<CrmOpportunityRow,
@@ -83,4 +83,53 @@ export async function loadEnquiryList(ctx: CrmContext, query: EnquiryListQuery):
       availability: availabilityDisplay({ availabilityState: o.availability_state, availabilityCovers: o.availability_covers, installStart: o.install_start, eventStart: o.event_start, eventEnd: o.event_end, technologies: o.technologies ?? [] }),
     })),
   };
+}
+
+/**
+ * For the line above the list ("5 more are not shown: 2 won and 1 lost in this company, 2 in your other companies"): every enquiry of ONE company the person may
+ * see, with how many are won and lost. The same function as the list, asked for counts only (one row), as the signed-in person. Returns null when it cannot be
+ * read: the line then says what the list's own two counts prove and no more. It never makes the page fail.
+ */
+export async function loadEnquiryScope(ctx: CrmContext, company: string): Promise<EnquiryScopeCounts | null> {
+  try {
+    const list = await loadEnquiryList(ctx, { q: "", company, owner: "", stage: "", status: "all", need: "", sort: { key: "due", dir: "asc" }, limit: 1, offset: 0 });
+    const count = (stage: string) => list.stages.find((s) => s.stage === stage)?.count ?? 0;
+    return { inCompany: list.matched, won: count("won"), lost: count("lost") };
+  } catch (e) {
+    console.error("[crm] enquiry scope counts failed", e);
+    return null;
+  }
+}
+
+/**
+ * For the board's check before a move: which of these enquiries have a proposal recorded as sent, an estimate recorded as sent and a Zoho Books quote reference
+ * (the three facts crm_move_stage insists on). Read as the signed-in person, in small batches of ids. Returns null when any read fails: the board then assumes
+ * nothing, sends the move and shows the database's own answer.
+ */
+export async function loadStageEvidence(ids: readonly string[]): Promise<Record<string, StageEvidence> | null> {
+  const out: Record<string, StageEvidence> = {};
+  for (const id of ids) out[id] = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
+  if (ids.length === 0) return out;
+  try {
+    const supabase = (await createClient()) as unknown as SupabaseClient;
+    for (let at = 0; at < ids.length; at += 80) {
+      const chunk = ids.slice(at, at + 80);
+      const [proposals, zoho, sends] = await Promise.all([
+        supabase.from("crm_proposals").select("opportunity_id").in("opportunity_id", chunk).in("status", ["sent", "accepted"]).limit(2000),
+        supabase.from("crm_zoho_references").select("opportunity_id, quote_ref").in("opportunity_id", chunk).limit(2000),
+        supabase.from("crm_estimate_sends").select("opportunity_id").in("opportunity_id", chunk).limit(2000),
+      ]);
+      // A database without the sent-estimates table (its migration is not applied) is a known state: there are no sent estimates, as on the enquiry's own page.
+      const sendsMissing = !!sends.error && /42P01|PGRST205|does not exist|could not find the table/i.test(`${(sends.error as { code?: string }).code ?? ""} ${sends.error.message}`);
+      const failed = proposals.error ?? zoho.error ?? (sendsMissing ? null : sends.error);
+      if (failed) throw new Error(failed.message);
+      for (const r of (proposals.data ?? []) as { opportunity_id: string }[]) { const e = out[r.opportunity_id]; if (e) e.hasSentProposal = true; }
+      for (const r of (zoho.data ?? []) as { opportunity_id: string; quote_ref: string | null }[]) { const e = out[r.opportunity_id]; if (e && (r.quote_ref ?? "").trim() !== "") e.hasQuoteRef = true; }
+      for (const r of (sendsMissing ? [] : (sends.data ?? [])) as { opportunity_id: string }[]) { const e = out[r.opportunity_id]; if (e) e.hasSentEstimate = true; }
+    }
+    return out;
+  } catch (e) {
+    console.error("[crm] board stage evidence failed", e);
+    return null;
+  }
 }

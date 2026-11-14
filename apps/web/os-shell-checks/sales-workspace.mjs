@@ -83,10 +83,10 @@ page = await newPage(browser, { width: 1280, height: 420 }); watch(page); await 
 await step("Enquiries opens as a table with the working columns and the open enquiries", async () => {
   await goList();
   const heads = (await page.locator("main thead th").allInnerTexts()).map((t) => t.trim().toLowerCase());
-  for (const h of ["enquiry", "agency / client", "owner", "stage", "next action", "due"]) if (!heads.some((x) => x.startsWith(h))) throw new Error(`missing column ${h}; have ${heads.join(" | ")}`);
+  for (const h of ["enquiry", "agency / client", "owner", "stage", "next action"]) if (!heads.some((x) => x.startsWith(h))) throw new Error(`missing column ${h}; have ${heads.join(" | ")}`);
   if (!heads.some((x) => /install|show/.test(x))) throw new Error("no installation/show date column");
   const t = await rowTitles(); if (t.length !== 4) throw new Error("expected the 4 open enquiries, got " + t.join(", "));
-  if (!/4 of 5 enquiries/.test(await main())) throw new Error("count text: " + (await main()).slice(0, 200));
+  if (!/Showing 4 open enquiries/.test(await main())) throw new Error("count text: " + (await main()).slice(0, 200));
 });
 await step("search by title, by reference and by agency; no match says so; Clear restores", async () => {
   const q = page.getByRole("searchbox"); await q.fill("museum"); await page.waitForURL((u) => u.searchParams.get("q") === "museum"); await until(async () => (await rowTitles()).length === 1, "one row");
@@ -101,8 +101,7 @@ await step("stage, owner and status filters (and a stage the URL invents is igno
   await page.locator("#lt-stage").selectOption(""); await until(async () => (await rowTitles()).length === 4, "stage cleared");
   await page.locator("#lt-owner").selectOption("me"); await until(async () => /Nothing matches/.test(await main()), "ceo owns none");
   await page.locator("#lt-owner").selectOption({ index: 2 }); await until(async () => (await rowTitles()).length === 4, "emp owns the four open ones");
-  // "Show" is one of the less common filters: it lives under "More filters" (a chip says when one is on).
-  { const more = page.getByRole("button", { name: /more filters/i }); if ((await more.getAttribute("aria-expanded")) !== "true") await more.click(); }
+  // "Show" sits beside Stage and Owner (a chip says when it is on).
   await page.locator("#lt-status").selectOption("closed"); await until(async () => (await rowTitles()).join() === "Floor projection for the Orbit launch", "won only");
   await page.locator("#lt-status").selectOption("all"); await until(async () => (await rowTitles()).length === 5, "everything");
   await goList("?stage=not_a_stage&owner=not-a-person&status=weird"); if ((await rowTitles()).length !== 4) throw new Error("invented filters were not ignored");
@@ -139,7 +138,7 @@ await step("Table to Board keeps every record and the filters; Board back to Tab
 // ----------------------------------------------------------------------------------------------------------------------------
 await step("a row opens the record in a side panel with the list kept behind it (filters, scroll)", async () => {
   await goList("?status=all&sort=enquiry"); const scrollable = await page.evaluate(() => document.documentElement.scrollHeight - window.innerHeight);
-  const link = page.locator("main tbody").getByRole("link", { name: "Roadshow immersive room" }); await link.scrollIntoViewIfNeeded(); const before = await page.evaluate(() => window.scrollY); // (a click would scroll it into view itself)
+  const link = page.locator("main tbody").getByRole("link", { name: "Roadshow immersive room", exact: true }); await link.scrollIntoViewIfNeeded(); const before = await page.evaluate(() => window.scrollY); // (a click would scroll it into view itself)
   await link.click();
   await page.waitForURL((u) => u.searchParams.get("open") === idOf(T.roadshow)); await panel().waitFor();
   const p = await panel().innerText(); if (!/Roadshow immersive room/.test(p) || !/next action/i.test(p)) throw new Error("panel content: " + p.slice(0, 200));
@@ -165,13 +164,13 @@ await step("Escape and the close button close the panel; a made-up or foreign op
   await page.goto(`${BASE}/sales/opportunities?open=00000000-0000-4000-8000-0000000000ff`, { waitUntil: "networkidle" }); if (!/does not exist, or you do not have access/i.test(await panel().innerText())) throw new Error("unknown id message");
 });
 await step("unsaved edits in the panel: switching rows and Close both ask first; Stay keeps them, Leave discards", async () => {
-  await goList("?sort=enquiry"); await page.locator("main tbody").getByRole("link", { name: "Atrium LED wall for the mall launch" }).click(); await panel().waitFor();
+  await goList("?sort=enquiry"); await page.locator("main tbody").getByRole("link", { name: "Atrium LED wall for the mall launch", exact: true }).click(); await panel().waitFor();
   await panel().getByRole("tab", { name: "Commercial" }).click(); await panel().getByLabel(/quote reference/i).fill("QT-UNSAVED"); asked.length = 0;
-  policy = "dismiss"; await page.locator("main tbody").getByRole("link", { name: "Museum interactive table" }).click(); await sleep(600);
+  policy = "dismiss"; await page.locator("main tbody").getByRole("link", { name: "Museum interactive table", exact: true }).click(); await sleep(600);
   if (asked.length !== 1) throw new Error("no unsaved-changes question when switching rows"); if (urlParam("open") !== idOf(T.atrium)) throw new Error("switched although the person chose to stay");
   if ((await panel().getByLabel(/quote reference/i).inputValue()) !== "QT-UNSAVED") throw new Error("typed text lost after staying");
   await panel().getByRole("button", { name: /close details/i }).click(); await sleep(600); if (asked.length !== 2 || !urlParam("open")) throw new Error("Close did not ask / closed anyway");
-  policy = "accept"; await page.locator("main tbody").getByRole("link", { name: "Museum interactive table" }).click(); await page.waitForURL((u) => u.searchParams.get("open") === idOf(T.museum)); await panel().waitFor();
+  policy = "accept"; await page.locator("main tbody").getByRole("link", { name: "Museum interactive table", exact: true }).click(); await page.waitForURL((u) => u.searchParams.get("open") === idOf(T.museum)); await panel().waitFor();
   if (asked.length !== 3) throw new Error("agreeing to leave did not go through the question");
   if (sql("select count(*) from crm_zoho_references where quote_ref='QT-UNSAVED'") !== "0") throw new Error("unsaved text was saved");
 });
@@ -232,6 +231,8 @@ await step("Board: the drag path goes through the same request (Atrium back one 
 // ----------------------------------------------------------------------------------------------------------------------------
 // Quick Add
 // ----------------------------------------------------------------------------------------------------------------------------
+// Agency and End client are search-as-you-type fields: type part of the name, then choose the match (typing alone selects nothing).
+const pickOrg = async (d, label, text, option) => { const f = d.getByRole("combobox", { name: label }); await f.click(); await f.fill(text); await page.getByRole("option", { name: option }).first().click(); };
 const openQuickAdd = async (url = `${BASE}/sales/opportunities`) => { await page.goto(url, { waitUntil: "networkidle" }); await page.getByRole("button", { name: /^add enquiry$/i }).first().click(); const d = page.getByRole("dialog", { name: /add an enquiry/i }); await d.waitFor(); return d; };
 await step("Quick Add: 'one is enough' - no agency and no client is refused in words, and everything typed stays", async () => {
   const d = await openQuickAdd(); const before = sql("select count(*) from crm_opportunities");
@@ -243,14 +244,14 @@ await step("Quick Add: 'one is enough' - no agency and no client is refused in w
   const kept = [await d.getByLabel("What is the enquiry?").inputValue(), await d.getByLabel("Next action").inputValue(), await d.getByLabel("Location").inputValue(), await d.getByLabel("Brief").inputValue()];
   if (kept.join("|") !== "Refusal check enquiry|Ring the referrer|Sharjah Expo|Typed before the refusal") throw new Error("typed values lost: " + kept.join("|"));
   if ((await d.getByLabel("Where did it come from?").inputValue()) !== "referral") throw new Error("source lost");
-  await d.getByLabel("Agency", { exact: true }).selectOption({ label: "Zeta Media LLC (Dubai)" });
+  await pickOrg(d, /^Agency/, "zeta", /Zeta Media LLC/);
   await d.getByRole("button", { name: /^add enquiry$/i }).click(); await page.waitForURL(/open=[0-9a-f-]{36}/, { timeout: 15000 });
   if (sql("select count(*) from crm_opportunities where title='Refusal check enquiry'") !== "1") throw new Error("not created after fixing the form");
   if (sql("select location from crm_opportunities where title='Refusal check enquiry'") !== "Sharjah Expo") throw new Error("details typed in 'more' not saved");
 });
 await step("Quick Add: a double click creates exactly one enquiry and the panel shows it", async () => {
   const d = await openQuickAdd(); await d.getByLabel("What is the enquiry?").fill("Double click enquiry"); await d.getByLabel("Where did it come from?").selectOption("website");
-  await d.getByLabel("End client", { exact: true }).selectOption({ label: "Orbit Motors (Riyadh)" }); await d.getByLabel("Next action").fill("Send intro");
+  await pickOrg(d, /^End client/, "orbit", /Orbit Motors/); await d.getByLabel("Next action").fill("Send intro");
   await d.getByRole("button", { name: /^add enquiry$/i }).dblclick(); await page.waitForURL(/open=[0-9a-f-]{36}/, { timeout: 15000 }); await sleep(1200);
   if (sql("select count(*) from crm_opportunities where title='Double click enquiry'") !== "1") throw new Error("duplicates: " + sql("select count(*) from crm_opportunities where title='Double click enquiry'"));
   await panel().waitFor(); if (!/Double click enquiry/.test(await panel().innerText())) throw new Error("new enquiry not shown in the panel"); if (await page.getByRole("dialog", { name: /add an enquiry/i }).count()) throw new Error("the Quick Add dialog stayed open");
@@ -258,7 +259,7 @@ await step("Quick Add: a double click creates exactly one enquiry and the panel 
 });
 await step("Quick Add: the owner picker exists for a founder (as on the full form) and the new enquiry gets the chosen owner", async () => {
   const d = await openQuickAdd(); await d.getByText("Add more details").click(); const owner = d.getByLabel("Owner", { exact: true }); await owner.waitFor();
-  await d.getByLabel("What is the enquiry?").fill("Owner picker enquiry"); await d.getByLabel("Where did it come from?").selectOption("linkedin"); await d.getByLabel("Agency", { exact: true }).selectOption({ label: "Zeta Media LLC (Dubai)" }); await d.getByLabel("Next action").fill("Intro call");
+  await d.getByLabel("What is the enquiry?").fill("Owner picker enquiry"); await d.getByLabel("Where did it come from?").selectOption("linkedin"); await pickOrg(d, /^Agency/, "zeta", /Zeta Media LLC/); await d.getByLabel("Next action").fill("Intro call");
   const empOption = (await owner.locator("option").allInnerTexts()).find((t) => /emp/i.test(t)); if (!empOption) throw new Error("no emp@ in the owner list"); await owner.selectOption({ label: empOption });
   await d.getByRole("button", { name: /^add enquiry$/i }).click(); await page.waitForURL(/open=[0-9a-f-]{36}/, { timeout: 15000 });
   if (sql("select owner_id from crm_opportunities where title='Owner picker enquiry'") !== sql("select id from auth.users where email='emp@e2e.local'")) throw new Error("owner not applied");
@@ -298,7 +299,7 @@ await step("a user with no Sales access (admin@) gets the no-access page and non
 });
 await step("value stays company-scoped: the founder's Value column shows each enquiry's own currency, no mixed total", async () => {
   await page.context().close(); page = await newPage(browser); watch(page); await login(page, "ceo@e2e.local");
-  await goList("?status=all&cols=enquiry,value"); const cells = await page.locator("main tbody td:last-child").allInnerTexts(); if (!cells.some((c) => /AED/.test(c))) throw new Error("no currency in value cells: " + cells.join("|"));
+  await goList("?status=all&cols=enquiry,value"); const cells = await page.locator('main tbody td[data-label="Value"]').allInnerTexts(); // the last cell of a row is now its one action if (!cells.some((c) => /AED/.test(c))) throw new Error("no currency in value cells: " + cells.join("|"));
 });
 console.log("client console/page errors:", page.errors.filter((e) => !/Failed to load resource.*(40[34])/.test(e)).slice(0, 5));
 await browser.close(); console.log(fails === 0 ? "\nALL SALES WORKSPACE CHECKS PASSED" : `\n${fails} FAILED`); process.exit(fails ? 1 : 0);

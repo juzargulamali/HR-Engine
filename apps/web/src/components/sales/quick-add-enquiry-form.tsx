@@ -1,18 +1,27 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { CRM_SOURCES, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
-import { Alert } from "@/components/ui/alert";
+import type { ActionState } from "@/lib/actions/companies";
 import { formatDate } from "@/components/sales/format";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { MoreDetails, QuickAdd } from "@/components/workspace/quick-add";
+import { withParams } from "@/components/workspace/url-state";
 import { ActionForm, Field } from "./action-form";
+import { focusComboQuietly } from "./combobox";
 import { AddOrganisationDialog, type CreatedOrganisation } from "@/app/(app)/sales/clients/entity-dialogs";
-import { DuplicateWarning, EventEditionPicker, OrganisationPicker, type EnquiryCompany, type EnquiryOrganisation } from "@/app/(app)/sales/new/new-enquiry-form";
+import {
+  CompanyField, CurrencyField, DuplicateWarning, EventEditionPicker, NoSettingsAlert, OrganisationPicker, SavingToLine, type EnquiryCompany, type EnquiryOrganisation,
+} from "@/app/(app)/sales/new/new-enquiry-form";
+import {
+  CARRY_KEY, ADDRESS_TEXT_MAX, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, DUE_TIME_LABEL, ENQUIRY_HELP, ENQUIRY_LABELS, enquiryBlockedReason, fullFormHandOff, resolveCurrency, startingCompanyId,
+} from "@/app/(app)/sales/new/enquiry-form-shared";
+import type { ActiveCompanySource } from "@/lib/crm/active-company";
 import type { EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
 import { EventEditionDialog, useCreatedEditions } from "@/components/sales/event-edition-dialog";
@@ -22,9 +31,31 @@ import { parseTechnologyRows, type TechnologyRow } from "@/app/(app)/sales/new/t
 let techKey = 1;
 const emptyTech = (): TechnologyRow => ({ key: techKey++, name: "", qty: "1" });
 
-/** The short form: what the enquiry is, who it is from, where it came from and what happens next. Everything else is behind "Add more details". */
-function QuickForm({ companies, organisations: serverOrganisations, editions: serverEditions = [], events: serverEvents = [], editionsFailed = false, currentUserId, currentUserName, today, close }: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; events?: EventChoice[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string; close: () => void }) {
-  const [companyId, setCompanyId] = useState((companies.find((c) => c.hasSettings) ?? companies[0])?.id ?? "");
+export interface QuickAddEnquiryProps {
+  companies: EnquiryCompany[];
+  organisations: EnquiryOrganisation[];
+  editions?: EditionOption[];
+  events?: EventChoice[];
+  editionsFailed?: boolean;
+  currentUserId: string;
+  currentUserName: string;
+  today: string;
+  /** The active Sales company and why it is the one. `from: "choose"` = no reliable default: the form starts with no company and asks. */
+  activeCompany?: { id: string | null; from: ActiveCompanySource };
+}
+
+/**
+ * The short form: which company, what the enquiry is, who it is from, where it came from and what happens next. Everything else is behind "Add more details",
+ * and "Open the full form" carries over whatever has been typed. It posts to the same createOpportunity action as the full form, with the same labels, defaults
+ * and checks (app/(app)/sales/new/enquiry-form-shared.ts).
+ */
+function QuickForm({ companies, organisations: serverOrganisations, editions: serverEditions = [], events: serverEvents = [], editionsFailed = false, currentUserId, currentUserName, today, activeCompany, close }: QuickAddEnquiryProps & { close: () => void }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const sp = useSearchParams();
+  // The list this was opened from, with its filters: a save comes back here with the new enquiry open beside it, and the full form's Cancel returns here.
+  const here = withParams(pathname, sp, { add: null, open: null });
+  const [companyId, setCompanyId] = useState(() => startingCompanyId(companies, activeCompany));
   const company = companies.find((c) => c.id === companyId) ?? null;
   const [agencyId, setAgencyId] = useState("");
   const [clientId, setClientId] = useState("");
@@ -39,6 +70,9 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   const [location, setLocation] = useState("");
   const [techRows, setTechRows] = useState<TechnologyRow[]>(() => [emptyTech()]);
   const [owner, setOwner] = useState(currentUserId);
+  // null = the currency has not been touched: it follows the chosen company's default. A code the person typed stays when the company changes.
+  const [currencyChoice, setCurrencyChoice] = useState<string | null>(null);
+  const currency = resolveCurrency(currencyChoice, company?.currency);
   const [addedOrgs, setAddedOrgs] = useState<EnquiryOrganisation[]>([]);
   const [orgDialog, setOrgDialog] = useState<null | "agency" | "client">(null);
 
@@ -70,112 +104,151 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   }, [hasSignal, agencyId, clientId, title, eventStart, installStart, location, tech.items]);
   const shown = (hasSignal ? matches : []).filter((m) => !dismissed.has(m.candidate.id));
 
+  // The same checks, in the same words, as the full form, answered before anything is sent. The server and the database check again.
+  const save = async (prev: ActionState, formData: FormData): Promise<ActionState> => {
+    const blockedBy = enquiryBlockedReason({ company, agencyId, clientId, techError: tech.error });
+    return blockedBy ? { error: blockedBy } : createOpportunity(prev, formData);
+  };
+
+  // "Open the full form" keeps everything typed here. Short values travel in the address; a long brief and the technologies wait in this browser tab.
+  const openFullForm = (e: React.MouseEvent<HTMLButtonElement>) => {
+    const form = e.currentTarget.form;
+    if (!form) return;
+    const data = new FormData(form);
+    const get = (k: string) => String(data.get(k) ?? "");
+    const token = Math.random().toString(36).slice(2, 12).padEnd(6, "0");
+    const handOff = fullFormHandOff({
+      companyId, title: get("title"), agencyOrgId: agencyId, clientOrgId: clientId, eventEditionId: editionId, source: get("source"), nextTitle: get("nextTitle"), nextDate: get("nextDate"),
+      nextTime: get("nextTime"), nextKind: get("nextKind"), brief: get("brief"), value: get("value"), currency: currency.source === "chosen" ? currency.value : "", ownerId: get("ownerId"),
+      location, eventStart, eventEnd, installStart, budgetNote: get("budgetNote"), technologies: get("technologies"),
+    }, { returnTo: here, currentUserId, token });
+    let href = handOff.href;
+    if (handOff.carried) {
+      try { sessionStorage.setItem(CARRY_KEY, JSON.stringify(handOff.carried)); }
+      catch {
+        // Storage is blocked: carry what fits in the address instead (the start of the brief), rather than nothing.
+        const u = new URL(href, window.location.origin);
+        u.searchParams.delete("carry");
+        if (handOff.carried.brief) u.searchParams.set("brief", handOff.carried.brief.slice(0, ADDRESS_TEXT_MAX));
+        href = `${u.pathname}${u.search}`;
+      }
+    }
+    router.push(href);
+  };
+
+  // A record added from a picker is chosen in that picker, and the keyboard focus goes back to the field it was added from (after the dialog has gone).
+  const backTo = (fieldId: string) => { setTimeout(() => focusComboQuietly(fieldId), 0); };
+  const chooseOrg = (side: "agency" | "client" | null, id: string) => { if (side === "agency") { setAgencyId(id); backTo("qa-agency"); } else { setClientId(id); backTo("qa-client"); } };
+
   return (
     <>
-      <ActionForm action={createOpportunity} submitLabel="Add enquiry" pendingLabel="Adding…" onDone={close} secondary={<Link href="/sales/new" className="mr-auto text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">Open the full form</Link>}>
+      <ActionForm action={save} submitLabel="Add enquiry" pendingLabel="Adding…" onDone={close} disabled={!company || !company.hasSettings}
+        secondary={<button type="button" onClick={openFullForm} className="mr-auto rounded-md text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" title="Opens the full form with everything you have typed here">Open the full form</button>}>
         <input type="hidden" name="after" value="panel" />
-        <input type="hidden" name="nextTime" value="10:00" />
-        <input type="hidden" name="nextKind" value="call" />
-        {companies.length > 1 ? (
-          <Field label="Company" htmlFor="qa-company">
-            <Select id="qa-company" name="companyId" value={companyId} onChange={(e) => setCompanyId(e.target.value)} required>
-              {companies.map((c) => <option key={c.id} value={c.id}>{c.name}{c.hasSettings ? "" : " (no Sales settings yet)"}</option>)}
+        <input type="hidden" name="returnTo" value={here} />
+        <input type="hidden" name="nextKind" value={DEFAULT_NEXT_KIND} />
+        <CompanyField id="qa-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
+        <NoSettingsAlert company={company} />
+
+        {/* Until a company is chosen nothing below can be filled in: a disabled fieldset turns every field and button inside it off at once. */}
+        <fieldset disabled={!company} className={`m-0 min-w-0 space-y-4 border-0 p-0 ${company ? "" : "opacity-60"}`} aria-label="Enquiry details">
+          <Field label={ENQUIRY_LABELS.title} htmlFor="qa-title" help={ENQUIRY_HELP.title}>
+            <Input id="qa-title" name="title" required maxLength={200} autoFocus={!!company} value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. LED tunnel for a mall activation" />
+          </Field>
+
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">Who is it from? <span className="font-normal text-muted-foreground">One of agency or end client is required.</span></legend>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <OrganisationPicker id="qa-agency" name="agencyOrgId" label={ENQUIRY_LABELS.agency} help={ENQUIRY_HELP.agency} value={agencyId} onChange={setAgencyId} organisations={organisations} field="agency" onAdd={() => setOrgDialog("agency")} />
+              <OrganisationPicker id="qa-client" name="clientOrgId" label={ENQUIRY_LABELS.client} help={ENQUIRY_HELP.client} value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")} />
+            </div>
+            <EventEditionPicker id="qa-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} onCreate={(name) => setEventDialog({ name })} />
+            {editionId && (eventStart || eventEnd) ? <p className="text-sm text-muted-foreground" role="status">Event dates on this enquiry: {eventStart ? formatDate(eventStart) : "start not set"} to {eventEnd ? formatDate(eventEnd) : "end not set"}. Change them under Add more details.</p> : null}
+          </fieldset>
+
+          <Field label={ENQUIRY_LABELS.source} htmlFor="qa-source">
+            <Select id="qa-source" name="source" required defaultValue="">
+              <option value="" disabled>Choose a source…</option>
+              {CRM_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
             </Select>
           </Field>
-        ) : <input type="hidden" name="companyId" value={companyId} />}
-        {company && !company.hasSettings ? <Alert variant="warning">{company.name} has no Sales settings yet, so an enquiry cannot be recorded for it. {company.canOpenSettings ? <Link href="/sales/settings" className="font-medium underline underline-offset-2">Set it up in Settings</Link> : "Ask a founder to set it up."}</Alert> : null}
 
-        <Field label="What is the enquiry?" htmlFor="qa-title">
-          <Input id="qa-title" name="title" required maxLength={200} autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. LED tunnel for a mall activation" />
-        </Field>
-
-        <fieldset className="space-y-2">
-          <legend className="sr-only">Who is it from? One is enough.</legend>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <OrganisationPicker id="qa-agency" name="agencyOrgId" label="Agency" hint="One of agency or end client is enough." value={agencyId} onChange={setAgencyId} organisations={organisations} field="agency" onAdd={() => setOrgDialog("agency")} />
-            <OrganisationPicker id="qa-client" name="clientOrgId" label="End client" hint="The brand the work is for." value={clientId} onChange={setClientId} organisations={organisations} field="client" onAdd={() => setOrgDialog("client")} />
-          </div>
-          <EventEditionPicker id="qa-event" value={editionId} onChange={setEditionId} editions={editions} loadError={editionsFailed} onCreate={(name) => setEventDialog({ name })} />
-          {editionId && (eventStart || eventEnd) ? <p className="text-sm text-muted-foreground" role="status">Event dates on this enquiry: {eventStart ? formatDate(eventStart) : "start not set"} to {eventEnd ? formatDate(eventEnd) : "end not set"}. Change them under Add more details.</p> : null}
-        </fieldset>
-
-        <Field label="Where did it come from?" htmlFor="qa-source">
-          <Select id="qa-source" name="source" required defaultValue="">
-            <option value="" disabled>Choose a source…</option>
-            {CRM_SOURCES.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
-          </Select>
-        </Field>
-
-        <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
-          <Field label="Next action" htmlFor="qa-next">
-            <Input id="qa-next" name="nextTitle" required placeholder="e.g. Call to qualify the brief" />
-          </Field>
-          <Field label="Due" htmlFor="qa-due">
-            <Input id="qa-due" name="nextDate" type="date" required min={today} defaultValue={today} />
-          </Field>
-        </div>
-
-        <DuplicateWarning matches={shown} checkFailed={hasSignal && dupFailed} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
-
-        <MoreDetails>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Event start" htmlFor="qa-es"><Input id="qa-es" name="eventStart" type="date" value={eventStart} onChange={(e) => setEventStart(e.target.value)} /></Field>
-            <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} /></Field>
-            <Field label="Installation" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
-          </div>
-          {dates.note}
-          <Field label="Location" htmlFor="qa-loc"><Input id="qa-loc" name="location" value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
-          <fieldset className="space-y-2">
-            <legend className="text-sm font-medium">Technologies requested</legend>
-            <input type="hidden" name="technologies" value={JSON.stringify(tech.items)} />
-            <ul className="space-y-2">
-              {techRows.map((row, i) => (
-                <li key={row.key} className="grid grid-cols-[minmax(0,1fr)_5rem_auto] items-center gap-2">
-                  <Input aria-label={`Technology ${i + 1}`} placeholder="e.g. LED wall" value={row.name} onChange={(e) => setTechRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, name: e.target.value } : r)))} />
-                  <Input aria-label={`Quantity of technology ${i + 1}`} type="number" min={1} step={1} value={row.qty} onChange={(e) => setTechRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, qty: e.target.value } : r)))} />
-                  <button type="button" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label={`Remove technology ${i + 1}`} onClick={() => setTechRows((rows) => (rows.length > 1 ? rows.filter((r) => r.key !== row.key) : [emptyTech()]))}>Remove</button>
-                </li>
-              ))}
-            </ul>
-            {tech.error ? <p role="alert" className="text-sm text-destructive">{tech.error}</p> : null}
-            <button type="button" className="rounded-md px-2 py-1 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={() => setTechRows((rows) => [...rows, emptyTech()])}>Add technology</button>
-          </fieldset>
-          <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Budget or value" htmlFor="qa-value"><Input id="qa-value" name="value" type="number" inputMode="decimal" min={0} step="0.01" /></Field>
-            <Field label="Currency" htmlFor="qa-cur"><Input key={companyId} id="qa-cur" name="currency" maxLength={3} pattern="[A-Za-z]{3}" title="A 3-letter currency code, for example AED" defaultValue={company?.currency ?? ""} className="uppercase" /></Field>
-            <Field label="Budget note" htmlFor="qa-bn"><Input id="qa-bn" name="budgetNote" /></Field>
-          </div>
-          <Field label="Brief" htmlFor="qa-brief"><Textarea id="qa-brief" name="brief" rows={3} /></Field>
-          {company?.canAssignOwner ? (
-            <Field label="Owner" htmlFor="qa-owner" hint="You can give the enquiry to a colleague with Sales access to this company.">
-              <Select id="qa-owner" name="ownerId" value={ownerValue} onChange={(e) => setOwner(e.target.value)}>
-                {people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === currentUserId ? " (me)" : ""}</option>)}
-              </Select>
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem_8rem]">
+            <Field label={ENQUIRY_LABELS.next} htmlFor="qa-next" help={ENQUIRY_HELP.next}>
+              <Input id="qa-next" name="nextTitle" required maxLength={200} placeholder="e.g. Call to qualify the brief" />
             </Field>
-          ) : <p className="text-sm text-muted-foreground">Owner: you. Only a founder or someone allowed to assign owners can give an enquiry to a colleague.</p>}
-        </MoreDetails>
+            <Field label="Due" htmlFor="qa-due">
+              <Input id="qa-due" name="nextDate" type="date" required min={today} defaultValue={today} />
+            </Field>
+            <Field label={DUE_TIME_LABEL} htmlFor="qa-time">
+              <Input id="qa-time" name="nextTime" type="time" defaultValue={DEFAULT_NEXT_TIME} />
+            </Field>
+          </div>
+
+          <DuplicateWarning matches={shown} checkFailed={hasSignal && dupFailed} onDismiss={(id) => setDismissed((prev) => new Set(prev).add(id))} />
+
+          <MoreDetails>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <Field label="Event start" htmlFor="qa-es"><Input id="qa-es" name="eventStart" type="date" value={eventStart} onChange={(e) => setEventStart(e.target.value)} /></Field>
+              <Field label="Event end" htmlFor="qa-ee"><Input id="qa-ee" name="eventEnd" type="date" min={eventStart || undefined} value={eventEnd} onChange={(e) => setEventEnd(e.target.value)} /></Field>
+              <Field label="Installation" htmlFor="qa-is"><Input id="qa-is" name="installStart" type="date" value={installStart} onChange={(e) => setInstallStart(e.target.value)} /></Field>
+            </div>
+            {dates.note}
+            <Field label="Location" htmlFor="qa-loc" help={ENQUIRY_HELP.location}><Input id="qa-loc" name="location" maxLength={200} value={location} onChange={(e) => setLocation(e.target.value)} /></Field>
+            <fieldset className="space-y-2">
+              <legend className="text-sm font-medium">Technologies requested</legend>
+              <input type="hidden" name="technologies" value={JSON.stringify(tech.items)} />
+              <ul className="space-y-2">
+                {techRows.map((row, i) => (
+                  <li key={row.key} className="grid grid-cols-[minmax(0,1fr)_5rem_auto] items-center gap-2">
+                    <Input aria-label={`Technology ${i + 1}`} placeholder="e.g. LED wall" value={row.name} onChange={(e) => setTechRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, name: e.target.value } : r)))} />
+                    <Input aria-label={`Quantity of technology ${i + 1}`} type="number" min={1} step={1} value={row.qty} onChange={(e) => setTechRows((rows) => rows.map((r) => (r.key === row.key ? { ...r, qty: e.target.value } : r)))} />
+                    <button type="button" className="rounded-md px-2 py-1 text-sm text-muted-foreground hover:bg-secondary hover:text-foreground" aria-label={`Remove technology ${i + 1}`} onClick={() => setTechRows((rows) => (rows.length > 1 ? rows.filter((r) => r.key !== row.key) : [emptyTech()]))}>Remove</button>
+                  </li>
+                ))}
+              </ul>
+              {tech.error ? <p role="alert" className="text-sm text-destructive">{tech.error}</p> : null}
+              <button type="button" className="rounded-md px-2 py-1 text-sm font-medium text-muted-foreground hover:bg-secondary hover:text-foreground" onClick={() => setTechRows((rows) => [...rows, emptyTech()])}>Add technology</button>
+            </fieldset>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label={ENQUIRY_LABELS.value} htmlFor="qa-value" help={ENQUIRY_HELP.value}><Input id="qa-value" name="value" type="number" inputMode="decimal" min={0} step="0.01" /></Field>
+              <CurrencyField id="qa-cur" company={company} chosen={currencyChoice} onChange={setCurrencyChoice} />
+            </div>
+            <Field label="Budget note" htmlFor="qa-bn" help={ENQUIRY_HELP.budgetNote}><Input id="qa-bn" name="budgetNote" /></Field>
+            <Field label="Brief" htmlFor="qa-brief" help={ENQUIRY_HELP.brief}><Textarea id="qa-brief" name="brief" rows={3} /></Field>
+            {company?.canAssignOwner ? (
+              <Field label={ENQUIRY_LABELS.owner} htmlFor="qa-owner" help={ENQUIRY_HELP.owner}>
+                <Select id="qa-owner" name="ownerId" value={ownerValue} onChange={(e) => setOwner(e.target.value)}>
+                  {people.map((p) => <option key={p.id} value={p.id}>{p.name}{p.id === currentUserId ? " (me)" : ""}</option>)}
+                </Select>
+              </Field>
+            ) : <p className="text-sm"><span className="font-medium">Owner:</span> you.<InfoHint label="Owner" className="ml-1">Only a founder or someone allowed to assign owners can give an enquiry to a colleague.</InfoHint></p>}
+            <p className="text-sm text-muted-foreground">Contacts, scope and who it is waiting on are in the full form, or on the enquiry once it is saved.</p>
+          </MoreDetails>
+        </fieldset>
+        <SavingToLine company={company} currency={currency} />
       </ActionForm>
       <EventEditionDialog
         open={eventDialog !== null}
         onClose={() => setEventDialog(null)}
         events={events}
         initial={{ name: eventDialog?.name ?? "", start: eventStart, end: eventEnd }}
-        onCreated={(c) => { addEdition(c); setEditionId(c.editionId, { id: c.editionId, start: c.start, end: c.end }); }}
+        onCreated={(c) => { addEdition(c); setEditionId(c.editionId, { id: c.editionId, start: c.start, end: c.end }); backTo("qa-event"); }}
       />
       <AddOrganisationDialog
         open={orgDialog !== null}
         onClose={() => setOrgDialog(null)}
         defaultKind={orgDialog === "agency" ? "agency" : "client"}
-        onCreated={(org: CreatedOrganisation) => { setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, roles: [org.kind], place: org.place }]); if (orgDialog === "agency") setAgencyId(org.id); else setClientId(org.id); }}
-        onUseExisting={(org) => { if (orgDialog === "agency") setAgencyId(org.id); else setClientId(org.id); }}
+        onCreated={(org: CreatedOrganisation) => { setAddedOrgs((prev) => [...prev, { id: org.id, name: org.name, kind: org.kind, roles: [org.kind], place: org.place }]); chooseOrg(orgDialog, org.id); }}
+        onUseExisting={(org) => chooseOrg(orgDialog, org.id)}
       />
     </>
   );
 }
 
-export function QuickAddEnquiryForm(props: { companies: EnquiryCompany[]; organisations: EnquiryOrganisation[]; editions?: EditionOption[]; events?: EventChoice[]; editionsFailed?: boolean; currentUserId: string; currentUserName: string; today: string }) {
+export function QuickAddEnquiryForm(props: QuickAddEnquiryProps) {
   return (
-    <QuickAdd label="Add enquiry" title="Add an enquiry" description="Record it the moment it arrives. Everything else can be added later." size="wide">
+    <QuickAdd label="Add enquiry" title="Add an enquiry" description="Record it the moment it arrives. Everything else can be added later." help="Saving records the enquiry in Sales with its owner and next action. Nothing is sent to the client. Open the full form keeps everything you have typed here." size="wide">
       {({ close }) => <QuickForm {...props} close={close} />}
     </QuickAdd>
   );

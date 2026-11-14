@@ -174,6 +174,19 @@ export function proposalActions(p: Pick<CrmProposalRow, "status">, stage: string
   return { send: p.status === "draft", accept: p.status === "sent", supersede: p.status === "draft" || p.status === "sent" };
 }
 
+/**
+ * What happens next for one proposal version, in words, shown beside its status and buttons. It follows what is recorded (the status, and whether the version
+ * is an estimate built in the app); it never says a client replied or that something was sent. Null when nothing more is expected of this version.
+ */
+export function proposalNextStep(p: Pick<CrmProposalRow, "status">, o: { estimate: { finalised: boolean } | null; stage: string }): string | null {
+  if (o.stage === "lost" || p.status === "superseded") return null;
+  if (p.status === "accepted") return o.stage === "won" ? null : "The client accepted it. Winning still needs a purchase order or an authorised email (Close as won, under More).";
+  if (p.status === "sent") return o.stage === "won" ? "Record it as accepted if this is the version the client accepted." : "Record it as accepted when the client accepts it, or add a new version if they ask for changes.";
+  if (o.stage === "won") return null;
+  if (o.estimate) return o.estimate.finalised ? "Send it to the client yourself, then record it as sent on the Estimates tab." : "Finish the estimate and finalise it (open the estimate).";
+  return "Send it to the client yourself, then record it as sent here.";
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // Handover package: a summary of agreed facts taken from the opportunity, never a separate copy
 // ---------------------------------------------------------------------------------------------------------------

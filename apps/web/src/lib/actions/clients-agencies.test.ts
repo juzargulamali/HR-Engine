@@ -32,7 +32,7 @@ describe("assigning the account owner", () => {
     expect((await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: SARA }))).error).toMatch(/Only a founder/);
     expect(rpc).not.toHaveBeenCalled();
   });
-  it("calls only the account-owner function (never a follow-up or inquiry-owner function) for a delegate, and Unassigned is a null owner", async () => {
+  it("calls only the account-owner function (never a follow-up or enquiry-owner function) for a delegate, and Unassigned is a null owner", async () => {
     grants = [{ companyId: CO, capabilities: ["assign_owner"] }];
     expect(await assignAccountOwner({ error: null }, fd({ orgId: ORG, companyId: CO, ownerId: SARA }))).toEqual({ error: null });
     expect(rpc).toHaveBeenCalledTimes(1);
@@ -102,7 +102,7 @@ describe("editing and creating", () => {
   });
 });
 
-describe("a dated follow-up on an account with no inquiry", () => {
+describe("a dated follow-up on an account with no enquiry", () => {
   const form = (over: Record<string, string> = {}) => fd({ orgId: ORG, companyId: CO, title: "Call the account", date: "2026-12-01", time: "10:30", ...over });
   it("calls only the account follow-up function (never an owner function), with a Dubai due time, for the selected company", async () => {
     grants = [{ companyId: CO, capabilities: [] }];

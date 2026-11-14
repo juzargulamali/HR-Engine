@@ -26,10 +26,11 @@ Sales & CRM follows each enquiry from the first message to the handover. An enqu
 - links: Follow-ups -> /sales/follow-ups
 - screens: /sales/follow-ups
 
-A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page groups them at the top. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company, or "What needs my attention today?" for everything.
+A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are in Dubai time. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company, or "What needs my attention today?" for everything.
 
-1. Open Follow-ups in Sales. Overdue items are listed first.
-2. Open the enquiry from the item, do the work, then complete or reschedule the follow-up.
+1. Open Follow-ups in Sales and press the Overdue card to see only what is overdue. Show all to-do brings the whole list back.
+2. Do the work, then press Complete on the row to record what happened and plan the next action.
+3. If it only needs a new date, press Reschedule and choose Tomorrow, In 2 days, Next week or your own date. The new due date is shown before you save.
 
 ## Ask JARVIS about your follow-ups and enquiries
 - id: sales-jarvis-lookups
@@ -82,13 +83,13 @@ JARVIS can draft the scope wording for an estimate: line descriptions, quantitie
 - links: Enquiries -> /sales/opportunities; Full new-enquiry form -> /sales/new
 - screens: /sales/opportunities; /sales/new
 
-Enquiries live in Sales. The quick form needs a title, where it came from, an agency or an end client (or both) and the next action with its date. Search finds any enquiry by reference, title, agency or client, however old. The list shows 100 at a time (Previous and Next). The chips above it show My open enquiries, Overdue, Due today, Awaiting first response and No next action; each number is how many enquiries that chip will show.
+Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. The list says how many enquiries it shows and why the rest are hidden, and Clear filters brings back your open enquiries.
 
 1. Open Enquiries in Sales.
-2. Press Add enquiry.
-3. Fill in the title, the source, the agency and/or end client, and what happens next and when.
+2. Press Add enquiry and check the company.
+3. Fill in What is the enquiry?, the source, the agency and/or end client, and what happens next and when. Open the full form keeps what you typed.
 4. If the enquiry is for a show, choose it in Event / Exhibition: the event start and end are filled from that edition and you can still change them. Dates you typed first are kept. If the show or its edition is not listed, press Create event or edition under the field; what you have typed stays as it is.
-5. Save. The enquiry opens so you can add more details.
+5. Save. You return to the list you started from with the new enquiry open beside it; the full form opens the enquiry's own page.
 
 ## See and plan follow-ups
 - id: sales-follow-ups
@@ -98,28 +99,28 @@ Enquiries live in Sales. The quick form needs a title, where it came from, an ag
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next on your enquiries. Every enquiry that is still being worked needs one open next action, so planning the next step is part of finishing the current one. On an enquiry, the Next action card at the top shows the action, who owns it and when it is due; if none is recorded it says so and offers Add follow-up. The Handover card on the page also tells you when a Project Manager has accepted your handover.
+The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. View only means the follow-up belongs to someone else. With several companies the page shows them all unless you choose one.
 
-1. Open Follow-ups in Sales to see what is due.
-2. To add one, open the enquiry and use Add follow-up (or Schedule next action in the side panel).
-3. Choose what to do, the date and who it is for.
+1. Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.
+2. Press Complete to record what happened and plan the next action, or Reschedule to move the due time.
+3. To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.
 4. A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days.
 
 ## Log a call, email or meeting on an enquiry
 - id: sales-log-update
 - area: sales
 - status: published
-- keywords: log a call; log call; log an email; log a meeting; add update; add an update; activity; record a call; note on an enquiry; meeting notes; add a note; timeline; log activity; history; comments; comment history; what happened; first response; pick up an enquiry; where does it stand
+- keywords: log a call; log call; log an email; log a meeting; add update; add an update; log activity button; main button on an enquiry; more menu; activity; record a call; note on an enquiry; meeting notes; add a note; timeline; log activity; history; comments; comment history; what happened; first response; pick up an enquiry; where does it stand
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-Updates are the enquiry's diary. Add one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. To pick up someone else's enquiry, read the three cards at the top: Next action, Where it stands and Latest activity.
+Activities are the enquiry's diary. Log one after a call, an email or a meeting; you can plan the next step in the same box. The first call, email or meeting you log is recorded as the first response. Logging only records it: nothing is sent to the client. To pick up someone else's enquiry, read the summary at the top: the next action, the one main button, what is in the way, and where it stands.
 
 1. Open the enquiry.
-2. Press Add update.
-3. Choose the type (call, email, meeting, note or client response) and write what happened.
+2. Press Log activity at the top.
+3. Choose the kind (call, email, meeting, note or client response) and write what happened. If it was one of the planned follow-ups, choose it and your words become its outcome.
 4. Turn on Plan the next step if you want a follow-up created at the same time.
-5. To read what happened, open Activity & history. All activity shows everything in order; Comments and notes shows only what people wrote. Lines the app recorded (stage changes, follow-ups, estimates recorded as sent, handover) are marked as such.
+5. To read what happened, open Activity & history. All shows everything; People's updates shows what people wrote; System shows what the app recorded. A completed follow-up appears once.
 
 ## Edit an enquiry's details
 - id: sales-edit-details
@@ -132,8 +133,8 @@ Updates are the enquiry's diary. Add one after a call, an email or a meeting; yo
 The enquiry's owner, or a Sales founder, can edit its details while it is open. Once it is Won only a founder can change the value, and a Lost enquiry cannot be edited.
 
 1. Open the enquiry.
-2. Press Edit details.
-3. Change what you need and save. If someone else changed it first you will be asked to reload.
+2. Open More at the top and choose Edit details, or use Edit details on the Scope & dates tab.
+3. Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated.
 4. Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too.
 
 ## Change an enquiry's stage
@@ -147,8 +148,8 @@ The enquiry's owner, or a Sales founder, can edit its details while it is open. 
 The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent and Estimate sent sit side by side: an enquiry can reach either, or both. Proposal sent needs a proposal recorded as sent, Estimate sent needs an estimate recorded as sent (Estimates tab), and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.
 
 1. Open the enquiry (or use the Board view of Enquiries).
-2. Choose Move to another stage and pick the stage.
-3. If the stage needs something first, the screen says what.
+2. Open More at the top, choose Move to another stage and pick the stage. Put on hold, Resume and Reopen are in the same menu.
+3. If the stage needs something first, the screen says what. On the Board the card stays where it was and shows a link to the tab where you record it.
 
 ## Mark an enquiry won or lost, and hand it over
 - id: sales-close-handover
@@ -158,12 +159,12 @@ The enquiry's owner or a Sales founder moves it: one step back, or any step forw
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the enquiry shows a Delivery handover card: Handover needed, Waiting for PM assignment, Waiting for PM acceptance, PM asked a question, or Project created, with who has it next. JARVIS does not close, reopen or hand over enquiries: do those on the enquiry page.
+Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. Contacts, prices and files stay in Sales, and your notes stay on the brief for the Project Manager to read. JARVIS does not close, reopen or hand over enquiries.
 
 1. Open the enquiry.
-2. Choose the Won or Lost action and fill in the form.
-3. After Won, use the button on the Delivery handover card: prepare and submit it, or answer the Project Manager's question and resubmit. A new brief starts with the linked event in Notes for the Project Manager, because the Project Manager cannot see Sales events; keep or edit it.
-4. When it says Project created, Open project takes you to the delivery project if you have access to it.
+2. Open More at the top, choose Close as won or Close as lost, and fill in the form.
+3. After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Put the site contact in the notes.
+4. Submit it, or answer the Project Manager's question and resubmit. When the project exists, Open project takes you to it if you have access.
 5. The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet.
 
 ## Find or add a client or agency
@@ -176,9 +177,10 @@ Won and Lost are closed on their own form, which asks for the evidence or the re
 
 Clients & Agencies holds every organisation. Search first so you do not add the same one twice. An organisation can be an agency, a direct client, an end client or a technology company, and an enquiry's agency and end-client boxes offer only organisations with the matching role.
 
-1. Open Clients & Agencies and search by name. The search and the filters apply as you type or choose; More filters holds country, lead source and exhibition.
-2. If it is not there, add it with its roles (and country and website if you know them).
-3. To add many at once, use Import from Excel.
+1. Open Clients & Agencies and check the company named above the list: owners and enquiry figures are shown for that company. Search by name; More filters holds country, lead source and exhibition.
+2. The list shows 100 accounts a page; use Next page for more.
+3. If it is not there, press Add account and give its roles (and country and website if you know them).
+4. To add many at once, open Import and export and choose Import from Excel. The preview says what will be created, updated and skipped before you confirm.
 
 ## Build an estimate
 - id: sales-estimates
@@ -225,7 +227,7 @@ An event page shows the same show across its editions: who exhibited each year a
 1. Press Record an observation, choose the edition and the exhibitor, then the agency (or Agency unknown).
 2. Read Who exhibited, and with which agency to compare the years.
 3. Under Agencies to contact, set the outreach priority and open the account to start outreach or a follow-up.
-4. Press Add first edition on an event that has none yet, or Add next edition when the next dates are known. Archive keeps the history; nothing is deleted.
+4. Press Add first edition on an event that has none yet, or Add next edition when the next dates are known: it starts with the last place and you enter the dates. Edit and Archive are under More; archiving keeps the history and deletes nothing.
 
 ## Import events from a spreadsheet
 - id: sales-events-import
@@ -250,12 +252,13 @@ Import events adds many shows and editions to the shared calendar from one file.
 - links: Outreach -> /sales/outreach; Clients & Agencies -> /sales/accounts
 - screens: /sales/outreach
 
-Outreach is your list of accounts to approach before any enquiry exists. Each card shows the objective, the target date, the last contact and the next action, with overdue ones marked. It never creates an enquiry by itself; you create one from the account when the client is ready.
+Outreach is your list of accounts to approach before any enquiry exists. Each row shows the account, its contact, the owner, the next action with its due date, and where it stands in words: overdue, due today, waiting for reply or enquiry raised. Logging an activity only records it; nothing is sent to the client. It never creates an enquiry by itself.
 
-1. Open Outreach in Sales to see what is assigned to you.
-2. Open an account from its card to log what you did and set the next action.
-3. Choose a status or tick Overdue only to decide what to do first: the list changes as soon as you choose, and Clear removes the filters.
-4. Accounts are assigned from Clients & Agencies by the people who manage Sales assignments.
+1. Open Outreach in Sales and check the company named above the list.
+2. Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.
+3. Choose a status or tick Overdue only to decide what to do first.
+4. When the client is ready, open the account and press Create enquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.
+5. Accounts are assigned from Clients & Agencies by the people who manage Sales assignments.
 
 ## Sales reports
 - id: sales-reports
@@ -265,10 +268,11 @@ Outreach is your list of accounts to approach before any enquiry exists. Each ca
 - links: Sales reports -> /sales/reports
 - screens: /sales/reports
 
-Sales reports are read-only pages of figures with their definitions. If a card cannot be loaded it says so instead of showing zero.
+Sales reports are read-only figures in two groups. Current pipeline and follow-ups is as of now and does not change with the dates. Results for the selected period counts only what was logged or closed between the dates. Under each title a line says how many records, which company and which period the figure rests on. If a card cannot be loaded it says so instead of showing zero.
 
 1. Open Reports in Sales.
-2. Choose the period, and the company if you have access to more than one.
+2. Choose the company above the report (or All my companies), then the period.
+3. Press the i beside a title for its definition. A number that is a link opens exactly those enquiries.
 
 ## Sales settings
 - id: sales-settings
@@ -278,9 +282,11 @@ Sales reports are read-only pages of figures with their definitions. If a card c
 - links: Sales settings -> /sales/settings
 - screens: /sales/settings
 
-Each company's Sales settings (reference code, currency, response target, working calendar, duplicate window, owner e-mail, approval policy and the estimate VAT choices) are kept on one page, for people who manage Sales settings or are founders.
+Sales settings are shown for one company at a time, in three parts: Response targets, Commercial approval, and Estimates & VAT with the VAT choices. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.
 
-1. Open Settings in Sales (under Manage in the menu).
+1. Open Settings in Sales (under Manage in the menu) and choose the company above the page.
+2. Follow a link in the list at the top to the setting that needs filling in.
+3. Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes.
 
 ## Flag an enquiry for Operations planning
 - id: sales-operations-planning
@@ -297,3 +303,32 @@ The owner of an enquiry, or a Sales founder, can flag it so Operations can plan 
 3. Press Flag for Operations planning. Use Edit planning details to change it later.
 4. Read From Operations. If there is a question, write Your answer and press Send answer to Operations.
 5. Remove from Operations planning hides the enquiry from Operations again.
+
+## The company you are working in, in Sales
+- id: sales-company
+- area: sales
+- status: published
+- keywords: which company; wrong company; change company in sales; choose a company; all my companies; company bar; sales company; switch company; why this company
+- links: Enquiries -> /sales/opportunities; Reports -> /sales/reports
+- screens: /sales/reports
+
+Sales pages and the Add enquiry forms work in one company, named above each page. It is the company of what you have open, else the one you used last in Sales, else the company you are employed by. If you have several and none of these applies, the page asks you to choose and shows nothing until you do. Follow-ups, Enquiries, Events and Reports can also show All my companies.
+
+1. Look at Company above the list. Press the i beside it to see why that company is shown.
+2. Press another company to change it. The next Sales page and Add enquiry open in the company you chose.
+3. If the page says Choose a company, press one to see its records.
+
+## Add a proposal version
+- id: sales-proposal-version
+- area: sales
+- status: published
+- keywords: add proposal; proposal version; upload a proposal; proposal document; record proposal as sent; proposal accepted; proposals and quotes; proposal register; new version of a proposal
+- links: Proposals & quotes -> /sales/proposals; Enquiries -> /sales/opportunities
+- screens: /sales/proposals
+
+A proposal is made outside Enginious OS and kept on the enquiry as a file or link, one version at a time. The owner of the enquiry or a Sales founder adds versions. Sent is a date you record after sending it yourself; it is not an approval, and Accepted is not a win. Proposals & quotes lists every version across enquiries with its next action.
+
+1. Open the enquiry and go to Proposals & files.
+2. Under Add version, write what changed and choose Upload a new file, Use a file already added or No document yet.
+3. Press Add version as a draft. If the file went up but the version did not, press Retry: the file is not uploaded again.
+4. After you send it to the client, press Record as sent on that version; record it as accepted when the client accepts it.

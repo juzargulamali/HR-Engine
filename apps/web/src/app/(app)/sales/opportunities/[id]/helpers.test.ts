@@ -148,3 +148,20 @@ describe("buildHandoverPackage", () => {
     expect(pkg.acceptedProposal?.id).toBe("b");
   });
 });
+
+describe("the next step of one proposal version", () => {
+  it("follows the recorded status and whether the version is an estimate; says nothing once nothing more is expected", async () => {
+    const { proposalNextStep } = await import("./helpers");
+    const at = (status: "draft" | "sent" | "accepted" | "superseded", stage = "proposal_prep", estimate: { finalised: boolean } | null = null) => proposalNextStep({ status }, { estimate, stage });
+    expect(at("draft")).toBe("Send it to the client yourself, then record it as sent here.");
+    expect(at("draft", "proposal_prep", { finalised: false })).toMatch(/Finish the estimate and finalise it/);
+    expect(at("draft", "proposal_prep", { finalised: true })).toMatch(/record it as sent on the Estimates tab/);
+    expect(at("sent")).toMatch(/Record it as accepted when the client accepts it/);
+    expect(at("accepted")).toMatch(/Winning still needs a purchase order or an authorised email/);
+    expect(at("accepted", "won")).toBeNull();
+    expect(at("sent", "won")).toMatch(/Record it as accepted if this is the version the client accepted/);
+    expect(at("draft", "won")).toBeNull();
+    expect(at("superseded")).toBeNull();
+    expect(at("sent", "lost")).toBeNull();
+  });
+});

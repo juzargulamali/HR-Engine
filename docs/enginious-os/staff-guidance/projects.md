@@ -46,7 +46,7 @@ Work is where a project starts. What needs doing is first: under Needs you are b
 2. Read Needs you and open a line to go to that task or record.
 3. For equipment, the Project Manager opens Equipment to review a draft and submit it; nothing is submitted for you.
 4. If the line says Import failed, press Import the handover equipment to try again, or open Equipment.
-5. Use Recent activity and Go to for the timeline, files, dependencies and site bookings.
+5. Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Go to also offers Handover brief and, if you have Sales access, Sales enquiry.
 
 ## Project chat
 - id: projects-chat
@@ -75,7 +75,7 @@ When Sales wins a job, the handover comes to Projects. Handovers waiting on you 
 
 1. Open the handover from My Day, or open Handovers.
 2. Read the brief.
-3. Press Accept handover to create the project with you as Project Manager; it opens on the project's Work page.
+3. Press Accept handover to create the project with you as Project Manager; it opens on the project's Project Plan, and Sales is told in the app.
 4. Or press Ask Sales a question; the handover goes back to Sales and you are told when they resubmit.
 5. If you press Accept twice, the same project opens: a second one is never created.
 
@@ -715,16 +715,16 @@ Longer explanations, examples and rules sit behind a small ⓘ next to the headi
 - id: projects-work-overview
 - area: projects
 - status: published
-- keywords: work overview; next on site; needs attention; recent changes on a project
+- keywords: work overview; next on site; needs attention; recent changes on a project; recent activity on a project; handover brief; sales enquiry of a project
 - links: Projects -> /projects
 - screens: /projects/[id]/work
 
-The top of a project's Work page lists the next thing happening on site, what is missing or waiting, who can act on it, and the latest changes.
+The top of a project's Work page lists the next thing happening on site and what is missing or waiting, with who can act on it. The latest changes are in one Recent activity list beside the tasks.
 
 1. Open the project's Work page.
 2. Next on site gives the next activity with its time, place, owner and whether it is confirmed.
 3. Needs attention lists missing outputs, changes requested, reviews waiting, gaps in the site plan and late shipments. Press a line to go to the record that fixes it.
-4. Recent changes links to the full History.
+4. Recent activity lists the latest changes to dates, status and people together with new output versions, review decisions and site changes, newest first. Full history opens History.
 
 ## Choose the project teams and their leads
 - id: projects-team-setup

@@ -6,7 +6,7 @@ import { RELATIONSHIPS, RELATIONSHIP_RANK, relationshipOf, type Relationship } f
 export const UNASSIGNED = "unassigned";
 export const NOT_RECORDED = "none";
 
-/** One organisation as the selected company sees it: shared record + this company's profile + this company's inquiry counts. */
+/** One organisation as the selected company sees it: shared record + this company's profile + this company's enquiry counts. */
 export interface DirectoryRow {
   org: CrmOrganisationRow;
   contacts: CrmContactRow[];
@@ -94,7 +94,7 @@ export function filterDirectory(rows: readonly DirectoryRow[], f: DirectoryFilte
   });
 }
 
-/** Joins the shared organisations with the selected company's profiles and enquiry figures (`enquiryStats`: an inquiry naming the organisation in two roles counts once). `opportunities` null = they could not be read. */
+/** Joins the shared organisations with the selected company's profiles and enquiry figures (`enquiryStats`: an enquiry naming the organisation in two roles counts once). `opportunities` null = they could not be read. */
 export function buildDirectoryRows(input: {
   organisations: readonly CrmOrganisationRow[];
   contacts: readonly CrmContactRow[];

@@ -32,7 +32,7 @@ export function OpsPlanningButton({ mode, opportunityId, version, values, won = 
   return (
     <>
       <Button type="button" size="sm" variant={mode === "flag" ? "default" : "outline"} onClick={() => setOpen(true)}>{label}</Button>
-      <Modal open={open} onClose={close} title={label} description={mode === "flag" ? "Operations will see this enquiry in Upcoming Work so they can plan ahead. Nothing is booked, reserved or created by flagging it." : "What Sales tells Operations about this enquiry. Nothing is booked, reserved or created by saving it."}>
+      <Modal open={open} onClose={close} title={label} description={mode === "flag" ? "Operations will see this enquiry in Upcoming Work so they can plan ahead, and Operations Managers are notified in the app. Nothing is booked, reserved or created by flagging it." : "What Sales tells Operations about this enquiry. Nothing is booked, reserved or created by saving it."}>
         <ActionForm action={setOpsPlanning} submitLabel={mode === "flag" ? "Flag for Operations planning" : "Save planning details"} pendingLabel="Saving…" onDone={close} secondary={<Button type="button" variant="ghost" onClick={close}>Cancel</Button>}>
           <input type="hidden" name="id" value={opportunityId} />
           <input type="hidden" name="expectedVersion" value={version} />
@@ -99,7 +99,7 @@ export function OpsAnswerForm({ opportunityId, version, current }: Target & { cu
     <ActionForm action={answerOpsQuestion} submitLabel={current ? "Replace the answer" : "Send answer to Operations"} pendingLabel="Sending…" resetOnSuccess className="space-y-3">
       <input type="hidden" name="id" value={opportunityId} />
       <input type="hidden" name="expectedVersion" value={version} />
-      <Field label={current ? "Change your answer" : "Your answer"} htmlFor="ops-answer" hint="Operations can read this. Do not put prices or commercial terms here.">
+      <Field label={current ? "Change your answer" : "Your answer"} htmlFor="ops-answer" hint="Operations reads this under the enquiry in Upcoming Work, and Operations Managers are notified in the app. Do not put prices or commercial terms here.">
         <Textarea id="ops-answer" name="answer" rows={3} required maxLength={OPS_TEXT_MAX} defaultValue={current ?? ""} />
       </Field>
     </ActionForm>

@@ -18,6 +18,8 @@ const PAGES = [
   ...INV,
   "/", "/sales", "/sales/follow-ups", "/sales/follow-ups?view=done&who=all", `/sales/follow-ups?open=${oppId}`, "/sales/opportunities", "/sales/opportunities?status=all", "/sales/opportunities?view=board&status=all", `/sales/opportunities?open=${oppId}`, `/sales/opportunities?view=board&open=${oppId}`, "/sales/opportunities?add=1", `/sales/opportunities/${oppId}`, "/sales/pipeline",
   "/sales/proposals", "/sales/clients", "/sales/reports", "/sales/settings", "/sales/new",
+  // The other Sales tabs, the six tabs of an enquiry and its handover page.
+  "/sales/accounts", "/sales/outreach", "/sales/events", ...["scope", "activity", "proposals", "quotations", "commercial"].map((t) => `/sales/opportunities/${oppId}?tab=${t}`), `/sales/opportunities/${oppId}/handover`,
   "/attendance", "/attendance-clock", "/employees", "/leave", "/leave/new", "/approvals", "/alerts", "/payroll", "/reimbursements", "/performance", "/policies", "/holidays", "/profile", "/letters", "/admin/users"];
 const browser = await chromium.launch(); let bad = 0, checked = 0;
 for (const width of [360, 390]) for (const theme of ["dark", "light"]) {
