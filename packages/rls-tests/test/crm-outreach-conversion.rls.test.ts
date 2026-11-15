@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Outreach to enquiry (migration 20270112000300_crm_outreach_conversion.sql), against a real Postgres.
+// Outreach to enquiry (migration 20270113000300_crm_outreach_conversion.sql), against a real Postgres.
 //   * the outreach's contact: one of the account's own contacts, set by the assignee or a Sales lead only, never on a closed outreach;
 //   * the Outreach source is accepted, existing sources are untouched, anything else is still refused;
 //   * conversion in one transaction: the enquiry is created and linked, or nothing is; a second attempt (again, a stale tab, two at the same moment) creates nothing
@@ -20,7 +20,7 @@ const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@conv-test.ae
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const j = (o: unknown) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;
 const pack = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
-const MIGRATION = "20270112000300_crm_outreach_conversion.sql";
+const MIGRATION = "20270113000300_crm_outreach_conversion.sql";
 
 describe("Outreach to enquiry: contact, source and one enquiry per outreach", () => {
   const db = new RlsTestDatabase();

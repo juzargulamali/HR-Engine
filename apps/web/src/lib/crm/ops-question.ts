@@ -1,6 +1,6 @@
 /**
  * "Operations asked a question" for Sales. When an Operations Manager saves a new or changed question on a flagged enquiry, the database sends ONE in-app notice to
- * the enquiry's owner (or to the company's Sales founders when the owner cannot act, or is the person who asked): migration 20270112000200_ops_question_notice.sql.
+ * the enquiry's owner (or to the company's Sales founders when the owner cannot act, or is the person who asked): migration 20270113000200_ops_question_notice.sql.
  * The notice is cleared by the database when Sales answers or Operations withdraws the question, and by the person when they dismiss it. Pure: no database here.
  */
 

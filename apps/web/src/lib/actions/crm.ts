@@ -111,7 +111,7 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   const fromOutreach = uuid.safeParse(formData.get("outreachId"));
   // The form's submission identifier (made when the form opened, sent with every attempt to save it). With it, ONE database call decides: a first attempt creates
   // the enquiry; the same identifier again (a retry after the answer was lost, a double click that got past the browser) returns the enquiry ALREADY saved and
-  // creates nothing; an outreach that already has an enquiry returns that one (crm_create_enquiry, 20270112000400). A form without an identifier, and a database
+  // creates nothing; an outreach that already has an enquiry returns that one (crm_create_enquiry, 20270113000400). A form without an identifier, and a database
   // without that function, take the earlier path below.
   const submissionKey = uuid.safeParse(formData.get("submissionKey"));
   if (submissionKey.success) {
@@ -138,7 +138,7 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     if (existing) return { error: OUTREACH_HAS_ENQUIRY, existingEnquiryId: existing };
   }
   // Raised from an outreach: ONE database call creates the enquiry and links it, after locking the outreach, so two tabs or a double submit that both pass the check
-  // above still end with one enquiry (crm_create_enquiry_from_outreach, 20270112000300). The loser of that race is told and offered the existing enquiry, exactly as
+  // above still end with one enquiry (crm_create_enquiry_from_outreach, 20270113000300). The loser of that race is told and offered the existing enquiry, exactly as
   // the stale tab is. A database without that function takes the earlier two-step path below.
   if (fromOutreach.success) {
     const conv = await supabase.rpc("crm_create_enquiry_from_outreach", { p_outreach: fromOutreach.data, p_fields: enquiryFields(d, nextDue) });

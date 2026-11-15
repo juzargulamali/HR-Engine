@@ -1196,7 +1196,7 @@ All three are one database function, `crm_set_ops_planning(id, flag, fields, exp
 
 ### 3.11 Added on the branch `claude/pr2-sales-ops-projects-handover` (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
 
-Five actions. Each needs its migration (install-order rows 44 to 48); without it the control is not offered or says it is not available.
+Five actions. Each needs its migration (install-order rows 43 to 47); without it the control is not offered or says it is not available.
 
 #### `sales.handover.set_site_contact`
 | Field | Entry |
@@ -1259,9 +1259,9 @@ Five actions. Each needs its migration (install-order rows 44 to 48); without it
 | (11) Surface | UI over DB function |
 
 #### `sales.enquiry.create` (changed)
-The entry in section 3.1 stands, with three differences once migrations `20270112000300` and `20270112000400` are applied: (a) the forms send a submission identifier and the action calls `crm_create_enquiry`, so **retrying the same form is now safe**: it returns the enquiry already saved and creates nothing (the "Duplicate risk" in field (10) remains for a NEW form, a form without an identifier, a database without the function, and JARVIS, which has its own ledger); (b) raised from an outreach, creation and linking are one transaction and a second attempt returns the outreach's existing enquiry; (c) the source list has a ninth value, `outreach`. The next action's time is typed on the clock of the company the enquiry is for.
+The entry in section 3.1 stands, with three differences once migrations `20270113000300` and `20270113000400` are applied: (a) the forms send a submission identifier and the action calls `crm_create_enquiry`, so **retrying the same form is now safe**: it returns the enquiry already saved and creates nothing (the "Duplicate risk" in field (10) remains for a NEW form, a form without an identifier, a database without the function, and JARVIS, which has its own ledger); (b) raised from an outreach, creation and linking are one transaction and a second attempt returns the outreach's existing enquiry; (c) the source list has a ninth value, `outreach`. The next action's time is typed on the clock of the company the enquiry is for.
 
-Other entries whose inputs changed with migration `20270112000500` (the date and time are typed on the company's clock; nothing else): `sales.follow_up.create`, `.reschedule`, `.complete`, `sales.enquiry.add_activity`, `.resume`, `.reopen`, `sales.account.follow_up.create`.
+Other entries whose inputs changed with migration `20270113000500` (the date and time are typed on the company's clock; nothing else): `sales.follow_up.create`, `.reschedule`, `.complete`, `sales.enquiry.add_activity`, `.resume`, `.reopen`, `sales.account.follow_up.create`.
 
 ## 4. Actions that communicate outside the system
 

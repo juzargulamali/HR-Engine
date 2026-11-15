@@ -226,7 +226,7 @@ Sections 1 to 4: 70 rows (4 + 9 + 17 + 8 + 7 + 3 + 10 + 4 + 7 + 1). Section 7: 1
 
 ## 10. Handover, Operations question, outreach conversion, retried save, follow-up time zones (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
 
-Written against the implementation on the branch (code read; unit, database and local browser runs are recorded in `../06-change-log.md` and the PR's report). Every row needs its migration (`docs/launch-refinement-install-order.md` rows 44 to 48); on a database without it the screen is as the earlier rows describe.
+Written against the implementation on the branch (code read; unit, database and local browser runs are recorded in `../06-change-log.md` and the PR's report). Every row needs its migration (`docs/launch-refinement-install-order.md` rows 43 to 47); on a database without it the screen is as the earlier rows describe.
 
 ### 10.1 New rows
 

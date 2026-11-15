@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270112000200_ops_question_notice.sql. Rows 1 to 4 must say OK; row 5 is a count for information. Creates no row.
+-- READ ONLY. Run AFTER 20270113000200_ops_question_notice.sql. Rows 1 to 4 must say OK; row 5 is a count for information. Creates no row.
 select item, result from (
   select 1 as ord, 'the trigger is on the Operations planning table, for inserts and updates' as item,
          case when exists (select 1 from pg_trigger where tgname = 'trg_ops_question_notify' and tgrelid = 'public.ops_enquiry_planning'::regclass and not tgisinternal and tgenabled <> 'D') then 'OK'

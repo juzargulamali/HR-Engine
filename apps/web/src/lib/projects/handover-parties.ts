@@ -1,6 +1,6 @@
 /**
  * The agency, the designated site contact and the notes of a Sales to Projects handover, as the database returns them
- * (20270112000100_proj_handover_parties.sql). Pure types and wording here; the reads are in handover-parties-data.ts.
+ * (20270113000100_proj_handover_parties.sql). Pure types and wording here; the reads are in handover-parties-data.ts.
  *
  * The database decides who gets what: proj_handover_parties (the people who work the handover) and proj_project_handover (what the project shows:
  * always the ACCEPTED brief, with the contact only for whoever manages the project and for Operations Managers).

@@ -14,10 +14,10 @@
 --        * A repeat with the same identifier by the same person creates nothing and returns the ORIGINAL enquiry: {"id": ..., "created": false, "existing": "submission"}.
 --        * Two attempts with the same identifier at the same moment are serialised by a transaction lock on (person, identifier): exactly one creates.
 --        * Two forms opened separately have two identifiers: both enquiries are created, however alike they are.
---        * With an outreach id it hands the creation to crm_create_enquiry_from_outreach (20270112000300), which returns the outreach's existing enquiry instead of
+--        * With an outreach id it hands the creation to crm_create_enquiry_from_outreach (20270113000300), which returns the outreach's existing enquiry instead of
 --          creating a second one.
 --        * Without an identifier it behaves exactly like crm_create_opportunity.
---   3. crm_create_opportunity_json(fields): the same internal helper 20270112000300 creates (identical text; either file may be applied first).
+--   3. crm_create_opportunity_json(fields): the same internal helper 20270113000300 creates (identical text; either file may be applied first).
 --
 -- JARVIS: its create path (jarvis_create_enquiry, 20261223000100) has its own ledger keyed by the confirmation proof, and "a repeat returns the ORIGINAL result"
 -- already. It calls crm_create_opportunity directly, which is not changed, so it neither needs nor uses this identifier.
@@ -39,7 +39,7 @@ create index if not exists idx_crm_enquiry_submissions_opportunity on crm_enquir
 alter table crm_enquiry_submissions enable row level security;
 revoke all on table crm_enquiry_submissions from anon, authenticated, public;
 
--- JSON to crm_create_opportunity, argument for argument (also created, identically, by 20270112000300: either file may be applied first).
+-- JSON to crm_create_opportunity, argument for argument (also created, identically, by 20270113000300: either file may be applied first).
 create or replace function crm_create_opportunity_json(p jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 begin
@@ -82,7 +82,7 @@ begin
   end if;
   if p_outreach_id is not null then
     if to_regprocedure('public.crm_create_enquiry_from_outreach(uuid, jsonb)') is null then
-      raise exception 'Raising an enquiry from an outreach is not installed in this database yet (20270112000300)' using errcode = '0A000';
+      raise exception 'Raising an enquiry from an outreach is not installed in this database yet (20270113000300)' using errcode = '0A000';
     end if;
     execute 'select crm_create_enquiry_from_outreach($1, $2)' into v_res using p_outreach_id, f;
     v_id := (v_res ->> 'id')::uuid;

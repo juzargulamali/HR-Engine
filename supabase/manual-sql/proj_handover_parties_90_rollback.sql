@@ -1,4 +1,4 @@
--- ROLLBACK for 20270112000100_proj_handover_parties.sql. Deploy the app from before this change FIRST (the new app reads these functions; without them it shows the handover
+-- ROLLBACK for 20270113000100_proj_handover_parties.sql. Deploy the app from before this change FIRST (the new app reads these functions; without them it shows the handover
 -- as it did before, so the order is a preference, not a requirement).
 -- It DELETES what Sales recorded with the new fields: the agency / direct-job record on every handover and every chosen site contact copy. Export them first if you want them:
 --   select id, crm_reference, job_type, agency_name, parties_recorded_at from proj_handovers where parties_recorded_at is not null;

@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270112000100_proj_handover_parties.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270113000100_proj_handover_parties.sql. Changes nothing.
 -- Expect: rows 1 and 2 'OK'; row 3 'not installed yet' (or 'already installed' on a second run). Rows 4 to 7 are numbers for information: the migration changes NONE of these
 -- rows and guesses nothing about them.
 --   Row 4: accepted handovers. Their projects will say "Not recorded at handover" for the agency and the site contact, for good (an accepted brief is a frozen record).
