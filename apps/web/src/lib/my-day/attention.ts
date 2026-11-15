@@ -3,6 +3,8 @@ import type { LucideIcon } from "lucide-react";
 import { BadgeCheck, CalendarClock, ClipboardCheck, ClipboardList, FileCheck2, FileClock, FolderKanban, IdCard, Inbox, AlarmClock, ReceiptText, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL } from "@/lib/crm/handover-attention";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
+import { OPS_QUESTION_WHAT, opsQuestionHref, type OpsQuestionCheck } from "@/lib/crm/ops-question";
+import { MessageCircleQuestion } from "lucide-react";
 import type { ApprovalsWaiting, SalesToday } from "@/lib/crm/my-day";
 import type { PendingApprovalItem } from "@/lib/approvals/pending";
 import type { BudgetDay } from "@/lib/budget/my-day";
@@ -21,7 +23,7 @@ import { waitingAgeText } from "./waiting";
  */
 
 export type AttentionSource =
-  | "approvals" | "project-tasks" | "project-decisions" | "sales" | "sales-handover" | "sales-approvals" | "budgets" | "budget-projects" | "notes" | "hr" | "operations" | "project-equipment";
+  | "approvals" | "project-tasks" | "project-decisions" | "sales" | "sales-handover" | "sales-ops-question" | "sales-approvals" | "budgets" | "budget-projects" | "notes" | "hr" | "operations" | "project-equipment";
 
 /** Named in the headline and in the error entries when that source could not be loaded. */
 export const SOURCE_LABEL: Record<AttentionSource, string> = {
@@ -30,6 +32,7 @@ export const SOURCE_LABEL: Record<AttentionSource, string> = {
   "project-decisions": "Project handovers and scope decisions",
   sales: "Sales follow-ups, handovers and approvals",
   "sales-handover": "Sales handovers",
+  "sales-ops-question": "Questions from Operations",
   "sales-approvals": "Commercial approvals",
   budgets: "Project budgets",
   "budget-projects": "The budgets of your projects",
@@ -235,6 +238,14 @@ export function handoverCandidates(check: Extract<HandoverCheck, { status: "ok" 
   return check.rows.filter((r) => r.kind !== "handover_accepted").map((r) => ({
     key: `opp:${r.opportunityId}`, source: "sales-handover", icon: FileCheck2, title: r.title, context: r.reference, what: HANDOVER_KIND_LABEL[r.kind],
     ...(waitingAgeText(r.at, now) ? { when: waitingAgeText(r.at, now)! } : {}), tier: 2, at: r.at, href: `/sales/opportunities/${r.opportunityId}/handover`,
+  }));
+}
+
+/** Questions Operations asked on the person's enquiries, one per enquiry. It shares its key with the enquiry's other rows (`opp:<id>`), and opens the question itself. */
+export function opsQuestionCandidates(check: Extract<OpsQuestionCheck, { status: "ok" }>, now: Date): AttentionCandidate[] {
+  return check.rows.map((r) => ({
+    key: `opp:${r.opportunityId}`, source: "sales-ops-question", icon: MessageCircleQuestion, title: r.title ?? r.reference, ...(r.title ? { context: r.reference } : {}), what: OPS_QUESTION_WHAT,
+    ...(waitingAgeText(r.at, now) ? { when: waitingAgeText(r.at, now)! } : {}), tier: 2, at: r.at, href: opsQuestionHref(r.opportunityId),
   }));
 }
 

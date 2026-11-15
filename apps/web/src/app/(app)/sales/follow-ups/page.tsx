@@ -13,6 +13,8 @@ import { CompanySwitch } from "@/components/sales/company-switch";
 import { FollowUpRowActions } from "@/components/sales/follow-up-row-actions";
 import { formatDate, formatDateTime } from "@/components/sales/format";
 import { HandoverAttention } from "@/components/sales/handover-attention";
+import { OpsQuestionAttention } from "@/components/sales/ops-question-attention";
+import { loadOpsQuestionNotices } from "@/lib/crm/ops-question-data";
 import { QuickAddEnquiry } from "@/components/sales/quick-add-enquiry";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import { RememberList } from "@/components/workspace/list-memory";
@@ -107,6 +109,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
 
   // The handover rows (won without a submitted handover, the PM's question, accepted). Never throws: a failed read is its own message on the card.
   const handover = await loadHandoverRows(ctx, opportunities);
+  // Questions Operations asked on the person's enquiries (their own unread notices). Never throws: a failed read is its own message on the card.
+  const opsQuestions = await loadOpsQuestionNotices(ctx);
 
   // "Only open" must be judged on every open follow-up the person can see, not just the filtered ones.
   const openByOpp = new Map<string, number>();
@@ -233,6 +237,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
           </CardContent>
         </Card>
       ) : null}
+
+      {wholeList ? <OpsQuestionAttention check={opsQuestions} /> : null}
 
       {wholeList ? <HandoverAttention check={handover} /> : null}
 

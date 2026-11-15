@@ -3,6 +3,8 @@ import { crmStageLabel, isCrmFounder, isCrmOpen } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import { getCrmContext, type CrmContext } from "./context";
 import { loadHandoverRows, type HandoverCheck } from "./handover-attention-data";
+import { loadOpsQuestionNotices } from "./ops-question-data";
+import type { OpsQuestionCheck } from "./ops-question";
 import { loadFollowUps, loadOpportunities } from "./data";
 import { attentionItems, openPipelineByStage, type AttentionItem } from "./reports";
 
@@ -19,6 +21,8 @@ export interface SalesToday {
   pipeline: { stage: string; label: string; count: number }[];
   /** The Sales-to-Projects handover rows (won without a submitted handover, the PM's question, accepted). A failed read is its own status, never an empty list. */
   handover: HandoverCheck;
+  /** Questions Operations asked on the person's enquiries (their own unread notices). A failed read is its own status, never an empty list. */
+  opsQuestions: OpsQuestionCheck;
   /** Commercial approval requests waiting for this person to decide (Sales founders only). */
   approvals: ApprovalsWaiting;
 }
@@ -69,7 +73,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
     const [opportunities, followUps] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);
     const attention = attentionItems({ opportunities, followUps: followUps.open, userId: ctx.userId, scope: "mine" });
     const count = (kind: AttentionItem["kind"]) => attention.filter((a) => a.kind === kind).length;
-    const [handover, approvals] = await Promise.all([loadHandoverRows(ctx, opportunities), loadApprovalsWaiting(ctx)]);
+    const [handover, approvals, opsQuestions] = await Promise.all([loadHandoverRows(ctx, opportunities), loadApprovalsWaiting(ctx), loadOpsQuestionNotices(ctx)]);
     return {
       status: "ok",
       data: {
@@ -81,6 +85,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
         opportunityCount: opportunities.length,
         pipeline: openPipelineByStage(opportunities.map((i) => ({ ...i.opp, value: i.value }))).map((b) => ({ stage: b.stage, label: crmStageLabel(b.stage), count: b.count })),
         handover,
+        opsQuestions,
         approvals,
       },
     };
