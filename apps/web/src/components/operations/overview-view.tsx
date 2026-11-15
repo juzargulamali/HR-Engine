@@ -8,6 +8,9 @@ import { InfoHint } from "@/components/ui/info-hint";
 import { CompanyTabs, ReadState, Unknown } from "@/components/operations/parts";
 import { CountBar, HealthBadge, KindMark, ReadinessBar } from "@/components/operations/visuals";
 import type { OpsResult } from "@/lib/operations/data";
+import { Alert } from "@/components/ui/alert";
+import { RunEquipmentList } from "@/components/inventory/job-panels";
+import type { CompanyRunCover, Read } from "@/lib/inventory/job-data";
 import {
   AT_RISK_WINDOW_DAYS, STALLED_DAYS, datesWord, DECISION_WORDS, decisions, deliveryByWeek, EQUIPMENT_ISSUE_WORDS, equipmentIssues, eventLine, groupEntries, HEALTH_ORDER, HEALTH_WORDS, healthCounts, installationsWithin, isFinished,
   laterEntries, NEXT_ON_SITE_DAYS, nextOnSite, nextUnresolved, pressure, projectHealth, readiness, SITE_ACTIVITY_LIMIT, splitDecisions, TIMELINE_DAYS, unitsOut, type DecisionItem, type Overview, type OverviewProject, type TimelineEntry,
@@ -28,10 +31,12 @@ const EVIDENCE_SHOWN = 3;
  * Every figure is the length of the list it opens, built from the same read, so a figure and its list cannot disagree. Nothing is scored. Colour is always
  * paired with a word. A part whose read failed says so and is never drawn as zero, empty or "on track".
  */
-export function OverviewView({ header, companies, company, ov, up, sites, crew, today, viewerId }: {
+export function OverviewView({ header, companies, company, ov, up, sites, crew, today, viewerId, runCover }: {
   header: React.ReactNode; companies: { id: string; name: string }[]; company: { id: string; name: string }; ov: { data: Overview }; up: OpsResult<UpcomingRow[]>; sites: OpsResult<SiteActivityRead[]>;
   /** Who is booked twice (person and both assignments). Optional: without it, or when its read failed, the panel says so and keeps the activity-level warning. */
   crew?: OpsResult<CrewOverlapsRead>; today: string; viewerId: string;
+  /** Equipment status per site run (Inventory Phase 1): the same request states the warehouse works with, with what is wrong for each run. Absent on a database without it. */
+  runCover?: Read<CompanyRunCover[]>;
 }) {
   const self = `/operations?company=${company.id}`;
   const upcomingHref = `/operations/upcoming?company=${company.id}`;
@@ -168,6 +173,24 @@ export function OverviewView({ header, companies, company, ov, up, sites, crew, 
             </ul>
           )}
         </Panel>
+
+        {runCover && runCover.state !== "not_installed" && runCover.state !== "none" ? (
+          <Panel id="equipment-runs" className="scroll-mt-20" title="Equipment by site run"
+            hint={<p>Each site run with the equipment request that serves it, as the warehouse has it: requested, sent, back and still out, and what is wrong for that run with who acts. When one request serves two runs the same equipment stays out between them. Operations reads this; the owner named on each line acts.</p>}>
+            {runCover.state === "error" ? <Alert variant="destructive" role="alert">The equipment status of the site runs could not be loaded. Reload to try again. It does not mean there is no equipment.</Alert>
+              : runCover.value.length === 0 ? <Muted>No equipment request is linked to a site run yet. The Project Manager ticks the site runs a request serves on the project&apos;s Equipment tab.</Muted>
+              : (
+                <ul className="space-y-4" data-testid="ops-run-equipment">
+                  {runCover.value.map((p) => (
+                    <li key={p.projectId}>
+                      <p className="mb-1.5 text-sm"><Link href={`/projects/${p.projectId}/equipment`} className="font-medium text-accent underline-offset-4 hover:underline">{p.reference} {p.name}</Link></p>
+                      <RunEquipmentList rows={p.rows} projectId={p.projectId} />
+                    </li>
+                  ))}
+                </ul>
+              )}
+          </Panel>
+        ) : null}
       </div>
 
       <Panel id="health" className="scroll-mt-20" title="Project health"

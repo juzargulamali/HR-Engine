@@ -2,18 +2,23 @@
 
 import { useEffect, useId, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ScanLine, TriangleAlert } from "lucide-react";
+import { Camera, ScanLine } from "lucide-react";
+import Link from "next/link";
 import { Alert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { formatQty } from "@/lib/inventory/words";
 import { parseQty, validateInput, type MovementInput, type RpcLine, type SummaryRow } from "@/lib/inventory/stock-movements";
 import type { FormContext } from "@/lib/inventory/stock-candidates";
-import { sendFlags, type Flag, type SendItem, type SendSelection } from "@/lib/inventory/workspace";
+import { scanForRequest, sendFlags, type Flag, type SendItem, type SendSelection } from "@/lib/inventory/workspace";
 import { cn } from "@/lib/utils";
+import { QrScanner } from "../qr-scanner";
 import { DonePanel, ReviewPanel } from "../stock/movement-review";
+import { FlagList, QtyStrip } from "./job-parts";
 import { MovementDialog } from "../stock/movement-panel";
 import { liveServices } from "../stock/movement-services-live";
 import { useMovementFlow } from "../stock/use-movement-flow";
@@ -33,14 +38,19 @@ export interface SendStepProps {
   expectedReturnLabel: string;
   /** For the unplanned-dispatch exception (the existing dispatch form). Null when it could not be loaded. */
   formContext: FormContext | null;
+  /** False on a database without the pick step: nothing is ticked for the person, as before. */
+  pickInstalled?: boolean;
+  /** Where to pick first (the Pick step of the same request). */
+  pickHref?: string;
   /** Set when the request can no longer be sent against (fulfilled, closed, not submitted): said instead of the form, but never in place of a "Recorded" result just shown. */
   blockedMessage?: string;
 }
 
 /**
- * Send out: the project, request, warehouse and expected return are carried forward, the RESERVED equipment is listed, and nothing is ticked for
- * you (reserved is not sent). Scan a code or tick the units that are actually going; counted stock takes a counted quantity; sending only part is
- * normal. What the database would refuse is flagged before the review step, and recording uses the same movement flow as every other
+ * Send: the project, request, warehouse and expected return are carried forward and the RESERVED equipment is listed. What was PICKED for this request is
+ * already ticked (and a picked counted quantity is already filled in): the person confirms it or corrects it in place. Reserved equipment that was not picked is
+ * never ticked for you (reserved is not sent). Scan a code or tick the units that are actually going; counted stock takes a counted quantity; sending only part is
+ * normal and leaves the rest reserved, not fulfilled. What the database would refuse is flagged before the review step, and recording uses the same movement flow as every other
  * movement (one key, single flight, "check whether it went through"). An unplanned dispatch is a separate, clearly labelled exception.
  */
 export function SendStep(p: SendStepProps) {
@@ -49,11 +59,15 @@ export function SendStep(p: SendStepProps) {
   const flow = useMovementFlow(liveServices, p.companyId, "dispatch");
   const locked = flow.uncertain && flow.phase !== "done";
   const [locationId, setLocationId] = useState(p.defaultLocationId);
-  const [ticked, setTicked] = useState<Record<string, string[]>>({});
-  const [counted, setCounted] = useState<Record<string, string>>({});
+  // Prefilled from the Pick step, shown in place: the person confirms it or corrects it. Nothing else is ticked.
+  const pickedTicks = () => Object.fromEntries(p.items.map((i) => [i.itemId, i.units.filter((u) => u.picked).map((u) => u.unitId)]));
+  const pickedCounts = () => Object.fromEntries(p.items.filter((i) => !i.individual && i.pickedWaiting > 0).map((i) => [i.itemId, String(Math.min(i.pickedWaiting, i.countedToSend))]));
+  const [ticked, setTicked] = useState<Record<string, string[]>>(pickedTicks);
+  const [counted, setCounted] = useState<Record<string, string>>(pickedCounts);
   const [scan, setScan] = useState("");
+  const [camera, setCamera] = useState(false);
   const [unknown, setUnknown] = useState<string[]>([]);
-  const [info, setInfo] = useState<string | null>(null);
+  const [info, setInfo] = useState<{ tone: "ok" | "warn" | "bad"; text: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [exception, setException] = useState(false);
 
@@ -73,18 +87,14 @@ export function SendStep(p: SendStepProps) {
   const toggle = (itemId: string, unitId: string, on: boolean) =>
     setTicked((t) => ({ ...t, [itemId]: on ? [...new Set([...(t[itemId] ?? []), unitId])] : (t[itemId] ?? []).filter((x) => x !== unitId) }));
 
-  const onScan = () => {
-    const code = scan.trim().toUpperCase();
-    setInfo(null);
-    if (!code) return;
-    setScan("");
-    for (const i of p.items) {
-      const u = i.units.find((x) => (x.code ?? "").toUpperCase() === code);
-      if (u) { toggle(i.itemId, u.unitId, true); setUnknown((x) => x.filter((c) => c !== code)); return; }
-    }
-    if (p.sentCodes.some((c) => c.toUpperCase() === code)) { setInfo(`${code} has already been sent for this request.`); return; }
-    setUnknown((x) => (x.includes(code) ? x : [...x, code]));
+  const read = (raw: string) => {
+    if (!raw.trim()) return;
+    const r = scanForRequest(p.items, new Set(Object.values(ticked).flat()), p.sentCodes, raw, "sent");
+    if (r.kind === "ticked") { toggle(r.itemId, r.unitId, true); setUnknown((x) => x.filter((c) => c !== r.code)); setInfo({ tone: "ok", text: `${r.code} ticked.` }); return; }
+    if (r.kind === "wrong") { setUnknown((x) => (x.includes(r.code) ? x : [...x, r.code])); setInfo({ tone: "bad", text: `Wrong item: ${r.text}` }); return; }
+    setInfo({ tone: "warn", text: r.kind === "duplicate" ? `Already scanned: ${r.text}` : r.text });
   };
+  const onScan = () => { const raw = scan; setScan(""); read(raw); };
 
   const lines = (): { ok: true; lines: RpcLine[] } | { ok: false; error: string } => {
     const out: RpcLine[] = [];
@@ -140,7 +150,14 @@ export function SendStep(p: SendStepProps) {
 
   if (p.blockedMessage && flow.phase !== "done") return <Alert role="status">{p.blockedMessage}</Alert>;
   if (flow.phase === "done") {
-    return <DonePanel flow={flow} onAnother={() => { setTicked({}); setCounted({}); setUnknown([]); setInfo(null); flow.startNew(); }} />;
+    return (
+      <div className="space-y-3">
+        <p className="rounded-md border border-border bg-card px-4 py-3 text-sm" role="status" data-testid="send-next">
+          <strong>What happens next:</strong> the equipment is now with {p.projectName}. Anything still reserved and not sent stays on this request. When it comes back, the warehouse records it under Receive.
+        </p>
+        <DonePanel flow={flow} onAnother={() => { setTicked({}); setCounted({}); setUnknown([]); setInfo(null); flow.startNew(); }} />
+      </div>
+    );
   }
   if (flow.phase === "reviewing" || flow.phase === "sending") {
     return (
@@ -173,13 +190,20 @@ export function SendStep(p: SendStepProps) {
         <>
           <form onSubmit={(e) => { e.preventDefault(); onScan(); }} className="flex flex-col gap-2 sm:flex-row sm:items-end">
             <div className="flex-1">
-              <label htmlFor={`${uid}-scan`} className="mb-1 block text-sm font-medium">Scan or type a code to tick it</label>
+              <div className="mb-1 flex items-center gap-1"><label htmlFor={`${uid}-scan`} className="text-sm font-medium">Scan or type a code to tick it</label><InfoHint label="scan or type a code">Scan the label on a unit, or type its equipment ID and press Add. Use the camera button on a phone. Scanning only ticks the unit: nothing is recorded until you confirm.</InfoHint></div>
               <Input id={`${uid}-scan`} value={scan} onChange={(e) => setScan(e.target.value)} disabled={locked} placeholder="Equipment ID, for example UAE-E-00042" autoComplete="off" className="h-11 text-base sm:h-9 sm:text-sm" />
             </div>
-            <Button type="submit" variant="outline" disabled={locked || !scan.trim()} className="h-11 sm:h-9"><ScanLine className="h-4 w-4" aria-hidden />Add</Button>
+            <div className="flex gap-2">
+              <Button type="submit" variant="outline" disabled={locked || !scan.trim()} className="h-11 flex-1 sm:h-9 sm:flex-none"><ScanLine className="h-4 w-4" aria-hidden />Add</Button>
+              <Button type="button" variant="outline" disabled={locked} onClick={() => setCamera((c) => !c)} aria-pressed={camera} className="h-11 flex-1 sm:h-9 sm:flex-none"><Camera className="h-4 w-4" aria-hidden />{camera ? "Close camera" : "Use camera"}</Button>
+            </div>
           </form>
-          <p className="-mt-2 text-xs text-muted-foreground">Nothing is ticked for you: reserved does not mean sent. Scanning only ticks a unit; nothing is recorded until you confirm.</p>
-          {info ? <p role="status" className="text-sm text-muted-foreground">{info}</p> : null}
+          {camera ? <div className="rounded-md border border-border p-3"><QrScanner onRead={read} onClose={() => setCamera(false)} /></div> : null}
+          <p className="-mt-2 text-xs text-muted-foreground">{p.pickInstalled === false ? "Nothing is ticked for you: reserved does not mean sent." : "What was picked for this request is already ticked: check it against what is going, and correct it here. Reserved equipment that was not picked is not ticked."} Nothing is recorded until you confirm.</p>
+          {info ? <p role={info.tone === "bad" ? "alert" : "status"} data-scan={info.tone} className={cn("rounded-md border px-3 py-2 text-sm", info.tone === "bad" ? "border-destructive/40 bg-destructive/10 text-destructive" : info.tone === "warn" ? "border-warning/40 bg-warning/10" : "border-border text-muted-foreground")}>{info.text}</p> : null}
+          {p.pickInstalled !== false && p.pickHref && p.items.some((i) => (i.individual ? i.units.length : i.countedToSend) - i.pickedWaiting > 0) ? (
+            <p className="text-sm text-muted-foreground" data-testid="send-not-picked">Some reserved equipment has not been picked yet. <Link href={p.pickHref} className="font-medium text-[hsl(var(--os-link))] underline underline-offset-2">Pick items</Link> first, or tick here what is going now.</p>
+          ) : null}
 
           <div className="space-y-3">
             {p.items.map((i) => {
@@ -187,20 +211,21 @@ export function SendStep(p: SendStepProps) {
               const picked = ticked[i.itemId] ?? [];
               return (
                 <section key={i.itemId} className="rounded-lg border border-border bg-card" aria-label={i.name}>
-                  <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border/70 px-4 py-2.5">
+                  <header className="space-y-2 border-b border-border/70 px-4 py-3">
                     <h3 className="text-sm font-semibold">{i.name}{i.model ? <span className="font-normal text-muted-foreground"> · {i.model}</span> : null}</h3>
-                    <p className="text-xs text-muted-foreground">Reserved {formatQty(i.reserved, i.uom)} · Sent {formatQty(i.sent, i.uom)} · <span className={cn(left > 0 && "font-medium text-foreground")}>To send {formatQty(left, i.uom)}</span></p>
+                    <QtyStrip asked={i.asked} reserved={i.reserved} picked={i.pickedWaiting + i.sent} sent={i.sent} uom={i.uom} pickKnown={p.pickInstalled !== false} />
+                    <p className="text-xs text-muted-foreground"><span className={cn(left > 0 && "font-medium text-foreground")}>To send {formatQty(left, i.uom)}</span>{i.asked - i.reserved > 0 ? ` · ${formatQty(i.asked - i.reserved, i.uom)} not reserved (short): it stays open on the request` : ""}</p>
                   </header>
                   {left <= 0 ? <p className="px-4 py-3 text-sm text-muted-foreground">Everything reserved has been sent.</p> : i.individual ? (
                     <div>
                       <ul className="divide-y divide-border/70">
                         {i.units.map((u) => (
                           <li key={u.unitId}>
-                            <label className="flex cursor-pointer items-center gap-3 px-4 py-2.5 text-sm">
-                              <input type="checkbox" checked={picked.includes(u.unitId)} onChange={(e) => toggle(i.itemId, u.unitId, e.target.checked)} disabled={locked} className="h-5 w-5 accent-[hsl(var(--accent))]" />
+                            <label className="flex min-h-[3rem] cursor-pointer items-center gap-3 px-4 py-2.5 text-sm">
+                              <input type="checkbox" checked={picked.includes(u.unitId)} onChange={(e) => toggle(i.itemId, u.unitId, e.target.checked)} disabled={locked} className="h-6 w-6 flex-none accent-[hsl(var(--accent))]" />
                               <span className="font-medium">{u.code ?? "Unit"}</span>
                               {u.serial ? <span className="text-muted-foreground">serial {u.serial}</span> : null}
-                              <span className="text-muted-foreground">reserved for this request</span>
+                              {u.picked ? <Badge variant="outline">Picked</Badge> : <span className="text-muted-foreground">reserved, not picked</span>}
                             </label>
                           </li>
                         ))}
@@ -213,7 +238,7 @@ export function SendStep(p: SendStepProps) {
                     <div className="flex flex-wrap items-center gap-3 px-4 py-3">
                       <label htmlFor={`${uid}-q-${i.itemId}`} className="text-sm">Counted quantity</label>
                       <Input id={`${uid}-q-${i.itemId}`} inputMode={i.scale > 0 ? "decimal" : "numeric"} placeholder={`up to ${formatQty(left, i.uom)}`} value={counted[i.itemId] ?? ""} onChange={(e) => setCounted({ ...counted, [i.itemId]: e.target.value })} disabled={locked} className="h-10 w-36 sm:h-9" />
-                      <span className="text-xs text-muted-foreground">Count what goes in the box. It is never filled in for you.</span>
+                      <span className="text-xs text-muted-foreground">{i.pickedWaiting > 0 ? `${formatQty(i.pickedWaiting, i.uom)} picked for this request: correct it if a different quantity is going.` : "Count what goes in the box."}</span>
                     </div>
                   )}
                 </section>
@@ -224,8 +249,8 @@ export function SendStep(p: SendStepProps) {
           <FlagList flags={flags} />
           {problem ? <Alert variant="destructive" role="alert">{problem}</Alert> : null}
           <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" disabled={picks === 0 || locked} onClick={onReview} className="h-11 w-full sm:h-9 sm:w-auto">Review{picks > 0 ? ` ${picks} to send` : ""}</Button>
-            {picks === 0 ? <span className="text-xs text-muted-foreground">Tick or count what is actually going to continue.</span> : null}
+            <Button type="button" disabled={picks === 0 || locked} onClick={onReview} className="h-12 w-full text-base sm:h-10 sm:w-auto sm:text-sm">Send equipment{picks > 0 ? ` (${picks})` : ""}</Button>
+            <span className="text-xs text-muted-foreground">{picks === 0 ? "Tick or count what is actually going to continue." : "You check the list once more before anything is recorded."}</span>
           </div>
         </>
       )}
@@ -244,18 +269,5 @@ export function SendStep(p: SendStepProps) {
         ) : <p className="mt-2 text-xs text-muted-foreground">The dispatch form could not be loaded. Reload the page to try again.</p>}
       </section>
     </div>
-  );
-}
-
-function FlagList({ flags }: { flags: Flag[] }) {
-  if (flags.length === 0) return null;
-  return (
-    <ul aria-label="Check these first" className="space-y-1.5">
-      {flags.map((f) => (
-        <li key={f.text} role={f.level === "block" ? "alert" : "status"} className={cn("flex items-start gap-2 rounded-md border px-3 py-2 text-sm", f.level === "block" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-warning/40 bg-warning/10")}>
-          <TriangleAlert className="mt-0.5 h-4 w-4 flex-none" aria-hidden /><span>{f.text}</span>
-        </li>
-      ))}
-    </ul>
   );
 }

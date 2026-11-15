@@ -268,7 +268,7 @@ await step("project manager adds the items (whole units and metres) and submits 
   await R.page.getByText(new RegExp(BRACKET)).first().waitFor();
   await sleep(500);
   await R.shot("flow1-request-lines");
-  await R.page.getByRole("button", { name: "Submit to the warehouse" }).click();
+  await R.page.getByRole("button", { name: "Send to Warehouse" }).click();
   await until(() => s1(`select status from inv_requests where id='${REQ}'`) === "submitted");
   eq(s1("select count(*) from inv_reservations"), 0, "submitting reserves nothing");
 });

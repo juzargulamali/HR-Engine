@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowLeftRight, ClipboardList, FileWarning, Hourglass, PackageCheck, SearchCheck, Send, Undo2 } from "lucide-react";
+import { ArrowLeftRight, ClipboardList, FileWarning, Hand, Hourglass, PackageCheck, SearchCheck, Send, Undo2 } from "lucide-react";
 import { buttonVariants } from "@/components/ui/button";
 import { RecordCheckButton } from "@/components/inventory/planning/record-check-button";
 import { ResolveDifference } from "@/components/inventory/notes/note-actions";
@@ -7,7 +7,7 @@ import { NotePdfLinks } from "@/components/inventory/notes/note-pdf-links";
 import type { QueueKind, QueueRow } from "@/lib/inventory/today";
 import { cn } from "@/lib/utils";
 
-const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck, waiting: Hourglass, held: SearchCheck, difference: FileWarning };
+const ICON: Record<QueueKind, React.ComponentType<{ className?: string }>> = { prepare: ClipboardList, pick: Hand, send: Send, returns: Undo2, transfer: ArrowLeftRight, sales: PackageCheck, waiting: Hourglass, held: SearchCheck, difference: FileWarning };
 
 /**
  * One job. Its title is a real link stretched over the whole row (so the empty part of the row opens the record, and keyboard and "open in a

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { recordOpportunityCheck, requestOpportunityCheck } from "@/lib/actions/inventoryPlanning";
-import type { SalesCheckView } from "@/lib/inventory/planning";
+import { CHECK_NOT_RESERVED, type SalesCheckView } from "@/lib/inventory/planning";
+import { InfoHint } from "@/components/ui/info-hint";
 import { formatDateTime } from "@/components/sales/format";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -44,9 +45,17 @@ export function AvailabilityCardView({ view, opportunityId, locations, canAsk, c
           <p className="mt-2 text-sm">No check is recorded yet. Waiting for the warehouse{view.pendingBy ? `: asked by ${view.pendingBy}` : ""}{view.pendingAt ? ` on ${formatDateTime(view.pendingAt)}` : ""}.</p>
         ) : null}
         {view.state === "checked" ? (
-          <p className="mt-2 text-sm text-muted-foreground">
-            Recorded{view.checkedBy ? ` by ${view.checkedBy}` : ""}{view.checkedAt ? ` on ${formatDateTime(view.checkedAt)}` : ""}{view.locationName ? ` against ${view.locationName}` : ""}. This is what the warehouse found then.{view.note ? ` Note: ${view.note}` : ""}
-          </p>
+          <>
+            <p className="mt-2 flex items-center gap-1 text-sm font-semibold" data-testid="check-not-reserved">{CHECK_NOT_RESERVED}
+              <InfoHint label="availability checked">The warehouse looked at its stock and bookings for this enquiry and recorded what it found, with a name and a time. Nothing is held for the enquiry: stock is reserved only for the equipment request of the project, after the job is won.</InfoHint>
+            </p>
+            <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2" data-testid="check-facts">
+              <div><dt className="text-muted-foreground">Checked</dt><dd>{view.checkedAt ? formatDateTime(view.checkedAt) : "Date not recorded"}{view.checkedBy ? ` by ${view.checkedBy}` : ""}</dd></div>
+              <div><dt className="text-muted-foreground">Warehouse</dt><dd>{view.locationName ?? "Not recorded"}</dd></div>
+              <div className="sm:col-span-2"><dt className="text-muted-foreground">Proposed dates checked</dt><dd>{view.coversRange ?? "The enquiry had no dates when it was checked"}</dd></div>
+            </dl>
+            <p className="mt-2 text-sm text-muted-foreground">This is what the warehouse found then.{view.note ? ` Note: ${view.note}` : ""}</p>
+          </>
         ) : null}
 
         {view.outOfDate ? (

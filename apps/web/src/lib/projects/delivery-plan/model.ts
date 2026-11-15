@@ -21,7 +21,7 @@ export const sectionFamily = (s: DpSection): DpSection => (s === "programming" ?
 
 export type SupplyRoute = "inventory" | "buy" | "rent" | "client";
 export const SUPPLY_ROUTES: readonly SupplyRoute[] = ["inventory", "buy", "rent", "client"];
-export const SUPPLY_ROUTE_LABELS: Record<SupplyRoute, string> = { inventory: "Inventory", buy: "Buy", rent: "Rent", client: "Client supplied" };
+export const SUPPLY_ROUTE_LABELS: Record<SupplyRoute, string> = { inventory: "From stock", buy: "Buy", rent: "Rent", client: "Client supplied" };
 
 /** The small structured part of a line. Which keys exist depends on the section (the database refuses any other). */
 export interface DpDetail {

@@ -5,6 +5,7 @@ import { PackageOpen, TriangleAlert } from "lucide-react";
 import { canOperateAnyStock } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
 import { TodayRow } from "@/components/inventory/today/today-row";
 import { WarehouseBar } from "@/components/inventory/warehouse-bar";
 import { RememberList } from "@/components/workspace/list-memory";
@@ -12,7 +13,7 @@ import { firstParam, withParams } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { legacyStockTarget } from "@/lib/inventory/legacy-redirect";
 import {
-  FAILURE_TAIL, FILTER_LABEL, GROUP_LABEL, SHOW_FILTERS, SOURCE_NOUN, filterCounts, filterRows, groupRows, isQueueEmpty, parseShow,
+  FAILURE_TAIL, FILTER_LABEL, GROUP_HELP, GROUP_LABEL, SHOW_FILTERS, SOURCE_NOUN, filterCounts, filterRows, groupRows, isQueueEmpty, parseShow,
 } from "@/lib/inventory/today";
 import { loadToday } from "@/lib/inventory/today-data";
 import { WAREHOUSE_COOKIE, pickWorkingLocation, warehouseOptions } from "@/lib/inventory/working-location";
@@ -62,6 +63,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
   }
 
   const where = working.id ? ctx.locationName(working.id) : "all warehouses";
+  const workingCompany = working.id ? ctx.companyName(active.find((l) => l.id === working.id)?.company_id ?? "") : null;
   const show = parseShow(firstParam(sp, "show"));
   const canOperate = canOperateAnyStock(ctx.grants);
   const data = await loadToday(ctx, { locationId: working.id });
@@ -78,7 +80,8 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
       {bar}
       <div>
         <h1 className="text-2xl font-semibold">Today</h1>
-        <p className="text-sm text-muted-foreground">{working.id ? `Work waiting at ${where}.` : "Work waiting across all warehouses."} Each row is one job: open it, or press its button.</p>
+        <p className="text-sm font-medium" data-testid="today-scope">{working.id ? `${workingCompany} · ${where}` : multiCompany ? "All companies · all warehouses" : `${ctx.companies[0]?.name ?? ""} · all warehouses`}</p>
+        <p className="text-sm text-muted-foreground">{working.id ? `Work waiting at ${where}.` : "Work waiting across all warehouses."} Each row is one job: its button opens the next step.</p>
       </div>
 
       {data.failed.map((s) => (
@@ -122,8 +125,9 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         <div className="space-y-5">
           {groups.map((g) => (
             <section key={g.bucket} aria-labelledby={`today-${g.bucket}`} className="overflow-hidden rounded-lg border border-border bg-card">
-              <h2 id={`today-${g.bucket}`} className={cn("flex items-center gap-2 border-b border-border/70 px-4 py-2 text-sm font-semibold", g.bucket === "late" && "text-destructive")}>
+              <h2 id={`today-${g.bucket}`} className="flex items-center gap-2 border-b border-border/70 px-4 py-2.5 text-sm font-semibold" data-section={g.bucket}>
                 {GROUP_LABEL[g.bucket]}<span className="rounded-full bg-secondary px-1.5 text-xs font-normal tabular-nums text-foreground">{g.rows.length}</span>
+                <InfoHint label={GROUP_LABEL[g.bucket]}>{GROUP_HELP[g.bucket]}</InfoHint>
               </h2>
               <ul className="divide-y divide-border/70">{g.rows.map((r) => <TodayRow key={r.id} row={r} canOperate={canOperate} checkLocations={checkLocations} />)}</ul>
             </section>
@@ -131,7 +135,7 @@ export default async function TodayPage({ searchParams }: { searchParams: Promis
         </div>
       )}
       <p className="text-xs text-muted-foreground">
-        Dates come from each record. A Sales check has no deadline, so it sits under “Waiting, no date set”. Lines waiting to be bought or rented stay under “Waiting / Shortages” until the stock is received and reserved. A check is not a reservation.
+        Dates come from each record. A Sales check has no deadline, so it sits under “Do now” until it is answered. Lines waiting to be bought or rented stay under “Waiting on someone else” until the stock is received and reserved. A check is not a reservation.
         {working.id ? " Counted items (cables, consumables) that are out with people or on projects are not split by warehouse, so they are listed only when you choose All warehouses." : ""}
       </p>
     </div>

@@ -23,8 +23,8 @@ import { SendStep, type SendStepProps } from "./send-step";
 beforeEach(() => { submit.mockClear(); refresh.mockClear(); submit.mockImplementation(async () => ({ error: null, message: "Recorded as MV-000001.", result: {}, uncertain: false })); });
 afterEach(() => cleanup());
 
-const projector: SendItem = { itemId: "i-pj", name: "Video projector", model: null, tracking: "individual", individual: true, uom: "each", scale: 0, units: [{ unitId: "u1", code: "PJ-0403", serial: null }, { unitId: "u2", code: "PJ-0404", serial: null }], countedToSend: 0, reserved: 4, sent: 2 };
-const strips: SendItem = { itemId: "i-ps", name: "Power strip", model: null, tracking: "quantity", individual: false, uom: "each", scale: 0, units: [], countedToSend: 6, reserved: 10, sent: 4 };
+const projector: SendItem = { itemId: "i-pj", name: "Video projector", model: null, tracking: "individual", individual: true, uom: "each", scale: 0, units: [{ unitId: "u1", code: "PJ-0403", serial: null }, { unitId: "u2", code: "PJ-0404", serial: null }], countedToSend: 0, reserved: 4, sent: 2, asked: 4, pickedWaiting: 0 };
+const strips: SendItem = { itemId: "i-ps", name: "Power strip", model: null, tracking: "quantity", individual: false, uom: "each", scale: 0, units: [], countedToSend: 6, reserved: 10, sent: 4, asked: 10, pickedWaiting: 0 };
 const send = (over: Partial<SendStepProps> = {}) => (
   <SendStep requestId="r1" requestCode="REQ-0049" projectId="p1" projectName="Al Khail Roadshow" companyId="c1" items={[projector, strips]} sentCodes={["PJ-0401"]}
     locations={[{ id: "l1", name: "Dubai warehouse" }]} defaultLocationId="l1" expectedReturnLabel="23 Oct 2026, 18:00 GST" formContext={null} {...over} />
@@ -38,7 +38,7 @@ describe("Send out", () => {
     expect(screen.getByText(/23 Oct 2026, 18:00 GST/)).toBeTruthy();
     expect((screen.getAllByRole("checkbox") as HTMLInputElement[]).every((c) => !c.checked)).toBe(true);
     expect((screen.getByLabelText(/counted quantity/i) as HTMLInputElement).value).toBe("");
-    expect((screen.getByRole("button", { name: /^Review/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /^Send equipment/ }) as HTMLButtonElement).disabled).toBe(true);
     expect(submit).not.toHaveBeenCalled();
   });
 
@@ -53,8 +53,8 @@ describe("Send out", () => {
     expect(screen.getByText(/PJ-0401 has already been sent/)).toBeTruthy();
     fireEvent.change(box, { target: { value: "WM-0099" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    expect(screen.getByText(/WM-0099 is not reserved for this request/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    expect(screen.getAllByText(/WM-0099 is not reserved for this request/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /^Send equipment/ }));
     expect((await screen.findAllByRole("alert")).some((a) => /Take off what the system would refuse/.test(a.textContent ?? ""))).toBe(true);
     expect(screen.queryByText("Check before you confirm")).toBeNull();
     expect(submit).not.toHaveBeenCalled();
@@ -66,7 +66,7 @@ describe("Send out", () => {
     fireEvent.change(screen.getByLabelText(/counted quantity/i), { target: { value: "2" } });
     expect(screen.getByText(/sending 1 of 2 reserved/)).toBeTruthy();
     expect(screen.getByText(/sending 2 of 6 reserved/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send equipment/ }));
     expect(await screen.findByText("Check before you confirm")).toBeTruthy();
     const dl = screen.getByText("What").closest("dl")!;
     expect(within(dl).getByText(/PJ-0403/)).toBeTruthy();
@@ -84,14 +84,14 @@ describe("Send out", () => {
   it("a request that can no longer be sent against says so instead of the form", () => {
     render(send({ blockedMessage: "This request is fulfilled, so equipment cannot be sent against it." }));
     expect(screen.getByText(/This request is fulfilled, so equipment cannot be sent against it/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^Review/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Send equipment/ })).toBeNull();
   });
 
   it("the Recorded panel, with the note's PDF, survives the refresh that makes the request fulfilled (a dispatch that sent everything)", async () => {
     submit.mockImplementation(async () => ({ error: null, message: "Dispatched.", result: { project_id: "p1", note_id: "n1", note_no: "ENG-D-00001" }, uncertain: false }));
     const { rerender } = render(send());
     fireEvent.click(screen.getByLabelText(/PJ-0403/));
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send equipment/ }));
     fireEvent.click(await screen.findByRole("button", { name: /confirm: send 1/i }));
     await screen.findByText("Recorded");
     // the page re-renders with the request fulfilled: the step is told it is blocked, and must keep showing what was just recorded
@@ -106,7 +106,7 @@ describe("Send out", () => {
     render(send());
     fireEvent.change(screen.getByLabelText(/counted quantity/i), { target: { value: "9" } });
     expect(screen.getByText(/9 counted, but only 6 are reserved and still to send/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send equipment/ }));
     expect(screen.queryByText("Check before you confirm")).toBeNull();
   });
 
@@ -114,7 +114,7 @@ describe("Send out", () => {
     submit.mockImplementationOnce(async () => ({ error: "Not enough free stock", message: "", result: {}, uncertain: false }) as never);
     render(send());
     fireEvent.click(screen.getByLabelText(/PJ-0404/));
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Send equipment/ }));
     fireEvent.click(await screen.findByRole("button", { name: /confirm: send 1/i }));
     expect(await screen.findByText("Not enough free stock")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Back to edit" }));
@@ -162,25 +162,28 @@ describe("Receive back", () => {
     expect((screen.getAllByRole("checkbox") as HTMLInputElement[]).every((c) => !c.checked)).toBe(true);
     expect(screen.getByText(/This request/)).toBeTruthy();
     expect(screen.getByText(/Another request/)).toBeTruthy();
-    expect((screen.getByRole("button", { name: /^Review/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: /^Receive return/ }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("requires a condition for everything received, shows what becomes available, and sends a partial return against the project", async () => {
     render(receive());
     fireEvent.click(screen.getByLabelText(/LED wall panel · LED-0007/));
     fireEvent.change(screen.getByLabelText(/How many HDMI cable came back/), { target: { value: "5" } });
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Receive return/ }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Choose a condition/);
     fireEvent.change(screen.getByLabelText(/Condition of LED wall panel · LED-0007/), { target: { value: "good" } });
     fireEvent.change(screen.getByLabelText(/Condition of HDMI cable/), { target: { value: "damaged" } });
     expect(screen.getByText("Available again")).toBeTruthy();
-    expect(screen.getByText("Held, not available")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    expect(screen.getByText("Held for inspection")).toBeTruthy();
+    // the result is said in one line beside the action before anything is saved: what came back, what is available, what is held, what is still out
+    expect(screen.getByTestId("receive-action").textContent).toMatch(/After saving: 6 returned · 1 available · 5 held for inspection · \d+ still out\./);
+    fireEvent.click(screen.getByRole("button", { name: /^Receive return/ }));
     expect(await screen.findByText("Check before you confirm")).toBeTruthy();
+    expect(screen.getByTestId("return-result-preview").textContent).toMatch(/^6 returned · 1 available · 5 held for inspection · /);
     expect(screen.getByText(/items stay with the project/)).toBeTruthy();
     expect(screen.getByText(/held for checking/)).toBeTruthy();
     expect(submit).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: /confirm: record returns/i }));
+    fireEvent.click(screen.getByRole("button", { name: /confirm: receive return/i }));
     await screen.findByText("Recorded");
     const sent = submit.mock.calls[0]![0];
     expect(sent).toMatchObject({ kind: "return", returnFrom: "project", projectId: "p1", locationId: "l1" });
@@ -222,7 +225,7 @@ describe("Receive back", () => {
     fireEvent.click(screen.getByRole("button", { name: /Tick all 2/ }));
     expect((screen.getAllByRole("checkbox") as HTMLInputElement[]).filter((c) => c.checked)).toHaveLength(2);
     expect(screen.getByRole("button", { name: /Untick all 2/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Review/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^Receive return/ }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/Choose a condition/);
     expect(submit).not.toHaveBeenCalled();
   });

@@ -255,7 +255,7 @@ if (run("A2")) {
     const haveAside = await scope.count();
     const where = haveAside ? scope : R.page.locator("main details[open]").first();   // the request that ?request= opened (the others are closed)
     await where.locator("details[aria-label='Planning dates'] > summary").first().click();
-    await where.getByLabel("Equipment due back", { exact: true }).first().fill(dayAt(51, "17:00"));
+    await where.getByLabel("Due back", { exact: true }).first().fill(dayAt(51, "17:00"));
     await where.getByRole("button", { name: "Change the dates" }).first().click();
     const status = R.page.locator("[role=status]", { hasText: /collide|cannot|could not|not free|conflict|keep|reserved/i }).first();
     await status.waitFor({ timeout: 20000 });
@@ -273,7 +273,7 @@ if (run("A2")) {
     await R.go(`/projects/${PRJ_A}/equipment?request=${X.request}`);
     const where = (await R.page.locator("aside[role=dialog]").count()) ? R.page.locator("aside[role=dialog]").first() : R.page.locator("main details[open]").first();   // the request that ?request= opened (the others are closed)
     await where.locator("details[aria-label='Planning dates'] > summary").first().click();
-    await where.getByLabel("Equipment due back", { exact: true }).first().fill(dayAt(48, "17:00"));
+    await where.getByLabel("Due back", { exact: true }).first().fill(dayAt(48, "17:00"));
     await where.getByRole("button", { name: "Change the dates" }).first().click();
     await until(() => rangeOf(X.line).includes(new Date(Date.now() + 48 * 86400000).toISOString().slice(0, 10)) || rangeOf(X.line).includes(new Date(Date.now() + 49 * 86400000).toISOString().slice(0, 10)), 20000, "range ");
     eq(activeRes(`r.unit_id='${HF_ID}'`), 2, "still two reservations, no overlap");
@@ -512,8 +512,8 @@ if (run("A4")) {
     await step(`A4 ${what}: stored in UTC as ${utcFrom.slice(0, 16)}Z .. ${utcTo.slice(0, 16)}Z and shown in Poznan time (${shown})`, async () => {
       if (i > 1) {   // change the dates through the plan form on the request
         await R.go(`/inventory/requests?open=${REQ}`); await R.panel().waitFor();
-        await R.panel().getByLabel("Dispatch and transport", { exact: true }).fill(from);
-        await R.panel().getByLabel("Equipment due back", { exact: true }).fill(to);
+        await R.panel().getByLabel("Leaves warehouse", { exact: true }).fill(from);
+        await R.panel().getByLabel("Due back", { exact: true }).fill(to);
         await R.panel().getByRole("button", { name: /Save the dates|Change the dates/ }).click();
         await until(() => s1(`select needed_from::text from inv_requests where id='${REQ}'`) === utcFrom, 15000, "needed_from ");
       }
@@ -523,7 +523,7 @@ if (run("A4")) {
       const t = await showRequest();
       check(t.includes(shown), `the panel shows Poznan local time "${shown}": ` + (t.match(/Needed \(local time of the request\)[^]{0,120}/)?.[0] ?? t.slice(0, 200)));
       check(t.includes("Europe/Warsaw"), "and names the zone");
-      const form = await R.panel().getByLabel("Dispatch and transport", { exact: true }).inputValue();
+      const form = await R.panel().getByLabel("Leaves warehouse", { exact: true }).inputValue();
       check(form === from, `the date box holds the local time as typed, not the browser's: ${form}`);   // for the gap case the panel above shows 03:00 while the box keeps the typed 02:30 (noted in the report)
       if (i === 1) await R.shot("flow4-poznan-dst");
     });

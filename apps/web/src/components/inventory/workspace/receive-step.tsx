@@ -11,7 +11,7 @@ import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { draftFromCandidate, type Candidate } from "@/lib/inventory/stock-candidates";
 import { parseLines, validateInput, type LineDraft, type MovementInput, type SummaryRow } from "@/lib/inventory/stock-movements";
 import { BALANCE_CONDITION_WORDS, CONDITION_WORDS, formatQty } from "@/lib/inventory/words";
-import { returnOutcome, type HolderOf, type ItemTotals } from "@/lib/inventory/workspace";
+import { returnOutcome, returnResultLine, type HolderOf, type ItemTotals } from "@/lib/inventory/workspace";
 import { cn } from "@/lib/utils";
 import { applyConditionToLines, appliedMessage } from "@/lib/inventory/return-condition";
 import { ConditionForAll } from "../condition-for-all";
@@ -19,6 +19,7 @@ import { DonePanel, ReviewPanel } from "../stock/movement-review";
 import { SentReturned } from "./sent-returned";
 import { liveServices } from "../stock/movement-services-live";
 import { useMovementFlow } from "../stock/use-movement-flow";
+import { InfoHint } from "@/components/ui/info-hint";
 
 export interface ReceiveStepProps {
   companyId: string;
@@ -32,15 +33,20 @@ export interface ReceiveStepProps {
   heldError: string | null;
   totals: ItemTotals[];
   holders: Record<string, HolderOf>;
+  /** The dispatch each unit of THIS request went out on ("UAE-M-00012, 12 Jun"), by unit id; absent when it could not be read or the unit went out another way. */
+  sentIn?: Record<string, string>;
+  /** The dispatches recorded for this request, oldest first, in words: the list below starts from them. */
+  dispatches?: string[];
 }
 
 const HOLDER_LABEL: Record<HolderOf, string> = { this: "This request", other: "Another request", none: "Not from a request" };
 
 /**
- * Receive back: starts from what is actually outstanding (what the PROJECT is recorded as holding), shows Sent / Returned / Still out at the
- * level the data supports (see lib/inventory/workspace.ts), and never assumes anything came back: nothing is ticked, a condition is chosen for
- * everything received, partial returns are normal. Good equipment becomes available through the existing rules; damaged or unchecked equipment
- * stays unavailable until it is checked.
+ * Receive: starts from the ORIGINAL DISPATCH. Everything that went out for the request and is still out is already listed, with the dispatch it left on, so
+ * nothing is typed again. The person records what physically happened: ticks what came back and says its condition; what is left unticked stays out. Sent /
+ * Returned / Still out are shown at the level the data supports (see lib/inventory/workspace.ts). Nothing is assumed to be back, and a condition is never chosen
+ * for the person. Serviceable equipment is available again at once; damaged equipment, or equipment needing a check, is held out of availability until an
+ * inspection by warehouse staff at that warehouse clears it. The result is said in one line before saving and again after it.
  */
 export function ReceiveStep(p: ReceiveStepProps) {
   const router = useRouter();
@@ -53,6 +59,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
   const [cond, setCond] = useState<Record<string, string>>({});
   const [problem, setProblem] = useState<string | null>(null);
   const [shown, setShown] = useState(false);
+  const [resultLine, setResultLine] = useState<string | null>(null);
 
   const isUnit = (c: Candidate) => c.type === "unit";
   const chosen = p.held.filter((c) => (isUnit(c) ? ticked[c.key] : Number(qty[c.key] || 0) > 0));
@@ -80,6 +87,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
   const onConfirm = () => {
     const res = build(flow.key);
     if ("error" in res) { setProblem(res.error); flow.toEdit(); return; }
+    setResultLine(outcomeLine());
     void flow.confirm(() => res.input);
   };
 
@@ -87,6 +95,13 @@ export function ReceiveStep(p: ReceiveStepProps) {
   const heldCount = (c: Candidate[]) => c.reduce((n, x) => n + (isUnit(x) ? 1 : (x.qty ?? 0)), 0);
   const stay = Math.max(0, heldCount(p.held) - chosen.reduce((n, c) => n + countOf(c), 0));
   const heldBack = chosen.filter((c) => returnOutcome(cond[c.key] ?? "", isUnit(c) || c.tracking === "individual") === "held").length;
+  /** "2 returned · 1 available · 1 held for inspection · 1 still out.": counts the things received (a unit is one; counted stock by its quantity). */
+  const outcomeLine = () => {
+    const sum = (list: Candidate[]) => list.reduce((n, c) => n + countOf(c), 0);
+    const held = chosen.filter((c) => returnOutcome(cond[c.key] ?? "", isUnit(c)) === "held");
+    const available = chosen.filter((c) => returnOutcome(cond[c.key] ?? "", isUnit(c)) === "available");
+    return returnResultLine({ returned: sum(chosen), available: sum(available), held: sum(held), stillOut: stay });
+  };
   const rows: SummaryRow[] = [
     { label: "What", value: chosen.map((c) => `${isUnit(c) ? 1 : formatQty(countOf(c), c.uom)} × ${c.itemName}${c.code ? ` (${c.code})` : c.binLabel ? ` (bin ${c.binLabel})` : ""}: ${conditionWord(isUnit(c), cond[c.key] ?? "good")}`).join("\n") },
     { label: "From", value: `Project ${p.projectName}` },
@@ -95,8 +110,27 @@ export function ReceiveStep(p: ReceiveStepProps) {
     ...(heldBack > 0 ? [{ label: "Held back", value: `${heldBack} ${heldBack === 1 ? "item is" : "items are"} not available again (damaged, or needing a check). ${heldBack === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${heldBack === 1 ? "it" : "them"}` }] : []),
   ];
 
-  if (flow.phase === "done") return <DonePanel flow={flow} onAnother={() => { setTicked({}); setQty({}); setCond({}); setShown(false); flow.startNew(); }} />;
-  if (flow.phase === "reviewing" || flow.phase === "sending") return <ReviewPanel flow={flow} rows={rows} confirmLabel="Confirm: record returns" onConfirm={onConfirm} />;
+  if (flow.phase === "done") {
+    return (
+      <div className="space-y-3">
+        {resultLine ? (
+          <div className="rounded-md border border-border bg-card px-4 py-3" role="status" data-testid="return-result">
+            <p className="text-base font-semibold">{resultLine}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Available equipment can be reserved again now. Held equipment is not available until warehouse staff at this warehouse inspect it and record the check (Today, Held for checking). What is still out stays with {p.projectName} on this request.</p>
+          </div>
+        ) : null}
+        <DonePanel flow={flow} onAnother={() => { setTicked({}); setQty({}); setCond({}); setShown(false); setResultLine(null); flow.startNew(); }} />
+      </div>
+    );
+  }
+  if (flow.phase === "reviewing" || flow.phase === "sending") {
+    return (
+      <div className="space-y-3">
+        <p className="rounded-md border border-border bg-card px-4 py-3 text-base font-semibold" role="status" data-testid="return-result-preview">{outcomeLine()}</p>
+        <ReviewPanel flow={flow} rows={rows} confirmLabel="Confirm: receive return" onConfirm={onConfirm} />
+      </div>
+    );
+  }
 
   const sentTotal = p.totals.reduce((n, t) => n + t.sent, 0);
   const sorted = [...p.held].sort((a, b) => holderRank(holderOf(a, p.holders)) - holderRank(holderOf(b, p.holders)) || a.itemName.localeCompare(b.itemName));
@@ -106,7 +140,10 @@ export function ReceiveStep(p: ReceiveStepProps) {
         <SentReturned totals={p.totals} heading={`Equipment sent for ${p.requestCode}`} />
       ) : sentTotal === 0 ? <p className="rounded-lg border border-border bg-card px-4 py-4 text-sm text-muted-foreground">Nothing has been sent for this request, so nothing from it can be out yet.</p> : null}
 
-      <h3 className="font-heading text-sm font-semibold">What is actually here now?</h3>
+      <h3 className="flex items-center gap-1 font-heading text-sm font-semibold">What came back?
+        <InfoHint label="what came back">The list starts from what was sent and is still out, so nothing is typed again. Tick each thing that is back and choose its condition. Leave the rest unticked: it stays out with the project. Damaged equipment is held and is not available until it is inspected.</InfoHint>
+      </h3>
+      {p.dispatches && p.dispatches.length > 0 ? <p className="-mt-2 text-sm text-muted-foreground" data-testid="return-dispatches">Sent for {p.requestCode}: {p.dispatches.join("; ")}.</p> : null}
       {p.heldError ? (
         <Alert variant="destructive" role="alert">
           What {p.projectName} is holding could not be loaded: {p.heldError} This is not an empty list.{" "}
@@ -156,12 +193,12 @@ export function ReceiveStep(p: ReceiveStepProps) {
                 ) : null}
                 <li className={cn("grid gap-3 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center", on && "bg-accent/5")}>
                   <div className="flex items-start gap-3">
-                    {individual ? <input id={`${uid}-t-${c.key}`} type="checkbox" checked={!!ticked[c.key]} onChange={(e) => setTicked({ ...ticked, [c.key]: e.target.checked })} disabled={locked} className="mt-1 h-5 w-5 flex-none accent-[hsl(var(--accent))]" /> : null}
+                    {individual ? <input id={`${uid}-t-${c.key}`} type="checkbox" checked={!!ticked[c.key]} onChange={(e) => setTicked({ ...ticked, [c.key]: e.target.checked })} disabled={locked} className="mt-0.5 h-6 w-6 flex-none accent-[hsl(var(--accent))]" /> : null}
                     <div className="min-w-0">
                       <label htmlFor={individual ? `${uid}-t-${c.key}` : `${uid}-q-${c.key}`} className="block text-sm font-medium">{label}</label>
                       <p className="text-xs text-muted-foreground">
-                        {individual ? "Came back" : `${formatQty(c.qty ?? 0, c.uom)} held by the project`}
-                        {c.serial ? ` · serial ${c.serial}` : ""}{individual ? ` · ${HOLDER_LABEL[holder]}` : ""}
+                        {individual ? (on ? "Came back" : "Still out") : `${formatQty(c.qty ?? 0, c.uom)} still out with the project`}
+                        {c.serial ? ` · serial ${c.serial}` : ""}{individual ? ` · ${c.unitId && p.sentIn?.[c.unitId] ? `sent on ${p.sentIn[c.unitId]}` : HOLDER_LABEL[holder]}` : ""}
                       </p>
                     </div>
                   </div>
@@ -174,7 +211,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
                           <option value="">Choose condition</option>
                           {options.map(([v, w]) => <option key={v} value={v}>{w}</option>)}
                         </Select>
-                        {outcome === "available" ? <Badge variant="success">Available again</Badge> : outcome === "held" ? <Badge variant="warning">Held, not available</Badge> : null}
+                        {outcome === "available" ? <Badge variant="success">Available again</Badge> : outcome === "held" ? <Badge variant="warning">Held for inspection</Badge> : null}
                       </>
                     ) : null}
                   </div>
@@ -183,11 +220,11 @@ export function ReceiveStep(p: ReceiveStepProps) {
               );
             })}
           </ul>
-          <p className="text-xs text-muted-foreground">Nothing is ticked for you. Tick only what is actually here. Good equipment becomes available again; damaged or unchecked equipment stays unavailable until it is checked. Anything you leave out stays with the project.</p>
+          <p className="text-xs text-muted-foreground">Nothing is ticked for you. Tick only what is actually here. Good equipment becomes available again; damaged or unchecked equipment stays unavailable until it is inspected. Anything you leave out stays with the project.</p>
           {problem && shown ? <Alert variant="destructive" role="alert">{problem}</Alert> : null}
-          <div className="flex flex-wrap items-center gap-3">
-            <Button type="button" disabled={chosen.length === 0 || locked} onClick={onReview} className="h-11 w-full sm:h-9 sm:w-auto">Review{chosen.length > 0 ? ` ${chosen.length} ${chosen.length === 1 ? "line" : "lines"}` : ""}</Button>
-            {chosen.length === 0 ? <span className="text-xs text-muted-foreground">Tick what came back to continue.</span> : null}
+          <div className="sticky bottom-0 z-10 -mx-1 space-y-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur" data-testid="receive-action">
+            <p className="text-sm" role="status">{chosen.length === 0 ? <span className="text-muted-foreground">Tick what came back to continue.</span> : missing.length > 0 ? <span className="font-medium text-[hsl(var(--os-amber))]">Choose a condition for {missing.length === 1 ? "1 line" : `${missing.length} lines`} to continue.</span> : <>After saving: <strong>{outcomeLine()}</strong></>}</p>
+            <Button type="button" disabled={chosen.length === 0 || locked} onClick={onReview} className="h-12 w-full text-base sm:h-10 sm:w-auto sm:text-sm">Receive return{chosen.length > 0 ? ` (${chosen.length} ${chosen.length === 1 ? "line" : "lines"})` : ""}</Button>
           </div>
         </>
       )}

@@ -146,7 +146,7 @@ export async function addLineUI(R, itemName, search, qty) {
   await until(() => count() === before + 1, 15000, "line added ");
   await sleep(600);
 }
-export const submitRequestUI = async (R) => { await R.page.getByRole("button", { name: "Submit to the warehouse" }).click(); };
+export const submitRequestUI = async (R) => { await R.page.getByRole("button", { name: "Send to Warehouse" }).click(); };
 
 /** Set-up as a person through the real functions (no screen): a submitted project request with one line. Returns { request, line }. */
 export function requestAs(n, projectId, itemId, qty, fromDay, toDay, { title = "set-up request", location = null, tz = "Asia/Dubai", submit = true } = {}) {

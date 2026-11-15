@@ -119,6 +119,7 @@ export function DeliveryPlanView({ projectId: id, plan, userId, readOnly, status
           {l.equipment?.request_id ? <Link href={`${base}/equipment?request=${l.equipment.request_id}`} className="text-[13px] font-medium text-accent underline-offset-4 hover:underline">{draftRequest ? "Review and send to Warehouse" : "Open equipment request"}</Link> : null}
           {editable(l.section) ? (
             <LineDialog projectId={id} itemId={item.id} sections={[l.section]} members={members} stock={stock} stockFailed={stockFailed} milestones={milestoneOptions} others={others(l.id)}
+              triggerLabel={l.section === "hardware" && route === "inventory" && !l.inv_item_id && !l.released_at ? "Match to stock" : undefined}
               line={{ id: l.id, version: l.version, section: l.section, description: l.description, qty: l.qty, inv_item_id: l.inv_item_id, assignee_id: l.assignee_id, needed_by: l.needed_by, notes: l.notes, released: !!l.released_at, booked,
                 start_date: l.start_date ?? null, supply_route: l.supply_route ?? null, detail: l.detail, milestone_id: l.milestone_id ?? null, depends_on: (l.plan_depends_on ?? []).map((d) => d.line_id) }} />
           ) : null}

@@ -8,15 +8,15 @@ import { Modal } from "@/components/ui/modal";
 import { MoreMenu } from "@/components/workspace/more-menu";
 import { Field, InvForm } from "./inv-form";
 
-/** Send the draft to the warehouse. Says what is missing instead of failing late. Submitting reserves nothing. */
+/** Send to Warehouse: the draft goes to the warehouse. Says what is missing instead of failing late. Sending reserves nothing. */
 export function SubmitRequest({ requestId, version, projectId, missing }: { requestId: string; version: number; projectId?: string | null; missing: string | null }) {
-  if (missing) return <p className="text-sm text-muted-foreground">To submit: {missing}.</p>;
+  if (missing) return <p className="text-sm font-medium text-[hsl(var(--os-amber))]" role="status">Before you can send this to the warehouse: {missing}.</p>;
   return (
-    <InvForm action={submitRequest} submitLabel="Submit to the warehouse" pendingLabel="Submitting…" className="flex flex-wrap items-center gap-3" >
+    <InvForm action={submitRequest} submitLabel="Send to Warehouse" pendingLabel="Sending…" className="flex flex-wrap items-center gap-3" >
       <input type="hidden" name="requestId" value={requestId} />
       <input type="hidden" name="expectedVersion" value={version} />
       {projectId ? <input type="hidden" name="projectId" value={projectId} /> : null}
-      <p className="min-w-0 flex-1 text-sm text-muted-foreground">The warehouse then reserves from stock. Submitting does not reserve anything by itself.</p>
+      <p className="min-w-0 flex-1 text-sm text-muted-foreground">The warehouse then reserves from stock. Sending does not reserve anything by itself.</p>
     </InvForm>
   );
 }

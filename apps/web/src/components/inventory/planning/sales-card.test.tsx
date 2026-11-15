@@ -49,8 +49,12 @@ describe("the Sales equipment availability card", () => {
   it("shows a current complete 'Available' as the only green state", () => {
     render(<AvailabilityCardView {...props} view={view(checked())} />);
     expect(badge().getAttribute("data-tone")).toBe("good");
-    expect(screen.getByText(/Recorded by Amal Haddad/)).toBeTruthy();
-    expect(screen.getByText(/against Dubai warehouse/)).toBeTruthy();
+    // the dated result, with who checked, the warehouse and the proposed dates it covered, and the line that says nothing is held
+    expect(screen.getByTestId("check-not-reserved").textContent).toContain("Availability checked · stock not reserved.");
+    const facts = screen.getByTestId("check-facts").textContent ?? "";
+    expect(facts).toMatch(/by Amal Haddad/);
+    expect(facts).toMatch(/Warehouse\s*Dubai warehouse/);
+    expect(facts).toMatch(/Proposed dates checked/);
   });
 
   it("says plainly that the check is out of date and is not green then", () => {
