@@ -2541,12 +2541,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "enquiry to handover",
       "how does the crm work"
     ],
-    "summary": "Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent or Estimate sent, Quote sent and Negotiation, and ends as Won or Lost. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.",
+    "summary": "Sales & CRM follows each enquiry from the first message to the handover. An enquiry moves through the stages New enquiry, Qualified, Proposal preparation, Proposal sent, Quote sent and Negotiation, and ends as Won or Lost. Sending an estimate is recorded on the enquiry and is not a stage. Every open enquiry keeps one next action, so Follow-ups always shows what to do next. A won enquiry is handed over to the project team; winning it does not by itself mean the project was delivered.",
     "steps": [
       "Add the enquiry in Enquiries (title, source, agency or end client, and the next action with its date).",
       "Work it from Follow-ups: log each call, email or meeting on the enquiry and plan the next step.",
-      "Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Estimate sent needs an estimate recorded as sent; Quote sent needs the Zoho Books quote reference.",
-      "Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen. After you send it to the client, record it as sent on the Estimates tab.",
+      "Move it to the next stage as it progresses. Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference. An estimate recorded as sent counts for neither.",
+      "Build the estimate from the enquiry when a price is needed. Prices stay in the Estimate screen. After you send it to the client, record it as sent on the Estimates tab. That records the revision and the date; the stage stays where it is.",
       "Mark it Won or Lost from the enquiry page, then complete the handover for a won enquiry. Reports shows the pipeline and results for your company."
     ],
     "links": [
@@ -2896,7 +2896,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "put on hold",
       "resume"
     ],
-    "summary": "The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent and Estimate sent sit side by side: an enquiry can reach either, or both. Proposal sent needs a proposal recorded as sent, Estimate sent needs an estimate recorded as sent (Estimates tab), and Quote sent needs the Zoho Books quote reference. Won, Lost and On hold have their own forms.",
+    "summary": "The enquiry's owner or a Sales founder moves it: one step back, or any step forward. Proposal sent needs a proposal recorded as sent, and Quote sent needs the Zoho Books quote reference. Estimate sent is no longer a stage: record an estimate as sent on the Estimates tab, and the stage stays where it is. If an enquiry still shows \"Estimate sent (stage no longer used)\", its owner or a founder chooses its stage with Move stage. Won, Lost and On hold have their own forms.",
     "steps": [
       "Open the enquiry (or use the Board view of Enquiries).",
       "Open More at the top, choose Move to another stage and pick the stage. Put on hold, Resume and Reopen are in the same menu.",
@@ -3027,8 +3027,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open the enquiry and go to the Estimates tab.",
       "Create an estimate and fill in the details and the items.",
       "Preview, then finalise. A finalised estimate is frozen; make a revision to change it.",
-      "After you have sent it to the client, press Record estimate as sent on that revision, confirm the date it went out, and choose whether to move the enquiry to Estimate sent.",
-      "If the enquiry is already at Quote sent or Negotiation, the estimate is recorded and the stage stays where it is."
+      "After you have sent it to the client, press Record estimate as sent on that revision and confirm the date it went out. The row then shows the sent date, when it was recorded and by whom. The enquiry's stage does not change.",
+      "A revision of a quotation issued before estimates replaced quotations shows the terms it carried over. Read them, then press Replace with the current estimate format and confirm. Until you do, that draft cannot be finalised or sent for approval. The earlier revision and its files stay as issued."
     ],
     "links": [
       {
