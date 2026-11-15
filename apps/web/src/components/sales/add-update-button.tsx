@@ -11,7 +11,7 @@ import { AddActivityForm, type OpenFollowUp } from "@/app/(app)/sales/opportunit
  * call: it never marks the client as having replied, and nothing is ever sent to anyone. Proposal and quote references have their own
  * forms (Proposals & files, Commercial) because they are different records, not a kind of note.
  */
-export function AddUpdateButton({ opportunityId, size = "sm", completable, suggestedDate, minDate }: { opportunityId: string; size?: "sm" | "default"; completable: OpenFollowUp[]; suggestedDate: string; minDate: string }) {
+export function AddUpdateButton({ opportunityId, size = "sm", completable, suggestedDate, minDate, timeZone }: { opportunityId: string; size?: "sm" | "default"; completable: OpenFollowUp[]; suggestedDate: string; minDate: string; /** The Sales time zone of the enquiry's company. */ timeZone: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -19,7 +19,7 @@ export function AddUpdateButton({ opportunityId, size = "sm", completable, sugge
         <MessageSquarePlus className="h-4 w-4" aria-hidden /> Add update
       </Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Add update" description="Record what happened and plan the next step. Choose Client response only when the client actually replied.">
-        <AddActivityForm opportunityId={opportunityId} onDone={() => setOpen(false)} completable={completable} suggestedDate={suggestedDate} minDate={minDate} />
+        <AddActivityForm opportunityId={opportunityId} onDone={() => setOpen(false)} completable={completable} suggestedDate={suggestedDate} minDate={minDate} timeZone={timeZone} />
         <p className="mt-3 text-sm text-muted-foreground">To record a proposal, use Proposals &amp; files. To record a quote reference, use Commercial.</p>
       </Modal>
     </>

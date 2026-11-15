@@ -19,10 +19,10 @@ export function buildEnquiryActions(view: OppView): EnquiryActionsProps {
     stage: opp.stage,
     moveOptions,
     canHold: canEdit && isActive,
-    resume: canEdit && isHold ? { returnsTo: opp.stage_before_hold } : null,
+    resume: canEdit && isHold ? { returnsTo: opp.stage_before_hold, timeZone: view.timeZone } : null,
     close: canEdit && isOpen ? { won: isActive, lost: true, valueText: formatMoney(detail.item.value, opp.currency), hasValue: detail.item.value != null, openFollowUps: view.openFollowUps.length, onHold: isHold } : null,
     assign: view.canAssign && isOpen ? { currentOwnerId: opp.owner_id, currentOwnerName: view.ownerName, people: view.people } : null,
-    reopen: view.canReopen ? { outcome: isWon ? "won" : "lost", stageBeforeClose: opp.stage_before_close, hasHandover: !!detail.handover } : null,
+    reopen: view.canReopen ? { outcome: isWon ? "won" : "lost", stageBeforeClose: opp.stage_before_close, hasHandover: !!detail.handover, timeZone: view.timeZone } : null,
     edit: view.editMode ? { data: toEditable(view), mode: view.editMode, availabilityWillNeedRecheck: availability === "confirmed" || availability === "unavailable" } : null,
     handoverHref: isWon ? `/sales/opportunities/${opp.id}/handover` : null,
   };

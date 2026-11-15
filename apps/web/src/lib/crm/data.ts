@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "./time-zone";
 import "server-only";
 import { availabilityDisplay, type AvailabilityDisplay } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
@@ -20,6 +21,8 @@ export interface OpportunityListItem {
   opp: CrmOpportunityRow;
   value: number | null;
   companyName: string;
+  /** The Sales time zone of the enquiry's company: the clock its next follow-up is shown and judged on (set by the loader; Dubai when absent). */
+  timeZone?: string;
   ownerName: string;
   agency: CrmOrganisationRow | null;
   client: CrmOrganisationRow | null;
@@ -139,6 +142,7 @@ function toItem(
     opp: o,
     value: num(o.value),
     companyName: ctx.companyName(o.company_id),
+    timeZone: zoneOfCompanies(ctx.companies)(o.company_id),
     ownerName: ctx.personName(o.owner_id),
     agency: o.agency_org_id ? (orgBy.get(o.agency_org_id) ?? null) : null,
     client: o.client_org_id ? (orgBy.get(o.client_org_id) ?? null) : null,

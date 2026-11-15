@@ -40,6 +40,8 @@ export type CrmCompanySettingsRow = {
   approval_policy: "not_configured" | "not_required" | "required";
   approval_note: string | null;
   owner_email_enabled: boolean;
+  /** The IANA zone this company's follow-up deadlines are typed and shown in (absent on a database without migration 20270112000500: then Asia/Dubai). */
+  follow_up_time_zone?: string | null;
   updated_by: string | null;
   created_at: string;
   updated_at: string;

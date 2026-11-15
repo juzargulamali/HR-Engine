@@ -99,16 +99,16 @@ function EnquiryPanelBody({ view, picker }: { view: OppView; picker: ContactPick
         {next ? (
           <>
             <p className="mt-1 break-words text-base font-semibold">{next.title}</p>
-            <p className="mt-0.5 text-sm"><DueText dueAt={next.due_at} /> <span className="text-muted-foreground">· {ctx.personName(next.assigned_to)}</span></p>
+            <p className="mt-0.5 text-sm"><DueText dueAt={next.due_at} zone={view.timeZone} /> <span className="text-muted-foreground">· {ctx.personName(next.assigned_to)}</span></p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
-              {canAct ? <CompleteFollowUpButton label="Complete follow-up" followUp={{ id: next.id, title: next.title, opportunityId: opp.id, isOnlyOpen: onlyOpen }} /> : <p className="text-sm text-muted-foreground">Only the assignee, the owner or a founder can complete it.</p>}
-              {isOpen ? <NewFollowUpButton label="Schedule next action" opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /> : null}
+              {canAct ? <CompleteFollowUpButton label="Complete follow-up" followUp={{ id: next.id, title: next.title, opportunityId: opp.id, isOnlyOpen: onlyOpen, timeZone: view.timeZone }} /> : <p className="text-sm text-muted-foreground">Only the assignee, the owner or a founder can complete it.</p>}
+              {isOpen ? <NewFollowUpButton label="Schedule next action" opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} timeZone={view.timeZone} /> : null}
             </div>
           </>
         ) : isActive ? (
           <>
             <p className="mt-1 text-sm font-medium text-[hsl(var(--os-amber))]">No next action is scheduled. Every active enquiry needs one, so it is not forgotten.</p>
-            <div className="mt-3"><NewFollowUpButton label="Schedule next action" opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /></div>
+            <div className="mt-3"><NewFollowUpButton label="Schedule next action" opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} timeZone={view.timeZone} /></div>
           </>
         ) : (
           <p className="mt-1 text-sm text-muted-foreground">{isHold ? "None while it is on hold. Resuming asks for one." : "Closed: no further follow-ups."}</p>

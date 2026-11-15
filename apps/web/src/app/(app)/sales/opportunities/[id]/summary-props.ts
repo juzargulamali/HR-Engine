@@ -41,17 +41,17 @@ export function buildSummaryActions(view: OppView, primary: PrimaryAction | null
   const availability = detail.item.availability;
   return {
     opportunityId: opp.id, version: opp.version, stage: opp.stage, primary,
-    followUp: next && canActOnNext(view) ? { id: next.id, title: next.title, opportunityId: opp.id, isOnlyOpen: isOnlyOpenFollowUp(detail.followUps, next.id, opp.stage) } : null,
+    followUp: next && canActOnNext(view) ? { id: next.id, title: next.title, opportunityId: opp.id, isOnlyOpen: isOnlyOpenFollowUp(detail.followUps, next.id, opp.stage), timeZone: view.timeZone } : null,
     // Adding a follow-up and logging an activity both depend on the follow-ups (the form can complete one and plans the next): not offered when they could not be read.
-    newFollowUp: isOpen && !followUpsFailed ? { people: view.people, canAssign: canEdit || view.canAssign, currentUserId: ctx.userId } : null,
+    newFollowUp: isOpen && !followUpsFailed ? { people: view.people, canAssign: canEdit || view.canAssign, currentUserId: ctx.userId, timeZone: view.timeZone } : null,
     log: !isLost && !followUpsFailed ? planNextProps(planNextInput(view)) : null,
     move: stageMoves(view),
     canHold: canEdit && isActive,
-    resume: canEdit && isHold ? { returnsTo: opp.stage_before_hold } : null,
+    resume: canEdit && isHold ? { returnsTo: opp.stage_before_hold, timeZone: view.timeZone } : null,
     close: canEdit && isOpen ? { won: isActive, lost: true } : null,
     edit: view.editMode ? { data: toEditable(view), mode: view.editMode, availabilityWillNeedRecheck: availability === "confirmed" || availability === "unavailable" } : null,
     assign: view.canAssign && isOpen ? { currentOwnerId: opp.owner_id, currentOwnerName: view.ownerName, people: view.people } : null,
-    reopen: view.canReopen ? (anyFailed(view, "handover") ? { unavailable: REOPEN_NOT_OFFERED } : { outcome: isWon ? "won" : "lost", stageBeforeClose: opp.stage_before_close, hasHandover: !!detail.handover }) : null,
+    reopen: view.canReopen ? (anyFailed(view, "handover") ? { unavailable: REOPEN_NOT_OFFERED } : { outcome: isWon ? "won" : "lost", stageBeforeClose: opp.stage_before_close, timeZone: view.timeZone, hasHandover: !!detail.handover }) : null,
     handoverHref: isWon ? `/sales/opportunities/${opp.id}/handover` : null,
   };
 }

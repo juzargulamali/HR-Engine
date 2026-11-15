@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { isSkippedLocalTime } from "@enginious-hr/domain";
 import { CheckCircle2 } from "lucide-react";
 import { cancelFollowUp, completeFollowUp, createFollowUp, rescheduleFollowUp } from "@/lib/actions/crm";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,8 @@ import { formatDueExact, dubaiTimeOfDay, resultingDue, whenShortcuts } from "@/l
 import { cn } from "@/lib/utils";
 import { ActionForm, Field } from "./action-form";
 import { Modal } from "./modal";
-import { todayInDubai } from "./format";
+import { todayIn, todayInDubai } from "./format";
+import { dueTimeLabel, zoneWords } from "@/lib/crm/time-zone";
 
 const KINDS = [["call", "Call"], ["email", "Email"], ["meeting", "Meeting"], ["proposal", "Proposal work"], ["other", "Other"]] as const;
 
@@ -29,17 +31,24 @@ function KindSelect({ id, defaultValue }: { id: string; defaultValue?: string })
  * The date and time of a follow-up, with one-tap choices (Tomorrow, In 2 days, Next week) and, always, the exact moment that will be saved, in words,
  * before the person saves. The fields stay ordinary date and time inputs, so anything else can be typed. `children` adds more fields to the same row.
  */
-export function WhenFields({ id, dateName, timeName, dateLabel = "Date", initialTime = "10:00", resultLabel = "Will be due", children }: { id: string; dateName: string; timeName: string; dateLabel?: string; initialTime?: string; resultLabel?: string; children?: React.ReactNode }) {
+export function WhenFields({ id, dateName, timeName, zone, dateLabel = "Date", initialTime = "10:00", resultLabel = "Will be due", children }: {
+  id: string; dateName: string; timeName: string;
+  /** The Sales time zone of the company the follow-up belongs to: the clock the date and time are typed on. It is named on the time field and in the result. */
+  zone: string;
+  dateLabel?: string; initialTime?: string; resultLabel?: string; children?: React.ReactNode;
+}) {
   const [date, setDate] = useState("");
   const [time, setTime] = useState(initialTime);
   // The moment the form was opened: "tomorrow" and "already passed" are judged against it (a dialog is open for a minute, not a day).
   const [opened] = useState(() => Date.now());
-  const due = resultingDue(date, time);
+  const due = resultingDue(date, time, zone);
+  // A time that does not exist that day on that clock (the hour skipped when the clocks go forward): said here, before the server refuses it.
+  const skipped = !due && isSkippedLocalTime(zone, date, /^\d{2}:\d{2}$/.test(time) ? time : "09:00");
   const past = !!due && new Date(due).getTime() < opened;
   return (
     <div className="space-y-2">
       <div role="group" aria-label="Quick choices" className="flex flex-wrap gap-1.5">
-        {whenShortcuts(new Date(opened)).map((s) => (
+        {whenShortcuts(new Date(opened), zone).map((s) => (
           <button key={s.key} type="button" aria-pressed={date === s.date} data-testid={`when-${s.key}`} onClick={() => setDate(s.date)}
             className={cn("inline-flex min-h-9 items-center rounded-full border px-3 text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", date === s.date ? "border-accent bg-accent/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
             {s.label}
@@ -47,17 +56,18 @@ export function WhenFields({ id, dateName, timeName, dateLabel = "Date", initial
         ))}
       </div>
       <div className={cn("grid gap-3", children ? "sm:grid-cols-3" : "sm:grid-cols-2")}>
-        <Field label={dateLabel} htmlFor={`${id}-date`}><Input id={`${id}-date`} name={dateName} type="date" required min={todayInDubai()} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
-        <Field label="Time (Dubai)" htmlFor={`${id}-time`}><Input id={`${id}-time`} name={timeName} type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
+        <Field label={dateLabel} htmlFor={`${id}-date`}><Input id={`${id}-date`} name={dateName} type="date" required min={todayIn(zone)} value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+        <Field label={dueTimeLabel(zone)} htmlFor={`${id}-time`}><Input id={`${id}-time`} name={timeName} type="time" value={time} onChange={(e) => setTime(e.target.value)} /></Field>
         {children}
       </div>
       <p aria-live="polite" data-testid="when-result" className="text-sm">
         {due ? (
           <>
-            <span className="text-muted-foreground">{resultLabel}</span> <span className="font-medium">{formatDueExact(due)}</span> <span className="text-muted-foreground">(Dubai time)</span>
+            <span className="text-muted-foreground">{resultLabel}</span> <span className="font-medium">{formatDueExact(due, zone)}</span> <span className="text-muted-foreground">({zoneWords(zone)})</span>
             {past ? <span className="font-medium text-[hsl(var(--os-amber))]"> · This time has already passed, so it will show as overdue.</span> : null}
           </>
-        ) : <span className="text-muted-foreground">Choose a date to see the exact date and time before you save.</span>}
+        ) : skipped ? <span className="font-medium text-[hsl(var(--os-amber))]" data-testid="when-skipped">That time does not exist on that date in {zoneWords(zone).replace(/ time$/, "")}: the clocks go forward that night. Choose another time.</span>
+          : <span className="text-muted-foreground">Choose a date to see the exact date and time before you save.</span>}
       </p>
     </div>
   );
@@ -70,6 +80,8 @@ export interface FollowUpRef {
   kind?: string;
   /** When it is due now: Reschedule keeps this time of day and says what it is moving from. */
   dueAt?: string;
+  /** The Sales time zone of the follow-up's company: the clock its dates and times are typed and shown on. */
+  timeZone: string;
   /** Null for a follow-up on an account with no inquiry: there is no stage to protect, so no hold option and completing it never forces a next step. */
   opportunityId: string | null;
   /** True when this is the only open follow-up on an active opportunity: completing it then needs a next step or a hold. */
@@ -102,7 +114,7 @@ function CompleteBody({ followUp, onClose }: { followUp: FollowUpRef; onClose: (
       {next === "follow_up" ? (
         <div className="space-y-3 rounded-md border border-border p-3">
           <Field label="Next action" htmlFor={`nt-${followUp.id}`}><Input id={`nt-${followUp.id}`} name="nextTitle" required placeholder="e.g. Send revised proposal" /></Field>
-          <WhenFields id={`nd-${followUp.id}`} dateName="nextDate" timeName="nextTime">
+          <WhenFields id={`nd-${followUp.id}`} dateName="nextDate" timeName="nextTime" zone={followUp.timeZone}>
             <Field label="Type" htmlFor={`nk-${followUp.id}`}><KindSelect id={`nk-${followUp.id}`} defaultValue={followUp.kind} /></Field>
           </WhenFields>
         </div>
@@ -138,7 +150,7 @@ export function CompleteFollowUpButton({ followUp, size = "sm", label = "Complet
   );
 }
 
-type FollowUpBasics = Pick<FollowUpRef, "id" | "title" | "opportunityId" | "dueAt">;
+type FollowUpBasics = Pick<FollowUpRef, "id" | "title" | "opportunityId" | "dueAt" | "timeZone">;
 
 export function RescheduleFollowUpDialog({ open, onClose, followUp }: { open: boolean; onClose: () => void; followUp: FollowUpBasics }) {
   return (
@@ -146,8 +158,8 @@ export function RescheduleFollowUpDialog({ open, onClose, followUp }: { open: bo
       <ActionForm action={rescheduleFollowUp} submitLabel="Reschedule" onDone={onClose}>
         <input type="hidden" name="followUpId" value={followUp.id} />
         <input type="hidden" name="opportunityId" value={followUp.opportunityId ?? ""} />
-        {followUp.dueAt ? <p className="text-sm text-muted-foreground">Due now: <span className="font-medium text-foreground">{formatDueExact(followUp.dueAt)}</span> (Dubai time)</p> : null}
-        <WhenFields id={`rd-${followUp.id}`} dateName="date" timeName="time" dateLabel="New date" initialTime={dubaiTimeOfDay(followUp.dueAt)} resultLabel="New due date" />
+        {followUp.dueAt ? <p className="text-sm text-muted-foreground">Due now: <span className="font-medium text-foreground">{formatDueExact(followUp.dueAt, followUp.timeZone)}</span> ({zoneWords(followUp.timeZone)})</p> : null}
+        <WhenFields id={`rd-${followUp.id}`} dateName="date" timeName="time" zone={followUp.timeZone} dateLabel="New date" initialTime={dubaiTimeOfDay(followUp.dueAt, "10:00", followUp.timeZone)} resultLabel="New due date" />
       </ActionForm>
     </Modal>
   );
@@ -185,7 +197,7 @@ export function CancelFollowUpButton({ followUp }: { followUp: FollowUpBasics })
   );
 }
 
-export function NewFollowUpButton({ opportunityId, people, canAssign, currentUserId, label = "Add follow-up" }: { opportunityId: string; people: { id: string; name: string }[]; canAssign: boolean; currentUserId: string; label?: string }) {
+export function NewFollowUpButton({ opportunityId, people, canAssign, currentUserId, timeZone, label = "Add follow-up" }: { opportunityId: string; people: { id: string; name: string }[]; canAssign: boolean; currentUserId: string; /** The Sales time zone of the enquiry's company. */ timeZone: string; label?: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -194,7 +206,7 @@ export function NewFollowUpButton({ opportunityId, people, canAssign, currentUse
         <ActionForm action={createFollowUp} submitLabel="Add follow-up" onDone={() => setOpen(false)}>
           <input type="hidden" name="id" value={opportunityId} />
           <Field label="What needs to happen?" htmlFor={`fu-title-${opportunityId}`}><Input id={`fu-title-${opportunityId}`} name="title" required /></Field>
-          <WhenFields id={`fu-when-${opportunityId}`} dateName="date" timeName="time">
+          <WhenFields id={`fu-when-${opportunityId}`} dateName="date" timeName="time" zone={timeZone}>
             <Field label="Type" htmlFor={`fu-kind-${opportunityId}`}>
               <Select id={`fu-kind-${opportunityId}`} name="kind" defaultValue="other">{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
             </Field>

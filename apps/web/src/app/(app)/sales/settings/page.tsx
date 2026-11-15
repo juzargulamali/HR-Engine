@@ -1,3 +1,5 @@
+import { companyTimeZone, timeZoneCity } from "@enginious-hr/domain";
+import { FollowUpTimeZoneForm } from "./time-zone-form";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canManageApprovalRules, canManageCrmAccess, canManageCrmSettings, isCrmFounder, parseWorkingCalendar } from "@enginious-hr/domain";
@@ -49,6 +51,7 @@ function ReadOnlySettings({ company, ctx }: { company: CrmCompanyInfo; ctx: CrmC
     ["Working calendar", cal
       ? `${DAY_ORDER.filter((d) => cal.workdays.includes(d)).map((d) => DAY_NAMES[d]).join(", ")}, ${cal.start} to ${cal.end} Dubai time${cal.holidays.length ? `, ${cal.holidays.length} ${cal.holidays.length === 1 ? "holiday" : "holidays"}` : ""}`
       : "Not configured"],
+    ["Follow-up time zone", `${companyTimeZone(s)} (${timeZoneCity(companyTimeZone(s))} time)`],
     ["Duplicate window", `${s.duplicate_window_days} days`],
     ["Email reminders to owners", s.owner_email_enabled ? "On" : "Off"],
     ["Commercial approval policy", (
@@ -158,6 +161,15 @@ export default async function SalesSettingsPage({ searchParams }: { searchParams
           <ReadOnlySettings company={c} ctx={ctx} />
         </Panel>
       )}
+
+      {canEdit && c.settings ? (
+        <Panel id="follow-up-time-zone" title={`Follow-up time zone for ${c.name}`} description="The clock this company's follow-up deadlines are typed and shown on."
+          hint="Every follow-up time of this company is entered and shown in this zone, with the place written next to it, and “due today” is this zone's calendar day. Changing it moves no deadline: each one stays the same moment and is then shown on the new clock.">
+          {c.settings.follow_up_time_zone === undefined
+            ? <p className="text-sm text-muted-foreground" data-testid="time-zone-unavailable">This company's follow-ups use Dubai time. Choosing another zone is not available in this environment yet.</p>
+            : <FollowUpTimeZoneForm key={`${c.id}-${companyTimeZone(c.settings)}`} companyId={c.id} current={companyTimeZone(c.settings)} />}
+        </Panel>
+      ) : null}
 
       <Panel id={SECTION.vat} title={`VAT choices for ${c.name}`} description="Part of Estimates & VAT. Each choice is saved as it is added."
         hint="The VAT choices Sales can pick from on an estimate. “0%” and “Out of scope” are separate explicit choices; nothing is chosen for the client. Estimates do not print standard terms.">

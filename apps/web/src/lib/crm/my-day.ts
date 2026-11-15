@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "./time-zone";
 import "server-only";
 import { crmStageLabel, isCrmFounder, isCrmOpen } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
@@ -71,7 +72,7 @@ export async function loadSalesToday(): Promise<SalesTodayResult> {
   if (!ctx || ctx.grants.length === 0) return { status: "none" };
   try {
     const [opportunities, followUps] = await Promise.all([loadOpportunities(ctx), loadFollowUps(ctx)]);
-    const attention = attentionItems({ opportunities, followUps: followUps.open, userId: ctx.userId, scope: "mine" });
+    const attention = attentionItems({ opportunities, followUps: followUps.open, userId: ctx.userId, scope: "mine", zoneOf: zoneOfCompanies(ctx.companies) });
     const count = (kind: AttentionItem["kind"]) => attention.filter((a) => a.kind === kind).length;
     const [handover, approvals, opsQuestions] = await Promise.all([loadHandoverRows(ctx, opportunities), loadApprovalsWaiting(ctx), loadOpsQuestionNotices(ctx)]);
     return {

@@ -1,5 +1,6 @@
 import { canActOnFollowUp, canAssignOwner, canChangeOpportunityContacts, canConfirmAvailability, canDecideApproval, canEditContactRecord, canEditOpportunity, canReopenClosed, isCrmActive, isCrmClosed, isCrmFounder, type ApprovalPolicy } from "@enginious-hr/domain";
-import { todayInDubai } from "@/components/sales/format";
+import { todayIn } from "@/components/sales/format";
+import { zoneOfCompanies } from "@/lib/crm/time-zone";
 import type { CrmContext } from "@/lib/crm/context";
 import type { DetailSection, OpportunityDetail } from "@/lib/crm/data";
 import type { CrmFollowUpRow, CrmOpportunityRow } from "@/types/crm";
@@ -12,6 +13,8 @@ export interface OppView {
   failed: ReadonlySet<DetailSection>;
   ctx: CrmContext;
   opp: CrmOpportunityRow;
+  /** The Sales time zone of this enquiry's company: the clock its follow-up deadlines are typed and shown on. */
+  timeZone: string;
   ownerName: string;
   isOpen: boolean;
   isActive: boolean;
@@ -51,7 +54,7 @@ export function buildOppView(ctx: CrmContext, detail: OpportunityDetail, failed:
   const isLost = opp.stage === "lost";
   const openFollowUps = detail.followUps.filter((f) => f.status === "open");
   return {
-    detail, failed, ctx, opp,
+    detail, failed, ctx, opp, timeZone: zoneOfCompanies(ctx.companies)(opp.company_id),
     ownerName: detail.item.ownerName,
     isOpen: !isCrmClosed(opp.stage),
     isActive: isCrmActive(opp.stage),
@@ -83,14 +86,14 @@ export function canEditSharedContact(view: Pick<OppView, "ctx" | "opp" | "isLost
   return canEditContactRecord(ctx.grants, { createdBy }, ctx.userId, ownedHere);
 }
 
-/** The page-specific inputs of `planNextProps`: who may complete which follow-up, the company's working calendar and today in Dubai. */
+/** The page-specific inputs of `planNextProps`: who may complete which follow-up, the company's working calendar, its time zone and today on that clock. */
 export function planNextInput(view: OppView) {
   const { ctx, opp, detail } = view;
   const ref = { companyId: opp.company_id, ownerId: opp.owner_id };
   return {
     openFollowUps: view.openFollowUps, followUps: detail.followUps, stage: opp.stage,
     calendar: ctx.companies.find((c) => c.id === opp.company_id)?.settings?.working_calendar ?? null,
-    today: todayInDubai(),
+    today: todayIn(view.timeZone), timeZone: view.timeZone,
     canAct: (f: { id: string }) => canActOnFollowUp(ctx.grants, { assignedTo: view.openFollowUps.find((x) => x.id === f.id)?.assigned_to ?? "" }, ref, ctx.userId),
   };
 }

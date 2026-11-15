@@ -32,7 +32,7 @@ import {
 } from "../clients/entity-dialogs";
 import { parseTechnologyRows, type TechnologyRow } from "./technologies";
 import {
-  CARRY_KEY, CURRENCY_SUGGESTIONS, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, DUE_TIME_LABEL, ENQUIRY_HELP, ENQUIRY_LABELS, NEXT_KINDS, currencyNote, enquiryBlockedReason, hasPrefill,
+  CARRY_KEY, CURRENCY_SUGGESTIONS, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, dueTimeLabelFor, ENQUIRY_HELP, ENQUIRY_LABELS, NEXT_KINDS, currencyNote, enquiryBlockedReason, hasPrefill,
   readCarried, resolveCurrency, startingCompanyId, type CurrencyState, type EnquiryPrefill,
 } from "./enquiry-form-shared";
 
@@ -47,6 +47,9 @@ export interface EnquiryCompany {
   /** May open Settings to set the company up (manage_settings or founder). */
   canOpenSettings: boolean;
   people: { id: string; name: string }[];
+  /** The company's Sales time zone (the clock the next action is typed on) and today's date on that clock. Absent = Asia/Dubai and the page's own `today`. */
+  timeZone?: string;
+  today?: string;
 }
 
 export interface EnquiryOrganisation {
@@ -528,9 +531,9 @@ export function NewEnquiryForm({
             </Field>
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Date" htmlFor="enq-next-date">
-                <Input id="enq-next-date" name="nextDate" type="date" required min={today} defaultValue={prefill?.nextDate || today} />
+                <Input id="enq-next-date" name="nextDate" type="date" required min={company?.today ?? today} defaultValue={prefill?.nextDate || today} />
               </Field>
-              <Field label={DUE_TIME_LABEL} htmlFor="enq-next-time">
+              <Field label={dueTimeLabelFor(company)} htmlFor="enq-next-time">
                 <Input id="enq-next-time" name="nextTime" type="time" defaultValue={prefill?.nextTime || DEFAULT_NEXT_TIME} />
               </Field>
               <Field label="Type" htmlFor="enq-next-kind">

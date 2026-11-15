@@ -19,6 +19,8 @@ export interface GuideFacts {
   firstResponseAt: string | null;
   /** The next open follow-up; `failed` = the follow-ups could not be read (nothing is then claimed about them). */
   followUps: { failed: true } | { failed: false; next: { title: string; dueAt: string; assigneeName: string } | null };
+  /** The Sales time zone of the enquiry's company: the next action is "due today" on that calendar day (Dubai when left out). */
+  timeZone?: string;
   /** Evidence for the "sent" stages; `unknown` = its read failed. */
   sentProposal: { version: number; sentOn: string | null } | null | "unknown";
   sentEstimate: { reference: string; revision: number; sentOn: string } | null | "unknown";
@@ -44,7 +46,7 @@ export function nextAction(f: GuideFacts, now: Date = new Date()): NextAction {
     if (f.stage === "on_hold") return { tone: "neutral", label: "On hold", title: "No next action while on hold", detail: f.holdReviewDate ? `Review date ${d(f.holdReviewDate)}.` : null, missing: false };
     return { tone: "amber", label: "No next action", title: "No next action is recorded", detail: "Every active enquiry needs one, so it is not forgotten.", missing: true };
   }
-  const timing = followUpTiming(next.dueAt, now);
+  const timing = followUpTiming(next.dueAt, now, f.timeZone);
   return {
     tone: timing === "overdue" ? "red" : timing === "due_today" ? "amber" : "blue",
     label: timing === "overdue" ? "Overdue" : timing === "due_today" ? "Due today" : "Planned",

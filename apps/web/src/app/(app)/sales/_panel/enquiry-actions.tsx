@@ -14,7 +14,7 @@ export interface EnquiryActionsProps {
   stage: string;
   moveOptions: MoveOption[] | null;
   canHold: boolean;
-  resume: { returnsTo: string | null } | null;
+  resume: { returnsTo: string | null; timeZone: string } | null;
   close: { won: boolean; lost: boolean; valueText: string; hasValue: boolean; openFollowUps: number; onHold: boolean } | null;
   assign: Omit<AssignOwnerProps, "opportunityId"> | null;
   reopen: Omit<ReopenProps, "opportunityId" | "version"> | null;
@@ -50,7 +50,7 @@ export function EnquiryActions(p: EnquiryActionsProps) {
       {p.edit ? <EditDetailsDialog open={dialog === "edit"} onClose={close} {...p.edit} /> : null}
       {p.moveOptions && p.moveOptions.length > 0 ? <MoveStageDialog open={dialog === "move"} onClose={close} opportunityId={p.opportunityId} version={p.version} stage={p.stage} options={p.moveOptions} /> : null}
       {p.canHold ? <HoldDialog open={dialog === "hold"} onClose={close} opportunityId={p.opportunityId} version={p.version} /> : null}
-      {p.resume ? <ResumeDialog open={dialog === "resume"} onClose={close} opportunityId={p.opportunityId} version={p.version} returnsTo={p.resume.returnsTo} /> : null}
+      {p.resume ? <ResumeDialog open={dialog === "resume"} onClose={close} opportunityId={p.opportunityId} version={p.version} returnsTo={p.resume.returnsTo} timeZone={p.resume.timeZone} /> : null}
       {p.assign ? <AssignOwnerDialog open={dialog === "assign"} onClose={close} opportunityId={p.opportunityId} {...p.assign} /> : null}
       {p.close ? (
         <CloseDialog

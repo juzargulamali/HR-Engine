@@ -20,7 +20,7 @@ import {
   CompanyField, CurrencyField, DuplicateWarning, EventEditionPicker, NoSettingsAlert, OrganisationPicker, SavingToLine, type EnquiryCompany, type EnquiryOrganisation,
 } from "@/app/(app)/sales/new/new-enquiry-form";
 import {
-  CARRY_KEY, ADDRESS_TEXT_MAX, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, DUE_TIME_LABEL, ENQUIRY_HELP, ENQUIRY_LABELS, enquiryBlockedReason, fullFormHandOff, resolveCurrency, startingCompanyId,
+  CARRY_KEY, ADDRESS_TEXT_MAX, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, dueTimeLabelFor, ENQUIRY_HELP, ENQUIRY_LABELS, enquiryBlockedReason, fullFormHandOff, resolveCurrency, startingCompanyId,
 } from "@/app/(app)/sales/new/enquiry-form-shared";
 import type { ActiveCompanySource } from "@/lib/crm/active-company";
 import type { EditionOption } from "@/lib/crm/events/data";
@@ -182,9 +182,9 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
               <Input id="qa-next" name="nextTitle" required maxLength={200} placeholder="e.g. Call to qualify the brief" />
             </Field>
             <Field label="Due" htmlFor="qa-due">
-              <Input id="qa-due" name="nextDate" type="date" required min={today} defaultValue={today} />
+              <Input id="qa-due" name="nextDate" type="date" required min={company?.today ?? today} defaultValue={today} />
             </Field>
-            <Field label={DUE_TIME_LABEL} htmlFor="qa-time">
+            <Field label={dueTimeLabelFor(company)} htmlFor="qa-time">
               <Input id="qa-time" name="nextTime" type="time" defaultValue={DEFAULT_NEXT_TIME} />
             </Field>
           </div>

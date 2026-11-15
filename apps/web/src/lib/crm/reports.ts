@@ -3,6 +3,7 @@
  * import and no clock of their own (callers pass `now`), so every rule here is unit-tested deterministically.
  * Money is never added across currencies: every total is a per-currency record.
  */
+import { DUBAI_ZONE, type ZoneOf } from "./time-zone";
 import {
   CRM_PIPELINE_STAGES,
   crmSourceLabel,
@@ -78,7 +79,7 @@ export const REPORT_GROUPS: readonly { id: "now" | "period"; title: string; basi
 export const REPORT_TEXT: Record<ReportId, { title: string; definition: string }> = {
   pipeline_by_stage: { title: "Open pipeline by stage", definition: "Open opportunities now: the six working stages plus On hold. Each currency on its own line; never added together. “Without a value” counts the opportunities with no value recorded, so a total reads as “at least”." },
   pipeline_by_owner: { title: "Open pipeline by owner", definition: "Open opportunities now, by the person who owns them, most first. Each currency on its own line; never added together." },
-  follow_ups: { title: "Follow-ups", definition: "Open follow-ups as of now, by when they are due (Dubai day). Done and cancelled follow-ups are not counted." },
+  follow_ups: { title: "Follow-ups", definition: "Open follow-ups as of now, by when they are due (the calendar day of each follow-up's own company). Done and cancelled follow-ups are not counted." },
   timeliness: { title: "Timeliness", definition: "First response to enquiries logged in the period. The share within target needs both a response target and a working calendar, and is worked out per company (each has its own target and calendar, so companies are never blended). Elapsed time to first response is clock time, not working hours." },
   won_lost: { title: "Won and lost", definition: "Closed in the period, by closing date. Won means a Won stage with purchase-order or authorised-email evidence. Win rate is won as a share of won plus lost; small numbers move it a lot. A closure that was later reopened is open again, so it is not counted." },
   lost_reasons: { title: "Lost reasons", definition: "The opportunities lost in the period, by the reason recorded when they were closed, most frequent first." },
@@ -142,12 +143,12 @@ export interface FollowUpCounts {
   upcoming: number;
 }
 
-/** Counts of OPEN follow-ups by timing (done and cancelled ones are ignored). */
-export function followUpCounts(followUps: readonly { due_at: string; status: string }[], now: Date = new Date()): FollowUpCounts {
+/** Counts of OPEN follow-ups by timing (done and cancelled ones are ignored), each on the calendar day of its own company (`zoneOf`; Dubai when none is given). */
+export function followUpCounts(followUps: readonly { due_at: string; status: string; company_id?: string | null }[], now: Date = new Date(), zoneOf: ZoneOf = DUBAI_ZONE): FollowUpCounts {
   const out: FollowUpCounts = { overdue: 0, dueToday: 0, upcoming: 0 };
   for (const f of followUps) {
     if (f.status !== "open") continue;
-    const t: FollowUpTiming = followUpTiming(f.due_at, now);
+    const t: FollowUpTiming = followUpTiming(f.due_at, now, zoneOf(f.company_id));
     if (t === "overdue") out.overdue++;
     else if (t === "due_today") out.dueToday++;
     else out.upcoming++;
@@ -353,6 +354,8 @@ export interface AttentionItem {
   at: string | null;
   /** The follow-up this row is about (overdue / due today rows), so the same follow-up is never listed twice. */
   followUpId?: string;
+  /** Follow-up rows: the Sales time zone of the follow-up's company, the clock `at` is shown on. */
+  timeZone?: string;
   /** A follow-up on an account with no inquiry: the row is about this account (opportunityId is empty and reference says "Account"). */
   account?: { id: string; companyId: string };
 }
@@ -365,7 +368,7 @@ interface AttentionOpp {
 }
 
 interface AttentionFollowUp {
-  followUp: { id?: string; assigned_to: string; title: string; due_at: string; status: string };
+  followUp: { id?: string; assigned_to: string; title: string; due_at: string; status: string; company_id?: string | null };
   /** Null for a follow-up on an account with no enquiry; then `account` names it. */
   opportunity: { id: string; reference: string; title: string } | null;
   account?: { id: string; name: string; companyId: string } | null;
@@ -377,21 +380,23 @@ interface AttentionFollowUp {
  * "assigned to / owned by me" restriction.
  */
 export function attentionItems(
-  input: { opportunities: readonly AttentionOpp[]; followUps: readonly AttentionFollowUp[]; userId: string; scope: "mine" | "all" },
+  input: { opportunities: readonly AttentionOpp[]; followUps: readonly AttentionFollowUp[]; userId: string; scope: "mine" | "all"; /** Each company's Sales time zone: a follow-up is "due today" on its own company's calendar day. Dubai when left out. */ zoneOf?: ZoneOf },
   now: Date = new Date(),
 ): AttentionItem[] {
+  const zoneOf = input.zoneOf ?? DUBAI_ZONE;
   const today = crmToday(now);
   const mineOnly = input.scope === "mine";
   const out: AttentionItem[] = [];
   for (const f of input.followUps) {
     if (f.followUp.status !== "open" || (mineOnly && f.followUp.assigned_to !== input.userId)) continue;
-    const t = followUpTiming(f.followUp.due_at, now);
+    const zone = zoneOf(f.followUp.company_id);
+    const t = followUpTiming(f.followUp.due_at, now, zone);
     if (t === "upcoming") continue;
     const target = f.opportunity
       ? { opportunityId: f.opportunity.id, reference: f.opportunity.reference, title: f.opportunity.title }
       : f.account ? { opportunityId: "", reference: "Account", title: f.account.name, account: { id: f.account.id, companyId: f.account.companyId } } : null;
     if (!target) continue;
-    out.push({ kind: t === "overdue" ? "overdue" : "due_today", ...target, detail: f.followUp.title, at: f.followUp.due_at, ...(f.followUp.id ? { followUpId: f.followUp.id } : {}) });
+    out.push({ kind: t === "overdue" ? "overdue" : "due_today", ...target, detail: f.followUp.title, at: f.followUp.due_at, timeZone: zone, ...(f.followUp.id ? { followUpId: f.followUp.id } : {}) });
   }
   for (const { opp, openFollowUps } of input.opportunities) {
     if (mineOnly && opp.owner_id !== input.userId) continue;

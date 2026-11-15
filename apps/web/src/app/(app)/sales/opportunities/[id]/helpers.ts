@@ -1,3 +1,4 @@
+import { CRM_TIME_ZONE } from "@enginious-hr/domain";
 import { AVAILABILITY_LABELS, crmStageLabel, isCrmActive, type ApprovalPolicy, type AvailabilityDisplay } from "@enginious-hr/domain";
 import { nextWorkingDay } from "@/lib/crm/next-working-day";
 import type { CrmActivityRow, CrmFileRow, CrmFollowUpRow, CrmOpportunityEventRow, CrmOpportunityRow, CrmProposalRow, CrmCompanySettingsRow } from "@/types/crm";
@@ -100,11 +101,13 @@ export function isOnlyOpenFollowUp(followUps: readonly Pick<CrmFollowUpRow, "id"
  * What "Add update" needs to also plan the next step: the open follow-ups this person may complete with the update (each says whether it is the only one,
  * which then makes the next step required), and the suggested date for the next one. `canAct` is the page's own check (the database repeats it).
  */
-export function planNextProps(view: { openFollowUps: readonly Pick<CrmFollowUpRow, "id" | "title">[]; followUps: readonly Pick<CrmFollowUpRow, "id" | "status">[]; stage: string; calendar: unknown; today: string; canAct: (f: { id: string }) => boolean }) {
+export function planNextProps(view: { openFollowUps: readonly Pick<CrmFollowUpRow, "id" | "title">[]; followUps: readonly Pick<CrmFollowUpRow, "id" | "status">[]; stage: string; calendar: unknown; today: string; timeZone?: string; canAct: (f: { id: string }) => boolean }) {
   return {
     completable: view.openFollowUps.filter((f) => view.canAct(f)).map((f) => ({ id: f.id, title: f.title, isOnlyOpen: isOnlyOpenFollowUp(view.followUps, f.id, view.stage) })),
     suggestedDate: nextWorkingDay(view.today, view.calendar),
     minDate: view.today,
+    // The clock the next step is typed on: the enquiry's company's (Dubai for a caller that names none).
+    timeZone: view.timeZone ?? CRM_TIME_ZONE,
   };
 }
 

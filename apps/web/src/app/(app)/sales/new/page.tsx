@@ -1,7 +1,7 @@
-import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
+import { canAssignOwner, canManageCrmSettings, companyTimeZone, isCrmFounder } from "@enginious-hr/domain";
 import { AskForAccess } from "@/components/os/ask-for-access";
 import { Alert } from "@/components/ui/alert";
-import { todayInDubai } from "@/components/sales/format";
+import { todayIn, todayInDubai } from "@/components/sales/format";
 import { LoadError } from "@/components/workspace/states";
 import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext } from "@/lib/crm/context";
@@ -69,6 +69,7 @@ export default async function NewEnquiryPage({ searchParams }: { searchParams: P
     canAssignOwner: canAssignOwner(ctx.grants, c.id),
     canOpenSettings: isCrmFounder(ctx.grants, c.id) || canManageCrmSettings(ctx.grants, c.id),
     people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),
+    timeZone: companyTimeZone(c.settings), today: todayIn(companyTimeZone(c.settings)),
   }));
   const contacts = organisations.flatMap((o) => o.contacts.map((c) => ({ id: c.id, name: c.name, organisationId: c.organisation_id, roleTitle: c.role_title })));
   const today = todayInDubai();

@@ -1,3 +1,4 @@
+import { CRM_TIME_ZONE } from "@enginious-hr/domain";
 import Link from "next/link";
 import { FileText } from "lucide-react";
 import { OsBadge, type OsTone } from "@/components/os/pills";
@@ -71,7 +72,7 @@ function NextAction({ row }: { row: Row }) {
   const f = opp.nextFollowUp;
   // On hold is the one open stage that may have no follow-up: it carries a review date on the enquiry instead.
   if (!f) return opp.opp.stage === "on_hold" ? <span className="text-muted-foreground">None: the enquiry is on hold</span> : <span className="font-medium text-[hsl(var(--os-amber))]">No follow-up planned on the enquiry</span>;
-  return <span className="break-words"><span className="font-medium">{f.title}</span> <span className="text-muted-foreground">·</span> <DueText dueAt={f.due_at} className="whitespace-normal" /></span>;
+  return <span className="break-words"><span className="font-medium">{f.title}</span> <span className="text-muted-foreground">·</span> <DueText dueAt={f.due_at} zone={opp.timeZone ?? CRM_TIME_ZONE} className="whitespace-normal" /></span>;
 }
 
 const sentText = (p: CrmProposalRow, estimate?: { finalised: boolean } | null) => (estimate && p.status === "draft" ? "Recorded on the enquiry's Estimates tab" : p.sent_on ? formatDate(p.sent_on) : p.status === "draft" ? "Not sent yet" : "Date not recorded");

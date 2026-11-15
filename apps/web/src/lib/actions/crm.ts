@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { dubaiDateTimeToIso, findLikelyDuplicates, validateCrmLink, type DuplicateCandidate, type DuplicateMatch, CRM_CAPABILITIES } from "@enginious-hr/domain";
+import { companyTimeZone, isValidTimeZone, findLikelyDuplicates, validateCrmLink, type DuplicateCandidate, type DuplicateMatch, CRM_CAPABILITIES } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { friendlyCrmError } from "@/lib/crm/errors";
@@ -12,13 +12,15 @@ import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
+import { dueFor, dueInZone } from "@/lib/crm/follow-up-zone";
 import { panelReturnHref } from "@/app/(app)/sales/new/enquiry-form-shared";
 import { diffZohoForm, isMissingDatabaseFunction, ZOHO_FIELDS, ZOHO_FORM_NAMES, ZOHO_SAVE_UNAVAILABLE } from "@/lib/crm/zoho-save";
 
 /**
  * Sales & CRM server actions. Every one is a thin wrapper over a crm_* database function: the function (not this file)
  * decides who may do what and enforces the stage rules, so a forged request gets the same refusal a normal one would.
- * This layer parses the form, converts Dubai wall-clock times to UTC, and turns database errors into plain sentences.
+ * This layer parses the form, converts a deadline typed on the company's own clock (its Sales time zone; lib/crm/follow-up-zone.ts) to the stored moment, and
+ * turns database errors into plain sentences.
  */
 
 const uuid = z.string().uuid();
@@ -46,10 +48,6 @@ function refresh(id?: string) {
   if (id) revalidatePath(`/sales/opportunities/${id}`);
 }
 
-function dueIso(date: string | undefined, time: string | undefined): string | null {
-  if (!date) return null;
-  return dubaiDateTimeToIso(date, time && /^\d{2}:\d{2}$/.test(time) ? time : "09:00");
-}
 
 const technologiesSchema = z.preprocess(
   (v) => {
@@ -95,8 +93,6 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   if (!parsed.success) return { error: firstIssue(parsed.error) };
   const d = parsed.data;
   if (!d.agencyOrgId && !d.clientOrgId) return { error: "Choose an agency, an end client, or both." };
-  const nextDue = dueIso(d.nextDate, d.nextTime);
-  if (!nextDue) return { error: "The next action needs a valid date and time." };
 
   // The company comes from the form, so it is checked here against the companies the person holds Sales access to before anything is sent. The database
   // function checks the same thing again (crm_has_access, and that the company has Sales settings), so a changed request can never save to another company;
@@ -106,6 +102,10 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   const company = ctx.companies.find((c) => c.id === d.companyId);
   if (!company) return { error: "You do not have Sales access to that company, so the enquiry was not saved. Choose one of your companies." };
   if (!company.settings) return { error: `${company.name} has no Sales settings yet (reference code and default currency), so an enquiry cannot be recorded for it.` };
+  // The next action is typed on the clock of the company the enquiry is for (its Sales time zone, read with the settings above).
+  const nextDueRes = dueInZone(companyTimeZone(company.settings), d.nextDate, d.nextTime, "The next action needs a valid date and time.");
+  if ("error" in nextDueRes) return { error: nextDueRes.error };
+  const nextDue = nextDueRes.iso;
 
   const supabase = await createClient();
   const fromOutreach = uuid.safeParse(formData.get("outreachId"));
@@ -330,9 +330,10 @@ const resumeSchema = z.object({
 export async function resumeOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = resumeSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
-  const due = dueIso(p.data.nextDate, p.data.nextTime);
-  if (!due) return { error: "The next action needs a valid date and time." };
   const supabase = await createClient();
+  const dueRes = await dueFor(supabase, { opportunityId: p.data.id }, p.data.nextDate, p.data.nextTime, "The next action needs a valid date and time.");
+  if ("error" in dueRes) return { error: dueRes.error };
+  const due = dueRes.iso;
   { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_resume_opportunity", { p_id: p.data.id, p_next_title: p.data.nextTitle, p_next_due: due, p_next_kind: p.data.nextKind, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
@@ -510,9 +511,10 @@ const reopenSchema = z.object({
 export async function reopenOpportunity(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = reopenSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
-  const due = dueIso(p.data.nextDate, p.data.nextTime);
-  if (!due) return { error: "The new next action needs a valid date and time." };
   const supabase = await createClient();
+  const dueRes = await dueFor(supabase, { opportunityId: p.data.id }, p.data.nextDate, p.data.nextTime, "The new next action needs a valid date and time.");
+  if ("error" in dueRes) return { error: dueRes.error };
+  const due = dueRes.iso;
   { const stale = await staleMessage(supabase, p.data.id, p.data.expectedVersion); if (stale) return { error: stale }; }
   const { error } = await supabase.rpc("crm_reopen_opportunity", {
     p_id: p.data.id, p_reason: p.data.reason, p_next_title: p.data.nextTitle, p_next_due: due, p_next_kind: p.data.nextKind,
@@ -547,10 +549,13 @@ export async function addActivity(_prev: ActionState, formData: FormData): Promi
   let nextDue: string | null = null;
   if (planNext) {
     if (!d.nextTitle || !d.nextDate) return { error: "Say what the next step is and when, or turn off “Plan the next step”." };
-    nextDue = dueIso(d.nextDate, d.nextTime);
-    if (!nextDue) return { error: "The next step needs a valid date and time." };
   }
   const supabase = await createClient();
+  if (planNext) {
+    const dueRes = await dueFor(supabase, { opportunityId: d.id }, d.nextDate, d.nextTime, "The next step needs a valid date and time.");
+    if ("error" in dueRes) return { error: dueRes.error };
+    nextDue = dueRes.iso;
+  }
   if (d.completeFollowUpId) {
     const done = await supabase.rpc("crm_complete_follow_up", {
       p_follow_up_id: d.completeFollowUpId, p_outcome: d.body, p_next_title: planNext ? (d.nextTitle ?? null) : null, p_next_due: nextDue, p_next_kind: d.nextKind,
@@ -585,9 +590,10 @@ const followUpSchema = z.object({
 export async function createFollowUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = followUpSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
-  const due = dueIso(p.data.date, p.data.time);
-  if (!due) return { error: "Enter a valid date and time." };
   const supabase = await createClient();
+  const dueRes = await dueFor(supabase, { opportunityId: p.data.id }, p.data.date, p.data.time);
+  if ("error" in dueRes) return { error: dueRes.error };
+  const due = dueRes.iso;
   const { error } = await supabase.rpc("crm_create_follow_up", { p_id: p.data.id, p_title: p.data.title, p_due_at: due, p_kind: p.data.kind, p_assigned_to: p.data.assignedTo ?? null });
   if (error) return fail(error.message);
   refresh(p.data.id);
@@ -608,11 +614,15 @@ export async function completeFollowUp(_prev: ActionState, formData: FormData): 
   let nextDue: string | null = null;
   if (d.next === "follow_up") {
     if (!d.nextTitle || !d.nextDate) return { error: "Say what the next action is and when." };
-    nextDue = dueIso(d.nextDate, d.nextTime);
-    if (!nextDue) return { error: "The next action needs a valid date and time." };
   }
   if (d.next === "hold" && (!d.holdReason || !d.holdReview)) return { error: "Give a reason and a review date to put it on hold." };
   const supabase = await createClient();
+  if (d.next === "follow_up") {
+    // The next follow-up belongs to the same company as the one being completed: its clock.
+    const dueRes = await dueFor(supabase, { followUpId: d.followUpId }, d.nextDate, d.nextTime, "The next action needs a valid date and time.");
+    if ("error" in dueRes) return { error: dueRes.error };
+    nextDue = dueRes.iso;
+  }
   const { error } = await supabase.rpc("crm_complete_follow_up", {
     p_follow_up_id: d.followUpId, p_outcome: d.outcome,
     p_next_title: d.next === "follow_up" ? (d.nextTitle ?? null) : null, p_next_due: nextDue, p_next_kind: d.nextKind,
@@ -627,9 +637,10 @@ const rescheduleSchema = z.object({ followUpId: uuid, opportunityId: optionalUui
 export async function rescheduleFollowUp(_prev: ActionState, formData: FormData): Promise<ActionState> {
   const p = rescheduleSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
-  const due = dueIso(p.data.date, p.data.time);
-  if (!due) return { error: "Enter a valid date and time." };
   const supabase = await createClient();
+  const dueRes = await dueFor(supabase, { followUpId: p.data.followUpId }, p.data.date, p.data.time);
+  if ("error" in dueRes) return { error: dueRes.error };
+  const due = dueRes.iso;
   const { error } = await supabase.rpc("crm_reschedule_follow_up", { p_follow_up_id: p.data.followUpId, p_due_at: due });
   if (error) return fail(error.message);
   refresh(p.data.opportunityId);
@@ -828,6 +839,23 @@ export async function saveCrmSettings(_prev: ActionState, formData: FormData): P
   });
   if (error) return fail(error.message);
   refresh();
+  return { error: null };
+}
+
+const timeZoneSchema = z.object({ companyId: uuid, timeZone: z.string().trim().min(1, "Choose a time zone") });
+/**
+ * Sets the company's follow-up time zone (crm_set_follow_up_time_zone: only people who manage that company's Sales settings; a named zone only). It changes the
+ * clock deadlines are typed and shown on; it moves no existing deadline.
+ */
+export async function setFollowUpTimeZone(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = timeZoneSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  if (!isValidTimeZone(p.data.timeZone)) return { error: "Choose a time zone by its name, for example Asia/Dubai or Europe/Warsaw." };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_set_follow_up_time_zone", { p_company_id: p.data.companyId, p_time_zone: p.data.timeZone });
+  if (error) return isMissingDatabaseFunction(error) ? { error: "Choosing a follow-up time zone is not available in this environment yet. Nothing was changed." } : fail(error.message);
+  refresh();
+  revalidatePath("/");
   return { error: null };
 }
 

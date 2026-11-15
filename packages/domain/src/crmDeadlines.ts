@@ -1,6 +1,12 @@
 /**
  * Dates, deadlines and "is this configured?" rules for Sales & CRM. Pure functions of (data, instant) so they can be
- * tested deterministically. All Sales dates are Dubai time (Asia/Dubai), Enginious's reference timezone.
+ * tested deterministically.
+ *
+ * Follow-up deadlines are typed and shown on the clock of the COMPANY the follow-up belongs to (its Sales setting `follow_up_time_zone`, an IANA zone name;
+ * Asia/Dubai unless the company set another). They are stored as moments, so changing a company's zone never moves a deadline: it changes the clock the
+ * same moment is shown on, and which calendar day counts as "today" for that company. Every function below that depends on a clock takes the zone as its
+ * last argument and defaults to Asia/Dubai, Enginious's reference zone, which is also what everything that is not a follow-up deadline keeps using.
+ * Conversions use the runtime's own zone database (Intl), never a fixed offset, so daylight-saving changes are followed.
  */
 import { getBusinessDateString, localDateTimeToUtcIso } from "./businessTime";
 
@@ -8,11 +14,60 @@ export const CRM_TIME_ZONE = "Asia/Dubai";
 
 export type FollowUpTiming = "overdue" | "due_today" | "upcoming";
 
-/** Overdue = the due moment has passed. Due today = still to come, on today's Dubai date. */
-export function followUpTiming(dueAtIso: string, now: Date = new Date()): FollowUpTiming {
+/**
+ * Overdue = the due moment has passed (the same in every zone). Due today = still to come, on today's date in `timeZone` (the company's zone; Dubai by default).
+ */
+export function followUpTiming(dueAtIso: string, now: Date = new Date(), timeZone: string = CRM_TIME_ZONE): FollowUpTiming {
   const due = new Date(dueAtIso);
   if (due.getTime() < now.getTime()) return "overdue";
-  return getBusinessDateString(CRM_TIME_ZONE, due) === getBusinessDateString(CRM_TIME_ZONE, now) ? "due_today" : "upcoming";
+  return getBusinessDateString(timeZone, due) === getBusinessDateString(timeZone, now) ? "due_today" : "upcoming";
+}
+
+/** True for an IANA zone name this runtime knows ("Europe/Warsaw"). A fixed offset ("+01:00", "UTC+1", "Etc/GMT+1") and an abbreviation ("CET") are not accepted. */
+export function isValidTimeZone(zone: unknown): zone is string {
+  if (typeof zone !== "string" || !/^[A-Za-z_]+(\/[A-Za-z0-9_+-]+)+$/.test(zone) || /^(Etc|posix|right)\//.test(zone)) return false;
+  try { new Intl.DateTimeFormat("en-GB", { timeZone: zone }); return true; } catch { return false; }
+}
+
+/** The zone a company's follow-up deadlines use: its Sales setting when that is a known zone, otherwise Asia/Dubai (also for a company with no settings yet, and on a database without the setting). */
+export function companyTimeZone(settings: { follow_up_time_zone?: string | null } | null | undefined): string {
+  return isValidTimeZone(settings?.follow_up_time_zone) ? settings.follow_up_time_zone : CRM_TIME_ZONE;
+}
+
+/** The place a zone is named after, for labels: "Asia/Dubai" reads "Dubai", "America/New_York" reads "New York". */
+export function timeZoneCity(zone: string): string {
+  return (zone.split("/").pop() ?? zone).replace(/_/g, " ");
+}
+
+/** The zones offered in Sales settings (the company's own is added when it is not one of these). IANA names only. */
+export const CRM_TIME_ZONE_CHOICES: readonly string[] = ["Asia/Dubai", "Asia/Riyadh", "Asia/Qatar", "Asia/Kuwait", "Asia/Bahrain", "Asia/Muscat", "Europe/Warsaw", "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Madrid", "Europe/Rome", "Europe/Istanbul", "Africa/Cairo", "Asia/Kolkata", "Asia/Singapore", "America/New_York"];
+
+/**
+ * "2026-10-20" + "11:00" on the clock of `timeZone` -> the stored moment (UTC ISO). Null when the date or time is malformed, and null when that time does not
+ * exist on that date in that zone (the hour skipped when clocks go forward: 02:30 on the last Sunday of March in Warsaw): it is refused, never moved to another
+ * time on a guess. A time that happens twice (the hour repeated when clocks go back) is its first occurrence.
+ */
+export function zonedDateTimeToIso(timeZone: string, date: string, time: string): string | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
+  return localDateTimeToUtcIso(timeZone, `${date}T${time}`);
+}
+
+/** True when `date` is a real calendar date and `time` a real time of day, but that time does not exist on that date in `timeZone` (clocks went forward). */
+export function isSkippedLocalTime(timeZone: string, date: string, time: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) return false;
+  const d = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== date) return false;
+  return localDateTimeToUtcIso(timeZone, `${date}T${time}`) === null;
+}
+
+/** "15:00": the time of day of a stored moment on the clock of `timeZone`. Null for an unreadable moment. */
+export function timeOfDayIn(timeZone: string, iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone }).formatToParts(d);
+  const get = (t: string) => parts.find((p) => p.type === t)?.value ?? "";
+  return /^\d{2}$/.test(get("hour")) && /^\d{2}$/.test(get("minute")) ? `${get("hour")}:${get("minute")}` : null;
 }
 
 /** Whole days past the due moment (0 if not overdue). */
@@ -21,13 +76,13 @@ export function daysOverdue(dueAtIso: string, now: Date = new Date()): number {
   return diff <= 0 ? 0 : Math.floor(diff / 86_400_000);
 }
 
-/** "2026-10-20" + "11:00" in Dubai time -> UTC ISO string for storing in timestamptz. Null if invalid. */
+/** "2026-10-20" + "11:00" in Dubai time -> UTC ISO string for storing in timestamptz. Null if invalid. (Follow-up deadlines use `zonedDateTimeToIso` with the company's zone.) */
 export function dubaiDateTimeToIso(date: string, time: string): string | null {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !/^\d{2}:\d{2}$/.test(time)) return null;
-  return localDateTimeToUtcIso(CRM_TIME_ZONE, `${date}T${time}`);
+  return zonedDateTimeToIso(CRM_TIME_ZONE, date, time);
 }
 
-export const crmToday = (now: Date = new Date()) => getBusinessDateString(CRM_TIME_ZONE, now);
+/** Today's calendar date (YYYY-MM-DD) in `timeZone`: Dubai by default; pass the company's zone for anything about its follow-up deadlines. */
+export const crmToday = (now: Date = new Date(), timeZone: string = CRM_TIME_ZONE) => getBusinessDateString(timeZone, now);
 
 // ----------------------------------------------------------------------------------------------------------------
 // Equipment availability: a dated check, not a reservation and not a commercial confirmation.

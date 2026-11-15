@@ -11,7 +11,7 @@ vi.mock("@/lib/actions/crm", () => ({ addActivity: vi.fn() }));
 import { AddActivityForm } from "./add-activity-form";
 
 afterEach(() => cleanup());
-const base = { opportunityId: "o1", suggestedDate: "2026-11-03", minDate: "2026-11-02" };
+const base = { opportunityId: "o1", suggestedDate: "2026-11-03", minDate: "2026-11-02", timeZone: "Asia/Dubai" };
 
 describe("Add update plans the next step in the same dialog", () => {
   it("starts with the next step off and the date suggested when it is turned on", () => {

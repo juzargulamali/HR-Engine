@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "./time-zone";
 import "server-only";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { availabilityDisplay, type AvailabilityDisplay } from "@enginious-hr/domain";
@@ -14,6 +15,8 @@ export interface EnquiryListItem {
   opp: ListOpp;
   value: number | null;
   companyName: string;
+  /** The Sales time zone of the enquiry's company: the clock its next follow-up is shown and judged on. */
+  timeZone?: string;
   ownerName: string;
   agency: { name: string } | null;
   client: { name: string } | null;
@@ -77,7 +80,7 @@ export async function loadEnquiryList(ctx: CrmContext, query: EnquiryListQuery):
     items: r.rows.map((o) => ({
       opp: { id: o.id, reference: o.reference, title: o.title, company_id: o.company_id, owner_id: o.owner_id, stage: o.stage, stage_before_hold: o.stage_before_hold, version: o.version, currency: o.currency,
         source: o.source, created_at: o.created_at, install_start: o.install_start, event_start: o.event_start, first_response_at: o.first_response_at },
-      value: num(o.value), companyName: ctx.companyName(o.company_id), ownerName: ctx.personName(o.owner_id),
+      value: num(o.value), companyName: ctx.companyName(o.company_id), timeZone: zoneOfCompanies(ctx.companies)(o.company_id), ownerName: ctx.personName(o.owner_id),
       agency: o.agency_name ? { name: o.agency_name } : null, client: o.client_name ? { name: o.client_name } : null,
       nextFollowUp: o.next, openFollowUps: Number(o.open_follow_ups),
       availability: availabilityDisplay({ availabilityState: o.availability_state, availabilityCovers: o.availability_covers, installStart: o.install_start, eventStart: o.event_start, eventEnd: o.event_end, technologies: o.technologies ?? [] }),

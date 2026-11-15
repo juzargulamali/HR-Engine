@@ -23,7 +23,7 @@ HTMLDialogElement.prototype.showModal = function showModal(this: HTMLDialogEleme
 HTMLDialogElement.prototype.close = function close(this: HTMLDialogElement) { this.removeAttribute("open"); };
 
 // Fictional data only. Monday 9 Nov 2026, 10:00 in Dubai; the follow-up was due on the 6th at 15:30 Dubai time.
-const followUp: FollowUpRef = { id: "f1", title: "Call the fictional agency", kind: "meeting", dueAt: "2026-11-06T11:30:00Z", opportunityId: "o1", isOnlyOpen: false };
+const followUp: FollowUpRef = { id: "f1", title: "Call the fictional agency", kind: "meeting", dueAt: "2026-11-06T11:30:00Z", opportunityId: "o1", isOnlyOpen: false, timeZone: "Asia/Dubai" };
 const posted = (fn: ReturnType<typeof vi.fn>) => Object.fromEntries((fn.mock.calls[0]![1] as FormData).entries());
 
 beforeEach(() => {
@@ -91,7 +91,7 @@ describe("Complete", () => {
   });
 
   it("a follow-up with no known type still defaults to Other", () => {
-    render(<CompleteFollowUpDialog open onClose={() => undefined} followUp={{ id: "f2", title: "Chase", opportunityId: "o1", isOnlyOpen: true }} />);
+    render(<CompleteFollowUpDialog open onClose={() => undefined} followUp={{ id: "f2", title: "Chase", opportunityId: "o1", isOnlyOpen: true, timeZone: "Asia/Dubai" }} />);
     expect((screen.getByLabelText("Type") as HTMLSelectElement).value).toBe("other");
   });
 });

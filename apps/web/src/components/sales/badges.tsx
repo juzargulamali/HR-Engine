@@ -1,7 +1,7 @@
 import { AVAILABILITY_LABELS, commercialApprovalLabel, crmStageLabel, daysOverdue, followUpTiming, type ApprovalPolicy, type ApprovalState, type AvailabilityDisplay } from "@enginious-hr/domain";
 import { OsBadge, type OsTone } from "@/components/os/pills";
 import { cn } from "@/lib/utils";
-import { formatDateTime } from "./format";
+import { formatDue } from "./format";
 
 // Early stages are plain, work in progress is blue, a decision is teal, a pause is amber; won is green and lost is quiet. The words always say the stage.
 const STAGE_TONE: Record<string, OsTone> = {
@@ -40,13 +40,16 @@ export function ApprovalBadge({ policy, latest }: { policy: ApprovalPolicy; late
   );
 }
 
-/** Due moment with its state in words (never colour alone). */
-export function DueText({ dueAt, className }: { dueAt: string; className?: string }) {
-  const timing = followUpTiming(dueAt);
+/**
+ * Due moment with its state in words (never colour alone), on the clock of the company the follow-up belongs to: `zone` is that company's Sales time zone, and
+ * the place is written after the time ("19 Oct 2026, 15:00 (Warsaw)"). "Due today" is that company's calendar day; "overdue" is the moment having passed.
+ */
+export function DueText({ dueAt, zone, className }: { dueAt: string; /** The IANA zone of the follow-up's company (lib/crm/time-zone.ts). */ zone: string; className?: string }) {
+  const timing = followUpTiming(dueAt, new Date(), zone);
   const days = daysOverdue(dueAt);
   return (
     <span className={cn("whitespace-nowrap max-sm:whitespace-normal", timing === "overdue" && "font-medium text-[hsl(var(--os-red))]", timing === "due_today" && "font-medium text-[hsl(var(--os-amber))]", className)}>
-      {formatDateTime(dueAt)}
+      {formatDue(dueAt, zone)}
       {timing === "overdue" ? ` · overdue${days > 0 ? ` ${days}d` : ""}` : timing === "due_today" ? " · due today" : ""}
     </span>
   );
