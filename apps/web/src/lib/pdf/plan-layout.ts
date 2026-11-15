@@ -7,7 +7,7 @@ export interface PlanSection {
   rows: PlanTableRow[];
 }
 
-const ORDER: PlanTableRow["section"][] = ["Milestones", "Delivery timeline", "Site production timeline", "Dependencies on others"];
+const ORDER: PlanTableRow["section"][] = ["Milestones", "Tasks", "Delivery timeline", "Site production timeline", "Dependencies on others"];
 
 /** Groups the flat table rows into sections in the fixed order, leaving empty sections out. */
 export function groupPlanRows(rows: readonly PlanTableRow[]): PlanSection[] {

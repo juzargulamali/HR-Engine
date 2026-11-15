@@ -8,10 +8,15 @@ export interface IssuedPlanPayload {
   delivery: { title: string; start_date: string | null; end_date: string | null }[];
   site: { title: string; start_date: string | null; end_date: string | null; starts_local: string | null; ends_local: string | null; tz: string | null }[];
   dependencies: { label: string; kind: string; expected_date: string | null; expected_time: string | null; organisation: string | null; confirmation: string }[];
+  /**
+   * Individual tasks the Project Manager chose for this timeline. Present only when at least one was chosen (versions issued before tasks could be chosen have no such key).
+   * The database builds each entry from an allowlist: the client title, the dates and the status in client words. Nothing else of a task is ever in a payload.
+   */
+  tasks?: { title: string; start_date: string | null; due_date: string | null; status: string }[];
 }
 
 export interface PlanTableRow {
-  section: "Milestones" | "Delivery timeline" | "Site production timeline" | "Dependencies on others";
+  section: "Milestones" | "Tasks" | "Delivery timeline" | "Site production timeline" | "Dependencies on others";
   title: string;
   when: string;
   detail: string;
@@ -31,6 +36,15 @@ const CONFIRMATION: Record<string, string> = { pending: "Not yet confirmed", con
 export function planTableRows(p: IssuedPlanPayload): PlanTableRow[] {
   const rows: PlanTableRow[] = [];
   for (const m of p.milestones) rows.push({ section: "Milestones", title: m.title, when: formatPlanDay(m.due_date), detail: "" });
+  // Only these four fields are read, whatever else a payload might hold: the client title, the two dates and the status in client words.
+  for (const t of p.tasks ?? []) {
+    rows.push({
+      section: "Tasks",
+      title: String(t.title ?? ""),
+      when: t.start_date && t.due_date ? range(t.start_date, t.due_date) : t.due_date ? `Due ${formatPlanDay(t.due_date)}` : t.start_date ? `From ${formatPlanDay(t.start_date)}` : "Date to be confirmed",
+      detail: typeof t.status === "string" ? t.status : "",
+    });
+  }
   for (const d of p.delivery) rows.push({ section: "Delivery timeline", title: d.title, when: range(d.start_date, d.end_date), detail: "" });
   for (const s of p.site) {
     const timed = s.starts_local && s.ends_local;

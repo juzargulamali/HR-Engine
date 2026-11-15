@@ -133,11 +133,12 @@ export async function cancelSiteBooking(_prev: S, fd: FormData): Promise<S> {
 
 // ---- Issued client timeline -------------------------------------------------------------------------------------
 export async function issueClientTimeline(_prev: S, fd: FormData): Promise<S> {
-  const p = z.object({ projectId: uuid, clientReference: optionalText, note: optionalText }).safeParse(Object.fromEntries(fd));
+  // The hash of the preview the manager was looking at: the database issues only when the content is still exactly that, so what is issued is what was previewed.
+  const p = z.object({ projectId: uuid, previewHash: z.string().trim().regex(/^[0-9a-f]{32}$/, "Open the preview again, then issue"), clientReference: optionalText, note: optionalText }).safeParse(Object.fromEntries(fd));
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
-  const { data, error } = await supabase.rpc("proj_issue_plan", { p_project_id: p.data.projectId, p_client_reference: p.data.clientReference ?? null, p_note: p.data.note ?? null });
-  if (error) return fail(error.message);
+  const { data, error } = await supabase.rpc("proj_issue_plan_checked", { p_project_id: p.data.projectId, p_expected_hash: p.data.previewHash, p_client_reference: p.data.clientReference ?? null, p_note: p.data.note ?? null });
+  if (error) { if (error.code === "40001") refreshProjects(p.data.projectId); return fail(error.message); }
   refreshProjects(p.data.projectId);
   return ok(data);
 }

@@ -7,8 +7,8 @@ import { fail, firstIssue, ok, patchOf, refreshProjects, staleMessage, uuid, typ
 /**
  * Choose, in one place, which existing milestones and timeline activities the client sees. It only flips `client_facing` through the same database functions
  * the item pages use (patch fields + the optimistic version), so permissions, history and the guard on issued versions are unchanged: versions already issued
- * are frozen copies and are never touched. Only items whose box was actually changed are written. Individual tasks have no client-facing flag, so they cannot
- * be chosen here (milestones carry the task dates the client sees).
+ * are frozen copies and are never touched. Only items whose box was actually changed are written. Individual tasks are chosen separately (saveClientTimelineTasks
+ * below): a task is on a timeline only by explicit choice, with the title the client will read.
  */
 type S = ProjectActionState;
 const MAX_ITEMS = 300;
@@ -42,6 +42,34 @@ export async function saveClientTimelineSelection(_prev: S, fd: FormData): Promi
     if (error) { refreshProjects(p.data.projectId); return fail(done > 0 ? `${done} saved, then: ${error.message}` : error.message); }
     done += 1;
   }
+  refreshProjects(p.data.projectId);
+  return ok();
+}
+
+const MAX_TASKS = 100;
+/**
+ * The individual tasks on the next client timeline, as one explicit choice: only the ticked tasks, each with the title the client will read. The whole choice is sent
+ * (the database sets it as a list, so saving twice changes nothing), and the database decides who may choose (the rule for issuing) and what a client can ever see of a
+ * task. Nothing is ticked by default and there is no "all tasks".
+ */
+export async function saveClientTimelineTasks(_prev: S, fd: FormData): Promise<S> {
+  const p = z.object({ projectId: uuid }).safeParse(Object.fromEntries(fd));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const rows: { task_id: string; client_title: string }[] = [];
+  for (const [key, value] of fd.entries()) {
+    const m = /^task_([0-9a-f-]{36})$/.exec(key);
+    if (!m || value !== "on") continue;
+    const id = m[1] ?? "";
+    if (!uuid.safeParse(id).success) continue;
+    const title = String(fd.get(`tasktitle_${id}`) ?? "").trim();
+    if (title === "") return { error: "Give every ticked task the title the client will see." };
+    if (title.length > 200) return { error: "A client title can be at most 200 characters." };
+    rows.push({ task_id: id, client_title: title });
+  }
+  if (rows.length > MAX_TASKS) return { error: `Choose at most ${MAX_TASKS} tasks for a client timeline.` };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("proj_set_client_timeline_tasks", { p_project_id: p.data.projectId, p_rows: rows });
+  if (error) return fail(error.message);
   refreshProjects(p.data.projectId);
   return ok();
 }
