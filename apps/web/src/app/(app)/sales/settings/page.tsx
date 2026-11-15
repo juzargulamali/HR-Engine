@@ -166,7 +166,7 @@ export default async function SalesSettingsPage({ searchParams }: { searchParams
         <Panel id="follow-up-time-zone" title={`Follow-up time zone for ${c.name}`} description="The clock this company's follow-up deadlines are typed and shown on."
           hint="Every follow-up time of this company is entered and shown in this zone, with the place written next to it, and “due today” is this zone's calendar day. Changing it moves no deadline: each one stays the same moment and is then shown on the new clock.">
           {c.settings.follow_up_time_zone === undefined
-            ? <p className="text-sm text-muted-foreground" data-testid="time-zone-unavailable">This company's follow-ups use Dubai time. Choosing another zone is not available in this environment yet.</p>
+            ? <p className="text-sm text-muted-foreground" data-testid="time-zone-unavailable">This company&apos;s follow-ups use Dubai time. Choosing another zone is not available in this environment yet.</p>
             : <FollowUpTimeZoneForm key={`${c.id}-${companyTimeZone(c.settings)}`} companyId={c.id} current={companyTimeZone(c.settings)} />}
         </Panel>
       ) : null}

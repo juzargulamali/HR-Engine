@@ -13,7 +13,7 @@ export function ActivityPanel({ view, showForm = true }: { view: OppView; showFo
   const timelineFailed = anyFailed(view, "activities", "events");
   // Follow-ups are part of the story (planned, completed, cancelled). If they could not be read the timeline still shows, and says they are missing.
   const followUpsMissing = anyFailed(view, "followUps");
-  const timeline = timelineFailed ? [] : timelineItems({ opportunityId: opp.id, activities: detail.activities, events: detail.events, followUps: followUpsMissing ? [] : detail.followUps, firstResponseAt: opp.first_response_at }, ctx.personName);
+  const timeline = timelineFailed ? [] : timelineItems({ timeZone: view.timeZone, opportunityId: opp.id, activities: detail.activities, events: detail.events, followUps: followUpsMissing ? [] : detail.followUps, firstResponseAt: opp.first_response_at }, ctx.personName);
   const mayBeCut = detail.activities.length >= TIMELINE_READ_LIMIT || detail.events.length >= TIMELINE_READ_LIMIT;
   // The "log an activity" form plans the next follow-up from the follow-ups: without them it is not offered (and says why).
   const followUpsFailed = anyFailed(view, "followUps");

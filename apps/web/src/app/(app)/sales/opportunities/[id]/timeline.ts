@@ -1,3 +1,5 @@
+import { CRM_TIME_ZONE } from "@enginious-hr/domain";
+import { formatDue } from "@/components/sales/format";
 import { formatDateTime } from "@/components/sales/format";
 import type { CrmActivityRow, CrmFollowUpRow, CrmOpportunityEventRow } from "@/types/crm";
 import { describeHistoryEvent } from "./closure-helpers";
@@ -79,7 +81,7 @@ const EVENT_LABEL: Record<string, string> = {
 };
 
 export function timelineItems(
-  input: { opportunityId: string; activities: readonly CrmActivityRow[]; events: readonly CrmOpportunityEventRow[]; followUps: readonly CrmFollowUpRow[]; firstResponseAt: string | null },
+  input: { opportunityId: string; activities: readonly CrmActivityRow[]; events: readonly CrmOpportunityEventRow[]; followUps: readonly CrmFollowUpRow[]; firstResponseAt: string | null; /** The Sales time zone of the enquiry's company: follow-up due times are worded on that clock, with the place. Dubai when left out. */ timeZone?: string },
   personName: (id: string | null | undefined) => string,
 ): TimelineItem[] {
   const base = `/sales/opportunities/${input.opportunityId}`;
@@ -107,7 +109,7 @@ export function timelineItems(
     });
   }
   for (const f of input.followUps) {
-    out.push({ id: `fp-${f.id}`, at: f.created_at, type: "system", label: "Follow-up", internal: false, firstResponse: false, text: `Follow-up planned: ${f.title}. Due ${formatDateTime(f.due_at)}, for ${personName(f.assigned_to)}.`, who: personName(f.created_by), when: formatDateTime(f.created_at), link: null });
+    out.push({ id: `fp-${f.id}`, at: f.created_at, type: "system", label: "Follow-up", internal: false, firstResponse: false, text: `Follow-up planned: ${f.title}. Due ${formatDue(f.due_at, input.timeZone ?? CRM_TIME_ZONE)}, for ${personName(f.assigned_to)}.`, who: personName(f.created_by), when: formatDateTime(f.created_at), link: null });
     if (f.status === "done" && f.completed_at) {
       // One entry per completion, written by a person (it carries their outcome): the kind and marks of the update they logged with it, when there is one.
       const m = completions.get(f.id);
