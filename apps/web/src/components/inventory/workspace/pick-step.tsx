@@ -14,7 +14,7 @@ import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { checkTransaction, recordPick } from "@/lib/actions/inventoryStock";
 import { parseQty, type MovementInput } from "@/lib/inventory/stock-movements";
 import { formatQty } from "@/lib/inventory/words";
-import { pickFlags, scanForRequest, toPickOf, type Flag, type PickInput, type PickLine, type SendItem, type SendSelection } from "@/lib/inventory/workspace";
+import { pickFlags, scanForRequest, type Flag, type PickInput, type PickLine, type SendItem, type SendSelection } from "@/lib/inventory/workspace";
 import { cn } from "@/lib/utils";
 import { QrScanner } from "../qr-scanner";
 import { useMovementFlow } from "../stock/use-movement-flow";
@@ -224,7 +224,7 @@ function PickForm(p: PickStepProps & { onAgain: () => void }) {
                     <Input id={`${uid}-q-${i.itemId}`} inputMode={i.scale > 0 ? "decimal" : "numeric"} placeholder={`up to ${formatQty(left, i.uom)}`} value={counted[i.itemId] ?? ""} onChange={(e) => setCounted({ ...counted, [i.itemId]: e.target.value })} disabled={locked} className="h-11 w-32 text-base sm:h-9 sm:text-sm" />
                     <Button type="button" variant="outline" size="sm" disabled={locked} onClick={() => setCounted({ ...counted, [i.itemId]: String(left) })} className="h-11 sm:h-9">All {formatQty(left, i.uom)}</Button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Count what you took off the shelf for this job. {toPickOf(i) > 0 ? `${formatQty(toPickOf(i), i.uom)} still to pick.` : "All of it is picked."}</p>
+                  <p className="text-xs text-muted-foreground">Count what you took off the shelf for this job. {(() => { const s = selection.find((x) => x.itemId === i.itemId); const rest = left - (s?.counted ?? 0); return rest > 0 ? `${formatQty(rest, i.uom)} of the reserved ${formatQty(left, i.uom)} would stay on the shelf.` : rest === 0 ? "All of it is picked." : ""; })()}</p>
                 </div>
               )}
             </section>
@@ -238,7 +238,7 @@ function PickForm(p: PickStepProps & { onAgain: () => void }) {
       {flow.uncertain ? <UncertainSave flow={flow} what="pick" onRetry={save} /> : null}
 
       {pickable.length > 0 ? (
-        <div className="sticky bottom-0 z-10 -mx-1 space-y-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur" data-testid="pick-action">
+        <div className="sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-10 -mx-1 space-y-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur lg:bottom-0" data-testid="pick-action">
           <p className="text-sm" role="status">
             {pending.ok
               ? <>Saving records <strong>{formatQty(nowPicked, "")}</strong> as picked for this request{stillOnShelf > 0 ? <> and leaves <strong>{stillOnShelf}</strong> reserved on the shelf</> : null}. Nothing leaves the warehouse.</>

@@ -42,10 +42,17 @@ async function loadCard({ opportunityId, companyId, stage, canAsk }: { opportuni
       return "failed";
     }
     const ctx = await getInventoryContext().catch(() => null);
-    const { data: locs } = await db.from("inv_locations").select("id, name").eq("company_id", companyId).eq("is_active", true).order("name");
+    const { data: own } = await db.from("inv_locations").select("id, name").eq("company_id", companyId).eq("is_active", true).order("name");
     const closed = stage === "won" || stage === "lost";
+    // Sales cannot read the locations list: the person who may ask is given the NAMES of the warehouses of this company to ask about (Inventory Phase 1). On a
+    // database without that function the dialog says, as before, that the warehouse chooses.
+    let locs = own ?? [];
+    if (locs.length === 0 && canAsk && !closed) {
+      const named = await (db as unknown as { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }> }).rpc("inv_opportunity_check_locations", { p_opportunity_id: opportunityId });
+      if (!named.error && Array.isArray(named.data)) locs = (named.data as { id?: unknown; name?: unknown }[]).filter((l): l is { id: string; name: string } => typeof l.id === "string" && typeof l.name === "string");
+    }
     const canRecord = !closed && !!ctx && (hasInvCapability(ctx.grants, companyId, "warehouse") || hasInvCapability(ctx.grants, companyId, "manage_catalogue"));
-    return { view, locations: locs ?? [], canAsk: canAsk && !closed, canRecord };
+    return { view, locations: locs, canAsk: canAsk && !closed, canRecord };
   } catch (e) {
     console.error("[inventory] equipment availability card failed", e);
     return "failed";

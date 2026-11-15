@@ -7,10 +7,10 @@ select item, result from (
                    and exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'inv_reservations' and column_name = 'picked_by')
                    and exists (select 1 from pg_constraint where conname = 'inv_reservations_picked' and conrelid = 'public.inv_reservations'::regclass)
                    and not exists (select 1 from inv_reservations where picked_qty > qty or picked_qty < 0) then 'OK' else 'PROBLEM' end as result
-  union all select 2, 'the five functions a signed-in user may call exist, and none is callable signed out',
+  union all select 2, 'the six functions a signed-in user may call exist, and none is callable signed out',
          case when (select bool_and(to_regprocedure(f) is not null and has_function_privilege('authenticated', to_regprocedure(f), 'execute') and not has_function_privilege('anon', to_regprocedure(f), 'execute'))
                       from unnest(array['public.inv_pick_for_request(uuid, uuid, uuid, text, jsonb)', 'public.inv_set_request_runs(uuid, uuid[])', 'public.inv_project_run_cover(uuid)',
-                                        'public.inv_company_run_cover(uuid)', 'public.inv_project_sales_check(uuid)']) f) then 'OK' else 'PROBLEM' end
+                                        'public.inv_company_run_cover(uuid)', 'public.inv_project_sales_check(uuid)', 'public.inv_opportunity_check_locations(uuid)']) f) then 'OK' else 'PROBLEM' end
   union all select 3, 'the two helpers are not callable from a browser session',
          case when not has_function_privilege('authenticated', 'public.inv_run_cover_rows(uuid)', 'execute') and not has_function_privilege('authenticated', 'public.inv_tech_norm(jsonb)', 'execute')
                    and not has_function_privilege('anon', 'public.inv_run_cover_rows(uuid)', 'execute') then 'OK' else 'PROBLEM' end
@@ -22,8 +22,8 @@ select item, result from (
                    and not has_table_privilege('authenticated', 'public.inv_request_runs', 'delete') and not has_table_privilege('anon', 'public.inv_request_runs', 'select') then 'OK' else 'PROBLEM' end
   union all select 5, 'every new function that checks access runs with a fixed search path; the reads are stable and the two writes are not',
          case when (select bool_and(p.proconfig::text like '%search_path=public%') from pg_proc p where p.pronamespace = 'public'::regnamespace
-                      and p.proname in ('inv_pick_for_request', 'inv_set_request_runs', 'inv_run_cover_rows', 'inv_project_run_cover', 'inv_company_run_cover', 'inv_project_sales_check'))
-                   and (select bool_and(p.provolatile = 's') from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('inv_run_cover_rows', 'inv_project_run_cover', 'inv_company_run_cover', 'inv_project_sales_check'))
+                      and p.proname in ('inv_pick_for_request', 'inv_set_request_runs', 'inv_run_cover_rows', 'inv_project_run_cover', 'inv_company_run_cover', 'inv_project_sales_check', 'inv_opportunity_check_locations'))
+                   and (select bool_and(p.provolatile = 's') from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('inv_run_cover_rows', 'inv_project_run_cover', 'inv_company_run_cover', 'inv_project_sales_check', 'inv_opportunity_check_locations'))
                    and (select bool_and(p.provolatile = 'v') from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname in ('inv_pick_for_request', 'inv_set_request_runs')) then 'OK' else 'PROBLEM' end
   union all select 6, 'reserve, dispatch, return and the request state are unchanged by this migration: none mentions the picked quantity (the deployed build keeps working)',
          case when (select bool_and(position('picked_qty' in p.prosrc) = 0) from pg_proc p where p.pronamespace = 'public'::regnamespace

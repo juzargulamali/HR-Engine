@@ -104,8 +104,8 @@ describe("Inventory Phase 1: pick, site runs, the project's availability check, 
   afterAll(async () => { await db.teardown(); });
 
   describe("installation", () => {
-    it("opens the five client functions to signed-in users only and closes the helpers", async () => {
-      const open = ["inv_pick_for_request", "inv_set_request_runs", "inv_project_run_cover", "inv_company_run_cover", "inv_project_sales_check"];
+    it("opens the six client functions to signed-in users only and closes the helpers", async () => {
+      const open = ["inv_pick_for_request", "inv_set_request_runs", "inv_project_run_cover", "inv_company_run_cover", "inv_project_sales_check", "inv_opportunity_check_locations"];
       const closed = ["inv_run_cover_rows", "inv_tech_norm"];
       const rows = await admin<Row>(`select p.proname, has_function_privilege('anon', p.oid, 'execute') anon, has_function_privilege('authenticated', p.oid, 'execute') auth
         from pg_proc p where p.pronamespace = 'public'::regnamespace and p.proname = any (array[${[...open, ...closed].map((n) => `'${n}'`).join(",")}])`);
@@ -331,6 +331,10 @@ describe("Inventory Phase 1: pick, site runs, the project's availability check, 
         p_next_due => now() + interval '2 days', p_agency_org_id => '${agencyId}', p_client_org_id => '${clientId}')`);
       const techs = [{ name: WALL, qty: 2 }];
       await admin(`update crm_opportunities set technologies = ${j(techs)}, install_start = '2031-09-08', event_start = '2031-09-10', event_end = '2031-09-12', location = 'Fictional Hall' where id = '${OPP}'`);
+      // Sales, who cannot read the locations list, is given the names of the warehouses it can ask about, for its own enquiry only
+      expect(await read(U.sales, `select id from inv_locations`)).toHaveLength(0);
+      expect(await call<Row[]>(U.sales, `inv_opportunity_check_locations('${OPP}')`)).toEqual([{ id: LOC.auh, name: "Abu Dhabi store" }, { id: LOC.dxb, name: "Dubai warehouse" }]);
+      for (const u of [U.pm, U.wh, U.outsider, U.ksaFounder, U.ops]) expect(await code(call(u, `inv_opportunity_check_locations('${OPP}')`)), u).toBe("P0002");
       await call(U.sales, `inv_request_opportunity_check('${OPP}', '${LOC.dxb}')`);
       checkId = await call<string>(U.wh, `inv_record_opportunity_check('${OPP}', '${LOC.dxb}', 'Fictional note')`);
       // what Sales sees: a dated result with the equipment, quantity, warehouse and dates it covered; nothing is reserved

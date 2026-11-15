@@ -14,7 +14,11 @@
 --   4. THE CHECK FOR THE PROJECT MANAGER. inv_project_sales_check gives whoever runs the project the availability check recorded on the enquiry it came from, and says
 --      what changed since (dates, quantities, warehouse). Derived from the check's own "covers" record; nothing is stored and the check itself is never edited.
 --
--- DEPLOYED-APP COMPATIBILITY: three nullable / defaulted columns on inv_reservations (the deployed build never names them), one new table, six new functions. No
+--   5. THE WAREHOUSE SALES ASKS ABOUT. Sales could ask for a check but could not name the warehouse, because Sales cannot read the locations list.
+--      inv_opportunity_check_locations gives the person who may ask (the enquiry's owner or a Sales founder) the NAMES of the active warehouses of that company and
+--      nothing else: no stock, no bins, no other company.
+--
+-- DEPLOYED-APP COMPATIBILITY: three nullable / defaulted columns on inv_reservations (the deployed build never names them), one new table, eight new functions. No
 -- existing function, policy, constraint or column is changed. Apply BEFORE deploying the Phase 1 build (the new build without this SQL says the pick step is not
 -- available yet and everything else works as before).
 -- ROLLBACK: supabase/manual-sql/inv_phase1_job_flow_90_rollback.sql.
@@ -193,7 +197,9 @@ as $$
       jsonb_build_object(
         'project_id', q.project_id, 'request_id', q.id, 'request_code', q.code, 'request_status', q.status,
         'run_id', i.id, 'run_title', i.title, 'run_kind', i.activity_kind, 'run_label', i.run_label, 'run_status', i.status, 'run_location', i.location,
-        'run_start', s.run_start, 'run_end', s.run_end, 'leaves_at', w.leaves_at, 'due_back_at', w.due_back_at, 'timezone', q.timezone,
+        'run_start', s.run_start, 'run_end', s.run_end, 'run_all_day', i.starts_at is null, 'run_first_day', coalesce(i.start_date, (i.starts_at at time zone q.timezone)::date),
+        'run_last_day', coalesce(i.end_date, i.start_date, (i.ends_at at time zone q.timezone)::date),
+        'leaves_at', w.leaves_at, 'due_back_at', w.due_back_at, 'timezone', q.timezone,
         'state', st.v ->> 'state', 'units_asked', st.v -> 'units_asked', 'units_short', st.v -> 'units_short', 'units_dispatched', st.v -> 'units_dispatched',
         'units_returned', st.v -> 'units_returned', 'units_out', st.v -> 'units_out', 'short_buy', st.v -> 'short_buy', 'short_rent', st.v -> 'short_rent',
         'short_no_plan', st.v -> 'short_no_plan',
@@ -322,13 +328,34 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- 5. The warehouses Sales can name when asking for a check
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
+-- For exactly the people who may ask for a check on this enquiry (inv_request_opportunity_check: its owner, or a Sales founder of its company): the id and the name
+-- of each ACTIVE location of the enquiry's own company, in name order. Anyone else: "Opportunity not found". Names only; nothing about stock.
+create or replace function inv_opportunity_check_locations(p_opportunity_id uuid)
+returns jsonb
+language plpgsql stable security definer
+set search_path = public
+as $$
+declare o crm_opportunities;
+begin
+  perform inv_require_user();
+  select * into o from crm_opportunities where id = p_opportunity_id;
+  if not found or not (crm_has_access(o.company_id) and (o.owner_id = auth.uid() or crm_is_founder(o.company_id))) then
+    raise exception 'Opportunity not found' using errcode = 'P0002';
+  end if;
+  return coalesce((select jsonb_agg(jsonb_build_object('id', l.id, 'name', l.name) order by l.name) from inv_locations l where l.company_id = o.company_id and l.is_active), '[]'::jsonb);
+end;
+$$;
+
+-- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 -- Privileges: clients read through row-level security and call only the public functions.
 -- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------
 revoke all on function
   inv_pick_for_request(uuid, uuid, uuid, text, jsonb), inv_set_request_runs(uuid, uuid[]), inv_run_cover_rows(uuid), inv_project_run_cover(uuid),
-  inv_company_run_cover(uuid), inv_tech_norm(jsonb), inv_project_sales_check(uuid)
+  inv_company_run_cover(uuid), inv_tech_norm(jsonb), inv_project_sales_check(uuid), inv_opportunity_check_locations(uuid)
   from public, anon, authenticated;
 grant execute on function
   inv_pick_for_request(uuid, uuid, uuid, text, jsonb), inv_set_request_runs(uuid, uuid[]), inv_project_run_cover(uuid), inv_company_run_cover(uuid),
-  inv_project_sales_check(uuid)
+  inv_project_sales_check(uuid), inv_opportunity_check_locations(uuid)
   to authenticated;

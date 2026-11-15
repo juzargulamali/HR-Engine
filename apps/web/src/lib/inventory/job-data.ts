@@ -118,6 +118,6 @@ export async function loadSiteRunOptions(projectId: string, zone: string, cover:
   type RunRow = { id: string; title: string; activity_kind?: string | null; run_label?: string | null; location?: string | null; start_date: string | null; end_date: string | null; starts_at: string | null; ends_at: string | null };
   const { data, error } = await db.from("proj_plan_items").select("*").eq("project_id", projectId).eq("plan", "site").neq("status", "cancelled").limit(200);
   const out: RunOption[] = error ? [] : ((data ?? []) as unknown as RunRow[]).map((a) => runOption({ id: a.id, title: a.title, kind: a.activity_kind, run_label: a.run_label, location: a.location, start_date: a.start_date, end_date: a.end_date, starts_at: a.starts_at, ends_at: a.ends_at }, zone));
-  for (const r of cover) if (!out.some((o) => o.id === r.runId)) out.push(runOption({ id: r.runId, title: r.runTitle, kind: r.runKind, run_label: r.runLabel, starts_at: r.runStart, ends_at: r.runEnd }, zone));
+  for (const r of cover) if (!out.some((o) => o.id === r.runId)) out.push(runOption({ id: r.runId, title: r.runTitle, kind: r.runKind, run_label: r.runLabel, start_date: r.runFirstDay, end_date: r.runLastDay }, zone));
   return out.sort((a, b) => (a.startDay ?? "9999").localeCompare(b.startDay ?? "9999") || a.title.localeCompare(b.title));
 }

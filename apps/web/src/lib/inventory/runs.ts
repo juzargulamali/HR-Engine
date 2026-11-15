@@ -99,6 +99,8 @@ export type RunProblem = "not_submitted" | "short" | "not_sent" | "partly_sent" 
 export interface RunCoverRow {
   projectId: string; requestId: string; requestCode: string; requestStatus: string;
   runId: string; runTitle: string; runKind: string | null; runLabel: string | null; runStart: string | null; runEnd: string | null;
+  /** A run with days and no clock times: it is shown by its first and last day. */
+  runAllDay: boolean; runFirstDay: string | null; runLastDay: string | null;
   leavesAt: string | null; dueBackAt: string | null; timezone: string;
   state: string; unitsAsked: number; unitsShort: number; unitsDispatched: number; unitsReturned: number; unitsOut: number;
   shortBuy: number; shortRent: number; shortNoPlan: number;
@@ -116,6 +118,7 @@ export function parseRunCover(rows: unknown): RunCoverRow[] {
   return rows.map(rec).filter((r) => text(r.request_id) && text(r.run_id)).map((r): RunCoverRow => ({
     projectId: text(r.project_id) ?? "", requestId: text(r.request_id)!, requestCode: text(r.request_code) ?? "", requestStatus: text(r.request_status) ?? "",
     runId: text(r.run_id)!, runTitle: text(r.run_title) ?? "Site run", runKind: text(r.run_kind), runLabel: text(r.run_label), runStart: text(r.run_start), runEnd: text(r.run_end),
+    runAllDay: r.run_all_day === true, runFirstDay: text(r.run_first_day), runLastDay: text(r.run_last_day),
     leavesAt: text(r.leaves_at), dueBackAt: text(r.due_back_at), timezone: text(r.timezone) ?? "UTC",
     state: text(r.state) ?? "", unitsAsked: number(r.units_asked), unitsShort: number(r.units_short), unitsDispatched: number(r.units_dispatched), unitsReturned: number(r.units_returned),
     unitsOut: number(r.units_out), shortBuy: number(r.short_buy), shortRent: number(r.short_rent), shortNoPlan: number(r.short_no_plan),
@@ -149,14 +152,20 @@ export function runProblemWords(p: RunProblem, r: Pick<RunCoverRow, "unitsShort"
   }
 }
 
-export interface RunGroup { runId: string; runTitle: string; runLabel: string | null; runStart: string | null; runEnd: string | null; rows: RunCoverRow[]; exceptions: string[] }
+export interface RunGroup { runId: string; runTitle: string; runLabel: string | null; runStart: string | null; runEnd: string | null; when: string; rows: RunCoverRow[]; exceptions: string[] }
+
+/** The run's own dates in words: "26 Nov 2026 to 27 Nov 2026", "26 Nov 2026", "No date yet". */
+export function runWhenWords(r: Pick<RunCoverRow, "runFirstDay" | "runLastDay">): string {
+  if (!r.runFirstDay) return "No date yet";
+  return r.runLastDay && r.runLastDay !== r.runFirstDay ? `${dayWords(r.runFirstDay)} to ${dayWords(r.runLastDay)}` : dayWords(r.runFirstDay);
+}
 
 /** The rows grouped under their run, in the order the database gave them (by run start), with each run's exceptions in words. */
 export function groupByRun(rows: readonly RunCoverRow[]): RunGroup[] {
   const groups: RunGroup[] = [];
   for (const r of rows) {
     let g = groups.find((x) => x.runId === r.runId);
-    if (!g) { g = { runId: r.runId, runTitle: r.runTitle, runLabel: r.runLabel, runStart: r.runStart, runEnd: r.runEnd, rows: [], exceptions: [] }; groups.push(g); }
+    if (!g) { g = { runId: r.runId, runTitle: r.runTitle, runLabel: r.runLabel, runStart: r.runStart, runEnd: r.runEnd, when: runWhenWords(r), rows: [], exceptions: [] }; groups.push(g); }
     g.rows.push(r);
     for (const p of r.problems) { const w = runProblemWords(p, r); if (w && !g.exceptions.includes(w)) g.exceptions.push(w); }
   }

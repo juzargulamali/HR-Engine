@@ -138,7 +138,8 @@ function LocationField({ locations, defaultLocationId, optional = false }: { loc
       : <Alert role="status">There is no active location to check against.</Alert>;
   }
   return (
-    <Field label="Location to check against" htmlFor="oc-loc" hint={optional ? "Optional: leave it open and the warehouse chooses." : undefined}>
+    <Field label="Location to check against" htmlFor="oc-loc" hint={optional ? "Optional: leave it open and the warehouse chooses." : undefined}
+      help="The warehouse whose stock and bookings are looked at. The result is recorded for this warehouse and this enquiry's dates.">
       <Select id="oc-loc" name="locationId" defaultValue={defaultLocationId ?? (optional ? "" : (locations[0]?.id ?? ""))} required={!optional}>
         {optional ? <option value="">Warehouse decides</option> : null}
         {locations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}

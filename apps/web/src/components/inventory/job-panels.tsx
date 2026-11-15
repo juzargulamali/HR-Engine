@@ -89,7 +89,7 @@ export function RunEquipmentList({ rows, projectId, timezone }: { rows: readonly
         <li key={g.runId} className="rounded-md border border-border p-3 text-sm" data-run={g.runTitle} data-exceptions={g.exceptions.length}>
           <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
             <p className="font-semibold">{g.runTitle}</p>
-            <p className="text-muted-foreground">{g.runStart ? `${formatInZone(g.runStart, timezone ?? g.rows[0]?.timezone ?? "UTC")}${g.runEnd ? ` to ${formatInZone(g.runEnd, timezone ?? g.rows[0]?.timezone ?? "UTC")}` : ""}` : "No date yet"}</p>
+            <p className="text-muted-foreground">{g.rows[0]?.runAllDay === false && g.runStart ? `${formatInZone(g.runStart, timezone ?? g.rows[0]?.timezone ?? "UTC")}${g.runEnd ? ` to ${formatInZone(g.runEnd, timezone ?? g.rows[0]?.timezone ?? "UTC")}` : ""}` : g.when}</p>
           </div>
           <ul className="mt-1.5 space-y-1">
             {g.rows.map((r) => (

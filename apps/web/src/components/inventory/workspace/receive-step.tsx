@@ -181,7 +181,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
                 <Fragment key={c.key}>
                 {group && group.first ? (
                   <li className="flex flex-wrap items-center justify-between gap-2 bg-secondary/40 px-4 py-2 text-sm">
-                    <span className="font-medium">{c.itemName} <span className="font-normal text-muted-foreground">· {group.size} here</span></span>
+                    <span className="font-medium">{c.itemName} <span className="font-normal text-muted-foreground">· {group.size} still out</span></span>
                     <Button type="button" size="sm" variant="ghost" disabled={locked} onClick={() => {
                       const all = sorted.slice(i, i + group.size);
                       const allOn = all.every((x) => ticked[x.key]);
@@ -222,7 +222,7 @@ export function ReceiveStep(p: ReceiveStepProps) {
           </ul>
           <p className="text-xs text-muted-foreground">Nothing is ticked for you. Tick only what is actually here. Good equipment becomes available again; damaged or unchecked equipment stays unavailable until it is inspected. Anything you leave out stays with the project.</p>
           {problem && shown ? <Alert variant="destructive" role="alert">{problem}</Alert> : null}
-          <div className="sticky bottom-0 z-10 -mx-1 space-y-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur" data-testid="receive-action">
+          <div className="sticky bottom-[calc(3.75rem+env(safe-area-inset-bottom))] z-10 -mx-1 space-y-2 border-t border-border bg-background/95 px-1 py-3 backdrop-blur lg:bottom-0" data-testid="receive-action">
             <p className="text-sm" role="status">{chosen.length === 0 ? <span className="text-muted-foreground">Tick what came back to continue.</span> : missing.length > 0 ? <span className="font-medium text-[hsl(var(--os-amber))]">Choose a condition for {missing.length === 1 ? "1 line" : `${missing.length} lines`} to continue.</span> : <>After saving: <strong>{outcomeLine()}</strong></>}</p>
             <Button type="button" disabled={chosen.length === 0 || locked} onClick={onReview} className="h-12 w-full text-base sm:h-10 sm:w-auto sm:text-sm">Receive return{chosen.length > 0 ? ` (${chosen.length} ${chosen.length === 1 ? "line" : "lines"})` : ""}</Button>
           </div>

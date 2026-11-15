@@ -16,8 +16,8 @@ import type { useMovementFlow } from "../stock/use-movement-flow";
  */
 export function QtyStrip({ asked, reserved, picked, sent, uom, pickKnown = true }: { asked: number; reserved: number; picked: number; sent: number; uom: string; pickKnown?: boolean }) {
   const cell = (label: string, value: number, strong = false) => (
-    <div className="min-w-0 rounded-md bg-secondary/50 px-2 py-1.5 text-center" data-qty={label.toLowerCase()}>
-      <dt className="truncate text-[11px] uppercase tracking-wide text-muted-foreground">{label}</dt>
+    <div className="min-w-0 rounded-md bg-secondary/50 px-1 py-1.5 text-center" data-qty={label.toLowerCase()}>
+      <dt className="text-[11px] leading-tight text-muted-foreground">{label}</dt>
       <dd className={cn("text-base tabular-nums", strong ? "font-semibold" : "font-medium")}>{formatQty(value)}</dd>
     </div>
   );

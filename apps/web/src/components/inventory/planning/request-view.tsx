@@ -90,7 +90,6 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       {model.lines.some((l) => l.progress.shortage > 0) ? <Alert variant="warning" role="status">Some lines are not covered yet for the request dates. Open the line to see what is short and what is planned (buy or rent).</Alert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        {r.status === "draft" && can.edit ? <div className="min-w-0 flex-1"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
         {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory/requests/${r.id}?step=send`} className={buttonVariants({ size: "sm" })}>Open the workspace</Link> : null}
         {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
         {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?view=people&employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
@@ -101,6 +100,8 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       {r.status === "draft" ? (
         <Section title={r.kind === "project" ? "Send to Warehouse: dates and site runs" : "Planning dates"} description={`Each date is local time in ${r.timezone}. The project, the equipment and the dates below are carried to the warehouse as they are.`}>
           <PlanForm requestId={r.id} version={r.version} status={r.status} timezone={r.timezone} plan={r.plan} projectId={projectId} editable={can.edit && editable} hasReservations={hasActiveReservations} runs={runs} />
+          {/* The one action of this step sits under the dates it sends: save the dates and site runs first, then send. */}
+          {can.edit ? <div className="rounded-md border border-border bg-secondary/30 p-3" data-testid="send-to-warehouse-action"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
         </Section>
       ) : (
         // Once the request is with the warehouse the lines are what people work with; the eight dates stay one click away.
