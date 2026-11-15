@@ -23,7 +23,7 @@ export function TermsPanel({ review, revisedFrom, opportunityId, action }: { rev
         <span className="font-semibold">Terms: current estimate format (selected).</span>{" "}
         {fromQuotation ? <>It was chosen in place of the terms of {earlier}, which was issued as a quotation and keeps its own terms exactly as issued. </>
           : revisedFrom ? <>The same format as {earlier}, which this draft was copied from. </> : null}
-        The client file prints the budgetary estimate notice and no standard terms.
+        The client file prints the budgetary estimate notice and no terms clauses.
       </p>
     );
   }
@@ -48,7 +48,7 @@ export function TermsPanel({ review, revisedFrom, opportunityId, action }: { rev
         <p className="font-medium">What replacing them does</p>
         <ul className="mt-1 list-disc space-y-0.5 pl-5 text-muted-foreground">
           <li>Removed from this draft: {n > 0 ? (n === 1 ? "the clause above" : `the ${n} clauses above`) : "the label above"}{n > 0 && review.label ? " and their label" : ""}.</li>
-          <li>Used instead: the current estimate format. The client file prints this notice and no standard terms: “{BUDGETARY_NOTICE}”</li>
+          <li>Used instead: the current estimate format. The client file prints this notice and no terms clauses: “{BUDGETARY_NOTICE}”</li>
           <li>Kept: the items, prices, recipient, VAT, payment details, exclusions, Assumptions and Next steps of this draft.</li>
           {revisedFrom ? <li>Not changed: revision {revisedFrom.revision} and its files.</li> : null}
         </ul>

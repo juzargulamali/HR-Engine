@@ -381,7 +381,7 @@ function ReplaceTerms({ p, ops }: { p: BuilderProps; ops: Ops }) {
       <Button type="button" onClick={() => { setError(null); setOpen(true); }}>Replace with the current estimate format</Button>
       <Modal open={open} onClose={() => setOpen(false)} title="Replace the carried-over terms?" description={`${p.header.reference} · revision ${p.header.revision}`}>
         <div className="space-y-3 text-sm">
-          <p>{n > 0 ? `The ${n === 1 ? "clause" : `${n} clauses`} carried over into this draft will be removed from it` : "The carried-over terms label will be removed from this draft"}, and the draft will use the current estimate format: the budgetary estimate notice, and no standard terms.</p>
+          <p>{n > 0 ? `The ${n === 1 ? "clause" : `${n} clauses`} carried over into this draft will be removed from it` : "The carried-over terms label will be removed from this draft"}, and the draft will use the current estimate format: the budgetary estimate notice, and no terms clauses.</p>
           <p className="text-muted-foreground">{p.revisedFrom ? `Revision ${p.revisedFrom.revision} and its files stay exactly as issued. ` : ""}Your items, prices, recipient and notes are kept. This cannot be undone on this draft.</p>
           {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
           <div className="flex flex-wrap justify-end gap-2">

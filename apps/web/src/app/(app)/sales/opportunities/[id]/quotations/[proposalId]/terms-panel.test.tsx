@@ -39,15 +39,15 @@ describe("where a draft's terms come from", () => {
     render(<TermsPanel review={termsReview("estimate-format:2", [])} revisedFrom={QUOTATION} opportunityId="o1" />);
     const line = screen.getByTestId("terms-origin");
     expect(line.getAttribute("data-terms")).toBe("selected");
-    expect(line.textContent).toBe("Terms: current estimate format (selected). It was chosen in place of the terms of revision 1, which was issued as a quotation and keeps its own terms exactly as issued. The client file prints the budgetary estimate notice and no standard terms.");
+    expect(line.textContent).toBe("Terms: current estimate format (selected). It was chosen in place of the terms of revision 1, which was issued as a quotation and keeps its own terms exactly as issued. The client file prints the budgetary estimate notice and no terms clauses.");
     expect(screen.queryByTestId("terms-review")).toBeNull();
   });
   it("SELECTED for a revision of an estimate and for a first draft: nothing was inherited, and it says so", () => {
     render(<TermsPanel review={termsReview("estimate-format:2", [{ title: "Next steps", body: "Review." }])} revisedFrom={ESTIMATE} opportunityId="o1" />);
-    expect(screen.getByTestId("terms-origin").textContent).toBe("Terms: current estimate format (selected). The same format as revision 1, which this draft was copied from. The client file prints the budgetary estimate notice and no standard terms.");
+    expect(screen.getByTestId("terms-origin").textContent).toBe("Terms: current estimate format (selected). The same format as revision 1, which this draft was copied from. The client file prints the budgetary estimate notice and no terms clauses.");
     cleanup();
     render(<TermsPanel review={termsReview("estimate-format:2", [])} revisedFrom={null} opportunityId="o1" />);
-    expect(screen.getByTestId("terms-origin").textContent).toBe("Terms: current estimate format (selected). The client file prints the budgetary estimate notice and no standard terms.");
+    expect(screen.getByTestId("terms-origin").textContent).toBe("Terms: current estimate format (selected). The client file prints the budgetary estimate notice and no terms clauses.");
   });
   it("INHERITED on a first draft that was never marked as an estimate: says they were copied when it was created", () => {
     render(<TermsPanel review={termsReview(LABEL, SIX.slice(0, 1))} revisedFrom={null} opportunityId="o1" />);

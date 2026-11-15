@@ -454,7 +454,7 @@ await step("the owner REPLACES them in a step they confirm (cancel changes nothi
   await page.getByRole("dialog").getByRole("button", { name: "Yes, replace the terms" }).click();
   const line = page.getByTestId("terms-origin"); await line.waitFor();
   const now = flat(await line.innerText());
-  if (now !== "Terms: current estimate format (selected). It was chosen in place of the terms of revision 1, which was issued as a quotation and keeps its own terms exactly as issued. The client file prints the budgetary estimate notice and no standard terms.") throw new Error("after replacing: " + now);
+  if (now !== "Terms: current estimate format (selected). It was chosen in place of the terms of revision 1, which was issued as a quotation and keeps its own terms exactly as issued. The client file prints the budgetary estimate notice and no terms clauses.") throw new Error("after replacing: " + now);
   if (await page.getByTestId("terms-review").count()) throw new Error("the inherited panel is still shown");
   // The saved draft (database state): no old term, the current format marker; the edit made earlier is kept.
   if (termsOf(legacyRev) !== "|estimate-format:2") throw new Error(`the revision still holds the old terms: ${termsOf(legacyRev)}`);
@@ -485,7 +485,7 @@ await step("a revision of a CURRENT-format estimate needs no review: it says its
   const rev3 = page.url().split("/").pop();
   await has(/Revision 3/, "revision 3");
   const line = flat(await page.getByTestId("terms-origin").innerText());
-  if (line !== "Terms: current estimate format (selected). The same format as revision 2, which this draft was copied from. The client file prints the budgetary estimate notice and no standard terms.") throw new Error("revision of an estimate: " + line);
+  if (line !== "Terms: current estimate format (selected). The same format as revision 2, which this draft was copied from. The client file prints the budgetary estimate notice and no terms clauses.") throw new Error("revision of an estimate: " + line);
   if (await page.getByTestId("terms-review").count() || await page.getByRole("button", { name: "Replace with the current estimate format" }).count()) throw new Error("a revision of an estimate asks for a terms review");
   if (termsOf(rev3) !== "|estimate-format:2") throw new Error(`revision 3 terms: ${termsOf(rev3)}`);
   await page.getByRole("button", { name: "Save draft" }).click(); await waitSaved();
