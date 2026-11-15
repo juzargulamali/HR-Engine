@@ -26,3 +26,22 @@ export function useSubmissionKey(): string {
   useEffect(() => { setKey(newSubmissionKey()); }, []);
   return key;
 }
+
+export const ANSWER_LOST = "The answer from the server did not arrive, so it is not known yet whether the enquiry was saved. What you entered is still here: press the save button again. If it was saved, that enquiry opens and no second one is created.";
+
+/**
+ * Keeps the form on screen when the answer to a save never arrives (a dropped connection, a timeout). Without this the failed call reaches the page's error
+ * screen, the form and its identifier are gone, and filling it in again would make a second enquiry. With it the person is told, in the form, to save again:
+ * the same identifier travels, so the database returns the enquiry already saved. A redirect (the normal end of a successful save) is passed on untouched.
+ */
+export function keepFormOnLostAnswer<S extends { error: string | null }>(action: (prev: S, formData: FormData) => Promise<S>): (prev: S, formData: FormData) => Promise<S> {
+  return async (prev, formData) => {
+    try {
+      return await action(prev, formData);
+    } catch (e) {
+      const digest = (e as { digest?: unknown } | null)?.digest;
+      if (typeof digest === "string" && digest.startsWith("NEXT_")) throw e;
+      return { ...prev, error: ANSWER_LOST };
+    }
+  };
+}

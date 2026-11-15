@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, TriangleAlert, X } from "lucide-react";
-import { useSubmissionKey } from "@/components/sales/use-submission-key";
+import { keepFormOnLostAnswer, useSubmissionKey } from "@/components/sales/use-submission-key";
 import { CRM_SOURCES, crmStageLabel, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import type { ActionState } from "@/lib/actions/companies";
@@ -301,7 +301,7 @@ export function NewEnquiryForm({
   /** The names of address parameters that were not used (an id the person may not use, a malformed value). */
   prefillIgnored?: readonly string[];
 }) {
-  const [state, formAction, pending] = useActionState(createOpportunity, initialState);
+  const [state, formAction, pending] = useActionState(keepFormOnLostAnswer(createOpportunity), initialState);
   const submissionKey = useSubmissionKey();
   const [clientError, setClientError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);

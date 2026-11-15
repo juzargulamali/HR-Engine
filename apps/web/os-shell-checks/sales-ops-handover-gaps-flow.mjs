@@ -30,7 +30,7 @@ execSync(`${HERE}/seed/sales-readiness.sh`, { stdio: "ignore", env: process.env 
 const UAE = "00000000-0000-4000-8000-00000000a001", PL = "00000000-0000-4000-8000-00000000a002";
 const U = (n) => `00000000-0000-4000-8000-0000000000a${n}`;
 const [HR1, HR, CEO, MGR, EMP, LEAD] = [U(1), U(2), U(3), U(4), U(5), U(7)];
-const as = (user, sql) => psql(`begin; set local role authenticated; select set_config('request.jwt.claims', '{\\"sub\\":\\"${user}\\",\\"role\\":\\"authenticated\\"}', true); ${sql}; commit;`).split("\n").filter((l) => l && !/^(BEGIN|SET|COMMIT)$/.test(l)).pop() ?? "";
+const as = (user, sql) => psql(`begin; set local role authenticated; select set_config('request.jwt.claims', '{\\"sub\\":\\"${user}\\",\\"role\\":\\"authenticated\\"}', true); ${sql.replace(/"/g, '\\"')}; commit;`).split("\n").filter((l) => l && !/^(BEGIN|SET|COMMIT)$/.test(l)).pop() ?? "";
 psql(`update proj_company_grants set capabilities = '{operations}' where user_id = '${LEAD}' and company_id = '${UAE}'`);
 psql(`insert into crm_company_grants (user_id, company_id, capabilities) values ('${CEO}', '${PL}', '{founder}'), ('${EMP}', '${PL}', '{}') on conflict do nothing`);
 psql(`insert into crm_company_settings (company_id, reference_code, default_quote_currency) values ('${PL}', 'POL', 'PLN') on conflict do nothing`);
@@ -138,7 +138,8 @@ try {
   await restricted.goto(`${BASE}/projects/${PROJECT}/work`);
   const restrictedHtml = await restricted.content();
   check(!/Fictional Tide Agency|Sara Fictional|Loading bay B|\+971 50 000 0001/.test(restrictedHtml), "summary-only person: none of the agency, contact or notes is in the page");
-  await restricted.goto(`${BASE}/projects/${PROJECT}`);
+  await restricted.waitForLoadState("networkidle").catch(() => null);
+  await restricted.goto(`${BASE}/projects/${PROJECT}`).catch(() => restricted.goto(`${BASE}/projects/${PROJECT}`));
   check(/Summary/.test(await text(restricted.locator("main"))) && !/Fictional Tide Agency|Sara Fictional/.test(await restricted.content()), "summary-only person: the project still opens as a summary");
   await shot(restricted, "06-project-summary-only");
   const refusal = (() => { try { return as(EMP, `select proj_project_handover('${PROJECT}')`); } catch (e) { return String(e.stderr ?? e.message); } })();
@@ -306,12 +307,14 @@ try {
   await emp.goto(`${BASE}/sales/opportunities/${OPP_PL}`);
   check(/11:00 \(Warsaw\)/.test(await text(emp.locator("main"))), "the enquiry shows the deadline with its place");
   await emp.goto(`${BASE}/sales/follow-ups`);
+  await emp.getByText(/\(Warsaw\)/).first().waitFor({ timeout: 20000 }).catch(() => null);
   const list = await text(emp.locator("main"));
   check(/11:00 \(Warsaw\)/.test(list) && /\(Dubai\)/.test(list), "Follow-ups with both companies: the Warsaw row and the Dubai rows each carry their own place");
   await shot(emp, "18-follow-ups-two-zones");
   // due today in Warsaw: move the deadline to a few minutes from now and read My Day
   psql(`update crm_follow_ups set due_at = now() + interval '5 minutes' where title = 'Call the Warsaw client'`);
   await emp.goto(`${BASE}/`);
+  await emp.getByText(/Call the Warsaw client/).first().waitFor({ timeout: 20000 }).catch(() => null);
   const day = await text(emp.locator("main"));
   check(/Call the Warsaw client/.test(day) && /\(Warsaw\)/.test(day), "My Day lists the Warsaw follow-up with its place");
   await shot(emp, "19-my-day-warsaw");

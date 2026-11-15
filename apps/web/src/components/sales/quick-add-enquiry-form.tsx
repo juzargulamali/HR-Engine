@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { useSubmissionKey } from "./use-submission-key";
+import { keepFormOnLostAnswer, useSubmissionKey } from "./use-submission-key";
 import { CRM_SOURCES, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import type { ActionState } from "@/lib/actions/companies";
@@ -109,7 +109,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   // The same checks, in the same words, as the full form, answered before anything is sent. The server and the database check again.
   const save = async (prev: ActionState, formData: FormData): Promise<ActionState> => {
     const blockedBy = enquiryBlockedReason({ company, agencyId, clientId, techError: tech.error });
-    return blockedBy ? { error: blockedBy } : createOpportunity(prev, formData);
+    return blockedBy ? { error: blockedBy } : keepFormOnLostAnswer(createOpportunity)(prev, formData);
   };
 
   // "Open the full form" keeps everything typed here. Short values travel in the address; a long brief and the technologies wait in this browser tab.

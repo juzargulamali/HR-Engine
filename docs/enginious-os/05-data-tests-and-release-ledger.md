@@ -264,6 +264,8 @@ Rules: apply in file-name order; #9 needs #3 (`user_is_active`). The batch (`lau
 
 Seeds (`apps/web/os-shell-checks/seed/`): `base.sh` (Sales and Projects grants and one Won enquiry), `sales.sh`, `scenario.sh` (full sample scenario, runs `base.sh`), `inventory.sh` (runs `base.sh`), `budget.sh`, `my-day.sh`. Each resets the database; run exactly one before a check. Inventory and budget grants beyond the base personas were not enumerated here (Unverified).
 
+**Added on a draft branch (2026-11-15):** `sales-ops-handover-gaps-flow.mjs` (reseeds itself from `seed/sales-readiness.sh`): the five handover-gap changes through the screens with six separate sessions; 58 checks passed on the local stack on 2026-11-15, with `sales-crm-readiness-flow.mjs` (23 passed) and `clients-agencies-outreach-flow.mjs` (8 passed) rerun on the same build.
+
 ### C.4 Playwright suites (not in CI)
 
 * `packages/e2e-tests/tests/`: `read-only` (15 specs: smoke, rbac, isolation, auth, policies, payroll, assets, holidays, audit log, account security, mobile), `mutating` (7 specs: leave, attendance, clock, reimbursements, document upload, account status, audit verification), `recovery-windows` (4 specs), `local-stack/10-policy-activation-gate.spec.ts`, plus `baseline` and `reconcile` capture scripts. CI refuses to let the recovery-windows specs be part of a Production project (step "E2E project isolation").
