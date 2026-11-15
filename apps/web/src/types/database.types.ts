@@ -1878,6 +1878,8 @@ export interface Database {
       crm_outreach_set_next: { Args: { p_outreach: string; p_text: string; p_due: string }; Returns: undefined };
       crm_outreach_set_status: { Args: { p_outreach: string; p_status: string; p_reason?: string | null }; Returns: undefined };
       crm_outreach_link_inquiry: { Args: { p_outreach: string; p_opportunity: string }; Returns: undefined };
+      crm_outreach_set_contact: { Args: { p_outreach: string; p_contact: string | null }; Returns: undefined };
+      crm_create_enquiry_from_outreach: { Args: { p_outreach: string; p_fields: Record<string, unknown> }; Returns: unknown };
       crm_reassign_follow_up: { Args: { p_follow_up_id: string; p_new_assignee: string }; Returns: undefined };
       crm_import_fingerprints: { Args: { p_company: string; p_items: Record<string, unknown>[] }; Returns: Record<string, string> };
       crm_import_apply: { Args: { p_company: string; p_batch_key: string; p_items: Record<string, unknown>[] }; Returns: Record<string, unknown> };

@@ -99,6 +99,8 @@ export type CrmOutreachRow = {
   next_action: string | null;
   next_due: string | null;
   opportunity_id: string | null;
+  /** The account's contact this outreach is with (absent on a database without migration 20270112000300; null = none chosen). */
+  contact_id?: string | null;
   created_at: string;
   updated_at: string;
 }

@@ -56,7 +56,7 @@ describe("propose: a brief becomes a review card (nothing is written)", () => {
     expect(r.card.values).toMatchObject({ source: "", nextTitle: "", nextDate: "", currency: null, value: null, eventStart: null, location: null, scope: null });
     expect(r.card.problems.map((p) => p.field).sort()).toEqual(["nextDate", "nextTitle", "source"]);
     const sourceQ = r.card.questions.find((q) => q.field === "source")!;
-    expect(sourceQ.options?.map((o) => o.value)).toEqual(["agency_call", "linkedin", "direct_client", "whatsapp", "instagram", "website", "referral", "other"]);
+    expect(sourceQ.options?.map((o) => o.value)).toEqual(["agency_call", "linkedin", "direct_client", "whatsapp", "instagram", "website", "referral", "outreach", "other"]);
     expect(r.card.questions.map((q) => q.field)).toEqual(expect.arrayContaining(["source", "nextTitle", "nextDate"]));
   });
   it("refuses a next-action date before today and an event end before its start", async () => {

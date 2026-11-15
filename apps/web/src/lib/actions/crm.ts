@@ -117,7 +117,21 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     const outreach = await (supabase as unknown as SupabaseClient).from("crm_outreach").select("opportunity_id").eq("id", fromOutreach.data).maybeSingle();
     if (outreach.error) return { error: "Could not check whether this outreach already has an enquiry, so nothing was saved. What you entered is still here: try again." };
     const existing = (outreach.data as { opportunity_id: string | null } | null)?.opportunity_id;
-    if (existing) return { error: "This outreach already has an enquiry, so a second one was not created. Open the existing enquiry instead.", existingEnquiryId: existing };
+    if (existing) return { error: OUTREACH_HAS_ENQUIRY, existingEnquiryId: existing };
+  }
+  // Raised from an outreach: ONE database call creates the enquiry and links it, after locking the outreach, so two tabs or a double submit that both pass the check
+  // above still end with one enquiry (crm_create_enquiry_from_outreach, 20270112000300). The loser of that race is told and offered the existing enquiry, exactly as
+  // the stale tab is. A database without that function takes the earlier two-step path below.
+  if (fromOutreach.success) {
+    const conv = await supabase.rpc("crm_create_enquiry_from_outreach", { p_outreach: fromOutreach.data, p_fields: enquiryFields(d, nextDue) });
+    if (!conv.error) {
+      const res = parseCreateResult(conv.data);
+      if (!res) return { error: "The enquiry may have been saved, but the answer could not be read. Open Enquiries to check before saving again." };
+      refresh();
+      if (!res.created) return { error: OUTREACH_HAS_ENQUIRY, existingEnquiryId: res.id };
+      return afterCreate(supabase, formData, d, res.id);
+    }
+    if (!isMissingDatabaseFunction(conv.error)) return fail(conv.error.message);
   }
   const { data, error } = await supabase.rpc("crm_create_opportunity", {
     p_company_id: d.companyId,
@@ -150,17 +164,44 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
     const link = await supabase.rpc("crm_outreach_link_inquiry", { p_outreach: fromOutreach.data, p_opportunity: data });
     if (link.error) redirect(`/sales/accounts/${d.clientOrgId ?? d.agencyOrgId}?company=${d.companyId}&outreach_link=failed`);
   }
+  return afterCreate(supabase, formData, d, String(data));
+}
+
+const OUTREACH_HAS_ENQUIRY = "This outreach already has an enquiry, so a second one was not created. Open the existing enquiry instead.";
+
+type CreateInput = z.infer<typeof createOpportunitySchema>;
+
+/** The enquiry's fields as the JSON-taking create functions read them (crm_create_opportunity_json maps each key to the same argument of crm_create_opportunity). */
+function enquiryFields(d: CreateInput, nextDue: string): Record<string, unknown> {
+  return {
+    company_id: d.companyId, title: d.title, source: d.source, next_title: d.nextTitle, next_due: nextDue, next_kind: d.nextKind,
+    agency_org_id: d.agencyOrgId ?? null, client_org_id: d.clientOrgId ?? null, owner_id: d.ownerId ?? null, currency: d.currency ?? null, value: d.value ?? null,
+    budget_note: d.budgetNote ?? null, brief: d.brief ?? null, event_start: d.eventStart ?? null, event_end: d.eventEnd ?? null, install_start: d.installStart ?? null,
+    location: d.location ?? null, technologies: d.technologies, scope: d.scope ?? null, waiting_on: d.waitingOn ?? null, contacts: d.contactIds.map((contact_id) => ({ contact_id })),
+  };
+}
+
+/** `{ id, created, existing }` as the JSON-taking create functions answer. Null when the answer is not that (never treated as "created"). */
+function parseCreateResult(raw: unknown): { id: string; created: boolean; existing: string | null } | null {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.id !== "string" || !uuid.safeParse(r.id).success || typeof r.created !== "boolean") return null;
+  return { id: r.id, created: r.created, existing: typeof r.existing === "string" ? r.existing : null };
+}
+
+/** What follows a NEW enquiry, whichever function created it: the optional event link, then where the person lands. Always redirects. */
+async function afterCreate(supabase: Awaited<ReturnType<typeof createClient>>, formData: FormData, d: CreateInput, id: string): Promise<never> {
   // The optional Event / Exhibition: its own function (crm_set_opportunity_edition) links it. The enquiry exists either way; if the link is refused (for example the
   // person created it for a colleague, and only the owner or a founder may link) the person lands on the enquiry, which says so and where to link it.
   let linkFailed = false;
   if (d.eventEditionId) {
-    const linked = await supabase.rpc("crm_set_opportunity_edition", { p_id: data, p_edition: d.eventEditionId, p_expected_version: null });
+    const linked = await supabase.rpc("crm_set_opportunity_edition", { p_id: id, p_edition: d.eventEditionId, p_expected_version: null });
     if (linked.error) { console.error("[crm] event link after create refused", linked.error.message); linkFailed = true; }
   }
   // The quick-add dialog asks to land on the list with the new enquiry open in the side panel; anything else keeps the full page.
   // Quick Add returns to the list it was opened from (Follow-ups or Enquiries, with its filters), and the new enquiry opens beside it.
   const returnTo = formData.get("returnTo");
-  redirect(linkFailed ? `/sales/opportunities/${data}?event_link=failed` : formData.get("after") === "panel" ? panelReturnHref(typeof returnTo === "string" ? returnTo : null, String(data)) : `/sales/opportunities/${data}`);
+  redirect(linkFailed ? `/sales/opportunities/${id}?event_link=failed` : formData.get("after") === "panel" ? panelReturnHref(typeof returnTo === "string" ? returnTo : null, id) : `/sales/opportunities/${id}`);
 }
 
 /** The organisations the edit form's agency and end-client pickers choose from (read through the person's own session). A failed read says so; it is never an empty list. */

@@ -204,8 +204,9 @@ export default async function AccountPageRoute({ params, searchParams }: { param
     <OutreachSection
       items={outreach} orgId={org.id} orgName={org.name} companyId={company.id} today={todayInDubai()} canAssign={canAssign}
       nameOf={(uid) => nameOf(uid) ?? "Former colleague"} inquiries={view.inquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))}
-      // Outreach holds no contact of its own: only when the account has exactly one is it certain who a new enquiry is from.
+      // The contact chosen on the outreach is carried into a new enquiry; when none was chosen, the account's one recorded contact is (it is then certain who it is from).
       onlyContactId={contacts.length === 1 ? contacts[0]!.id : null}
+      contacts={contacts.map((ct) => ({ id: ct.id, name: ct.name, roleTitle: ct.role_title ?? null }))}
     />
   );
 
