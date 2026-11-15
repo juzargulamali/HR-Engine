@@ -3,7 +3,7 @@
 // Run: `node os-shell-checks/estimate-sent-record-flow.mjs`.
 //   1. emp@ (the enquiry owner) records a finalised estimate as sent on the Estimates tab: the dialog offers no stage move and says the stage stays; afterwards
 //      the row shows the sent date, when it was recorded and by whom; the timeline names the exact revision and the date; the stage and version are unchanged;
-//   2. the stage is offered nowhere: Move stage, the table's Stage filter, the board's lanes and its Move-to control, Reports;
+//   2. the stage is offered nowhere for an ordinary enquiry: Move stage, the table's Stage filter, the board's lanes and its Move-to control;
 //   3. the database refuses a move into it for the owner and the founder, and the call the previously deployed app makes (p_move = true) records the send and
 //      leaves the stage alone; an estimate recorded as sent unlocks neither Proposal sent nor Quote sent;
 //   4. an enquiry LEFT at Estimate sent (its records did not say where it belongs) still opens: it is labelled "stage no longer used", the page says what to
@@ -79,11 +79,12 @@ await step("emp@ records the finalised estimate as sent: no stage move is offere
   await shot("pr1-10-record-as-sent-dialog");
   await dlg.getByRole("button", { name: "Record as sent" }).click();
   await page.getByText(/Sent to client/).first().waitFor();
-  const row = flat(await page.locator("li", { hasText: refA }).first().innerText());
+  const rowLi = page.locator("li", { has: page.getByTestId("estimate-send-record") }).first();
+  const row = flat(await rowLi.innerText());
   if (!/Sent to client \d{1,2} \w{3} \d{4}/.test(row) || !/recorded \d{1,2} \w{3} \d{4}.*by /.test(row)) throw new Error("the row does not show the sent date and who recorded it when: " + row);
-  if (await page.locator("li", { hasText: refA }).getByRole("button", { name: "Record estimate as sent" }).count()) throw new Error("the action is still offered for a revision already recorded");
+  if (!row.includes(refA) || await rowLi.getByRole("button", { name: "Record estimate as sent" }).count()) throw new Error("the action is still offered for a revision already recorded");
   const send = sql(`select revision || '|' || reference || '|' || (sent_on = current_date) || '|' || (recorded_at > now() - interval '5 minutes') || '|' || (recorded_by = '00000000-0000-4000-8000-0000000000a5') from crm_estimate_sends where proposal_id='${estA}'`);
-  if (send !== `1|${refA}|t|t|t`) throw new Error(`the send record: ${send}`);
+  if (send !== `1|${refA}|true|true|true`) throw new Error(`the send record: ${send}`);
   if (stageOf(oppA) !== before) throw new Error(`the stage or version changed: ${before} -> ${stageOf(oppA)}`);
   await shot("pr1-11-estimates-tab-recorded");
 });
@@ -95,7 +96,7 @@ await step("the enquiry and its history show the record with the exact revision 
   await has(/Qualified/, "stage"); await hasNot(/Estimate sent \(stage no longer used\)|Move to Estimate sent/, "the retired stage on an ordinary enquiry");
   await shot("pr1-12-enquiry-summary-after-record");
 });
-await step("the stage is offered nowhere: Move stage, the Stage filter, the board lanes and Reports have no Estimate sent", async () => {
+await step("the stage is offered nowhere: Move stage, the Stage filter and the board (lanes and Move-to) have no Estimate sent", async () => {
   await page.getByRole("button", { name: "More", exact: true }).first().click(); await page.getByRole("menuitem", { name: /Move to another stage/ }).click();
   const dlg = page.getByRole("dialog"); await dlg.waitFor();
   const opts = await dlg.getByLabel("Move to").locator("option").allInnerTexts();
@@ -103,10 +104,10 @@ await step("the stage is offered nowhere: Move stage, the Stage filter, the boar
   if (!opts.includes("Proposal sent") || !opts.includes("Quote sent")) throw new Error("Move stage options: " + opts.join(" | "));
   await page.keyboard.press("Escape");
   // Table filter and board, without the enquiry that was left at the stage (it is hidden for this look by putting it on another owner's list: search by title).
-  await page.goto(`${BASE}/sales/opportunities?view=table&q=estimate+first`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/sales/opportunities?view=table&q=estimate+first`, { waitUntil: "load" }); await page.getByText("Fictional estimate first hall").first().waitFor();
   const html = await page.content();
   if (/>Estimate sent</.test(html)) throw new Error("the table page offers Estimate sent");
-  await page.goto(`${BASE}/sales/opportunities?view=board&q=estimate+first`, { waitUntil: "networkidle" });
+  await page.goto(`${BASE}/sales/opportunities?view=board&q=estimate+first`, { waitUntil: "load" }); await page.getByText("Fictional estimate first hall").first().waitFor();
   const lanes = await page.getByRole("heading", { level: 2 }).allInnerTexts().catch(() => []);
   if ((await textOf()).match(STAGE_WORDS)) throw new Error("the board shows an Estimate sent lane with no enquiry at it: " + lanes.join(" | "));
   await shot("pr1-13-board-without-the-stage");
