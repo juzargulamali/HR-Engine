@@ -40,7 +40,7 @@ function stageBehindTheRecord(f: PrimaryFacts): MoveChoice | null {
   const { guide } = f;
   const here = crmStageStep(guide.stage);
   if (here === null || !f.moves) return null;
-  // Estimate sent is not proposed here: recording an estimate as sent offers that move in its own form, and leaving it unticked is the person's choice.
+  // An estimate recorded as sent proposes no stage: it is a fact about one estimate revision, and neither a sent proposal nor a Zoho Books quote reference.
   const reached = [guide.quoteRef !== "unknown" && guide.quoteRef ? "quote_sent" : null, guide.sentProposal !== "unknown" && guide.sentProposal ? "proposal_sent" : null];
   for (const id of reached) {
     if (!id) continue;

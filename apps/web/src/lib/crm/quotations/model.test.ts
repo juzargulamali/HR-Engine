@@ -3,7 +3,7 @@ import { QUOTATION_STATE_LABEL, calculate, hasValidApproval, issueBlockers, pend
 
 const H: QuotationHeader = {
   proposal_id: "p1", opportunity_id: "o1", company_id: "c1", reference: "QUO-FIX-2026-0001", revision: 1, previous_proposal_id: null, currency: null, vat_choice_id: null,
-  vat_kind: null, vat_label: null, vat_rate: null, bill_to_org_id: null, validity_date: null, issue_date: null, milestones: [], terms_label: null, terms: [], exclusions: [], internal_notes: null,
+  vat_kind: null, vat_label: null, vat_rate: null, bill_to_org_id: null, validity_date: null, issue_date: null, milestones: [], terms_label: "estimate-format:2", terms: [], exclusions: [], internal_notes: null,
   content_changed_at: "2026-01-02T00:00:00Z", issued_at: null, issued_by: null,
 };
 const S: QuotationSectionRow[] = [{ id: "s1", proposal_id: "p1", position: 2, title: "AV" }, { id: "s2", proposal_id: "p1", position: 1, title: "Fabrication" }];
@@ -43,6 +43,20 @@ describe("quotation model", () => {
     expect(hasValidApproval(H, approved, "h1")).toBe(true);
     expect(issueBlockers(ready, [S[1]!], lines, approved, "required", "2026-06-01", "h1")).toEqual([]);
     expect(issueBlockers({ ...ready, validity_date: "2026-01-01" }, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual(["The review-pricing date is in the past."]);
+  });
+  it("a draft that still carries inherited terms cannot go out until a person replaces them: it is the first blocker, whatever else is ready", () => {
+    const ready = { ...H, currency: "EUR", vat_kind: "out_of_scope" as const, vat_label: "Out of scope", bill_to_org_id: "org" };
+    const lines = [L("a", "s2", 1, 1, 10)];
+    const REVIEW = "Review the terms carried over into this draft and replace them with the current estimate format (Details step).";
+    // A revision of a quotation issued before the estimates-only change: the old label and the six clauses (two shown here).
+    const legacy = { ...ready, terms_label: "Standard terms (working draft, pending legal review)", terms: [{ title: "Start of work", body: "x" }, { title: "Confidentiality", body: "y" }] };
+    expect(issueBlockers(legacy, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual([REVIEW]);
+    // The label alone (clauses emptied by hand) and stray clauses under an estimate marker are both inherited terms.
+    expect(issueBlockers({ ...ready, terms_label: null }, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual([REVIEW]);
+    expect(issueBlockers({ ...ready, terms: [{ title: "Changes", body: "x" }] }, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual([REVIEW]);
+    // The person's own notes are not inherited terms; an earlier estimate format needs no review either.
+    expect(issueBlockers({ ...ready, terms: [{ title: "Assumptions", body: "a" }, { title: "Next steps", body: "b" }] }, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual([]);
+    expect(issueBlockers({ ...ready, terms_label: "estimate-format:1" }, [S[1]!], lines, [], "not_required", "2026-06-01")).toEqual([]);
   });
   it("flags an inconsistent milestone schedule", () => {
     const ready = { ...H, currency: "EUR", vat_kind: "out_of_scope" as const, vat_label: "Out of scope", bill_to_org_id: "org", milestones: [{ label: "a", kind: "percent" as const, value: "60" }] };

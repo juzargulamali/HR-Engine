@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
-import { CLIENT_NOTE_MAX, ESTIMATE_FORMAT_MARKER, QUOTATION_CURRENCIES, UNSECTIONED_TITLE, clausesToNotes, isUnsectionedTitle, notesToClauses } from "@enginious-hr/domain";
+import { CLIENT_NOTE_MAX, ESTIMATE_FORMAT_MARKER, QUOTATION_CURRENCIES, TERMS_REVIEW_BLOCKER, UNSECTIONED_TITLE, clausesToNotes, isUnsectionedTitle, notesToClauses, termsReview, termsReviewFingerprint } from "@enginious-hr/domain";
 import { loadQuotation } from "@/lib/crm/quotations/data";
 import { calculate, issueBlockers } from "@/lib/crm/quotations/model";
 import { getCrmContext } from "@/lib/crm/context";
@@ -43,23 +43,54 @@ export async function createQuotation(_prev: ActionState, formData: FormData): P
   const { data, error } = await client.rpc("crm_quote_create", { p_opportunity: p.data.opportunityId });
   if (error || !data) return fail(error?.message ?? "Could not create the estimate.");
   // The database copies the company's standard terms into every new draft; an estimate prints none of them. Mark the draft as an estimate and clear the copy now.
-  // Best effort: saving the draft, requesting approval and finalising all repeat this (`ensureEstimateFormat`), so a failure here loses nothing.
+  // Best effort: if this fails the draft keeps the copied terms, and the estimate page then asks the person to replace them before it can go out (`termsReview`).
   const marked = await client.rpc("crm_quote_save_header", { p_proposal: data as string, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: [] } });
   if (marked.error) console.error("[estimates] could not mark the new draft as an estimate", marked.error.message);
   refresh(p.data.opportunityId);
   redirect(`/sales/opportunities/${p.data.opportunityId}/quotations/${data as string}`);
 }
 
-/** Marks a draft as an estimate and drops everything but the two client notes from its `terms` (the historical standard terms never reach a client file). */
+type TermsRow = { terms_label: string | null; terms: { title: string; body: string }[] };
+const COULD_NOT_CHECK_TERMS = "Could not check the estimate, so nothing was changed. Try again.";
+async function readTerms(client: SupabaseClient, proposalId: string): Promise<TermsRow | null> {
+  const cur = await client.from("crm_quotations").select("terms_label, terms").eq("proposal_id", proposalId).maybeSingle();
+  return cur.error || !cur.data ? null : (cur.data as TermsRow);
+}
+
+/**
+ * The gate before a draft goes anywhere (approval, finalising). A draft that still carries terms it INHERITED (a revision of a quotation issued before the
+ * estimates-only change copies its six standard clauses and their label; a draft never marked as an estimate holds the company template) is refused here:
+ * a person replaces them on the estimate page, seeing what goes and what comes (`replaceInheritedTerms`). Nothing is swapped silently and nothing inherited
+ * reaches a client file. A draft already in an estimate format is only moved to the current layout version (no wording changes hands: it has no terms).
+ */
 async function ensureEstimateFormat(proposalId: string): Promise<string | null> {
   const client = await db();
-  const cur = await client.from("crm_quotations").select("terms_label, terms").eq("proposal_id", proposalId).maybeSingle();
-  if (cur.error || !cur.data) return "Could not check the estimate, so nothing was changed. Try again.";
-  const row = cur.data as { terms_label: string | null; terms: { title: string; body: string }[] };
-  const clauses = notesToClauses(clausesToNotes(row.terms));
-  if (row.terms_label === ESTIMATE_FORMAT_MARKER && JSON.stringify(clauses) === JSON.stringify(row.terms)) return null;
-  const { error } = await client.rpc("crm_quote_save_header", { p_proposal: proposalId, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: clauses } });
+  const row = await readTerms(client, proposalId);
+  if (!row) return COULD_NOT_CHECK_TERMS;
+  if (termsReview(row.terms_label, row.terms).needed) return `${TERMS_REVIEW_BLOCKER} Nothing was changed.`;
+  if (row.terms_label === ESTIMATE_FORMAT_MARKER) return null;
+  const { error } = await client.rpc("crm_quote_save_header", { p_proposal: proposalId, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER } });
   return error ? fail(error.message).error : null;
+}
+
+/**
+ * THE explicit step: replaces the terms a draft inherited with the current estimate format (the budgetary notice, no standard terms; the person's own
+ * Assumptions and Next steps are kept). `seen` is the fingerprint of the clauses the screen showed: if the draft's terms changed since, nothing is replaced and
+ * the person is asked to look again. Owner or founder, draft only: the database function (`crm_quote_save_header`) decides. The issued revision the draft was
+ * copied from, its snapshot and its files are never touched (only this draft's own row is written).
+ */
+export async function replaceInheritedTerms(opportunityId: string, proposalId: string, seen: string): Promise<ActionState> {
+  if (![opportunityId, proposalId].every((x) => uuid.safeParse(x).success)) return { error: "Missing estimate." };
+  const client = await db();
+  const row = await readTerms(client, proposalId);
+  if (!row) return { error: COULD_NOT_CHECK_TERMS };
+  const review = termsReview(row.terms_label, row.terms);
+  if (!review.needed) { refresh(opportunityId, proposalId); return { error: null }; }
+  if (termsReviewFingerprint(review) !== seen) return { error: "The terms of this draft changed after you opened this page, so nothing was replaced. Reload the page and review them again." };
+  const { error } = await client.rpc("crm_quote_save_header", { p_proposal: proposalId, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: notesToClauses(clausesToNotes(row.terms)) } });
+  if (error) return fail(error.message);
+  refresh(opportunityId, proposalId);
+  return { error: null };
 }
 
 const nullableId = z.preprocess(blankToNull, uuid.nullable());
@@ -109,6 +140,12 @@ export async function saveEstimateDraft(input: EstimateDraftInput): Promise<Esti
   }
   const d = p.data;
   const client = await db();
+  // Saving never replaces inherited terms: while the person has not confirmed the replacement, the carried-over clauses and their label are written back as they
+  // are (with the person's own notes beside them), so a save, automatic or pressed, changes nothing about them.
+  const stored = await readTerms(client, d.proposalId);
+  if (!stored) return { error: "Could not check the estimate, so nothing was saved. Try again.", created: {} };
+  const review = termsReview(stored.terms_label, stored.terms);
+  const noteClauses = notesToClauses({ assumptions: d.notes.assumptions, nextSteps: d.notes.nextSteps });
   const header = await client.rpc("crm_quote_save_header", {
     p_proposal: d.proposalId,
     p_patch: {
@@ -116,8 +153,7 @@ export async function saveEstimateDraft(input: EstimateDraftInput): Promise<Esti
       internal_notes: d.notes.internalNotes,
       milestones: d.notes.milestones.map((m) => ({ ...m, due: m.due || null })),
       exclusions: d.notes.exclusions,
-      terms: notesToClauses({ assumptions: d.notes.assumptions, nextSteps: d.notes.nextSteps }),
-      terms_label: ESTIMATE_FORMAT_MARKER,
+      ...(review.needed ? { terms: [...review.inherited, ...noteClauses] } : { terms: noteClauses, terms_label: ESTIMATE_FORMAT_MARKER }),
     },
   });
   if (header.error) return { error: fail(header.error.message).error, created: {} };
@@ -236,7 +272,7 @@ export async function reorderQuotation(opportunityId: string, proposalId: string
 /** Requests approval of THIS version (crm_quote_request_approval). A waiting request for an older version is withdrawn first. */
 export async function requestQuotationApproval(opportunityId: string, proposalId: string): Promise<ActionState> {
   if (![opportunityId, proposalId].every((x) => uuid.safeParse(x).success)) return { error: "Missing estimate." };
-  // An old draft is brought into the estimate format BEFORE its version is fingerprinted, so the approval is bound to what will actually be finalised.
+  // Inherited terms must have been replaced by a person first (refused otherwise), so the approval is bound to what will actually be finalised.
   const formatError = await ensureEstimateFormat(proposalId);
   if (formatError) return { error: formatError };
   const { error } = await (await db()).rpc("crm_quote_request_approval", { p_proposal: proposalId });

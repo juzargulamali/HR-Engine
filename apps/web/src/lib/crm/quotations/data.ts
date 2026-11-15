@@ -54,6 +54,11 @@ export interface QuotationBundle {
   snapshot: { content: QuotationSnapshot; content_hash: string; issued_at: string } | null;
   /** The revision chain of this reference, newest first. */
   revisions: { proposal_id: string; revision: number; issued: boolean; status: string }[];
+  /**
+   * The finalised revision this one was copied from (`previous_proposal_id`), with the terms label FROZEN in its snapshot: tells a revision of a quotation issued
+   * before the estimates-only change (no estimate marker) from a revision of an estimate. Null for a first revision.
+   */
+  revisedFrom: { proposal_id: string; revision: number; termsLabel: string | null; termClauses: number } | null;
 }
 
 export async function loadQuotation(proposalId: string): Promise<QuotationBundle | null> {
@@ -85,6 +90,14 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
     ok(hr);
     contentHash = (hr.data as string | null) ?? null;
   }
+  let revisedFrom: QuotationBundle["revisedFrom"] = null;
+  if (header.previous_proposal_id) {
+    const prev = await db.from("crm_quotation_snapshots").select("content").eq("proposal_id", header.previous_proposal_id).maybeSingle();
+    ok(prev);
+    const content = (prev.data as { content: QuotationSnapshot } | null)?.content;
+    const rev = chainIds.find((c) => c.proposal_id === header.previous_proposal_id)?.revision;
+    if (content && rev != null) revisedFrom = { proposal_id: header.previous_proposal_id, revision: rev, termsLabel: content.terms?.label ?? null, termClauses: content.terms?.clauses?.length ?? 0 };
+  }
   const statusBy = new Map(((st.data ?? []) as { id: string; status: string }[]).map((r) => [r.id, r.status]));
   const lines = (lin.data ?? []) as QuotationLineRow[];
   const fileRows = (files.data ?? []) as CrmFileRow[];
@@ -110,6 +123,7 @@ export async function loadQuotation(proposalId: string): Promise<QuotationBundle
     files: fileRows, imageUrls, logoUrl, approvals: (appr.data ?? []) as ApprovalLite[], contentHash,
     snapshot: (snap.data as QuotationBundle["snapshot"]) ?? null,
     revisions: chainIds.map((c) => ({ proposal_id: c.proposal_id, revision: c.revision, issued: !!c.issued_at, status: statusBy.get(c.proposal_id) ?? "draft" })),
+    revisedFrom,
   };
 }
 

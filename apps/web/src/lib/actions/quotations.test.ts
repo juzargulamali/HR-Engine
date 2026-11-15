@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { ESTIMATE_FORMAT_MARKER, UNSECTIONED_TITLE } from "@enginious-hr/domain";
+import { ESTIMATE_FORMAT_MARKER, UNSECTIONED_TITLE, termsReview, termsReviewFingerprint } from "@enginious-hr/domain";
 
 vi.mock("server-only", () => ({}));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
@@ -23,7 +23,7 @@ vi.mock("@/lib/crm/context", () => ({ getCrmContext: async () => crmCtx }));
 const pinAssets = vi.fn();
 vi.mock("@/lib/crm/quotations/pin-assets", () => ({ pinAssets: (...a: unknown[]) => pinAssets(...a) }));
 
-import { createQuotation, decideQuotationApproval, issueQuotation, requestQuotationApproval, saveEstimateDraft, saveQuotationSection, deleteQuotationLine, setQuotationLineImage, checkEstimateReady, type EstimateDraftInput } from "./quotations";
+import { createQuotation, decideQuotationApproval, issueQuotation, replaceInheritedTerms, requestQuotationApproval, saveEstimateDraft, saveQuotationSection, deleteQuotationLine, setQuotationLineImage, checkEstimateReady, type EstimateDraftInput } from "./quotations";
 
 const OPP = "11111111-1111-4111-8111-111111111111";
 const P = "22222222-2222-4222-8222-222222222222";
@@ -51,7 +51,7 @@ describe("creating and saving an estimate draft", () => {
     expect(rpc).toHaveBeenNthCalledWith(1, "crm_quote_create", { p_opportunity: OPP });
     expect(rpc).toHaveBeenNthCalledWith(2, "crm_quote_save_header", { p_proposal: P, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: [] } });
   });
-  it("a failed clean-up of the copied terms does not lose the new draft (every later save, approval request and finalise repeats it)", async () => {
+  it("a failed clean-up of the copied terms does not lose the new draft (the estimate page then asks the person to replace them before it can go out)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     rpc.mockResolvedValueOnce({ data: P, error: null }).mockResolvedValueOnce({ data: null, error: { message: "boom" } });
     await expect(createQuotation({ error: null }, fd({ opportunityId: OPP }))).rejects.toThrow(/REDIRECT/);
@@ -142,10 +142,57 @@ describe("finalising and approval", () => {
     expect(rpc).toHaveBeenCalledTimes(1);
     expect(rpc).toHaveBeenCalledWith("crm_quote_issue", { p_proposal: P, p_assets: { logo: null, lines: {} } });
   });
-  it("an old draft (legacy label, standard terms copied in) is brought into the estimate format BEFORE it is finalised: only the two notes survive", async () => {
-    tables.crm_quotations = { data: { terms_label: "Standard terms (working draft, pending legal review)", terms: [{ title: "Start of work", body: "Work begins after written acceptance." }, { title: "Next steps", body: "Review." }] }, error: null };
+  const LEGACY = { terms_label: "Standard terms (working draft, pending legal review)", terms: [{ title: "Start of work", body: "Work begins after written acceptance." }, { title: "Confidentiality", body: "Keep it private." }, { title: "Next steps", body: "Review." }] };
+  const REVIEW = /Review the terms carried over into this draft and replace them with the current estimate format \(Details step\)\. Nothing was changed\./;
+  it("a draft that still carries inherited terms (a revision of an earlier quotation) is NOT finalised and NOT sent for approval, and nothing is swapped silently", async () => {
+    tables.crm_quotations = { data: LEGACY, error: null };
+    expect((await issueQuotation(OPP, P)).error).toMatch(REVIEW);
+    expect((await requestQuotationApproval(OPP, P)).error).toMatch(REVIEW);
+    expect(rpc).not.toHaveBeenCalled();                    // no header write, no pin, no issue, no approval request
+    expect(pinAssets).not.toHaveBeenCalled();
+  });
+  it("saving such a draft (automatic or Save draft) never replaces the inherited terms: they are written back as they are, with the person's notes beside them, and the label is not touched", async () => {
+    tables.crm_quotations = { data: LEGACY, error: null };
+    expect((await saveEstimateDraft(draft({ notes: { ...NOTES, assumptions: "Power by venue.", nextSteps: "Review." } }))).error).toBeNull();
+    const patch = calls("crm_quote_save_header")[0].p_patch;
+    expect(patch.terms).toEqual([{ title: "Start of work", body: "Work begins after written acceptance." }, { title: "Confidentiality", body: "Keep it private." }, { title: "Assumptions", body: "Power by venue." }, { title: "Next steps", body: "Review." }]);
+    expect("terms_label" in patch).toBe(false);
+    // A draft already in the estimate format saves as before: the marker and only the notes.
+    rpc.mockClear(); tables.crm_quotations = MARKED;
+    await saveEstimateDraft(draft({ notes: { ...NOTES, nextSteps: "Review." } }));
+    expect(calls("crm_quote_save_header")[0].p_patch).toMatchObject({ terms_label: ESTIMATE_FORMAT_MARKER, terms: [{ title: "Next steps", body: "Review." }] });
+    // If the stored terms cannot be read, nothing is saved (never a guess).
+    rpc.mockClear(); tables.crm_quotations = { data: null, error: { message: "down" } };
+    expect((await saveEstimateDraft(draft())).error).toBe("Could not check the estimate, so nothing was saved. Try again.");
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("THE explicit step: the person confirms what they were shown; the draft takes the current estimate format and keeps only its own notes", async () => {
+    tables.crm_quotations = { data: LEGACY, error: null };
+    const seen = termsReviewFingerprint(termsReview(LEGACY.terms_label, LEGACY.terms));
+    expect(await replaceInheritedTerms(OPP, P, seen)).toEqual({ error: null });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("crm_quote_save_header", { p_proposal: P, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: [{ title: "Next steps", body: "Review." }] } });
+  });
+  it("the step replaces nothing when the draft's terms are not what the person was shown, when they cannot be read, or when the database refuses (not the owner or a founder)", async () => {
+    tables.crm_quotations = { data: LEGACY, error: null };
+    expect((await replaceInheritedTerms(OPP, P, termsReviewFingerprint(termsReview("Some other label", [])))).error).toMatch(/changed after you opened this page, so nothing was replaced/);
+    expect(rpc).not.toHaveBeenCalled();
+    tables.crm_quotations = { data: null, error: { message: "down" } };
+    expect((await replaceInheritedTerms(OPP, P, "x")).error).toMatch(/Could not check the estimate, so nothing was changed/);
+    expect(rpc).not.toHaveBeenCalled();
+    tables.crm_quotations = { data: LEGACY, error: null };
+    rpc.mockResolvedValue({ data: null, error: { message: "Only the owner of this opportunity or a founder can do this" } });
+    expect((await replaceInheritedTerms(OPP, P, termsReviewFingerprint(termsReview(LEGACY.terms_label, LEGACY.terms)))).error).toMatch(/owner of this enquiry or a founder|owner of this opportunity or a founder/);
+    // Already in the estimate format: nothing to do, nothing written.
+    rpc.mockClear(); tables.crm_quotations = MARKED;
+    expect(await replaceInheritedTerms(OPP, P, "anything")).toEqual({ error: null });
+    expect(rpc).not.toHaveBeenCalled();
+    expect((await replaceInheritedTerms("nope", P, "x")).error).toBe("Missing estimate.");
+  });
+  it("an estimate finalised under the earlier layout version is only moved to the current layout before finalising (it has no terms to replace)", async () => {
+    tables.crm_quotations = { data: { terms_label: "estimate-format:1", terms: [{ title: "Next steps", body: "Review." }] }, error: null };
     await issueQuotation(OPP, P);
-    expect(rpc).toHaveBeenNthCalledWith(1, "crm_quote_save_header", { p_proposal: P, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER, terms: [{ title: "Next steps", body: "Review." }] } });
+    expect(rpc).toHaveBeenNthCalledWith(1, "crm_quote_save_header", { p_proposal: P, p_patch: { terms_label: ESTIMATE_FORMAT_MARKER } });
     expect(rpc).toHaveBeenNthCalledWith(2, "crm_quote_issue", expect.anything());
   });
   it("nothing is finalised when the format cannot be checked, or when a picture cannot be pinned", async () => {
@@ -196,7 +243,7 @@ describe("picture of an item saved a moment ago (no section known on screen)", (
 });
 
 describe("checking the saved estimate before finishing", () => {
-  const header = { opportunity_id: OPP, proposal_id: P, company_id: "c1", currency: "EUR", vat_kind: "rate", vat_rate: 5, vat_label: "5%", bill_to_org_id: S, validity_date: null, milestones: [], issued_at: null };
+  const header = { opportunity_id: OPP, proposal_id: P, company_id: "c1", currency: "EUR", vat_kind: "rate", vat_rate: 5, vat_label: "5%", bill_to_org_id: S, validity_date: null, milestones: [], issued_at: null, terms_label: ESTIMATE_FORMAT_MARKER, terms: [] };
   const sec = { id: S, proposal_id: P, position: 1, title: "AV" };
   const line = { id: L1, proposal_id: P, section_id: S, position: 1, description: "LED", image_file_id: null, unit: null, quantity: 1, unit_price: 10, vat_choice_id: null, vat_kind: null, vat_label: null, vat_rate: null };
   it("lists what is missing in the saved data, changing nothing", async () => {
@@ -209,6 +256,10 @@ describe("checking the saved estimate before finishing", () => {
   it("is empty when the saved estimate is complete and no approval is needed", async () => {
     bundle = { header, sections: [sec], lines: [line], files: [], issuer: {}, approvals: [], contentHash: "h" };
     expect(await checkEstimateReady(OPP, P)).toEqual({ error: null, blockers: [] });
+  });
+  it("lists the terms review first for a saved draft that still carries inherited terms", async () => {
+    bundle = { header: { ...header, terms_label: "Standard terms (working draft, pending legal review)", terms: [{ title: "Changes", body: "x" }] }, sections: [sec], lines: [line], files: [], issuer: {}, approvals: [], contentHash: "h" };
+    expect((await checkEstimateReady(OPP, P)).blockers).toEqual(["Review the terms carried over into this draft and replace them with the current estimate format (Details step)."]);
   });
   it("still asks for approval when the company requires it and the saved version has none (the approval gate is not bypassed)", async () => {
     crmCtx = { companies: [{ id: "c1", settings: { approval_policy: "required" } }] };

@@ -1,4 +1,4 @@
-import { CRM_STAGES } from "@enginious-hr/domain";
+import { CRM_RETIRED_STAGES, CRM_STAGES } from "@enginious-hr/domain";
 
 /**
  * A typed Sales question -> a QUERY DESCRIPTOR, deterministically and locally (no model reads the question). The descriptor is only a question: the server validates it
@@ -55,7 +55,11 @@ const PERIODS: { period: string; re: RegExp }[] = [
 ];
 export const summaryPeriodIn = (text: string): string | null => PERIODS.find((p) => p.re.test(text))?.period ?? null;
 
-const STAGE_WORDS: { id: string; re: RegExp }[] = CRM_STAGES.filter((s) => s.open).map((s) => ({ id: s.id, re: new RegExp(`\\b${s.label.replace(/\s+/g, "\\s+")}\\b`, "i") }));
+// A retired stage ("Estimate sent") is still a reading filter, so the enquiries left at it can be found; it is matched by its plain name.
+const STAGE_WORDS: { id: string; re: RegExp }[] = [
+  ...CRM_STAGES.filter((s) => s.open).map((s) => ({ id: s.id as string, re: new RegExp(`\\b${s.label.replace(/\s+/g, "\\s+")}\\b`, "i") })),
+  ...CRM_RETIRED_STAGES.map((s) => ({ id: s.id as string, re: new RegExp(`\\b${s.id.replace(/_/g, "\\s+")}\\b`, "i") })),
+];
 export const stageIn = (text: string): string | null => STAGE_WORDS.find((s) => s.re.test(text))?.id ?? null;
 
 /** A proper name after "for", "from", "with", "at" or "linked to": an organisation or an event, to be searched (never trusted). */

@@ -50,7 +50,7 @@ describe("what the summary offers follows the same permission view as the tabs",
   it("owner or founder of an active enquiry: everything the old button row had, and nothing is dropped", () => {
     const p = buildSummaryActions(view(), complete);
     expect(p.followUp).toMatchObject({ id: "f1", isOnlyOpen: true });
-    expect(p.move && "options" in p.move && p.move.options.map((o) => o.id)).toEqual(["new", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"]);
+    expect(p.move && "options" in p.move && p.move.options.map((o) => o.id)).toEqual(["new", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]);
     expect(p).toMatchObject({ canHold: true, resume: null, close: { won: true, lost: true }, edit: { mode: "full" }, assign: { currentOwnerId: "u1" }, reopen: null, handoverHref: null });
     expect(p.log).not.toBeNull();
     expect(p.newFollowUp).toMatchObject({ canAssign: true, currentUserId: "u1" });
@@ -62,8 +62,9 @@ describe("what the summary offers follows the same permission view as the tabs",
     expect(p.newFollowUp).not.toBeNull();
     expect(buildSummaryActions(view({ ctx: colleague, followUps: [fu({ assigned_to: "u2" })] }), null).followUp).toMatchObject({ id: "f1" });
   });
-  it("failed proposals, Zoho references or estimate records: the stage move is shown as not offered, with why; hold and close stay", () => {
-    for (const s of ["proposals", "zoho", "estimateSends"] as const) {
+  it("failed proposals or Zoho references: the stage move is shown as not offered, with why; hold and close stay (estimate records gate no stage)", () => {
+    expect(buildSummaryActions(view({ failed: ["estimateSends"] }), null).move).not.toEqual({ unavailable: MOVES_NOT_OFFERED });
+    for (const s of ["proposals", "zoho"] as const) {
       const p = buildSummaryActions(view({ failed: [s] }), null);
       expect(p.move, s).toEqual({ unavailable: MOVES_NOT_OFFERED });
       expect(p, s).toMatchObject({ canHold: true, close: { won: true, lost: true } });

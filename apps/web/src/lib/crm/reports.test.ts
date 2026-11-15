@@ -301,8 +301,12 @@ describe("the Estimate sent stage in reports", () => {
     opp({ stage: "won", closed_at: "2026-09-01T05:00:00Z", evidence_reference: "PO-1", currency: "AED", value: 500 }),
     opp({ stage: "lost", closed_at: "2026-09-04T05:00:00Z", lost_reason: "Price" }),
   ];
-  it("is one more open stage of the pipeline, next to Proposal sent, with its own total", () => {
+  it("is not a pipeline row when no open enquiry holds it (it is a retired stage)", () => {
+    expect(openPipelineByStage(opps.filter((o) => o.stage !== "estimate_sent")).map((s) => s.stage)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold"]);
+  });
+  it("gets a row, next to Proposal sent, only while an open enquiry still holds it, so the rows add up to every open enquiry", () => {
     const stages = openPipelineByStage(opps);
+    expect(stages.reduce((n, s) => n + s.count, 0)).toBe(2);
     expect(stages.map((s) => s.stage)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold"]);
     expect(stages.find((s) => s.stage === "estimate_sent")).toMatchObject({ count: 1, totals: { AED: 300 } });
     expect(stages.find((s) => s.stage === "proposal_sent")).toMatchObject({ count: 1, totals: { AED: 200 } });

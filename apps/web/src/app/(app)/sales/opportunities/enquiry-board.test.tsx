@@ -17,11 +17,11 @@ configure({ asyncUtilTimeout: 5000 });
 
 afterEach(() => { cleanup(); moveStage.mockReset(); });
 
-const columns = ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"].map((id) => ({ id, label: id }));
-const none = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
+const columns = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"].map((id) => ({ id, label: id }));
+const none = { hasSentProposal: false, hasQuoteRef: false };
 const show = (evidence: BoardMeta["evidence"]) => {
   const meta: Record<string, BoardMeta> = { e1: { stage: "proposal_prep", version: 4, stageBeforeHold: null, valueText: "AED 100", hasValue: true, openFollowUps: 1, evidence } };
-  const items = [{ id: "e1", columnId: "proposal_prep", title: "Fictional roadshow room", card: <span>Fictional roadshow room</span>, moveTo: ["qualified", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] }];
+  const items = [{ id: "e1", columnId: "proposal_prep", title: "Fictional roadshow room", card: <span>Fictional roadshow room</span>, moveTo: ["qualified", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] }];
   render(<EnquiryBoard columns={columns} items={items} meta={meta} />);
 };
 const move = (to: string) => fireEvent.change(screen.getByLabelText("Move Fictional roadshow room to"), { target: { value: to } });
@@ -45,11 +45,11 @@ describe("Enquiries board: a move is checked against the detail page's evidence 
     expect(within(lane("proposal_prep")).getByText(/Not moved to Quote sent/)).toBeTruthy();
     expect(screen.getByRole("link", { name: "Open Commercial to record it" }).getAttribute("href")).toBe("/sales/opportunities/e1?tab=commercial");
   });
-  it("Proposal sent and Estimate sent each ask for their own record, with their own link", async () => {
-    show({ ...none, hasSentProposal: true });
-    move("estimate_sent");
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Record an estimate as sent first/));
-    expect((await screen.findByRole("link", { name: "Open Estimates to record it" })).getAttribute("href")).toBe("/sales/opportunities/e1?tab=quotations");
+  it("Proposal sent asks for its own record, with its own link; a Zoho quote reference does not stand in for it", async () => {
+    show({ ...none, hasQuoteRef: true });
+    move("proposal_sent");
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toMatch(/Record a proposal as sent first/));
+    expect((await screen.findByRole("link", { name: "Open Proposals & files to record it" })).getAttribute("href")).toBe("/sales/opportunities/e1?tab=proposals");
     expect(moveStage).not.toHaveBeenCalled();
   });
   it("a move whose evidence is recorded, or that needs none, goes to the same action as before; the refusal of an earlier try is gone", async () => {

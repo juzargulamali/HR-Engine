@@ -1,6 +1,6 @@
 import "server-only";
 import { z } from "zod";
-import { CRM_PIPELINE_STAGES, CRM_STAGE_IDS, CRM_TIME_ZONE, crmStageLabel, crmToday, daysOverdue, dubaiDateTimeToIso, isCrmActive } from "@enginious-hr/domain";
+import { CRM_STAGE_IDS, CRM_WORKING_STAGE_IDS, CRM_TIME_ZONE, crmStageLabel, crmToday, daysOverdue, dubaiDateTimeToIso, isCrmActive } from "@enginious-hr/domain";
 import { addDays } from "@/lib/crm/reports";
 import { displaySafe } from "../outbound";
 import type { LookupRow, LookupSection, SalesLookupCard } from "../protocol";
@@ -146,7 +146,7 @@ async function enquiries(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind
     filters.push(`linked to the event ${list[0]!.name} (any edition)`);
     links.push({ label: "Events & Exhibitions", href: "/sales/events" });
   }
-  const stages = d.stage ? [d.stage] : [...CRM_PIPELINE_STAGES, "on_hold"];
+  const stages = d.stage ? [d.stage] : [...CRM_WORKING_STAGE_IDS, "on_hold"];
   filters.unshift(d.stage ? `stage: ${crmStageLabel(d.stage)}` : "open (not Won or Lost; On hold included)");
   const section = (heading: string, rows: LookupRow[], total: number): LookupSection => ({ heading, rows, total });
   const title = d.scope === "mine" ? "Your open enquiries" : "Open enquiries";
@@ -177,7 +177,7 @@ const INCOMPLETE = "I could not read all the records needed to answer that, so I
 async function inactive(ctx: JarvisContext, d: Extract<LookupDescriptor, { kind: "inactive" }>): Promise<Built> {
   const cutoff = new Date(ctx.now.getTime() - d.days * 86_400_000).toISOString();
   let mine: { rows: EnquiryRow[]; count: number };
-  try { mine = await myOpen(ctx, CRM_PIPELINE_STAGES); } catch { return failed(); }
+  try { mine = await myOpen(ctx, CRM_WORKING_STAGE_IDS); } catch { return failed(); }
   const ids = mine.rows.map((o) => o.id);
   const recent = new Set<string>();
   // "No activity" is a claim of absence, so the activity read must be COMPLETE: paged against an exact count, never one capped response.
@@ -250,7 +250,7 @@ async function attention(ctx: JarvisContext): Promise<Built> {
   let note: string | null = null;
   let partialScan = false;
   try {
-    const mine = await myOpen(ctx, [...CRM_PIPELINE_STAGES, "on_hold"]);
+    const mine = await myOpen(ctx, [...CRM_WORKING_STAGE_IDS, "on_hold"]);
     note = coverage(mine.count, mine.rows.length);
     partialScan = mine.count > mine.rows.length;
     const names = await orgNames(ctx.supabase, mine.rows.flatMap((o) => [o.agency_org_id, o.client_org_id]));

@@ -11,17 +11,16 @@ export const REOPEN_NOT_OFFERED = "Not offered: the handover record could not be
 
 /**
  * The stage moves this person may make now, each with what the database still requires first (stageMoveRequirement mirrors crm_move_stage). When the facts
- * those requirements are read from (proposals, Zoho references, estimates recorded as sent) could not be loaded, no move is offered and the menu says why:
+ * those requirements are read from (proposals, Zoho references) could not be loaded, no move is offered and the menu says why:
  * the hints would otherwise be wrong. Null for someone who may not move the stage at all.
  */
 export function stageMoves(view: OppView): { options: MoveOption[] } | { unavailable: string } | null {
   const { opp, detail, canEdit, isActive } = view;
   if (!canEdit || !isActive) return null;
-  if (anyFailed(view, "proposals", "zoho", "estimateSends")) return { unavailable: MOVES_NOT_OFFERED };
+  if (anyFailed(view, "proposals", "zoho")) return { unavailable: MOVES_NOT_OFFERED };
   const facts = {
     hasSentProposal: detail.proposals.some((p) => p.status === "sent" || p.status === "accepted"),
     hasQuoteRef: !!detail.zoho?.quote_ref?.trim(),
-    hasSentEstimate: detail.estimateSends.length > 0,
   };
   return { options: crmAllowedMoves(opp.stage).map((to) => ({ id: to, label: crmStageLabel(to), requirement: stageMoveRequirement(to, facts) })) };
 }

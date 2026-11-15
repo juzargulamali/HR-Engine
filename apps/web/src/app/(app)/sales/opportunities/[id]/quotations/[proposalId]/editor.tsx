@@ -4,9 +4,9 @@ import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore, useT
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { ArrowDown, ArrowUp, Check, Download, ImagePlus, Pencil, Plus, Trash2 } from "lucide-react";
-import { BUDGETARY_NOTICE, NOTE_HEADINGS, QUOTATION_CURRENCIES, REVIEW_PRICING_LABEL, clausesToNotes, isUnsectionedTitle, noteParagraphs, reviewPricingSentence, validateQuotationImageMeta, type PaymentMilestone } from "@enginious-hr/domain";
+import { BUDGETARY_NOTICE, NOTE_HEADINGS, QUOTATION_CURRENCIES, REVIEW_PRICING_LABEL, clausesToNotes, isUnsectionedTitle, noteParagraphs, reviewPricingSentence, termsReviewFingerprint, validateQuotationImageMeta, type PaymentMilestone, type TermsReview } from "@enginious-hr/domain";
 import {
-  checkEstimateReady, createQuotationRevision, decideQuotationApproval, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, requestQuotationApproval, saveEstimateDraft,
+  checkEstimateReady, createQuotationRevision, decideQuotationApproval, deleteQuotationLine, deleteQuotationSection, issueQuotation, reorderQuotation, replaceInheritedTerms, requestQuotationApproval, saveEstimateDraft,
   saveQuotationSection, setQuotationLineImage,
 } from "@/lib/actions/quotations";
 import type { ActionState } from "@/lib/actions/companies";
@@ -25,6 +25,7 @@ import { ActionForm, Field } from "@/components/sales/action-form";
 import { Modal } from "@/components/sales/modal";
 import { cn } from "@/lib/utils";
 import { money } from "./money";
+import { TermsPanel, type RevisedFrom } from "./terms-panel";
 
 export interface OrgChoice { id: string; name: string; detail: string }
 interface Ids { opportunityId: string; proposalId: string }
@@ -69,6 +70,9 @@ export interface BuilderProps {
   blockers: string[];
   needsApproval: boolean;
   approvalPending: boolean;
+  /** Whether the SAVED draft still carries inherited terms (a person replaces them here, explicitly), and the finalised revision it was copied from. */
+  termsReview: TermsReview;
+  revisedFrom: RevisedFrom | null;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------------------
@@ -315,6 +319,9 @@ export function EstimateBuilder(p: BuilderProps) {
         </ol>
       </nav>
 
+      {/* Where this draft's terms come from, on every step: inherited terms are replaced here, by a person, in order with the saves (never by a save). */}
+      <TermsPanel review={p.termsReview} revisedFrom={p.revisedFrom} opportunityId={p.ids.opportunityId} action={p.termsReview.needed ? <ReplaceTerms p={p} ops={ops} /> : undefined} />
+
       {step === "details" ? (
         <DetailsStep p={p} details={details} patch={patchDetails} notes={notes} patchNotes={patchNotes} />
       ) : null}
@@ -348,6 +355,42 @@ export function EstimateBuilder(p: BuilderProps) {
         </div>
       </div>
     </div>
+  );
+}
+
+/**
+ * The explicit step that replaces inherited terms with the current estimate format. The person has the clauses and what changes in front of them (`TermsPanel`),
+ * presses the button, and confirms in a dialog. It runs after the saves already queued, so a save can never write the old clauses back afterwards.
+ */
+function ReplaceTerms({ p, ops }: { p: BuilderProps; ops: Ops }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const n = p.termsReview.inherited.length;
+  const confirm = async () => {
+    setBusy(true); setError(null);
+    try {
+      const r = await ops.exclusive(() => replaceInheritedTerms(p.ids.opportunityId, p.ids.proposalId, termsReviewFingerprint(p.termsReview)));
+      if (r.error) setError(r.error); else { setOpen(false); router.refresh(); }
+    } catch { setError("Something went wrong, so nothing was replaced. Try again."); }
+    setBusy(false);
+  };
+  return (
+    <>
+      <Button type="button" onClick={() => { setError(null); setOpen(true); }}>Replace with the current estimate format</Button>
+      <Modal open={open} onClose={() => setOpen(false)} title="Replace the carried-over terms?" description={`${p.header.reference} · revision ${p.header.revision}`}>
+        <div className="space-y-3 text-sm">
+          <p>{n > 0 ? `The ${n === 1 ? "clause" : `${n} clauses`} carried over into this draft will be removed from it` : "The carried-over terms label will be removed from this draft"}, and the draft will use the current estimate format: the budgetary estimate notice, and no standard terms.</p>
+          <p className="text-muted-foreground">{p.revisedFrom ? `Revision ${p.revisedFrom.revision} and its files stay exactly as issued. ` : ""}Your items, prices, recipient and notes are kept. This cannot be undone on this draft.</p>
+          {error ? <Alert variant="destructive" role="alert">{error}</Alert> : null}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>
+            <Button type="button" disabled={busy} onClick={() => void confirm()}>{busy ? "Replacing…" : "Yes, replace the terms"}</Button>
+          </div>
+        </div>
+      </Modal>
+    </>
   );
 }
 
