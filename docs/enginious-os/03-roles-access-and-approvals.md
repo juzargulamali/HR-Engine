@@ -300,3 +300,6 @@ Not returned by any of them: purchase or rental cost, supplier and rental suppli
 | Brief for this file | Mid-transit revoke hides the unit | Visible with a flag (section 6) |
 
 Next: `04-flows-sales-to-warehouse-and-others.md`.
+
+* Scheduling, client timelines and QA (2026-11-15; draft PR, not merged; migrations `20270113000100`, `20270113000200` not applied by Claude). **Choosing tasks for a client timeline, reading the preview and issuing** follow the existing rule for issuing: the Project Manager, someone holding temporary project leadership, or a founder (`proj_require_manager` in `proj_set_client_timeline_tasks` and `proj_issue_plan_checked`; `proj_can_manage` in `proj_plan_preview` and in the SELECT policy of `proj_client_timeline_tasks`). A member reads issued versions and nothing of the choice; a summary-only person reads neither. **Who is booked twice** needs the Operations right (or founder) for the company (`ops_require` in `ops_crew_overlaps`); the other side of an overlap is described only where the reader holds that right for its company too (`ops_company_ids`). An office board display is refused. Tests: `proj-client-timeline-tasks.rls.test.ts`, `ops-crew-overlaps.rls.test.ts`.
+

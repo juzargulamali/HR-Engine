@@ -271,7 +271,8 @@ for (const width of [390, 360]) for (const theme of ["light", "dark"]) {
     const tip = page.getByTestId("tl-tooltip"); await tip.waitFor({ timeout: 5000 });
     const tb = await tip.boundingBox();
     if (!tb || tb.x < -1 || tb.x + tb.width > width + 1) throw new Error("the bar's details run off the screen");
-    await shot(`work-schedule-${width}-${theme}`);
+    await page.getByTestId("plan-timeline").scrollIntoViewIfNeeded();
+    await shot(`work-schedule-${width}-${theme}`, { fullPage: false });
   });
 }
 
