@@ -92,9 +92,9 @@ What the Quote sent gate does NOT check: that the quote exists in Zoho, that its
 2. **Fixed (same migration):** `crm_set_proposal_status` for `superseded` did not check the starting status; it now allows only `draft` or `sent` (section 1).
 3. The Zoho quote reference gate is satisfied by any non-blank text.
 
-## 5. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 5. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Where a row of sections 1, 1.1 or 2 differs from this section, this section wins. The database functions are unchanged.
 

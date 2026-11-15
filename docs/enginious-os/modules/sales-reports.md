@@ -54,9 +54,9 @@ My Day "Sales pipeline" widget and counts (`lib/my-day/attention.ts`, `lib/crm/m
 2. **Fixed (same branch):** the `crm_closures` read ignored its error; also `loadFollowUps` (shared with the Follow-ups page) ignored the errors of its enquiry and organisation reads and would silently drop follow-ups: both now fail the read (the Reports Follow-ups card and the Follow-ups page say "Could not load"). The ignored closures read is on the **Won and lost** card (the reopened-closures sentence), not on the source card.
 3. Won value uses the enquiry's current `value`; a founder's later value edit on a Won enquiry therefore changes past figures (the closure keeps `value_at_close`, which the card does not use).
 
-## 7. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 7. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Words, grouping and links only: **no calculation changed** (`lib/crm/reports.ts` gained labels and helpers; the comment there says "nothing here changes a calculation"). Where sections 2 and 3 differ from this section on layout or titles, this section wins.
 

@@ -101,9 +101,9 @@ Project Manager assignment, acceptance and the Projects screens are the Projects
 1. **Fixed (migration `20261222000100`, applied on hosted V2 per the owner (owner-run verification, owner-reported 2026-11-09)):** the Won "date on the document" was validated as not-future only in the form; `crm_mark_won` now refuses it too (section 1).
 2. `proj_submit_handover` treats a repeat on `submitted`, `pm_assigned` or `accepted` as success without change; `proj_accept_handover` on an already accepted handover returns the same project to the assigned Project Manager. These are the only idempotent steps of the handover flow.
 
-## 6. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 6. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Where a row of section 2 or 2.2 differs from this section, this section wins. No database function changed: the facts below about what a handover carries were read in the SQL and are now said on the page.
 
@@ -144,7 +144,7 @@ Whether the project should receive the contacts and the notes is open owner deci
 
 Tests: `handover/readiness.test.ts`, `project-handover.test.tsx`, `project-handover-forms.test.tsx`, `handover/page.test.tsx`, `lib/actions/projectsCore.handover.test.ts`.
 
-## 7. Agency, site contact and notes carried to the project (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+## 7. Agency, site contact and notes carried to the project (2026-11-15; PR #99 from `claude/pr2-sales-ops-projects-handover`: **merged** as `b1d1cdd` (2026-11-15); required CI green on head `c32163a`; hosted migrations (install-order rows 44 to 48) applied and their verifiers passed, owner-confirmed, not run by Claude; Production not verified by Claude)
 
 Source: `supabase/migrations/20270112000100_proj_handover_parties.sql`; `apps/web/src/app/(app)/sales/opportunities/[id]/handover/{page.tsx,project-handover.tsx,project-handover-forms.tsx,readiness.ts}`; `apps/web/src/lib/projects/handover-parties.ts` and `handover-parties-data.ts`; `apps/web/src/lib/actions/projectsCore.ts` (`saveHandoverCore`); `apps/web/src/components/projects/handover-brief.tsx`. Tests: `packages/rls-tests/test/proj-handover-parties.rls.test.ts`, `apps/web/src/lib/projects/handover-parties.test.tsx`. **Sections 2, 3 and 6 above describe the page before this change where they say that contacts and notes are not copied; this section is the current behaviour once migration `20270112000100` is applied.** On a database without it the page is exactly as sections 2 and 6 describe (the code asks the database whether the functions exist: `loadProjectHandover`).
 

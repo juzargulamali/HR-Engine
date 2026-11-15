@@ -270,9 +270,9 @@ Not in this version (follow-ups): a My Day row for outreach, notifications or e-
 
 Lint, typecheck, root `npm test`, `cd apps/web && npx vitest run`, placeholder-env build, `npm run check:secrets`, the full RLS suite once (migration changed) and one local-stack browser journey, `apps/web/os-shell-checks/clients-agencies-outreach-flow.mjs` (fictional data only; counts in the README stamp table). Tests: `packages/rls-tests/test/crm-outreach.rls.test.ts` (adds "outcomes per kind": every valid pair accepted, invalid pairs refused with nothing stored, legacy-list rows stay valid and readable; and "reassignment and who can read the history"), `apps/web/src/lib/actions/outreach.test.ts` (outcome must fit the kind), `apps/web/src/lib/crm/clients-agencies/outreach.test.ts` (the lists, legacy outcomes, reset rule, lists in step with the migration), `apps/web/src/app/(app)/sales/outreach/outreach-forms.test.tsx` (options follow the kind, reset on kind change), `outreach-data.test.ts`, `components/nav/nav-groups.test.ts`. The owner pack verify file 20 has one more check (27: per-kind validation present, stored-outcome constraint allows old and new values).
 
-## 11. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 11. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Where a row of sections 2.1, 2.2, 8.1 or 10.1 differs from this section on layout, labels or paging, this section wins. No database function changed; `createOpportunity` gained one check (11.5).
 
@@ -326,7 +326,7 @@ The company is never guessed: the company in the address, else the active compan
 
 Tests: `sales/outreach/page.test.tsx`, `sales/accounts/pages.test.tsx`, `directory-table.test.tsx`, `sales/clients/page.test.tsx`, `lib/crm/clients-agencies/outreach-data.test.ts`.
 
-## 12. Outreach conversion: the contact, the Outreach source and one enquiry per outreach (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+## 12. Outreach conversion: the contact, the Outreach source and one enquiry per outreach (2026-11-15; PR #99 from `claude/pr2-sales-ops-projects-handover`: **merged** as `b1d1cdd` (2026-11-15); required CI green on head `c32163a`; hosted migrations (install-order rows 44 to 48) applied and their verifiers passed, owner-confirmed, not run by Claude; Production not verified by Claude)
 
 Source: `supabase/migrations/20270112000300_crm_outreach_conversion.sql`; `apps/web/src/app/(app)/sales/outreach/{outreach-section.tsx,outreach-forms.tsx}` (`OutreachContactControl`, `InquiryLinkControls`); `apps/web/src/lib/actions/outreach.ts` (`setOutreachContact`); `apps/web/src/lib/crm/clients-agencies/outreach-enquiry.ts`; `apps/web/src/lib/actions/crm.ts` (`createOpportunity`); `packages/domain/src/crmStages.ts` (`CRM_SOURCES`). Tests: `packages/rls-tests/test/crm-outreach-conversion.rls.test.ts`; `apps/web/src/app/(app)/sales/outreach/outreach-contact.test.tsx`; `apps/web/src/lib/actions/crm-create-opportunity.test.ts`; `apps/web/src/lib/crm/clients-agencies/outreach-enquiry.test.ts`.
 

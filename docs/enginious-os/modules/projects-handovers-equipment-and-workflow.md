@@ -107,7 +107,7 @@ In-app `notifications` rows written by `proj_notify` (handover functions). No e-
 
 ---
 
-### 1.4 Sales & CRM upgrade: what changed on Handovers (2026-11-14; Sales & CRM upgrade, draft PR #96, not merged; code read at `d016c28`; no migration, no SQL; browser behaviour `Unverified (local browser pass in progress)`)
+### 1.4 Sales & CRM upgrade: what changed on Handovers (2026-11-14; Sales & CRM upgrade, PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`; no migration, no SQL; browser behaviour `Unverified (local browser pass in progress)`)
 
 Sources: `apps/web/src/app/(app)/projects/handovers/page.tsx`, `handover-actions.tsx`, `apps/web/src/lib/actions/projectsCore.ts`, `apps/web/src/app/(app)/sales/opportunities/[id]/handover/readiness.ts`. No database function changed.
 
@@ -370,7 +370,7 @@ Steps 5 to 8, 9 to 13 and the budget run in parallel in practice; the order abov
 * `Unverified`: labels of the controls inside People & access, task creation and the Complete project page are left to `projects-people-changes-history-completion.md` and `projects-work-and-tasks.md`; only the functions were read here.
 * The app's own labels "Substitute — not yet accepted" and "Import failed — review" contain a long dash; they are quoted exactly.
 
-## 6. The handover's agency, site contact and notes on the project (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+## 6. The handover's agency, site contact and notes on the project (2026-11-15; PR #99 from `claude/pr2-sales-ops-projects-handover`: **merged** as `b1d1cdd` (2026-11-15); required CI green on head `c32163a`; hosted migrations (install-order rows 44 to 48) applied and their verifiers passed, owner-confirmed, not run by Claude; Production not verified by Claude)
 
 Source: `supabase/migrations/20270112000100_proj_handover_parties.sql` (`proj_project_handover`, `proj_handover_parties`); `apps/web/src/app/(app)/projects/[id]/work/{page.tsx,details-card.tsx}` (`HandoverPartiesFacts`); `apps/web/src/app/(app)/projects/handovers/page.tsx`; `apps/web/src/components/projects/handover-brief.tsx`. Tests: `packages/rls-tests/test/proj-handover-parties.rls.test.ts`; `apps/web/src/lib/projects/handover-parties.test.tsx`.
 
