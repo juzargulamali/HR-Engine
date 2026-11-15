@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER applying 20270112000100_crm_quote_terms_guard.sql. Changes nothing. One result table.
+-- READ ONLY. Run AFTER applying 20270111000100_crm_quote_terms_guard.sql. Changes nothing. One result table.
 -- Expect: rows 1 to 6 'OK'. Rows 7 and 8 are numbers for information.
 select n, item, result from (
   select 1 as n, 'the rule function exists and signed-in people cannot call it' as item,

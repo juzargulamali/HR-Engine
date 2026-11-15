@@ -1,4 +1,4 @@
--- WRITES. OWNER-RUN ROLLBACK of 20270112000200_crm_retire_estimate_sent_stage.sql. Safe to run twice.
+-- WRITES. OWNER-RUN ROLLBACK of 20270111000200_crm_retire_estimate_sent_stage.sql. Safe to run twice.
 -- It restores the EXACT previous crm_move_stage and crm_record_estimate_sent (as in 20261228000100) and crm_reopen_opportunity (as in 20261115000200); privileges
 -- are kept by create or replace. Estimate sent is then a stage people can be moved into again, and "record as sent" can move the enquiry again.
 -- It puts back the enquiries the migration moved, but ONLY those nobody has touched since: still at the stage the migration chose, with no later stage, hold,

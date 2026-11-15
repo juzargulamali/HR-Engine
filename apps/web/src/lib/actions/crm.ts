@@ -628,7 +628,7 @@ const estimateSentSchema = z.object({
 /**
  * Records that a finalised estimate was sent to the client: a fact about something the person already did outside the app (nothing is sent from here, and
  * finalising or downloading an estimate never records it). The record holds the exact revision, the date it was sent and when and by whom it was recorded.
- * It NEVER moves the enquiry's stage: "Estimate sent" is no longer a pipeline stage (migration 20270112000200), so `p_move` is always sent as false (a database
+ * It NEVER moves the enquiry's stage: "Estimate sent" is no longer a pipeline stage (migration 20270111000200), so `p_move` is always sent as false (a database
  * that still has the earlier function then leaves the stage alone too). Owner or founder; the database (crm_record_estimate_sent) repeats every check.
  */
 export async function recordEstimateSent(_prev: ActionState, formData: FormData): Promise<ActionState> {

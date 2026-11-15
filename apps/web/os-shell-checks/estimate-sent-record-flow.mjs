@@ -1,4 +1,4 @@
-// "Record as sent" stays; "Estimate sent" is not a pipeline stage any more (migration 20270112000200). LOCAL STACK ONLY, fictional data only. Needs
+// "Record as sent" stays; "Estimate sent" is not a pipeline stage any more (migration 20270111000200). LOCAL STACK ONLY, fictional data only. Needs
 // `seed/sales.sh` (grants: ceo@ founder, mgr@ and emp@ plain) and writes to the database it drives, so reseed before every run.
 // Run: `node os-shell-checks/estimate-sent-record-flow.mjs`.
 //   1. emp@ (the enquiry owner) records a finalised estimate as sent on the Estimates tab: the dialog offers no stage move and says the stage stays; afterwards
@@ -19,7 +19,7 @@ import { mkdirSync } from "node:fs";
 
 const CO = "00000000-0000-4000-8000-00000000a001";
 const DB = process.env.LOCAL_DB_NAME ?? "hr_local_stack";
-const MIGRATION = new URL("../../../supabase/migrations/20270112000200_crm_retire_estimate_sent_stage.sql", import.meta.url).pathname;
+const MIGRATION = new URL("../../../supabase/migrations/20270111000200_crm_retire_estimate_sent_stage.sql", import.meta.url).pathname;
 const browser = await chromium.launch();
 let fails = 0; let page;
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp/est-sent-shots"; mkdirSync(SHOTS, { recursive: true });

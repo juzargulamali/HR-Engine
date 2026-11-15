@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270112000100_crm_quote_terms_guard.sql. Changes nothing. One result table.
+-- READ ONLY. Run BEFORE applying 20270111000100_crm_quote_terms_guard.sql. Changes nothing. One result table.
 -- Rows 1 and 2 (prerequisites). Expect: 1 'OK'; 2 'not installed yet' (or 'already installed' on a second run).
 -- Rows 10+ (one per company that has any): DRAFT estimates that hold inherited terms today, as "drafts holding inherited terms / of which revisions of an
 --   earlier document / of which waiting for approval". These drafts are NOT changed by the migration. After it, each one cannot be finalised or sent for approval

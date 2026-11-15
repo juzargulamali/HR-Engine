@@ -364,7 +364,7 @@ await step("an enquiry with ONE linked party: it is suggested with the reason bu
   const refused = asDbTry(4, `select crm_quote_save_section('${directId}', null, 'Nope')`);
   if (refused.ok || !/owner of this opportunity or a founder/.test(refused.out)) throw new Error("non-owner was not refused: " + refused.out);
 });
-const GUARD_MIGRATION = new URL("../../../supabase/migrations/20270112000100_crm_quote_terms_guard.sql", import.meta.url).pathname;
+const GUARD_MIGRATION = new URL("../../../supabase/migrations/20270111000100_crm_quote_terms_guard.sql", import.meta.url).pathname;
 const GUARD_ROLLBACK = new URL("../../../supabase/manual-sql/crm_quote_terms_guard_90_rollback.sql", import.meta.url).pathname;
 const SIX = "Site access and readiness,Site services and other trades,Changes,Start of work,Scope exclusions,Confidentiality";
 const OLD_LABEL = "Standard terms (working draft, pending legal review)";
@@ -379,7 +379,7 @@ await step("a quotation frozen BEFORE this change keeps its wording on screen an
   asDb(5, `select crm_quote_save_header('${q}', '{"currency":"EUR","vat_choice_id":"${vat}","bill_to_org_id":"${client}","validity_date":"2099-12-31","milestones":[{"label":"Deposit","kind":"percent","value":"100","due":"On acceptance"}]}'::jsonb)`);
   const sec = asDb(5, `select crm_quote_save_section('${q}', null, 'Fabrication')`);
   asDb(5, `select crm_quote_save_line('${q}', null, '${sec}', '{"description":"Legacy stage deck","unit":"m2","quantity":"3","unit_price":"33.33"}'::jsonb)`);
-  // The database now refuses to issue a draft with these terms (migration 20270112000100), so the document is issued as it was THEN: the guard's own rollback
+  // The database now refuses to issue a draft with these terms (migration 20270111000100), so the document is issued as it was THEN: the guard's own rollback
   // restores the earlier functions, the quotation is issued, and the migration is applied again (as on a hosted database, where such documents predate it).
   if (asDbTry(5, `select crm_quote_issue('${q}')`).ok) throw new Error("the database finalised a draft that still carries the standard terms");
   psqlInput(`\\i ${GUARD_ROLLBACK}\n`);

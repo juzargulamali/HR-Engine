@@ -237,7 +237,7 @@ Shared meanings:
 |---|---|
 | (1) Reached | `moveStage` (`crm.ts`); `crm_move_stage`; Move stage dialog, panel menu, board drag. **2026-11-14 branch (draft PR #96):** on the enquiry page the dialog opens from the summary's More menu or its main button; on the board a move into Proposal sent or Quote sent (Estimate sent is not a target since 2026-11-15) is checked first and, when the evidence is missing, the action is not called at all ([pipeline 2.2](./sales-pipeline-and-stages.md)). The database rule is unchanged |
 | (2) Record | `crm_opportunities` by id and version |
-| (3) Inputs | Target working stage (one step back or any forward); **never Estimate sent** (retired 2026-11-15, `20270112000200`: refused with "Estimate sent is no longer a pipeline stage...") |
+| (3) Inputs | Target working stage (one step back or any forward); **never Estimate sent** (retired 2026-11-15, `20270111000200`: refused with "Estimate sent is no longer a pipeline stage...") |
 | (4) Permissions | Owner/founder |
 | (5) Starting states | A working stage, or the retired Estimate sent for an enquiry left there (it moves out like a step-4 stage). Refused: On hold ("Resume first"), Won/Lost, same stage, more than one step back, to On hold/Won/Lost. Proposal sent needs a proposal `sent` or `accepted`; Quote sent needs a non-blank Zoho quote reference |
 | (6) Changes | `stage`, `stage_changed_at`, `version + 1` |
@@ -310,7 +310,7 @@ Shared meanings:
 #### `sales.enquiry.reopen`
 | Field | Entry |
 |---|---|
-| (1) Reached (since `20270112000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) | `reopenOpportunity` (`crm.ts`); `crm_reopen_opportunity` (since `20270112000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) |
+| (1) Reached (since `20270111000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) | `reopenOpportunity` (`crm.ts`); `crm_reopen_opportunity` (since `20270111000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) |
 | (2) Record | `crm_opportunities`, `crm_closures` |
 | (3) Inputs | Reason (required), target working stage (default: where it was closed from, else Negotiation), a new next action (title, date, type) |
 | (4) Permissions | `reopen_closed` capability (founder implies); **not the owner as such** |
@@ -960,7 +960,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | New `crm_approvals` row bound to the estimate's content hash |
 | (3) Inputs | Estimate id |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically). **No inherited terms** (refused by the app, and by the database since `20270112000100_crm_quote_terms_guard.sql`) |
+| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically). **No inherited terms** (refused by the app, and by the database since `20270111000100_crm_quote_terms_guard.sql`) |
 | (6) Changes | `crm_approvals` (`pending`, `quote_content_hash`) |
 | (7) Side effects | Event `approval`; founders see it on My Day |
 | (8) Verify | Estimate page "Waiting for a founder" |
@@ -990,7 +990,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | The estimate: `crm_quotations.issued_at`, a frozen `crm_quotation_snapshots` row |
 | (3) Inputs | Complete estimate: currency, VAT, bill-to, at least one item, no empty section, valid dates, milestones adding up; issuing company has a legal name |
 | (4) Permissions | Owner/founder; if policy `required`, a founder's approval of this exact content |
-| (5) Starting states | Draft estimate; open enquiry; **the draft carries no inherited terms** (app: `ensureEstimateFormat`; database since `20270112000100_crm_quote_terms_guard.sql`, not applied: "Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed"; do `sales.estimate.replace_inherited_terms` first, which is itself stop-and-ask) |
+| (5) Starting states | Draft estimate; open enquiry; **the draft carries no inherited terms** (app: `ensureEstimateFormat`; database since `20270111000100_crm_quote_terms_guard.sql`, not applied: "Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed"; do `sales.estimate.replace_inherited_terms` first, which is itself stop-and-ask) |
 | (6) Changes | `issued_at`, `issued_by`, `issue_date`; snapshot (immutable); **earlier revisions of the same reference that were draft or sent become superseded** |
 | (7) Side effects | Event `proposal` "<ref> rev N issued"; **changes no stage and creates no reservation or Zoho row; sends nothing**; exports now come from the frozen snapshot |
 | (8) Verify | Estimate page shows "finalised"; the PDF download carries no DRAFT marking; the Estimates tab badge |
@@ -1014,7 +1014,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (11) Surface | UI over DB function |
 
 #### `sales.estimate.replace_inherited_terms`
-Added 2026-11-15 (draft PR #98 from `main` `0dffeba`: not merged, hosted SQL not applied, Production not deployed). It uses the existing `crm_quote_save_header`; the database then lets the draft be finalised (`20270112000100_crm_quote_terms_guard.sql`).
+Added 2026-11-15 (draft PR #98 from `main` `0dffeba`: not merged, hosted SQL not applied, Production not deployed). It uses the existing `crm_quote_save_header`; the database then lets the draft be finalised (`20270111000100_crm_quote_terms_guard.sql`).
 
 | Field | Entry |
 |---|---|
@@ -1031,7 +1031,7 @@ Added 2026-11-15 (draft PR #98 from `main` `0dffeba`: not merged, hosted SQL not
 | (11) Surface | UI over DB function. Not a JARVIS action |
 
 #### `sales.estimate.record_sent`
-**Changed 2026-11-15 (draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed; migration `20270112000200`): it never moves the enquiry's stage.** Fields (3), (5), (6), (7) and (8) below are rewritten; history: added (2026-11-11, branch `claude/events-first-edition-calendar`, PR #79 not merged at the time of writing; migration `20261228000100_crm_estimate_sent_stage.sql`, **not applied by Claude, hosted status `Unverified`**).
+**Changed 2026-11-15 (draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed; migration `20270111000200`): it never moves the enquiry's stage.** Fields (3), (5), (6), (7) and (8) below are rewritten; history: added (2026-11-11, branch `claude/events-first-edition-calendar`, PR #79 not merged at the time of writing; migration `20261228000100_crm_estimate_sent_stage.sql`, **not applied by Claude, hosted status `Unverified`**).
 
 | Field | Entry |
 |---|---|

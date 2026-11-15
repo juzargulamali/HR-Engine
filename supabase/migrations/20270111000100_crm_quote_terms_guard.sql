@@ -47,7 +47,7 @@ as $$
 declare q crm_quotations; v_hash text; v_id uuid;
 begin
   q := crm_quote_load_editable(p_proposal);
-  -- An approval is bound to the exact version: a draft that still carries inherited terms is not a version that can go out (20270112000100).
+  -- An approval is bound to the exact version: a draft that still carries inherited terms is not a version that can go out (20270111000100).
   if crm_quote_terms_need_review(q.terms_label, q.terms) then
     raise exception 'Replace the terms carried over into this draft with the current estimate format before requesting approval (estimate page, Details step). Nothing was changed' using errcode = '23514';
   end if;
@@ -70,7 +70,7 @@ declare
   v_bad integer; v_hash text; ln record;
 begin
   q := crm_quote_load_editable(p_proposal);
-  -- Terms inherited from an earlier quotation are replaced by a person first (20270112000100): nothing inherited is frozen into a document a client receives.
+  -- Terms inherited from an earlier quotation are replaced by a person first (20270111000100): nothing inherited is frozen into a document a client receives.
   if crm_quote_terms_need_review(q.terms_label, q.terms) then
     raise exception 'Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed' using errcode = '23514';
   end if;

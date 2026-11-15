@@ -5,7 +5,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
 // Sales & CRM, Estimates: the database refuses to finalise, or to send for approval, a draft that still carries INHERITED terms
-// (migration 20270112000100_crm_quote_terms_guard.sql). Fictional data only. Against a real Postgres with every earlier migration applied:
+// (migration 20270111000100_crm_quote_terms_guard.sql). Fictional data only. Against a real Postgres with every earlier migration applied:
 //   * BEFORE the migration (the state of every hosted database today) a quotation is issued the way the app issued it before the estimates-only change, a
 //     revision of it is drafted (it copies the six standard clauses and their label), and a current-format estimate is finalised;
 //   * the migration and its owner pack run (twice);
@@ -17,7 +17,7 @@ import { RlsTestDatabase } from "../src/harness";
 //   * the rule is the same as `termsReview` in packages/domain (the vectors below are asserted there too);
 //   * the rollback restores the two functions exactly.
 
-const MIGRATION = "20270112000100_crm_quote_terms_guard.sql";
+const MIGRATION = "20270111000100_crm_quote_terms_guard.sql";
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const id = () => randomUUID();
 const CO = { uae: id(), ksa: id() };

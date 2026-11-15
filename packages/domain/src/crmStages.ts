@@ -1,6 +1,6 @@
 /**
  * Sales pipeline stages. Ids are stable (stored in the database and in reports); labels are display text and may be
- * renamed without changing history. Mirrors crm_stage_index / crm_move_stage (supabase/migrations/20270112000200_crm_retire_estimate_sent_stage.sql).
+ * renamed without changing history. Mirrors crm_stage_index / crm_move_stage (supabase/migrations/20270111000200_crm_retire_estimate_sent_stage.sql).
  *
  * `estimate_sent` is a RETIRED stage (2027-01-11): nobody can be moved into it any more. Sending an estimate is a recorded fact about one estimate revision
  * (`crm_estimate_sends`, "Record as sent" on the Estimates tab) and no longer a place in the pipeline. The id stays in `CRM_STAGE_IDS` because history lines
@@ -49,7 +49,7 @@ export const isCrmActive = (stage: string) => crmStageStep(stage) !== null;
  * Plain stage moves: one step back or any step forward within the working stages. The retired Estimate sent is never a target; an enquiry still holding it
  * can go to Proposal preparation, Proposal sent, Quote sent or Negotiation (the database checks the evidence each "sent" stage needs). On hold, Won and Lost
  * are never plain moves (they carry a reason or evidence), and a held or closed opportunity does not move. Mirrors crm_move_stage
- * (supabase/migrations/20270112000200_crm_retire_estimate_sent_stage.sql).
+ * (supabase/migrations/20270111000200_crm_retire_estimate_sent_stage.sql).
  */
 export function crmAllowedMoves(from: string): CrmStageId[] {
   const step = crmStageStep(from);

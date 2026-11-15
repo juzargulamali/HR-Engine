@@ -1,4 +1,4 @@
--- WRITES. OWNER-RUN ROLLBACK of 20270112000100_crm_quote_terms_guard.sql. Safe to run twice.
+-- WRITES. OWNER-RUN ROLLBACK of 20270111000100_crm_quote_terms_guard.sql. Safe to run twice.
 -- Restores the EXACT previous crm_quote_request_approval and crm_quote_issue (as in 20261220000100; privileges are kept by create or replace) and drops the rule
 -- function. It changes no estimate, snapshot, approval or file. After it, only the app stops a draft with inherited terms from being finalised.
 begin;

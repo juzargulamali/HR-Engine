@@ -8,7 +8,7 @@ import type { StageTransitionView } from "../protocol";
  *   recorded (the database checks it again). On hold, Won, Lost, reopen and handover are never offered: they have their own forms, evidence and side effects.
  */
 // Written out on purpose: these are the six stages JARVIS may move an enquiry between. Estimate sent is NOT one of them: it is a retired stage (migration
-// 20270112000200) that nobody can be moved into, and an enquiry still holding it is moved out by a person on its own page. jarvis_change_stage refuses both
+// 20270111000200) that nobody can be moved into, and an enquiry still holding it is moved out by a person on its own page. jarvis_change_stage refuses both
 // directions (migration 20261228000100, unchanged).
 export const WORKING: readonly string[] = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
 export const ESTIMATE_SENT_NOT_THROUGH_JARVIS = "Estimate sent is no longer a pipeline stage, so JARVIS cannot move an enquiry to it or from it. To record that an estimate went to the client, use Record estimate as sent on the enquiry's Estimates tab: it does not change the stage. An enquiry still shown at Estimate sent is moved with Move stage on its own page.";

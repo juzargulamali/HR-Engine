@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Sales & CRM: "Estimate sent" is retired as a pipeline stage; "record as sent" stays (migration 20270112000200_crm_retire_estimate_sent_stage.sql).
+// Sales & CRM: "Estimate sent" is retired as a pipeline stage; "record as sent" stays (migration 20270111000200_crm_retire_estimate_sent_stage.sql).
 // Fictional data only. Against a real Postgres with every earlier migration applied, the enquiries below are put at Estimate sent with the functions the
 // DEPLOYED app uses (so they are shaped like hosted rows), then the owner pack and the migration run:
 //   * the read-only preflight proposes, per enquiry, exactly what the migration then does, with the evidence, and lists the ambiguous ones;
@@ -16,7 +16,7 @@ import { RlsTestDatabase } from "../src/harness";
 //   * history is kept: no timeline line is changed or removed; every move adds one system line; closed enquiries are untouched;
 //   * a second run changes nothing; the rollback restores the three functions exactly and puts back only the enquiries nobody touched since.
 
-const MIGRATION = "20270112000200_crm_retire_estimate_sent_stage.sql";
+const MIGRATION = "20270111000200_crm_retire_estimate_sent_stage.sql";
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const id = () => randomUUID();
 const CO = { uae: id(), ksa: id() };

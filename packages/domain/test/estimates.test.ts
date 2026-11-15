@@ -127,7 +127,7 @@ describe("terms a draft inherited (a revision of a quotation issued before the e
     expect(termsReviewFingerprint(termsReview(LABEL, SIX.map((c, i) => (i === 0 ? { ...c, body: "edited" } : c))))).not.toBe(a);
     expect(TERMS_REVIEW_BLOCKER).toMatch(/replace them with the current estimate format/);
   });
-  it("is ONE rule shared with the database (crm_quote_terms_need_review, migration 20270112000100): the same vectors are asserted in packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts", () => {
+  it("is ONE rule shared with the database (crm_quote_terms_need_review, migration 20270111000100): the same vectors are asserted in packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts", () => {
     const OLD = "Standard terms (working draft, pending legal review)";
     const vectors: [string | null, string[], boolean][] = [
       ["estimate-format:2", [], false],
