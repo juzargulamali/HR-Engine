@@ -79,9 +79,9 @@ One shared value per account, **1 to 5 (5 highest) or Unrated**, the team's own 
 - An archived event or edition cannot be restored from the screen (and import never reopens one); there is no screen or function that deletes an event, edition or observation-bearing edition.
 - The directory's per-company columns follow the working company (see `sales-clients-and-agencies.md` section 2.1); a per-company breakdown of owners is not shown.
 
-## 6. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 6. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Where a row of sections 3.1, 3.2, 3.4 or 3.5 differs from this section on layout or labels, this section wins. No database function changed.
 

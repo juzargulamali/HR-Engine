@@ -54,9 +54,9 @@ Catalogue: `sales.settings.save_vat_choice`. Per company, the list of VAT treatm
 2. The settings page reads `companies.default_currency` without checking its error (`page.tsx`), so a failed read only means an empty prefill for a company without settings.
 3. `crm_save_terms_template` and the terms table remain installed with no caller (kept deliberately per the Estimates reference).
 
-## 7. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 7. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
-Status, four facts kept apart: merged: no (draft PR #96). Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
+Status, four facts kept apart: merged: yes, PR #96, merge commit `0dffeba` (2026-11-14). Required CI: green on head `c7b3702`. Hosted database: no migration and no SQL in this change. Production: not verified by Claude. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
 Layout, wording and guards only. `saveCrmSettings` -> `crm_upsert_settings` and `saveVatChoice` -> `crm_save_vat_choice` are unchanged, and so is who may change what (section 1). Where sections 2 and 3 differ from this section on layout, this section wins.
 
@@ -74,7 +74,7 @@ Tests: `sales/settings/page.test.tsx`, `settings-form.test.tsx`, `blockers.test.
 
 **Known risk at `d016c28`, `Unverified`:** the server page imports the constants `APPROVAL_POLICY_LABEL` and `APPROVAL_POLICY_EXPLANATION` from `settings-form.tsx`, a client file; in the real app a server page may not be able to read values exported from a client file, so the read-only view may fail there although the unit tests pass. At the time of writing QA held an uncommitted fix that moves them to a plain file (`settings/approval-policy.ts`); it is not part of `d016c28`.
 
-## 8. Follow-up time zone (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+## 8. Follow-up time zone (2026-11-15; PR #99 from `claude/pr2-sales-ops-projects-handover`: **merged** as `b1d1cdd` (2026-11-15); required CI green on head `c32163a`; hosted migrations (install-order rows 44 to 48) applied and their verifiers passed, owner-confirmed, not run by Claude; Production not verified by Claude)
 
 Source: `apps/web/src/app/(app)/sales/settings/{page.tsx,time-zone-form.tsx}`; `apps/web/src/lib/actions/crm.ts` (`setFollowUpTimeZone`); `supabase/migrations/20270112000500_crm_follow_up_time_zone.sql`. Tests: `packages/rls-tests/test/crm-follow-up-time-zone.rls.test.ts`; `apps/web/src/lib/crm/time-zone.test.tsx`.
 

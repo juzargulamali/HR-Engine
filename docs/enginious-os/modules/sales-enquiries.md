@@ -8,7 +8,7 @@ Related references: stage moves, hold, resume and reopen: [`sales-pipeline-and-s
 
 **Later change: Projects & Tasks Phase 2B (2026-11-12, merged as PR #86, merge `5b75ade`; migration `20270102000100` not applied by Claude; not seen signed in).** The Overview tab gains the **Operations planning** panel: new section 4.6 and the Overview row of the tab table in section 4. Only those parts were written against the code; the rest of this reference was not re-read.
 
-**Later change: Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`; no migration, no SQL; browser behaviour `Unverified (local browser pass in progress)`).** New **section 9** describes the list, Quick add, the full form and the enquiry page as built on the branch. **Where a row of sections 2, 3, 4, 4.0 or 4.3 differs from section 9, section 9 wins.** Sections 4.1, 4.2, 4.4, 4.5, 4.6 (except the wording in 9.6) and 5 were not re-read and keep their stamps.
+**Later change: Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`; no migration, no SQL; browser behaviour `Unverified (local browser pass in progress)`).** New **section 9** describes the list, Quick add, the full form and the enquiry page as built on the branch. **Where a row of sections 2, 3, 4, 4.0 or 4.3 differs from section 9, section 9 wins.** Sections 4.1, 4.2, 4.4, 4.5, 4.6 (except the wording in 9.6) and 5 were not re-read and keep their stamps.
 
 ## 1. Who sees what
 
@@ -67,7 +67,7 @@ Two doors, one action: the quick-add dialog (list pages) and the full page `/sal
 | Section / field | What it is | Required | Notes |
 |---|---|---|---|
 | Company | As above | yes | No company at all: "You do not have Sales access to any company yet" with Ask for access |
-| **What is the enquiry?** (title; the label was "Requirement" until the Sales & CRM upgrade of 2026-11-14, draft PR #96; Quick add already used these words; `ENQUIRY_LABELS.title`, `sales/new/enquiry-form-shared.ts`) | One-line brief | yes | max 200 |
+| **What is the enquiry?** (title; the label was "Requirement" until the Sales & CRM upgrade of 2026-11-14, PR #96; Quick add already used these words; `ENQUIRY_LABELS.title`, `sales/new/enquiry-form-shared.ts`) | One-line brief | yes | max 200 |
 | Where did it come from? | Source | yes | section 3.3 |
 | Agency / End client | One search-as-you-type field each + "Add organisation" | at least one | Role-aware (3.4); a prefill from an account's Outreach picks the field the account's role fits |
 | Event / Exhibition (optional) | Same field as on the full page, with the same **Create event or edition** | no | Section 3.4 |
@@ -148,7 +148,7 @@ Tabs (`detail-tabs.tsx`, accessible tablist; `?tab=` selects the first tab: `ove
 | Estimates | Estimates built in the app | `sales-estimates-and-quotations.md` section 2.1 |
 | Commercial | Equipment availability, Commercial approval, Zoho Books references | `sales-proposals-and-zoho.md` |
 
-> **Superseded on the branch of 2026-11-14 (draft PR #96, not merged):** the three cards described here are replaced by ONE summary with one main button; see section 9.4. The rules in `lib/crm/enquiry-guide.ts` still supply the sentences.
+> **Superseded on the branch of 2026-11-14 (PR #96, merged as `0dffeba`):** the three cards described here are replaced by ONE summary with one main button; see section 9.4. The rules in `lib/crm/enquiry-guide.ts` still supply the sentences.
 
 ### 4.0 The guide under the header: next action, where it stands, latest activity (2026-11-11, Sales employee launch, branch `claude/admiring-cray-uky379`; no migration; not seen signed-in)
 `enquiry-guide.tsx` (server; rules in `lib/crm/enquiry-guide.ts`, pure). Three cards under the header card, each with a coloured edge and a labelled badge (red = overdue or a failed read, amber = due today or something missing, blue = planned or waiting, green = done, grey = nothing to do). It only reads; every link opens an existing tab or page whose own rules decide what the person may do.
@@ -261,7 +261,7 @@ List, side panel, follow-ups, reports, settings and accounts show "Could not loa
 2. The enquiry list cannot show more than 2000 enquiries (`.limit(2000)` in `loadOpportunities`) or 300 table rows, and the list says so only for the 300 cap. Reports say so for the 2000 cap (`reports/page.tsx`); the list does not. Board view shows every filtered row up to the 2000.
 3. **Fixed (same branch):** the `/sales/clients` page ignored the error of its separate "contacts without an organisation" read (it showed none rather than "could not load"); it now says "Could not load the contacts without an organisation" and does not claim a complete count or an empty list. A failed organisations read on that page is "Could not load clients and contacts".
 
-## 9. Sales & CRM upgrade (2026-11-14; draft PR #96, not merged; code read at `d016c28`)
+## 9. Sales & CRM upgrade (2026-11-14; PR #96, merged as `0dffeba` on 2026-11-14; code read at `d016c28`)
 
 Status, four facts kept apart: merged: no. Required CI: has not run on a head. Hosted database: no migration and no SQL in this change. Production: not deployed. Unit tests: the full web suite passed locally at `d016c28` (356 files, 4,006 tests; reported by the builders, not re-run by the documentation author). Written from the code; anything about how a screen looks or behaves in a browser is `Unverified (local browser pass in progress)`.
 
@@ -339,7 +339,7 @@ Words only: "Risk" reads **Operational risk**; "Question from Operations" reads 
 
 `sales/opportunities/page.test.tsx`, `enquiry-board.test.tsx`, `lib/crm/enquiry-list.test.ts`, `sales/new/enquiry-form-shared.test.ts`, `sales/new/enquiry-forms.test.tsx`, `lib/actions/crm-create-opportunity.test.ts`, `opportunities/[id]/primary-action.test.ts`, `summary.test.tsx`, `enquiry-guide.test.tsx`, `detail-tabs.test.tsx`, `timeline.test.ts`, `scope-panel.test.tsx`, `page.test.tsx`, `lib/crm/active-company.test.ts`. What each asserts was not re-read line by line (`Unverified`).
 
-## 10. Saving once, and the question from Operations (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+## 10. Saving once, and the question from Operations (2026-11-15; PR #99 from `claude/pr2-sales-ops-projects-handover`: **merged** as `b1d1cdd` (2026-11-15); required CI green on head `c32163a`; hosted migrations (install-order rows 44 to 48) applied and their verifiers passed, owner-confirmed, not run by Claude; Production not verified by Claude)
 
 ### 10.1 The submission identifier: a retried save returns the enquiry already saved
 
