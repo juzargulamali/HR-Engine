@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000200_ops_crew_overlaps.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270111000200_ops_crew_overlaps.sql. Changes nothing.
 -- Expect: row 1 'OK'; row 2 'not installed yet' (or 'already installed' on a second run). Rows 3 to 5 are numbers for information: what the new read would list.
 --   Row 5 counts the overlaps that cross a company boundary. For those, an Operations Manager of only one of the two companies sees the other side as a time window with no
 --   project name, title or link. Review the list printed by the second statement if the number surprises you (expected: usually 0 or very few).

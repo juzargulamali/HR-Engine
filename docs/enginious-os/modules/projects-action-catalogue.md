@@ -247,7 +247,7 @@ The upgrade adds **no** Projects action and changes no database function. It cha
 
 The screens that changed are rows 330 to 333 of the coverage index. Browser behaviour `Unverified (local browser pass in progress)`. A documented function is not an approved tool.
 
-## 14. Scheduling, client timelines and QA ([`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md); 2026-11-15, draft PR, migrations `20270113000100` and `20270113000200` not applied by Claude)
+## 14. Scheduling, client timelines and QA ([`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md); 2026-11-15, draft PR, migrations `20270111000100` and `20270111000200` not applied by Claude)
 
 None of these is an approved JARVIS tool. They are reached only by app server actions or loaders with the signed-in person's own session.
 

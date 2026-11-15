@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER applying 20270113000100_proj_client_timeline_tasks.sql. Changes nothing.
+-- READ ONLY. Run AFTER applying 20270111000100_proj_client_timeline_tasks.sql. Changes nothing.
 -- Expect: rows 1 to 5 'OK'. Row 6 must equal preflight row 5 (the migration made no issued version outdated). Rows 7 and 8 are for information.
 select item, result from (
   select 1 as ord, 'the table exists with row level security on and exactly one SELECT policy (managers of the project)' as item,

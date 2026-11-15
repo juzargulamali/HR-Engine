@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000100_proj_client_timeline_tasks.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270111000100_proj_client_timeline_tasks.sql. Changes nothing.
 -- Expect: rows 1 and 2 'OK'; row 3 'not installed yet' (or 'already installed' on a second run). Rows 4 to 7 are for information.
 --   Row 4: issued client timelines (all versions / latest versions). None of them is rewritten by the migration: the table is not altered.
 --   Row 5: latest versions that are ALREADY outdated today. After the migration this number must be the same (verify row 6 repeats it): the migration adds a "tasks" key only when a

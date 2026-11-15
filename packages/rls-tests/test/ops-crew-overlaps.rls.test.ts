@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Operations: who is committed twice (migration 20270113000200_ops_crew_overlaps.sql), against a real Postgres. Fictional data throughout.
+// Operations: who is committed twice (migration 20270111000200_ops_crew_overlaps.sql), against a real Postgres. Fictional data throughout.
 //   * for an Operations Manager (or founder) of the company: the person and BOTH confirmed commitments, each with its exact window in the site's own time zone and the ids to link with;
 //   * only confirmed, unfinished commitments of live projects that are not wholly past; a tentative activity, a finished one and a past one are not listed;
 //   * COMPANY BOUNDARY: a side in a company the caller holds no Operations right for carries its window and "hidden" and nothing else (no name, reference, title or id);

@@ -4,14 +4,14 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Individual tasks on a client timeline (migration 20270113000100_proj_client_timeline_tasks.sql), against a real Postgres. Fictional data throughout.
+// Individual tasks on a client timeline (migration 20270111000100_proj_client_timeline_tasks.sql), against a real Postgres. Fictional data throughout.
 //   * nothing is chosen by default; a task is on the timeline only by explicit choice of someone who may issue (Project Manager, temporary leadership, founder);
 //   * the payload is built from an ALLOWLIST in SQL: secret strings planted in every internal field of a task appear nowhere in the preview, the issued version or any read;
 //   * a member and a summary-only person can neither choose, preview nor issue, and cannot read the choice;
 //   * applying the migration changes no existing payload or hash (an issued version does not turn outdated), and issuing a new version never rewrites an old one;
 //   * the checked issue refuses when the content is no longer the preview; the owner pack (verify, rollback) behaves as documented.
 
-const MIGRATION = "20270113000100_proj_client_timeline_tasks.sql";
+const MIGRATION = "20270111000100_proj_client_timeline_tasks.sql";
 const id = () => randomUUID();
 const CO = { a: id(), b: id() };
 const U = { pm: id(), founder: id(), member: id(), summary: id(), outsider: id(), acting: id() };
