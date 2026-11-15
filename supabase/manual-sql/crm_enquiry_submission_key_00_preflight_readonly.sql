@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000400_crm_enquiry_submission_key.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270112000400_crm_enquiry_submission_key.sql. Changes nothing.
 -- Expect: row 1 'OK'; row 2 'not installed yet' (or 'already installed' on a second run). Rows 3 and 4 are for information.
 --   Row 3: enquiries today. None of them is changed and none gets an identifier (only enquiries saved from the new forms record one).
 --   Row 4: enquiries that LOOK like an earlier double save: the same person, company, title and account, created within two minutes of each other. They are listed by

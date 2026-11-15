@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270113000300_crm_outreach_conversion.sql. Rows 1 to 6 must say OK; row 7 is a count for information. Creates no row.
+-- READ ONLY. Run AFTER 20270112000300_crm_outreach_conversion.sql. Rows 1 to 6 must say OK; row 7 is a count for information. Creates no row.
 select item, result from (
   select 1 as ord, 'crm_outreach has the contact column' as item,
          case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'crm_outreach' and column_name = 'contact_id') then 'OK'

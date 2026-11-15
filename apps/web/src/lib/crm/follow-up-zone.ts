@@ -3,7 +3,7 @@ import { companyTimeZone, CRM_TIME_ZONE, isSkippedLocalTime, timeZoneCity, zoned
 
 /**
  * The clock a follow-up deadline is typed on: the Sales time zone of the company the follow-up belongs to (crm_company_settings.follow_up_time_zone, migration
- * 20270113000500; Asia/Dubai unless the company set another, and on a database without the setting). Resolved on the server for every save, from the record
+ * 20270112000500; Asia/Dubai unless the company set another, and on a database without the setting). Resolved on the server for every save, from the record
  * itself, never from the form: a deadline can never be saved on another company's clock by a changed request.
  */
 

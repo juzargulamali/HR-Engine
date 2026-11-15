@@ -76,7 +76,7 @@ Tests: `sales/settings/page.test.tsx`, `settings-form.test.tsx`, `blockers.test.
 
 ## 8. Follow-up time zone (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
 
-Source: `apps/web/src/app/(app)/sales/settings/{page.tsx,time-zone-form.tsx}`; `apps/web/src/lib/actions/crm.ts` (`setFollowUpTimeZone`); `supabase/migrations/20270113000500_crm_follow_up_time_zone.sql`. Tests: `packages/rls-tests/test/crm-follow-up-time-zone.rls.test.ts`; `apps/web/src/lib/crm/time-zone.test.tsx`.
+Source: `apps/web/src/app/(app)/sales/settings/{page.tsx,time-zone-form.tsx}`; `apps/web/src/lib/actions/crm.ts` (`setFollowUpTimeZone`); `supabase/migrations/20270112000500_crm_follow_up_time_zone.sql`. Tests: `packages/rls-tests/test/crm-follow-up-time-zone.rls.test.ts`; `apps/web/src/lib/crm/time-zone.test.tsx`.
 
 | Control (label) | Who | What it does | Function | Failure |
 |---|---|---|---|---|

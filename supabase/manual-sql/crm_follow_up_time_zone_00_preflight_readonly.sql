@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000500_crm_follow_up_time_zone.sql. Changes nothing. KEEP THE OUTPUT: row 5 is compared with the verify file afterwards.
+-- READ ONLY. Run BEFORE applying 20270112000500_crm_follow_up_time_zone.sql. Changes nothing. KEEP THE OUTPUT: row 5 is compared with the verify file afterwards.
 -- Expect: rows 1 and 2 'OK'; row 3 'not installed yet' (or 'already installed' on a second run). Rows 4 to 7 are for information.
 --   Row 2: follow-up due times are stored as moments (timestamp with time zone). The migration does not read or write them.
 --   Row 4: EVERY Sales company with its country and the zone it WILL get (owner decision, 2026-11-15): AE -> Asia/Dubai, SA -> Asia/Riyadh, PL -> Europe/Warsaw.

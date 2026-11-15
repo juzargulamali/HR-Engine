@@ -1,4 +1,4 @@
-// LOCAL STACK ONLY (see README). The five Sales / Operations / Projects handover changes of migrations 20270113000100 to 20270113000500, through the real screens,
+// LOCAL STACK ONLY (see README). The five Sales / Operations / Projects handover changes of migrations 20270112000100 to 20270112000500, through the real screens,
 // with separate signed-in sessions. It reseeds itself (seed/sales-readiness.sh, then its own fictional rows) and WRITES to the database it drives.
 //   node os-shell-checks/sales-ops-handover-gaps-flow.mjs        SHOTS_DIR=<folder> SHOT_PREFIX=pr2- for screenshots (2x)
 //

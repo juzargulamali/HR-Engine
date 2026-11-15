@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000300_crm_outreach_conversion.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270112000300_crm_outreach_conversion.sql. Changes nothing.
 -- Expect: rows 1 and 2 'OK'; row 3 'not installed yet' (or 'already installed' on a second run). Rows 4 to 7 are numbers for information.
 --   Row 2 must be OK: every enquiry's source is one of the eight existing values, so the widened check accepts every existing row. The migration changes NO enquiry.
 --   Row 4: enquiries by source today (they keep their source).

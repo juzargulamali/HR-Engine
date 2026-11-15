@@ -372,7 +372,7 @@ Steps 5 to 8, 9 to 13 and the budget run in parallel in practice; the order abov
 
 ## 6. The handover's agency, site contact and notes on the project (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
 
-Source: `supabase/migrations/20270113000100_proj_handover_parties.sql` (`proj_project_handover`, `proj_handover_parties`); `apps/web/src/app/(app)/projects/[id]/work/{page.tsx,details-card.tsx}` (`HandoverPartiesFacts`); `apps/web/src/app/(app)/projects/handovers/page.tsx`; `apps/web/src/components/projects/handover-brief.tsx`. Tests: `packages/rls-tests/test/proj-handover-parties.rls.test.ts`; `apps/web/src/lib/projects/handover-parties.test.tsx`.
+Source: `supabase/migrations/20270112000100_proj_handover_parties.sql` (`proj_project_handover`, `proj_handover_parties`); `apps/web/src/app/(app)/projects/[id]/work/{page.tsx,details-card.tsx}` (`HandoverPartiesFacts`); `apps/web/src/app/(app)/projects/handovers/page.tsx`; `apps/web/src/components/projects/handover-brief.tsx`. Tests: `packages/rls-tests/test/proj-handover-parties.rls.test.ts`; `apps/web/src/lib/projects/handover-parties.test.tsx`.
 
 | Control (label) | Where | Who | What it shows | Function | Failure |
 |---|---|---|---|---|---|

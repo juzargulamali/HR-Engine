@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270113000200_ops_question_notice.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270112000200_ops_question_notice.sql. Changes nothing.
 -- Expect: row 1 'OK'; row 2 'not installed yet' (or 'already installed' on a second run). Rows 3 to 5 are numbers for information.
 --   Row 3: questions from Operations that Sales has not answered. The migration sends NOTHING for these (no backfill): tell the owners yourself, or ask Operations to
 --          save the question again with a changed wording after the migration (a changed question notifies once).

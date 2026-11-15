@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270113000400_crm_enquiry_submission_key.sql. Rows 1 to 5 must say OK; row 6 is a count for information. Creates no row.
+-- READ ONLY. Run AFTER 20270112000400_crm_enquiry_submission_key.sql. Rows 1 to 5 must say OK; row 6 is a count for information. Creates no row.
 select item, result from (
   select 1 as ord, 'the submissions table exists with its primary key on (person, identifier), row level security is on and it has NO policy' as item,
          case when to_regclass('public.crm_enquiry_submissions') is not null

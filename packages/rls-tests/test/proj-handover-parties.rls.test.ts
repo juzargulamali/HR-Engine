@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Sales to Projects handover: agency, site contact and notes (migration 20270113000100_proj_handover_parties.sql), against a real Postgres.
+// Sales to Projects handover: agency, site contact and notes (migration 20270112000100_proj_handover_parties.sql), against a real Postgres.
 //   * an agency-led job and a direct job are told apart, and the agency is the enquiry's own;
 //   * Sales chooses the site contact only from the contacts linked to the enquiry; only the owner or a Sales founder; never once the Project Manager has the brief;
 //   * the copy is taken again at submission; a contact removed from the enquiry stops the submission in words; a contact edited AFTER acceptance does not reach the project;
@@ -22,7 +22,7 @@ type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-exp
 const j = (o: unknown) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;
 const ROOT = path.join(__dirname, "../../..");
 const pack = (f: string) => readFileSync(path.join(ROOT, "supabase/manual-sql", f), "utf8");
-const MIGRATION = "20270113000100_proj_handover_parties.sql";
+const MIGRATION = "20270112000100_proj_handover_parties.sql";
 
 const SEED = `
   insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED'), ('SA', 'Saudi Arabia', 'SAR') on conflict do nothing;

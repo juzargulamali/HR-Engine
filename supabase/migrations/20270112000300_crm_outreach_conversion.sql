@@ -69,7 +69,7 @@ $$;
 drop trigger if exists trg_crm_outreach_one_enquiry on crm_outreach;
 create trigger trg_crm_outreach_one_enquiry before update of opportunity_id on crm_outreach for each row execute function crm_outreach_one_enquiry();
 
--- 5. JSON to crm_create_opportunity, argument for argument (also created, identically, by 20270113000400: either file may be applied first) ------------------------------
+-- 5. JSON to crm_create_opportunity, argument for argument (also created, identically, by 20270112000400: either file may be applied first) ------------------------------
 create or replace function crm_create_opportunity_json(p jsonb)
 returns uuid language plpgsql security definer set search_path = public as $$
 begin

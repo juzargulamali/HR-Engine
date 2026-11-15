@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Sales follow-ups: a time zone per company (migration 20270113000500_crm_follow_up_time_zone.sql), against a real Postgres.
+// Sales follow-ups: a time zone per company (migration 20270112000500_crm_follow_up_time_zone.sql), against a real Postgres.
 //   * each existing company takes the zone of its country (AE Dubai, SA Riyadh, PL Warsaw; any other country stays on Dubai and is listed for review), once;
 //   * no follow-up due moment changes when the migration is applied, when it is applied again, or when a zone is changed later: the preflight fingerprint equals
 //     the verify fingerprint; what changes is the clock the same moment is read on (10:00 Dubai is 07:00 Warsaw in winter, 09:00 Riyadh);
@@ -21,7 +21,7 @@ const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@tz-test.ae')
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const ROOT = path.join(__dirname, "../../..");
 const pack = (f: string) => readFileSync(path.join(ROOT, "supabase/manual-sql", f), "utf8");
-const MIGRATION = "20270113000500_crm_follow_up_time_zone.sql";
+const MIGRATION = "20270112000500_crm_follow_up_time_zone.sql";
 const row = (rows: { item: string; result: string }[], re: RegExp) => rows.find((r) => re.test(r.item))!.result;
 
 describe("Follow-up time zone per company", () => {

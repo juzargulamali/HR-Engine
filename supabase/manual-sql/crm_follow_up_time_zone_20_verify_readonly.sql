@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270113000500_crm_follow_up_time_zone.sql. Rows 1 to 5 must say OK. ROW 6 MUST BE IDENTICAL to row 5 of the preflight output you kept
+-- READ ONLY. Run AFTER 20270112000500_crm_follow_up_time_zone.sql. Rows 1 to 5 must say OK. ROW 6 MUST BE IDENTICAL to row 5 of the preflight output you kept
 -- (count / earliest / latest / checksum): that is the proof that no follow-up due moment was changed. If it differs, STOP: do not deploy the new app; compare the
 -- count first (a follow-up added or removed by someone working between the two runs changes it legitimately: rerun both files in a quiet minute); if it still
 -- differs, run the rollback and report it. Row 7 is for information. Creates no row.

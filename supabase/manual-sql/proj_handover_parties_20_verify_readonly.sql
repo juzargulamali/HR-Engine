@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270113000100_proj_handover_parties.sql. Rows 1 to 6 must say OK; rows 7 and 8 are counts for information. Creates no row.
+-- READ ONLY. Run AFTER 20270112000100_proj_handover_parties.sql. Rows 1 to 6 must say OK; rows 7 and 8 are counts for information. Creates no row.
 select item, result from (
   select 1 as ord, 'the four new columns exist on proj_handovers, with the job-type rule' as item,
          case when (select count(*) from information_schema.columns where table_schema = 'public' and table_name = 'proj_handovers'

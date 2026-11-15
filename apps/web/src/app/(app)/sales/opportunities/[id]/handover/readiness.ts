@@ -9,7 +9,7 @@
  *     date, show dates, scope, exclusions, technologies and risks on its details. The NOTES are not in that insert: they stay on the brief.
  *   - 20270102000100_ops_phase2b.sql section 4 copies the enquiry's event edition onto the brief while it is prepared and again when it is submitted, and from the brief
  *     onto the project when it is created.
- *   - 20270113000100_proj_handover_parties.sql records on the brief whether the job is direct or agency-led (and the agency's name), from the enquiry, at the same
+ *   - 20270112000100_proj_handover_parties.sql records on the brief whether the job is direct or agency-led (and the agency's name), from the enquiry, at the same
  *     moments as the edition, and keeps a copy of ONE site contact that Sales chooses from the enquiry's contacts. The project reads the accepted brief: the agency and
  *     the notes for everyone who works on it, the contact for whoever manages it and for Operations Managers (proj_project_handover).
  *   - No function copies the other contacts, proposals, estimates, files, the value, payment terms or the purchase order.

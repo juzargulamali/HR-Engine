@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Operations asks Sales a question: one in-app notice (migration 20270113000200_ops_question_notice.sql), against a real Postgres.
+// Operations asks Sales a question: one in-app notice (migration 20270112000200_ops_question_notice.sql), against a real Postgres.
 //   * a new question tells the enquiry's owner once; the same question again, other planning fields, a retry and two saves at once tell nobody again;
 //   * a changed question keeps ONE unread notice; once the notice was read, a changed question tells again;
 //   * answering or withdrawing the question clears the unread notice;
@@ -155,8 +155,8 @@ describe("Operations question: Sales is told once", () => {
     await ask(U.ops, OPP, { question: "After the rollback nobody is told" });
     expect((await notices()).length).toBe(before);
     expect((await admin(`select question from ops_enquiry_planning where opportunity_id = '${OPP}'`))[0]!.question).toBe("After the rollback nobody is told");
-    await db.applyMigration("20270113000200_ops_question_notice.sql");
-    await db.applyMigration("20270113000200_ops_question_notice.sql");
+    await db.applyMigration("20270112000200_ops_question_notice.sql");
+    await db.applyMigration("20270112000200_ops_question_notice.sql");
     await ask(U.ops, OPP, { question: "Installed again: told once" });
     expect((await notices()).length).toBe(before + 1);
   });

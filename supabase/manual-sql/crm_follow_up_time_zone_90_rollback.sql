@@ -1,4 +1,4 @@
--- ROLLBACK for 20270113000500_crm_follow_up_time_zone.sql. It returns EVERY company to the Dubai clock (the column goes; both app versions then treat every company as
+-- ROLLBACK for 20270112000500_crm_follow_up_time_zone.sql. It returns EVERY company to the Dubai clock (the column goes; both app versions then treat every company as
 -- Asia/Dubai) and changes no follow-up: every due moment stays exactly as it is.
 --
 -- WHAT IS UNSAFE, AND WHEN IT STOPS. Returning a company to the Dubai clock is harmless for deadlines typed BEFORE this migration (they were typed on the Dubai clock

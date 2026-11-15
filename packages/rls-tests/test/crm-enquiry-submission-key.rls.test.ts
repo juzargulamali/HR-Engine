@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// New enquiry with a submission identifier (migration 20270113000400_crm_enquiry_submission_key.sql), against a real Postgres.
+// New enquiry with a submission identifier (migration 20270112000400_crm_enquiry_submission_key.sql), against a real Postgres.
 //   * the first save creates the enquiry; the same identifier again (a retry after a lost answer, a double click) returns the ORIGINAL enquiry and creates nothing;
 //   * two calls with the same identifier on two connections at the same moment create exactly one (one waits for the other);
 //   * two different identifiers with identical details create two enquiries; without an identifier it is the old behaviour;
@@ -20,7 +20,7 @@ const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@submit-test.
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const j = (o: unknown) => `'${JSON.stringify(o).replace(/'/g, "''")}'::jsonb`;
 const pack = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
-const MIGRATION = "20270113000400_crm_enquiry_submission_key.sql";
+const MIGRATION = "20270112000400_crm_enquiry_submission_key.sql";
 
 describe("New enquiry: one enquiry per submission identifier", () => {
   const db = new RlsTestDatabase();
