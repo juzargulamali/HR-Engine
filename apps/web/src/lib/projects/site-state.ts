@@ -39,3 +39,16 @@ export function describeSitePhase(p: SitePhaseInfo | null | undefined): SiteStat
 
 /** For a crew member on a tentative activity whose date has passed and whose reporting details are incomplete: who to ask. */
 export const provisionalPassedText = (contactName: string | null | undefined): string => `Provisional date passed · contact ${contactName ?? "your Project Manager"} for updated details`;
+
+/**
+ * THE state of a site activity, for every screen that shows one (Site schedule, Work, the Calendar's Month, Week and Agenda views, My Day, Operations). Two facts decide it and nothing else:
+ * the plan item's own status (a finished or cancelled activity says so) and the phase the database worked out (`proj_site_phase_json`). No screen derives a state of its own, and none looks at
+ * the clock: an activity reads Started only when the phase is `started`, which the database gives only for an explicit start record.
+ */
+export interface SiteActivityStateText extends SiteStateText { finished: boolean; /** A short machine word for the state, the same on every screen (for tests and styling). */ key: SitePhase | "finished" | "cancelled" | "unknown" }
+export function siteActivityState(phase: SitePhaseInfo | null | undefined, itemStatus?: string | null): SiteActivityStateText {
+  if (itemStatus === "done") return { label: "Finished", detail: "Marked done on the site schedule", tone: "quiet", started: false, fromHeader: false, finished: true, key: "finished" };
+  if (itemStatus === "cancelled") return { label: "Cancelled", detail: null, tone: "quiet", started: false, fromHeader: false, finished: false, key: "cancelled" };
+  if (!phase) return { label: "State not available", detail: null, tone: "quiet", started: false, fromHeader: false, finished: false, key: "unknown" };
+  return { ...describeSitePhase(phase), finished: false, key: phase.phase };
+}

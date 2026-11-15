@@ -328,6 +328,10 @@ Who can open them: the redirect itself makes no access check; the Plan page it l
 * **Files & client plan** reads 1 **Choose what the client sees** (tick boxes over milestones and plan items; `saveClientTimelineSelection` writes only changed boxes through `proj_save_milestone` / `proj_save_plan_item`), 2 **Preview**, 3 **Issued versions (frozen)**. Issued versions are never touched by a new choice. Individual tasks cannot be put on the client timeline (needs a migration: tasks have no client-facing flag and `proj_build_plan_payload` has no slot).
 * **Release plan** has a needs-attention block (each waiting line links to its row with the unblock step). **Feedback & changes** link both ways (a scope change shows what it was raised from; feedback links its scope change).
 
+## 15. Individual tasks on the client timeline, and Back to Calendar (2026-11-15; draft PR, migration `20270113000100` not applied by Claude)
+
+Statements above that a client timeline never contains tasks describe the state before this change. From it, the Project Manager may add **individual tasks by explicit choice**, each with the title the client sees; the payload carries only that title, the dates and the status in client words, built from an allowlist in the database; the Preview is exactly what is issued; issued versions are untouched. The project's Plan calendar words a site activity through the shared state function, and a record opened from a calendar entry offers **Back to Calendar**. Full reference: [`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md) sections 1 and 3; coverage rows 334 to 337, 340, 341; actions 136 to 138.
+
 ## Coverage rows
 
 | Entry | Kind (screen / tab / panel / dialog / form / filter / download / legacy route) | How to reach it | Who can see it | Purpose | Reference (section number in this file) | Status (Documented or Unverified: what) |

@@ -7,7 +7,7 @@ let held: number | null = null;
 const from = () => ({ select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: held === null ? null : { version: held } }) }) }) });
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => ({ rpc, from }) }));
 
-import { saveClientTimelineSelection } from "./projectsTimelineSelect";
+import { saveClientTimelineSelection, saveClientTimelineTasks } from "./projectsTimelineSelect";
 
 const P = "11111111-1111-4111-8111-111111111111";
 const M1 = "22222222-2222-4222-8222-222222222222";
@@ -45,5 +45,30 @@ describe("choosing what the client sees", () => {
     rpc.mockResolvedValue({ data: null, error: { message: "This project is completed." } });
     const r = await saveClientTimelineSelection({ error: null }, fd({ projectId: P, [`itemwas_${I1}`]: "0", [`itemver_${I1}`]: "1", [`item_${I1}`]: "on" }));
     expect(r.error).toMatch(/completed/);
+  });
+});
+
+describe("choosing individual tasks for the client timeline", () => {
+  const T1 = "55555555-5555-4555-8555-555555555555";
+  const T2 = "66666666-6666-4666-8666-666666666666";
+  it("sends only the ticked tasks, each with its client title, as one list; an unticked task is not sent whatever title its field holds", async () => {
+    const r = await saveClientTimelineTasks({ error: null }, fd({ projectId: P, [`task_${T1}`]: "on", [`tasktitle_${T1}`]: "  Screen content ready ", [`tasktitle_${T2}`]: "Not chosen" }));
+    expect(r.error ?? null).toBeNull();
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).toHaveBeenCalledWith("proj_set_client_timeline_tasks", { p_project_id: P, p_rows: [{ task_id: T1, client_title: "Screen content ready" }] });
+  });
+  it("ticking nothing clears the choice (an empty list), never 'all tasks'", async () => {
+    await saveClientTimelineTasks({ error: null }, fd({ projectId: P }));
+    expect(rpc).toHaveBeenCalledWith("proj_set_client_timeline_tasks", { p_project_id: P, p_rows: [] });
+  });
+  it("a ticked task without a client title is refused before anything is written", async () => {
+    const r = await saveClientTimelineTasks({ error: null }, fd({ projectId: P, [`task_${T1}`]: "on", [`tasktitle_${T1}`]: "   " }));
+    expect(r.error).toMatch(/title the client will see/);
+    expect(rpc).not.toHaveBeenCalled();
+  });
+  it("a refusal from the database (a member, a summary-only person) is shown, not swallowed", async () => {
+    rpc.mockResolvedValueOnce({ data: null, error: { message: "Only the Project Manager, someone holding temporary project leadership, or a founder can do that", code: "42501" } });
+    const r = await saveClientTimelineTasks({ error: null }, fd({ projectId: P, [`task_${T1}`]: "on", [`tasktitle_${T1}`]: "Screen content ready" }));
+    expect(r.error).toMatch(/Project Manager/);
   });
 });

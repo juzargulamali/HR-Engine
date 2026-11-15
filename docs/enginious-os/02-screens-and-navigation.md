@@ -213,3 +213,6 @@ Phone order: what needs you first, then your tasks (`docs/os-my-day.md`).
 * Mechanics on My Day: every source is read with `Promise.allSettled`; a failed source becomes `failed(source)` and an error entry naming it (`SOURCE_LABEL`) in both the headline and Needs me (`attention.ts`, `page.tsx` lines ~106, 333).
 * Menu: Finance's waiting number is simply absent when unreadable ("never 0, never a guess", `nav-groups.ts`). Inventory shows `LoadError`.
 * Known residual gaps: failed role or navigation-probe reads can still hide menu rows or read as "no role" (spec D-15, D-19, D-20; status after launch `Unverified`). Inventory staff-directory failed-read sweep is deferred (file 01, section 8).
+
+* Scheduling, client timelines and QA (2026-11-15; draft PR, not merged; see `modules/projects-scheduling-timelines-qa.md`): no new route. Calendar entries carry `?from=calendar` (the Projects calendar, `/projects/calendar`) or `?from=plan-calendar` (a project's Plan calendar); the project they open shows **Back to Calendar** beside "All projects", which returns to the remembered date, view, time zone and filters. The Projects list shows a work package count on projects that have work packages, linking to `/projects/[id]/work#work-packages`. Files & client plan gains the **Individual tasks** chooser.
+

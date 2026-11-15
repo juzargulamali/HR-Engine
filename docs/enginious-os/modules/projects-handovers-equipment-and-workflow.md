@@ -384,7 +384,7 @@ Source: `supabase/migrations/20270112000100_proj_handover_parties.sql` (`proj_pr
 * can open the details (active member, founder, Operations Manager): job type, agency and the notes. The notes were already readable to these people on the project's History page through the handover row;
 * the contact's name, role, phone and e-mail: only `proj_can_manage` (the Project Manager, an acting Project Manager within their dates, a founder) and the company's Operations Managers. For everyone else the function sends `contact_restricted = true` and no contact field.
 
-What the project shows is always the ACCEPTED brief (the function reads the frozen handover row; nothing is copied a second time, so it cannot drift). An internal project has no handover and shows nothing. Coverage row 334; catalogue: read-only, no entry.
+What the project shows is always the ACCEPTED brief (the function reads the frozen handover row; nothing is copied a second time, so it cannot drift). An internal project has no handover and shows nothing. Coverage rows 344 and 345; catalogue: read-only, no entry.
 
 ## Coverage rows
 

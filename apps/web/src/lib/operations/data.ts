@@ -7,7 +7,7 @@ import { getProjectsContext, type ProjectsContext } from "@/lib/projects/context
 import { createClient } from "@/lib/supabase/server";
 import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { choosePermittedCompany, OPS_COMPANY_COOKIE } from "./company";
-import { SITE_ACTIVITY_LIMIT, type Overview, type UpcomingRow } from "./model";
+import { SITE_ACTIVITY_LIMIT, type CrewOverlapsRead, type Overview, type UpcomingRow } from "./model";
 
 /**
  * The Operations view of a signed-in session. Operations Manager is a Projects capability ("operations") held per company; a founder holds it too. This only shapes
@@ -63,4 +63,15 @@ export async function loadSiteActivities(companyId: string): Promise<OpsResult<S
   const { data, error } = await (await createClient()).rpc("proj_site_activities_read", { p_company_id: companyId, p_limit: SITE_ACTIVITY_LIMIT });
   if (error) return fail(error, "site activities");
   return Array.isArray(data) ? { state: "ok", data: data as unknown as SiteActivityRead[] } : { state: "error" };
+}
+
+/**
+ * Who is booked twice: each crew member with two confirmed site assignments that overlap, both assignments and their windows. The database checks the Operations right for
+ * the company and hides the name, title and ids of an assignment in a company the reader holds no Operations right for. When it is not installed or fails, the Overview says so
+ * and keeps its activity-level warning.
+ */
+export async function loadCrewOverlaps(companyId: string): Promise<OpsResult<CrewOverlapsRead>> {
+  const { data, error } = await (await createClient()).rpc("ops_crew_overlaps", { p_company_id: companyId });
+  if (error) return fail(error, "crew overlaps");
+  return data && typeof data === "object" && Array.isArray((data as { overlaps?: unknown }).overlaps) ? { state: "ok", data: data as unknown as CrewOverlapsRead } : { state: "error" };
 }

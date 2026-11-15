@@ -1713,6 +1713,8 @@ export interface Database {
       proj_scope_changes: ProjReadOnlyTable<ProjScopeChangeRow>;
       proj_scope_change_commercial: ProjReadOnlyTable<ProjScopeChangeCommercialRow>;
       proj_issued_plans: ProjReadOnlyTable<ProjIssuedPlanRow>;
+      // 20270113000100: the tasks a manager chose for the next client timeline (readable by the project's managers only; written through proj_set_client_timeline_tasks).
+      proj_client_timeline_tasks: ProjReadOnlyTable<{ task_id: string; project_id: string; client_title: string; selected_by: string; selected_at: string; updated_at: string }>;
       proj_completions: ProjReadOnlyTable<ProjCompletionRow>;
       // Sales & CRM (20261115000000-300): read-only to clients; every write is a crm_* function below.
       crm_company_grants: CrmReadOnlyTable<CrmCompanyGrantRow>;
@@ -2106,6 +2108,10 @@ export interface Database {
       proj_current_plan_payload: { Args: { p_project_id: string }; Returns: Record<string, unknown> | null };
       proj_issue_plan: { Args: { p_project_id: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
       proj_plan_outdated: { Args: { p_project_id: string }; Returns: boolean | null };
+      proj_plan_preview: { Args: { p_project_id: string }; Returns: { payload: Record<string, unknown>; hash: string } | null };
+      proj_issue_plan_checked: { Args: { p_project_id: string; p_expected_hash: string; p_client_reference?: string | null; p_note?: string | null }; Returns: string };
+      proj_set_client_timeline_tasks: { Args: { p_project_id: string; p_rows: { task_id: string; client_title: string }[] }; Returns: unknown };
+      ops_crew_overlaps: { Args: { p_company_id: string }; Returns: unknown };
       ops_overview: { Args: { p_company_id: string }; Returns: unknown };
       ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
       ops_tv_board: { Args: { p_company_id: string }; Returns: unknown };

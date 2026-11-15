@@ -7,11 +7,11 @@ vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children:
 vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn(), push: vi.fn(), replace: vi.fn() }), usePathname: () => "/operations", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/actions/operations", () => ({ saveEnquiryPlanning: vi.fn() }));
 vi.mock("@/lib/projects/format", async (orig) => ({ ...(await orig<typeof import("@/lib/projects/format")>()), todayIso: () => "2027-02-20" }));
-const data = vi.hoisted(() => ({ ctx: null as unknown, overview: null as unknown, upcoming: null as unknown, sites: null as unknown }));
+const data = vi.hoisted(() => ({ ctx: null as unknown, overview: null as unknown, upcoming: null as unknown, sites: null as unknown, crew: null as unknown }));
 vi.mock("@/lib/operations/data", () => ({
   getOperationsContext: async () => data.ctx,
   pickCompany: async (ctx: { companies: { id: string; name: string }[] }, asked?: string) => ctx.companies.find((c) => c.id === asked) ?? ctx.companies[0] ?? null,
-  loadOverview: async () => data.overview, loadUpcoming: async () => data.upcoming, loadSiteActivities: async () => data.sites,
+  loadOverview: async () => data.overview, loadUpcoming: async () => data.upcoming, loadSiteActivities: async () => data.sites, loadCrewOverlaps: async () => data.crew,
 }));
 
 import OperationsOverviewPage from "./page";
@@ -43,7 +43,7 @@ const live: Overview["projects"][number] = {
 };
 const renderPage = async (page: (p: { searchParams: Promise<Record<string, string>> }) => Promise<React.ReactNode>, sp: Record<string, string> = {}) => render(<>{await page({ searchParams: Promise.resolve(sp) })}</>);
 
-beforeEach(() => { data.ctx = ctx(); data.overview = { state: "ok", data: overview }; data.upcoming = { state: "ok", data: [row] }; data.sites = { state: "not_installed" }; });
+beforeEach(() => { data.ctx = ctx(); data.overview = { state: "ok", data: overview }; data.upcoming = { state: "ok", data: [row] }; data.sites = { state: "not_installed" }; data.crew = { state: "not_installed" }; });
 afterEach(cleanup);
 
 describe("Operations Overview", () => {
@@ -315,6 +315,50 @@ describe("Operations Overview: the site activities, company and queues of this r
     const both = within(pair).getAllByTestId("ops-commitment").map((c) => c.textContent);
     expect(both).toEqual(["Hall 4 installation · UAE-P-2027-0002 Fictional Motors launch · 26 Feb to 27 Feb", "Roadshow rigging · UAE-P-2027-0003 Roadshow · 27 Feb"]);
     expect(pair.textContent).toContain("Tariq Technician");
+  });
+});
+
+describe("Operations Overview: who is booked twice", () => {
+  const side = (o: Record<string, unknown>) => ({ hidden: false, kind: "crew", id: "a1", project_id: "p2", reference: "UAE-P-2027-0002", project_name: "Fictional Motors launch", title: "Hall 4 installation", run_label: null,
+    starts_at: "2027-02-26T05:00:00Z", ends_at: "2027-02-26T13:00:00Z", tz: "Asia/Dubai", all_day: false, starts_local: "2027-02-26T09:00", ends_local: "2027-02-26T17:00", ...o });
+  const read = (overlaps: unknown[], extra: Record<string, unknown> = {}) => ({ state: "ok", data: { company_id: "c1", taken_at: "2027-02-20T08:00:00Z", overlaps, total: overlaps.length, truncated: false, ...extra } });
+  it("names the crew member and both confirmed assignments, each with its window in the site's own time zone and a link to its exact row", async () => {
+    data.crew = read([{ user_id: "u-t", person: "Tariq Technician", overlap_from: "2027-02-26T11:00:00Z", overlap_to: "2027-02-26T13:00:00Z", a: side({}),
+      b: side({ id: "a9", project_id: "p3", reference: "UAE-P-2027-0003", project_name: "Roadshow", title: "Stand build", run_label: "Run 2", tz: "Europe/London", starts_local: "2027-02-26T11:00", ends_local: "2027-02-26T15:00" }) }]);
+    await renderPage(OperationsOverviewPage);
+    const pair = screen.getByTestId("ops-pressure-pair");
+    expect(pair.getAttribute("data-kind")).toBe("crew_overlap");
+    expect(within(pair).getByTestId("ops-overlap-person").textContent).toBe("Tariq Technician");
+    const both = within(pair).getAllByTestId("ops-commitment");
+    expect(both.map((c) => c.textContent)).toEqual([
+      "Hall 4 installation · UAE-P-2027-0002 Fictional Motors launch · 26 Feb, 09:00 to 17:00 (Asia/Dubai)",
+      "Stand build · Run 2 · UAE-P-2027-0003 Roadshow · 26 Feb, 11:00 to 15:00 (Europe/London)"]);
+    expect(both.map((c) => within(c).getByRole("link").getAttribute("href"))).toEqual(["/projects/p2/plan?plan=site&mode=list#site-a1", "/projects/p3/plan?plan=site&mode=list#site-a9"]);
+  });
+  it("an assignment in a company the reader cannot see is a time window only: no project name, no title, no link", async () => {
+    data.crew = read([{ user_id: "u-t", person: "Tariq Technician", overlap_from: "2027-02-26T05:00:00Z", overlap_to: "2027-02-26T13:00:00Z", a: side({}),
+      b: { hidden: true, starts_at: "2027-02-25T20:00:00Z", ends_at: "2027-02-27T20:00:00Z", tz: "Asia/Dubai", all_day: true, starts_local: "2027-02-26T00:00", ends_local: "2027-02-27T23:59" } }]);
+    await renderPage(OperationsOverviewPage);
+    const both = within(screen.getByTestId("ops-pressure-pair")).getAllByTestId("ops-commitment");
+    expect(both[1]!.textContent).toBe("A confirmed assignment in another company (details not shown) · 26 Feb to 27 Feb, all day (Asia/Dubai)");
+    expect(both[1]!.getAttribute("data-source")).toBe("other_company");
+    expect(within(both[1]!).queryByRole("link")).toBeNull();
+    expect(within(both[0]!).getByRole("link").getAttribute("href")).toBe("/projects/p2/plan?plan=site&mode=list#site-a1");
+  });
+  it("a confirmed site booking links to its conflict check on the project's bookings", async () => {
+    data.crew = read([{ user_id: "u-t", person: "Tariq Technician", overlap_from: "x", overlap_to: "y", a: side({}), b: side({ kind: "booking", id: "b7", title: "Site booking: Hall 2" }) }]);
+    await renderPage(OperationsOverviewPage);
+    const both = within(screen.getByTestId("ops-pressure-pair")).getAllByTestId("ops-commitment");
+    expect(within(both[1]!).getByRole("link").getAttribute("href")).toBe("/projects/p2/plan?plan=site&mode=list&check=b7#bookings");
+  });
+  it("a failed read says it could not be loaded and is never shown as nothing; a long list says how many are shown", async () => {
+    data.crew = { state: "error" };
+    await renderPage(OperationsOverviewPage);
+    expect(screen.getByTestId("ops-crew-overlaps-error").textContent).toMatch(/could not be loaded/);
+    cleanup();
+    data.crew = read([{ user_id: "u-t", person: "Tariq Technician", overlap_from: "x", overlap_to: "y", a: side({}), b: side({ id: "a9" }) }], { total: 140, truncated: true });
+    await renderPage(OperationsOverviewPage);
+    expect(screen.getByTestId("ops-crew-overlaps-more").textContent).toBe("Showing the first 1 of 140 overlapping assignments.");
   });
 });
 

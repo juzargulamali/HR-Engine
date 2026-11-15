@@ -164,4 +164,4 @@ Rules (each verified by the RLS test named above):
 * **Handovers that existed before the migration** are not changed: `parties_recorded_at` stays empty, and the project reads "Not recorded at handover" (never "direct job"). A brief still open takes the agency the next time Sales saves or submits it.
 * **Repeat acceptance** is unchanged (`proj_accept_handover` is not replaced): one project per enquiry.
 
-Catalogue entry: `sales.handover.set_site_contact`. Coverage row 100.
+Catalogue entry: `sales.handover.set_site_contact`. Coverage row 103.

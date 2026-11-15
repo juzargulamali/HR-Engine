@@ -383,3 +383,22 @@ describe("Operations: team pressure shows both commitments", () => {
     expect(pressure(o, [{ ...a, starts_at: "2027-03-02T05:00:00Z", ends_at: "2027-03-02T08:00:00Z" }, { ...b, starts_at: "2027-03-02T09:00:00Z", ends_at: "2027-03-02T12:00:00Z" }]).filter((x) => x.kind === "crew_overlap")).toEqual([]);
   });
 });
+
+describe("per-person crew overlaps", () => {
+  it("replace the activity-level warning when the read is available, and say which person and which two assignments", async () => {
+    const { pressure, sideWhen, sideCommitment } = await import("./model");
+    const o = { company_id: "c1", taken_at: "2027-02-20T08:00:00Z", handovers: [], projects: [], overlaps: [] };
+    const a = { hidden: false, kind: "crew" as const, id: "a1", project_id: "p1", reference: "UAE-P-2027-0001", project_name: "Expo", title: "Setup", run_label: null, starts_at: "2027-03-02T05:00:00Z", ends_at: "2027-03-02T13:00:00Z",
+      tz: "Asia/Dubai", all_day: false, starts_local: "2027-03-02T09:00", ends_local: "2027-03-02T17:00" };
+    const hidden = { hidden: true, starts_at: "2027-03-01T20:00:00Z", ends_at: "2027-03-03T20:00:00Z", tz: "Asia/Dubai", all_day: true, starts_local: "2027-03-02T00:00", ends_local: "2027-03-03T23:59" };
+    const items = pressure(o, [], { company_id: "c1", taken_at: "x", overlaps: [{ user_id: "u1", person: "Eli Engineer", overlap_from: "x", overlap_to: "y", a, b: hidden }], total: 1, truncated: false });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ kind: "crew_overlap", who: "Eli Engineer", href: "/projects/p1/plan?plan=site&mode=list#site-a1" });
+    expect(items[0]!.commitments!.map((c) => [c.source, c.href])).toEqual([["activity", "/projects/p1/plan?plan=site&mode=list#site-a1"], ["other_company", null]]);
+    expect(JSON.stringify(sideCommitment(hidden))).not.toMatch(/UAE-P|Expo|Setup|projects\//);
+    expect(sideWhen(a)).toBe("2 Mar, 09:00 to 17:00 (Asia/Dubai)");
+    expect(sideWhen({ ...a, ends_local: "2027-03-03T02:00" })).toBe("2 Mar 09:00 to 3 Mar 02:00 (Asia/Dubai)");
+    expect(sideWhen(hidden)).toBe("2 Mar to 3 Mar, all day (Asia/Dubai)");
+    expect(sideWhen({ ...hidden, ends_local: "2027-03-02T23:59", tz: "America/New_York" })).toBe("2 Mar, all day (America/New York)");
+  });
+});

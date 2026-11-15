@@ -610,7 +610,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Type in the search box to find a project by name, reference or Project Manager.",
       "Use Show to switch between Ongoing and Completed and archived, and Kind, Status, Company or Event edition to narrow the list. Press Clear to remove the filters.",
       "Click a column heading such as Key dates or Status to sort, or choose Board to see the ongoing projects by status.",
-      "Click a project to open it. All projects on the project brings you back to the same list."
+      "Click a project to open it. All projects on the project brings you back to the same list. A project with work packages shows a small count under its name, such as 1/3 work packages, with review beside it when one waits for review. Press it to open them."
     ],
     "links": [
       {
@@ -723,7 +723,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Choose My calendar or Company calendar.",
       "Choose Month, Week or Agenda, and use the arrows or Today to move through time.",
       "On My calendar, tick what to show under Show only, choose a zone under Show times in, and press Apply.",
-      "Click an entry to open its project."
+      "Click an entry to open its project. Press Back to Calendar there to return to the same date, view and filters. A site activity reads the same in Month, Week and Agenda as on the Site schedule: Started only after the Project Manager recorded the start, Finished once it is marked done."
     ],
     "links": [
       {
@@ -1072,7 +1072,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open the project, press Manage project and choose Files & client plan.",
       "To add a file choose Upload a file, pick the file, choose What is it and press Upload file. For a link choose Add a link and press Add link.",
-      "Project Manager: check What would be issued now, then press Issue this timeline (later, Issue a new version).",
+      "Project Manager: tick what the client sees (individual tasks only one by one), check What would be issued now, then press Issue this timeline (later, Issue a new version).",
       "Press Download PDF and send it to the client yourself. Then press Record as sent and say how and to whom.",
       "When the client agrees, press Record client acceptance and give the date and who accepted."
     ],
@@ -1620,6 +1620,9 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "title": "Operations Overview: what needs you first",
     "keywords": [
       "operations overview",
+      "booked twice",
+      "crew overlap",
+      "double booked",
       "needs my decision",
       "handover stalled",
       "installation at risk",
@@ -1640,7 +1643,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Press a card at the top to jump to its list.",
       "Start with Needs my decision. For Project Manager not assigned press Assign a Project Manager, choose the person and press Assign Project Manager. They accept it; you cannot accept for them.",
       "For other items press the button on the item and speak to the person named under With.",
-      "Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab. Decisions assigned to me and follow-ups (with the person each waits on) come first, then Next on site. Each dated site activity appears once, with a link to its row on the Site schedule; a date from the project header is labelled, and a date from Sales before handover is labelled tentative. A date that has passed reads start unconfirmed until the Project Manager records the start. Press a request code to open that equipment request and its next action."
+      "Under Next installations read the label, the event edition and how many equipment lines are ready. Under Equipment issues, Partly dispatched shows how many lines have gone out; press the project to open its Equipment tab. Decisions assigned to me and follow-ups (with the person each waits on) come first, then Next on site. Each dated site activity appears once, with a link to its row on the Site schedule; a date from the project header is labelled, and a date from Sales before handover is labelled tentative. A date that has passed reads start unconfirmed until the Project Manager records the start. Press a request code to open that equipment request and its next action. Under Team pressure read who is booked on two confirmed site assignments that overlap: both assignments are listed with their times at each site and a link to each. An assignment in a company you do not manage shows its time only."
     ],
     "links": [
       {
@@ -2175,7 +2178,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "The Project Plan view once called Timeline is now Work schedule: each activation and requirement as a bar by its dates. Installation, dismantling, crew and shipments stay under Site schedule. A week fits a normal desktop window; nine or thirty days scroll sideways inside the chart while the page stays still. Names and the date header stay pinned, Today is marked and rows print exact dates. Choose Day or Week, press Today, and hover, focus or tap a bar for details. Bars are read only.",
     "steps": [
       "Open the project and choose Project Plan, then Work schedule.",
-      "Scroll the chart sideways, or press Today.",
+      "Scroll the chart sideways, or press Today. On a phone the chart scrolls inside itself and the page stays still.",
       "Choose Day or Week.",
       "Hover, focus or tap a bar for its details."
     ],
@@ -2363,13 +2366,17 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "issue preview",
       "issued versions",
       "milestones",
-      "project files"
+      "project files",
+      "tasks on the client timeline",
+      "show a task to the client",
+      "title the client sees"
     ],
-    "summary": "Files and client plan reads in three steps: Choose what the client sees, Preview, and Issued versions. Tick the milestones and timeline activities for the next issued client timeline. Issued versions are frozen: changing the ticks never alters one already issued. Individual tasks cannot be put on the client timeline yet.",
+    "summary": "Files and client plan reads in three steps: Choose what the client sees, Preview, and Issued versions. Tick the milestones and timeline activities for the next issued client timeline. The Project Manager can also add individual tasks, one by one; of a task the client sees only the title you give it, its dates and its status in plain words. Issued versions are frozen: changing the ticks never alters one already issued.",
     "steps": [
       "Open the project's Files and client plan.",
       "Tick or untick items under Choose what the client sees and press Save what the client sees.",
-      "Read the Preview, then issue a version when it is right.",
+      "Under Individual tasks tick each task the client should see, check or reword Title the client sees, and press Save the chosen tasks.",
+      "Read the Preview: it is exactly what would be issued. Then issue a version when it is right. If something changed after you opened the page, nothing is issued and you are asked to check the Preview again.",
       "Open any earlier issued version from the list; it stays as it was issued."
     ],
     "links": [

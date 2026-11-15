@@ -364,4 +364,4 @@ Source: `supabase/migrations/20270112000200_ops_question_notice.sql`; `apps/web/
 * **Where Sales sees it.** Follow-ups: the card **Questions from Operations** (above Handover), one row per enquiry. My Day: one attention item "Operations asked a question" under the enquiry's own key. Project notices (for people who also hold Projects access): "Operations asked a question on <reference>". Each opens `/sales/opportunities/<id>?tab=overview#ops-question`: the Overview tab, scrolled to the question block of the Operations planning panel (`AnchorTarget`, which brings itself into view when it appears).
 * A failed read says "Could not check whether Operations has asked you a question"; it never reads as "no questions".
 
-Coverage rows 101 and 102.
+Coverage rows 104 and 105.
