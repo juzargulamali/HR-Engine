@@ -11,7 +11,10 @@ vi.mock("next/link", () => ({ default: ({ children, href, ...rest }: { children:
 vi.mock("@/lib/actions/projectsCore", () => ({ acceptHandover: vi.fn(), assignHandoverPm: vi.fn(), requestHandoverClarification: vi.fn(), saveHandover: vi.fn(), saveAndSubmitHandover: vi.fn(), withdrawHandover: vi.fn() }));
 
 let tables: Record<string, FakeResult | (() => FakeResult)> = {};
-vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, { proj_staff_directory: rows([]) }) }));
+// A database without the agency and site contact functions (the brief then reads exactly as before); a test sets another answer.
+const PARTIES_NOT_INSTALLED: FakeResult = { data: null, error: { message: "Could not find the function public.proj_handover_parties in the schema cache", code: "PGRST202" } };
+let partiesAnswer: FakeResult = PARTIES_NOT_INSTALLED;
+vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, { proj_staff_directory: rows([]), proj_handover_parties: partiesAnswer }) }));
 let grants = [{ companyId: "c1", capabilities: ["founder"] }];
 vi.mock("@/lib/projects/context", () => ({
   getProjectsContext: async () => ({ userId: "u1", grants, people: [{ id: "u1", name: "Fictional Pm", companyIds: ["c1"] }], companyName: () => "Fictional Co" }),

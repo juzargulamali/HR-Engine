@@ -16,16 +16,19 @@ describe("outreach to enquiry: what is carried into the New enquiry form", () =>
     expect(href.startsWith("/sales/new?")).toBe(true);
     const q = new URLSearchParams(href.split("?")[1]);
     expect(Object.fromEntries(q)).toEqual({
-      company: CO, org: ORG, outreach: OUT, contact: CONTACT,
+      company: CO, org: ORG, outreach: OUT, contact: CONTACT, source: "outreach",
       title: "Fictional Harbour Studio: Introduce the LED tunnel",
       brief: "Outreach objective: Introduce the LED tunnel Latest outreach note (2026-11-10, Call, Spoke): Asked for a quote & a site visit",
     });
-    // no source is sent: the enquiry sources have no value for "from outreach", so the person chooses it on the form
-    expect(q.has("source")).toBe(false);
+    // the form opens with the Outreach source chosen (the person can still change it)
+    expect(q.get("source")).toBe("outreach");
+    // a database that does not know the Outreach source yet: no source is sent and the person chooses it, as before
+    const older = new URLSearchParams(outreachEnquiryHref({ companyId: CO, orgId: ORG, orgName: "Fictional Co", outreachId: OUT, objective: null, withSource: false }).split("?")[1]);
+    expect(older.has("source")).toBe(false);
   });
   it("sends nothing it does not know: no contact, no brief, and a plain title", () => {
     const q = new URLSearchParams(outreachEnquiryHref({ companyId: CO, orgId: ORG, orgName: "Fictional Co", outreachId: OUT, objective: null }).split("?")[1]);
-    expect([...q.keys()].sort()).toEqual(["company", "org", "outreach", "title"]);
+    expect([...q.keys()].sort()).toEqual(["company", "org", "outreach", "source", "title"]);
     expect(q.get("title")).toBe("Fictional Co: enquiry from outreach");
   });
   it("keeps the title inside the form's limit and the brief short", () => {

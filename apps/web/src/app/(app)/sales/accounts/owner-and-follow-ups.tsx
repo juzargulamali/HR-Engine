@@ -9,7 +9,8 @@ import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Modal } from "@/components/sales/modal";
-import { todayInDubai } from "@/components/sales/format";
+import { todayIn } from "@/components/sales/format";
+import { dueTimeLabel } from "@/lib/crm/time-zone";
 import type { PersonOption } from "./account-forms";
 
 /** Change the ACCOUNT owner for the selected company. Shown only to people who hold the assign-owners right; the database checks it again. */
@@ -55,7 +56,7 @@ export function ReassignFollowUpButton({ followUpId, assigneeId, people, title }
 }
 
 /** A dated follow-up on one of this account's open inquiries, with its own assignee (follow-ups belong to an inquiry). */
-export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { inquiries: { id: string; label: string }[]; people: PersonOption[]; defaultAssigneeId: string }) {
+export function AddFollowUpButton({ inquiries, people, defaultAssigneeId, timeZone }: { inquiries: { id: string; label: string }[]; people: PersonOption[]; defaultAssigneeId: string; /** The Sales time zone of the company these enquiries belong to. */ timeZone: string }) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -65,8 +66,8 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
           <Field label="Enquiry" htmlFor="fu-opp"><Select id="fu-opp" name="id" defaultValue={inquiries[0]?.id}>{inquiries.map((i) => <option key={i.id} value={i.id}>{i.label}</option>)}</Select></Field>
           <Field label="What to do" htmlFor="fu-title"><Input id="fu-title" name="title" required autoComplete="off" placeholder="e.g. Follow up the exhibition introduction" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Due date" htmlFor="fu-date"><Input id="fu-date" name="date" type="date" required defaultValue={todayInDubai()} /></Field>
-            <Field label="Time (Dubai)" htmlFor="fu-time"><Input id="fu-time" name="time" type="time" defaultValue="09:00" /></Field>
+            <Field label="Due date" htmlFor="fu-date"><Input id="fu-date" name="date" type="date" required defaultValue={todayIn(timeZone)} /></Field>
+            <Field label={dueTimeLabel(timeZone)} htmlFor="fu-time"><Input id="fu-time" name="time" type="time" defaultValue="09:00" /></Field>
           </div>
           <Field label="Follow-up for" htmlFor="fu-assignee"><Select id="fu-assignee" name="assignedTo" defaultValue={defaultAssigneeId}>{people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select></Field>
         </ActionForm>
@@ -79,7 +80,7 @@ export function AddFollowUpButton({ inquiries, people, defaultAssigneeId }: { in
  * A dated follow-up on this account when it has no enquiry to hang one on. The person chosen must have Sales access for this company (the list holds only
  * them) and only someone with the assign owners right may choose anyone but themselves (`canAssign`; the database checks it again). The account owner is untouched.
  */
-export function AddAccountFollowUpButton({ orgId, companyId, people, currentUserId, canAssign }: { orgId: string; companyId: string; people: PersonOption[]; currentUserId: string; canAssign: boolean }) {
+export function AddAccountFollowUpButton({ orgId, companyId, people, currentUserId, canAssign, timeZone }: { orgId: string; companyId: string; people: PersonOption[]; currentUserId: string; canAssign: boolean; /** The Sales time zone of the selected company. */ timeZone: string }) {
   const [open, setOpen] = useState(false);
   const choices = canAssign ? people : people.filter((p) => p.id === currentUserId);
   return (
@@ -91,8 +92,8 @@ export function AddAccountFollowUpButton({ orgId, companyId, people, currentUser
           <input type="hidden" name="companyId" value={companyId} />
           <Field label="What to do" htmlFor="afu-title"><Input id="afu-title" name="title" required autoComplete="off" placeholder="e.g. Send our portfolio and ask for a meeting" /></Field>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Due date" htmlFor="afu-date"><Input id="afu-date" name="date" type="date" required defaultValue={todayInDubai()} /></Field>
-            <Field label="Time (Dubai)" htmlFor="afu-time"><Input id="afu-time" name="time" type="time" defaultValue="09:00" /></Field>
+            <Field label="Due date" htmlFor="afu-date"><Input id="afu-date" name="date" type="date" required defaultValue={todayIn(timeZone)} /></Field>
+            <Field label={dueTimeLabel(timeZone)} htmlFor="afu-time"><Input id="afu-time" name="time" type="time" defaultValue="09:00" /></Field>
           </div>
           <Field label="Follow-up for" htmlFor="afu-assignee" hint={canAssign ? "Only people with Sales access for this company are listed." : "Only a founder, or someone they delegated, can give a follow-up to someone else."}>
             <Select id="afu-assignee" name="assignedTo" defaultValue={currentUserId}>{choices.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</Select>

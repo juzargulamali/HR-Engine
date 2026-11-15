@@ -48,6 +48,7 @@ export async function EnquiryGuide({ view }: { view: OppView }) {
   const facts: GuideFacts = {
     stage: opp.stage, stageBeforeHold: opp.stage_before_hold, holdReason: opp.hold_reason, holdReviewDate: opp.hold_review_date, lostReason: opp.lost_reason, waitingOn: opp.waiting_on,
     firstResponseAt: opp.first_response_at,
+    timeZone: view.timeZone,
     followUps: followUpsFailed ? { failed: true } : { failed: false, next: next ? { title: next.title, dueAt: next.due_at, assigneeName: view.ctx.personName(next.assigned_to) } : null },
     sentProposal: marks ? (sentProposal ? { version: sentProposal.version, sentOn: sentProposal.sent_on } : null) : "unknown",
     sentEstimate: sendsFailed ? "unknown" : lastSend ? { reference: lastSend.reference, revision: lastSend.revision, sentOn: lastSend.sent_on } : null,
@@ -100,7 +101,7 @@ export async function EnquiryGuide({ view }: { view: OppView }) {
           </h2>
           <div className="mt-1.5 flex flex-wrap items-center gap-2">
             <OsBadge tone={BADGE[na.tone]} dot>{na.label}</OsBadge>
-            {hasNext ? <DueText dueAt={next.due_at} className="whitespace-normal text-sm" /> : null}
+            {hasNext ? <DueText dueAt={next.due_at} zone={view.timeZone} className="whitespace-normal text-sm" /> : null}
           </div>
           <p className="mt-1.5 break-words text-base font-semibold leading-snug">{na.title}</p>
           {na.detail ? <p className="mt-0.5 break-words text-sm text-muted-foreground">{hasNext ? <>For <span className="font-medium text-foreground">{na.detail}</span></> : na.detail}</p> : null}

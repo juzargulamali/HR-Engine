@@ -65,6 +65,8 @@ export const CRM_SOURCES: { id: string; label: string }[] = [
   { id: "instagram", label: "Instagram" },
   { id: "website", label: "Website enquiry" },
   { id: "referral", label: "Referral" },
+  // Raised from the Sales team's own outreach to an account (the Outreach section's "Create enquiry" chooses it; it can also be chosen by hand).
+  { id: "outreach", label: "Outreach" },
   { id: "other", label: "Other" },
 ];
 export const crmSourceLabel = (id: string) => CRM_SOURCES.find((s) => s.id === id)?.label ?? id;

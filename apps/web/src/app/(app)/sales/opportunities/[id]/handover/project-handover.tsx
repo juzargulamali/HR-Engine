@@ -12,8 +12,10 @@ import { createClient } from "@/lib/supabase/server";
 import type { ProjHandoverRow, ProjHandoverStatusRow } from "@/types/projects";
 import { Panel } from "../parts";
 import { HandoverReadiness } from "./handover-readiness";
-import { ProjectHandoverForm, WithdrawProjectHandoverForm, type BriefValues } from "./project-handover-forms";
+import { ProjectHandoverForm, WithdrawProjectHandoverForm, type BriefValues, type ContactChoice } from "./project-handover-forms";
 import { handoverReadiness } from "./readiness";
+import { loadHandoverParties } from "@/lib/projects/handover-parties-data";
+import type { HandoverParties } from "@/lib/projects/handover-parties";
 
 export interface ProjectHandoverState {
   installed: boolean;
@@ -21,6 +23,11 @@ export interface ProjectHandoverState {
   failed?: boolean;
   status: ProjHandoverStatusRow | null;
   row: ProjHandoverRow | null;
+  /**
+   * The agency and site contact of the saved brief. "none": the database does not record them yet (the page then reads as it did before, with no contact choice).
+   * "error": they could not be read, so the contact is neither shown nor changed. null: nothing is saved yet, or this person may not read the brief.
+   */
+  parties?: HandoverParties | "none" | "error" | null;
 }
 
 /** Reads the Projects handover for an opportunity. A missing table or function reads as "not installed"; any OTHER failure is `failed` (never "nothing prepared yet"). */
@@ -36,7 +43,12 @@ export async function loadProjectHandover(opportunityId: string): Promise<Projec
       console.error("[crm] project handover read failed", statusRes.error?.message ?? rowRes.error?.message);
       return { installed: true, failed: true, status: null, row: null };
     }
-    return { installed: true, status: statusRes.data?.[0] ?? null, row: (rowRes.data as ProjHandoverRow | null) ?? null };
+    const row = (rowRes.data as ProjHandoverRow | null) ?? null;
+    // With no saved brief there is nothing to read; the same function is asked about a handover that cannot exist, only to learn whether the database has it
+    // ("not found" = it does; "no such function" = it does not, and the page shows no contact choice).
+    const read = await loadHandoverParties(row?.id ?? "00000000-0000-0000-0000-000000000000");
+    const parties = read.status === "none" ? "none" as const : row ? (read.status === "ok" ? read.parties : "error" as const) : null;
+    return { installed: true, status: statusRes.data?.[0] ?? null, row, parties };
   } catch (e) {
     console.error("[crm] project handover read threw", e);
     return { installed: true, failed: true, status: null, row: null };
@@ -52,7 +64,11 @@ const NEXT: Record<string, string> = {
 };
 
 /** What the page knows about the enquiry that the brief does not carry: the linked event edition, how many contacts it has (null = could not be read) and its own open points. */
-export interface HandoverFacts { edition: string | null; contactCount: number | null; salesGaps?: readonly string[] }
+export interface HandoverFacts {
+  edition: string | null; contactCount: number | null; salesGaps?: readonly string[];
+  /** The enquiry's own end client and agency (names), and its linked contacts for the site contact choice (null = they could not be read). */
+  clientName?: string | null; agencyName?: string | null; contacts?: readonly ContactChoice[] | null;
+}
 
 /**
  * The Projects handover as Sales sees it, in the order the work happens: where it stands and who acts next, the project once it exists, whether it is ready and what it
@@ -79,11 +95,18 @@ export function ProjectHandoverPanel({
   }
   const { status, row } = state;
   const st = status?.status ?? null;
+  // The agency and the site contact are part of the page only when the database records them ("none" or absent = it does not: everything reads as before).
+  const withParties = state.parties !== undefined && state.parties !== "none";
+  const saved = state.parties && typeof state.parties === "object" ? state.parties : null;
+  const partiesFailed = state.parties === "error";
+  // The contact choice: the enquiry's linked contacts. Withheld (the saved choice is left as it is) when the contacts or the saved choice could not be read.
+  const choices = withParties && !partiesFailed && facts?.contacts ? facts.contacts : null;
   const editable = canEdit && (!st || ["draft", "submitted", "clarification_requested"].includes(st));
   const values: BriefValues = row
     ? {
         title: row.title, clientName: row.client_name ?? "", location: row.location ?? "", siteTimezone: row.site_timezone, installStart: row.install_start ?? "",
         eventStart: row.event_start ?? "", eventEnd: row.event_end ?? "", scope: row.scope ?? "", exclusions: row.exclusions ?? "", notes: row.notes ?? "", technologies: row.technologies, risks: (row.risks ?? []).filter((r): r is string => typeof r === "string"),
+        siteContactId: saved?.siteContact?.contactId ?? "",
       }
     : defaults;
   // Ready / what transfers: from the saved brief when there is one (that is what will be submitted), otherwise from the enquiry's facts the form opens with. Shown to
@@ -95,6 +118,12 @@ export function ProjectHandoverPanel({
         // A saved brief carries its own copy of the edition (taken by the database); before the first save the enquiry's linked edition is what will be copied.
         edition: row ? (row.edition_snapshot ? (row.edition_snapshot.label ?? row.edition_snapshot.event_name ?? "Edition without a name") : null) : (facts?.edition ?? null),
         contactCount: facts ? facts.contactCount : null, salesGaps: facts?.salesGaps,
+        // What the brief records (a saved one) or what it will take from the enquiry (a new one). A saved brief from before the agency was recorded takes it at the next save.
+        parties: withParties && !partiesFailed ? {
+          clientName: facts?.clientName ?? null,
+          agencyName: saved?.recorded ? saved.agencyName : (facts?.agencyName ?? null),
+          siteContact: saved?.siteContact ? { name: saved.siteContact.name, roleTitle: saved.siteContact.roleTitle } : null,
+        } : null,
       })
     : null;
   const projectHref = status?.project_id ? `/projects/${status.project_id}` : null;
@@ -136,7 +165,7 @@ export function ProjectHandoverPanel({
                 <summary className="cursor-pointer text-sm font-medium">{waiting ? "The brief, as the Project Manager sees it" : "Preview the saved brief, as the Project Manager will see it"}</summary>
                 <div className="mt-3 space-y-2">
                   <p className="text-sm"><span className="text-muted-foreground">Project name: </span><span className="break-words font-medium">{row.title}</span></p>
-                  <HandoverBrief h={row} />
+                  <HandoverBrief h={row} parties={withParties ? (partiesFailed ? "error" : saved ?? undefined) : undefined} />
                 </div>
               </details>
             ) : null}
@@ -145,11 +174,11 @@ export function ProjectHandoverPanel({
                 <summary className="cursor-pointer text-sm font-medium">Edit the submitted brief</summary>
                 <div className="mt-3 space-y-3">
                   <Muted>It is submitted and waiting. Changes you save are seen by whoever picks it up; nobody is notified again.</Muted>
-                  <ProjectHandoverForm key={`${row!.id}-${row!.version}`} opportunityId={opportunityId} version={row!.version} values={values} existing submitMode={null} />
+                  <ProjectHandoverForm key={`${row!.id}-${row!.version}`} opportunityId={opportunityId} version={row!.version} values={values} existing submitMode={null} contacts={choices} agencyName={withParties ? (facts?.agencyName ?? null) : undefined} contactsFailed={withParties && !choices} />
                 </div>
               </details>
             ) : (
-              <ProjectHandoverForm key={row ? `${row.id}-${row.version}` : "new"} opportunityId={opportunityId} version={row?.version ?? null} values={values} existing={Boolean(row)} submitMode={!st || st === "draft" ? "submit" : st === "clarification_requested" ? "resubmit" : null} />
+              <ProjectHandoverForm key={row ? `${row.id}-${row.version}` : "new"} opportunityId={opportunityId} version={row?.version ?? null} values={values} existing={Boolean(row)} submitMode={!st || st === "draft" ? "submit" : st === "clarification_requested" ? "resubmit" : null} contacts={choices} agencyName={withParties ? (facts?.agencyName ?? null) : undefined} contactsFailed={withParties && !choices} />
             )}
             {row ? <WithdrawProjectHandoverForm handoverId={row.id} opportunityId={opportunityId} /> : null}
           </>
@@ -158,7 +187,7 @@ export function ProjectHandoverPanel({
             <summary className="cursor-pointer text-sm font-medium">{st === "accepted" ? "The accepted brief (kept as agreed, read-only)" : "The brief, as the Project Manager sees it"}</summary>
             <div className="mt-3 space-y-2">
               <p className="text-sm"><span className="text-muted-foreground">Project name: </span><span className="break-words font-medium">{row.title}</span></p>
-              <HandoverBrief h={row} />
+              <HandoverBrief h={row} parties={withParties ? (partiesFailed ? "error" : saved ?? undefined) : undefined} />
             </div>
           </details>
         ) : st ? (

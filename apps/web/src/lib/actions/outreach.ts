@@ -97,6 +97,22 @@ export async function setOutreachStatus(_prev: ActionState, formData: FormData):
   return { error: null };
 }
 
+const contactSchema = z.object({ outreachId: uuid, contactId: z.preprocess((v) => (v === "" || v == null ? null : v), z.string().uuid("Choose one of the account's contacts.").nullable()) });
+
+/**
+ * The contact this outreach is with: one of the account's own contacts, or none. The database checks who may change the outreach and that the contact belongs to
+ * the account (crm_outreach_set_contact). It is what "Create enquiry" carries into the New enquiry form.
+ */
+export async function setOutreachContact(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const p = contactSchema.safeParse(Object.fromEntries(formData));
+  if (!p.success) return { error: firstIssue(p.error) };
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("crm_outreach_set_contact", { p_outreach: p.data.outreachId, p_contact: p.data.contactId });
+  if (error) return fail(/could not find the function|schema cache/i.test(error.message) ? "Choosing a contact for an outreach is not available in this environment yet. Nothing was changed." : error.message);
+  refresh();
+  return { error: null };
+}
+
 const linkSchema = z.object({ outreachId: uuid, opportunityId: z.string().uuid("Choose the enquiry to link.") });
 
 /** Link an existing enquiry of this account: sets Enquiry raised. Creates nothing. */

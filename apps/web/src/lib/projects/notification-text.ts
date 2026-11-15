@@ -143,6 +143,11 @@ export function describeNotification(type: string, payload: Record<string, unkno
       return { text: `Sales flagged ${str(payload.reference) ?? "an enquiry"} for Operations planning`, href: "/operations/upcoming" };
     case "project_ops_sales_answered":
       return { text: `Sales answered your question on ${str(payload.reference) ?? "an enquiry"}`, href: "/operations/upcoming" };
+    // To Sales (the enquiry's owner, or the Sales founders when the owner cannot act): Operations asked a question. It opens the question on the enquiry.
+    case "project_ops_question": {
+      const oid = str(payload.opportunity_id);
+      return { text: `Operations asked a question on ${str(payload.reference) ?? "an enquiry"}`, href: oid ? `/sales/opportunities/${oid}?tab=overview#ops-question` : null };
+    }
     case "project_reopened":
       return { text: `${project} was reopened.`, href: projectLink };
     default:

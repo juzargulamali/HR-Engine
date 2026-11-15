@@ -6,6 +6,8 @@ import type { CrmOpportunityRow } from "@/types/crm";
 import { OpsAnswerForm, OpsPlanningButton, RemoveOpsPlanningButton, type OpsPlanningValues } from "./ops-planning-forms";
 import { Fact, Muted, Panel, SubHeading } from "./parts";
 import type { OppView } from "./view";
+import { AnchorTarget } from "@/components/sales/scroll-to-anchor";
+import { OPS_QUESTION_ANCHOR } from "@/lib/crm/ops-question";
 
 const NOT_SET = <span className="text-muted-foreground">Not recorded</span>;
 const RISK_BADGE = { unknown: "outline", low: "secondary", medium: "warning", high: "destructive" } as const;
@@ -79,7 +81,8 @@ export function OpsPlanningPanel({ opp, canEdit, read }: { opp: OpsOpp; canEdit:
                 {planning.capacityNote ? <span className="mt-1 block whitespace-pre-wrap">{planning.capacityNote}</span> : null}
               </Fact>
             </dl>
-            <div>
+            {/* The "Operations asked a question" notice opens the enquiry here (#ops-question on the Overview tab). */}
+            <AnchorTarget id={OPS_QUESTION_ANCHOR} className="scroll-mt-24 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
               {/* The same words Operations sees on its side of this exchange ("Question for Sales", "Sales answered"), so both read one conversation. */}
               <p className="text-sm text-muted-foreground">Question for Sales</p>
               {planning.question ? (
@@ -97,7 +100,7 @@ export function OpsPlanningPanel({ opp, canEdit, read }: { opp: OpsOpp; canEdit:
                   {canEdit && !lost ? <OpsAnswerForm {...target} current={planning.answer} /> : !planning.answer && !lost ? <Muted>Only the owner of this enquiry or a Sales founder can answer.</Muted> : null}
                 </div>
               ) : <Muted className="mt-1">Operations has not asked anything.</Muted>}
-            </div>
+            </AnchorTarget>
           </div>
         )}
       </div>

@@ -1,4 +1,4 @@
-import { CRM_SOURCES } from "@enginious-hr/domain";
+import { CRM_SOURCES, CRM_TIME_ZONE, timeZoneCity } from "@enginious-hr/domain";
 import type { ActiveCompanySource } from "@/lib/crm/active-company";
 import { hasRoleFor } from "@/lib/crm/organisation-roles";
 
@@ -17,7 +17,12 @@ export type NextKind = (typeof NEXT_KINDS)[number][0];
 export const CURRENCY_SUGGESTIONS = ["AED", "SAR", "EUR", "USD", "GBP"];
 export const DEFAULT_NEXT_TIME = "10:00";
 export const DEFAULT_NEXT_KIND: NextKind = "call";
-/** Every Sales due time is a Dubai wall-clock time (the server converts it), whichever company the enquiry is for. */
+/**
+ * The label of the next action's time field. The time is typed on the clock of the company the enquiry is for (its Sales time zone; the server converts it with
+ * that same zone), so the label names that place and follows the company chosen in the form. With no company chosen yet it reads "Time".
+ */
+export const dueTimeLabelFor = (company: { timeZone?: string } | null | undefined): string => (company ? `Time (${timeZoneCity(company.timeZone ?? CRM_TIME_ZONE)})` : "Time");
+/** Kept for callers that name no company: the reference zone. */
 export const DUE_TIME_LABEL = "Time (Dubai)";
 
 export const ENQUIRY_LABELS = {

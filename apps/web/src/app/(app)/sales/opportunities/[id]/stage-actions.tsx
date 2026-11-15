@@ -11,7 +11,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Modal } from "@/components/sales/modal";
-import { todayInDubai } from "@/components/sales/format";
+import { todayIn, todayInDubai } from "@/components/sales/format";
+import { dueTimeLabel } from "@/lib/crm/time-zone";
 import { composeReason, OTHER_HOLD_REASON, OTHER_LOST_REASON } from "./helpers";
 
 export interface MoveOption {
@@ -124,10 +125,10 @@ export function HoldButton(p: HoldProps) {
   );
 }
 
-export interface ResumeProps { opportunityId: string; version: number; returnsTo: string | null }
+export interface ResumeProps { opportunityId: string; version: number; returnsTo: string | null; /** The Sales time zone of the enquiry's company: the clock the next action is typed on. */ timeZone: string }
 
 /** Controlled dialog. Resuming still needs the next action. */
-export function ResumeDialog({ open, onClose, opportunityId, version, returnsTo }: ResumeProps & { open: boolean; onClose: () => void }) {
+export function ResumeDialog({ open, onClose, opportunityId, version, returnsTo, timeZone }: ResumeProps & { open: boolean; onClose: () => void }) {
   return (
     <Modal open={open} onClose={onClose} title="Resume this opportunity" description={`It goes back to ${returnsTo ? crmStageLabel(returnsTo) : "its earlier stage"}. An active opportunity always needs a next action.`}>
       <ActionForm action={resumeOpportunity} submitLabel="Resume" onDone={onClose} secondary={<Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>}>
@@ -135,8 +136,8 @@ export function ResumeDialog({ open, onClose, opportunityId, version, returnsTo 
         <input type="hidden" name="expectedVersion" value={version} />
         <Field label="Next action" htmlFor="resume-title"><Input id="resume-title" name="nextTitle" required placeholder="e.g. Call to confirm the new dates" /></Field>
         <div className="grid gap-3 sm:grid-cols-3">
-          <Field label="Date" htmlFor="resume-date"><Input id="resume-date" name="nextDate" type="date" required min={todayInDubai()} /></Field>
-          <Field label="Time (Dubai)" htmlFor="resume-time"><Input id="resume-time" name="nextTime" type="time" defaultValue="10:00" /></Field>
+          <Field label="Date" htmlFor="resume-date"><Input id="resume-date" name="nextDate" type="date" required min={todayIn(timeZone)} /></Field>
+          <Field label={dueTimeLabel(timeZone)} htmlFor="resume-time"><Input id="resume-time" name="nextTime" type="time" defaultValue="10:00" /></Field>
           <Field label="Type" htmlFor="resume-kind">
             <Select id="resume-kind" name="nextKind" defaultValue="call">{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
           </Field>

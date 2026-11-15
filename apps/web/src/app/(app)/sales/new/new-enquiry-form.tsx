@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, TriangleAlert, X } from "lucide-react";
+import { keepFormOnLostAnswer, useSubmissionKey } from "@/components/sales/use-submission-key";
 import { CRM_SOURCES, crmStageLabel, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import type { ActionState } from "@/lib/actions/companies";
@@ -31,7 +32,7 @@ import {
 } from "../clients/entity-dialogs";
 import { parseTechnologyRows, type TechnologyRow } from "./technologies";
 import {
-  CARRY_KEY, CURRENCY_SUGGESTIONS, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, DUE_TIME_LABEL, ENQUIRY_HELP, ENQUIRY_LABELS, NEXT_KINDS, currencyNote, enquiryBlockedReason, hasPrefill,
+  CARRY_KEY, CURRENCY_SUGGESTIONS, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, dueTimeLabelFor, ENQUIRY_HELP, ENQUIRY_LABELS, NEXT_KINDS, currencyNote, enquiryBlockedReason, hasPrefill,
   readCarried, resolveCurrency, startingCompanyId, type CurrencyState, type EnquiryPrefill,
 } from "./enquiry-form-shared";
 
@@ -46,6 +47,9 @@ export interface EnquiryCompany {
   /** May open Settings to set the company up (manage_settings or founder). */
   canOpenSettings: boolean;
   people: { id: string; name: string }[];
+  /** The company's Sales time zone (the clock the next action is typed on) and today's date on that clock. Absent = Asia/Dubai and the page's own `today`. */
+  timeZone?: string;
+  today?: string;
 }
 
 export interface EnquiryOrganisation {
@@ -297,7 +301,8 @@ export function NewEnquiryForm({
   /** The names of address parameters that were not used (an id the person may not use, a malformed value). */
   prefillIgnored?: readonly string[];
 }) {
-  const [state, formAction, pending] = useActionState(createOpportunity, initialState);
+  const [state, formAction, pending] = useActionState(keepFormOnLostAnswer(createOpportunity), initialState);
+  const submissionKey = useSubmissionKey();
   const [clientError, setClientError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   // A second click or Enter while the first save is on its way must not send the enquiry twice. `pending` only changes with the next render, so the lock is a
@@ -441,6 +446,8 @@ export function NewEnquiryForm({
     <>
       <form onSubmit={onSubmit} className="grid gap-6 lg:grid-cols-3">
         {prefill?.outreachId ? <input type="hidden" name="outreachId" value={prefill.outreachId} /> : null}
+        {/* One identifier for this opened form: saving it again (after a lost answer) returns the enquiry already saved instead of making a second one. */}
+        {submissionKey ? <input type="hidden" name="submissionKey" value={submissionKey} /> : null}
         <div className="min-w-0 space-y-6 lg:col-span-2">
           {prefill?.outreachId ? (
             <Alert role="status" data-testid="enquiry-carried-over"><strong>Carried over from outreach: check before saving.</strong> The account, the company and anything else below came from the outreach. Saving links this enquiry to that outreach.</Alert>
@@ -524,9 +531,9 @@ export function NewEnquiryForm({
             </Field>
             <div className="grid gap-4 sm:grid-cols-3">
               <Field label="Date" htmlFor="enq-next-date">
-                <Input id="enq-next-date" name="nextDate" type="date" required min={today} defaultValue={prefill?.nextDate || today} />
+                <Input id="enq-next-date" name="nextDate" type="date" required min={company?.today ?? today} defaultValue={prefill?.nextDate || today} />
               </Field>
-              <Field label={DUE_TIME_LABEL} htmlFor="enq-next-time">
+              <Field label={dueTimeLabelFor(company)} htmlFor="enq-next-time">
                 <Input id="enq-next-time" name="nextTime" type="time" defaultValue={prefill?.nextTime || DEFAULT_NEXT_TIME} />
               </Field>
               <Field label="Type" htmlFor="enq-next-kind">

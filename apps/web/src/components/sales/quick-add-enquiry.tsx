@@ -1,10 +1,10 @@
-import { canAssignOwner, canManageCrmSettings, isCrmFounder } from "@enginious-hr/domain";
+import { canAssignOwner, canManageCrmSettings, companyTimeZone, isCrmFounder } from "@enginious-hr/domain";
 import { pickSalesCompany } from "@/lib/crm/active-company-server";
 import { getCrmContext } from "@/lib/crm/context";
 import { loadOrganisations } from "@/lib/crm/data";
 import { loadEditionPicker, type EditionOption } from "@/lib/crm/events/data";
 import type { EventChoice } from "@/lib/crm/events/model";
-import { todayInDubai } from "./format";
+import { todayIn, todayInDubai } from "./format";
 import { QuickAddEnquiryForm } from "./quick-add-enquiry-form";
 
 /**
@@ -43,6 +43,7 @@ export async function QuickAddEnquiry({ companyId }: { companyId?: string | null
         canAssignOwner: canAssignOwner(ctx.grants, c.id),
         canOpenSettings: isCrmFounder(ctx.grants, c.id) || canManageCrmSettings(ctx.grants, c.id),
         people: ctx.people.filter((p) => p.companyIds.includes(c.id)).map((p) => ({ id: p.id, name: p.name })),
+    timeZone: companyTimeZone(c.settings), today: todayIn(companyTimeZone(c.settings)),
       }))}
       organisations={organisations.map((o) => ({ id: o.id, name: o.name, kind: o.kind, roles: o.roles, place: o.place, country: o.country_code, website: o.website }))}
       editions={editions}

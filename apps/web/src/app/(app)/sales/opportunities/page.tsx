@@ -2,7 +2,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
-import { CRM_RETIRED_STAGES, CRM_STAGES, crmSourceLabel, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
+import { CRM_RETIRED_STAGES, CRM_STAGES, CRM_TIME_ZONE, crmSourceLabel, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -267,7 +267,7 @@ function BoardView({ rows, stages, ctx, here, evidence }: { rows: EnquiryListIte
     const canEdit = canEditOpportunity(ctx.grants, { companyId: i.opp.company_id, ownerId: i.opp.owner_id }, ctx.userId);
     const targets = boardMoveTargets({ stage: i.opp.stage, stageBeforeHold: i.opp.stage_before_hold, canEdit, ownerName: i.ownerName });
     meta[i.opp.id] = {
-      stage: i.opp.stage, version: i.opp.version, stageBeforeHold: i.opp.stage_before_hold,
+      stage: i.opp.stage, version: i.opp.version, stageBeforeHold: i.opp.stage_before_hold, timeZone: i.timeZone ?? CRM_TIME_ZONE,
       valueText: formatMoney(i.value, i.opp.currency), hasValue: i.value != null, openFollowUps: i.openFollowUps,
       evidence: evidence?.[i.opp.id] ?? null,
     };
@@ -308,7 +308,7 @@ function NextAction({ item: i }: { item: EnquiryListItem }) {
     return (
       <>
         <span className="block break-words font-medium" title={i.nextFollowUp.title}>{i.nextFollowUp.title}</span>
-        <DueText dueAt={i.nextFollowUp.due_at} className="block whitespace-normal text-sm" />
+        <DueText dueAt={i.nextFollowUp.due_at} zone={i.timeZone ?? CRM_TIME_ZONE} className="block whitespace-normal text-sm" />
       </>
     );
   }
@@ -393,7 +393,7 @@ function Cell({ column, item: i, href }: { column: EnquiryColumn; item: EnquiryL
     case "owner": return <>{i.ownerName}</>;
     case "stage": return <StageBadge stage={i.opp.stage} />;
     case "next": return <NextAction item={i} />;
-    case "due": return i.nextFollowUp ? <DueText dueAt={i.nextFollowUp.due_at} className="whitespace-normal" /> : <span className="text-muted-foreground">—</span>;
+    case "due": return i.nextFollowUp ? <DueText dueAt={i.nextFollowUp.due_at} zone={i.timeZone ?? CRM_TIME_ZONE} className="whitespace-normal" /> : <span className="text-muted-foreground">—</span>;
     case "dates": {
       const d = installOrShowDate(i.opp);
       return d ? <span className="whitespace-nowrap">{formatDate(d)}<span className="block text-sm text-muted-foreground">{i.opp.install_start ? "Installation" : "Show"}</span></span> : <span className="text-muted-foreground">—</span>;

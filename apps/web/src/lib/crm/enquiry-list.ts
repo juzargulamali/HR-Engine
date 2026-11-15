@@ -156,11 +156,12 @@ export const ENQUIRY_NEEDS: readonly { id: EnquiryNeed; label: string; tone: "re
 ];
 export const parseNeed = (v: string): EnquiryNeed | "" => (ENQUIRY_NEEDS.some((n) => n.id === v) ? (v as EnquiryNeed) : "");
 
-type NeedInput = { opp: { stage: string; first_response_at: string | null }; nextFollowUp: { due_at: string } | null; openFollowUps: number };
+/** `timeZone` is the Sales time zone of the enquiry's company (the list loaders set it): "due today" is that company's calendar day. Dubai when absent. */
+type NeedInput = { opp: { stage: string; first_response_at: string | null }; nextFollowUp: { due_at: string } | null; openFollowUps: number; timeZone?: string };
 export function enquiryNeeds(i: NeedInput, now: Date = new Date()): EnquiryNeed[] {
   const out: EnquiryNeed[] = [];
   if (i.nextFollowUp && isCrmOpen(i.opp.stage)) {
-    const t = followUpTiming(i.nextFollowUp.due_at, now);
+    const t = followUpTiming(i.nextFollowUp.due_at, now, i.timeZone);
     if (t === "overdue") out.push("overdue");
     else if (t === "due_today") out.push("due_today");
   }

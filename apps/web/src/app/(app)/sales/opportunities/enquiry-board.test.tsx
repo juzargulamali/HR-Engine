@@ -20,7 +20,7 @@ afterEach(() => { cleanup(); moveStage.mockReset(); });
 const columns = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"].map((id) => ({ id, label: id }));
 const none = { hasSentProposal: false, hasQuoteRef: false };
 const show = (evidence: BoardMeta["evidence"]) => {
-  const meta: Record<string, BoardMeta> = { e1: { stage: "proposal_prep", version: 4, stageBeforeHold: null, valueText: "AED 100", hasValue: true, openFollowUps: 1, evidence } };
+  const meta: Record<string, BoardMeta> = { e1: { stage: "proposal_prep", version: 4, stageBeforeHold: null, timeZone: "Asia/Dubai", valueText: "AED 100", hasValue: true, openFollowUps: 1, evidence } };
   const items = [{ id: "e1", columnId: "proposal_prep", title: "Fictional roadshow room", card: <span>Fictional roadshow room</span>, moveTo: ["qualified", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] }];
   render(<EnquiryBoard columns={columns} items={items} meta={meta} />);
 };

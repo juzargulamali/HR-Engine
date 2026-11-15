@@ -27,7 +27,12 @@ export interface BriefValues {
   technologies: { name: string; qty: number }[];
   /** Unresolved risks, one per line when edited. Carried over from the enquiry on a new brief. */
   risks?: string[];
+  /** The contact chosen as the site contact (one of the enquiry's contacts), or "" for none. */
+  siteContactId?: string;
 }
+
+/** One of the enquiry's linked contacts, offered as the site contact. */
+export interface ContactChoice { id: string; name: string; roleTitle: string | null; organisation: string | null }
 
 interface Row { key: number; name: string; qty: string }
 
@@ -64,7 +69,15 @@ function Technologies({ initial }: { initial: { name: string; qty: number }[] })
  * it back to the Project Manager after a question; with neither (already submitted, or the Project Manager has it) it only saves, as before. "Save draft"
  * is always there beside it and never submits.
  */
-export function ProjectHandoverForm({ opportunityId, version, values, existing, submitMode = null }: { opportunityId: string; version: number | null; values: BriefValues; existing: boolean; submitMode?: "submit" | "resubmit" | null }) {
+export function ProjectHandoverForm({ opportunityId, version, values, existing, submitMode = null, contacts = null, agencyName, contactsFailed = false }: {
+  opportunityId: string; version: number | null; values: BriefValues; existing: boolean; submitMode?: "submit" | "resubmit" | null;
+  /** The enquiry's contacts to choose the site contact from. null = no choice is offered (the database does not record one yet, or they could not be read): nothing is sent, so the saved choice stays. */
+  contacts?: readonly ContactChoice[] | null;
+  /** The enquiry's agency (null = a direct job). Left out (undefined) on a database that does not record it: the line is then not shown. */
+  agencyName?: string | null;
+  /** True when a choice should have been offered but the contacts or the saved choice could not be read. */
+  contactsFailed?: boolean;
+}) {
   const combined = submitMode !== null;
   return (
     <ActionForm
@@ -85,6 +98,13 @@ export function ProjectHandoverForm({ opportunityId, version, values, existing, 
       <Field label="Exclusions" htmlFor="ph-excl"><Textarea id="ph-excl" name="exclusions" rows={3} defaultValue={values.exclusions} /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Client" htmlFor="ph-client" hint={existing ? undefined : "Leave blank to use the client or agency name from the opportunity."}><Input id="ph-client" name="clientName" defaultValue={values.clientName} /></Field>
+        {agencyName !== undefined ? (
+          <div className="sm:col-span-2" data-testid="handover-agency">
+            <p className="text-sm font-medium">Agency</p>
+            <p className="mt-1 text-sm">{agencyName ?? "None: a direct job"}</p>
+            <p className="mt-1 text-sm text-muted-foreground">Taken from the enquiry when you save and again when you submit. If it is wrong, correct the agency on the enquiry first: it is not typed here.</p>
+          </div>
+        ) : null}
         <Field label="Location" htmlFor="ph-location"><Input id="ph-location" name="location" defaultValue={values.location} /></Field>
         <Field label="Installation starts" htmlFor="ph-install"><Input id="ph-install" name="installStart" type="date" defaultValue={values.installStart} /></Field>
         <div className="grid grid-cols-2 gap-3">
@@ -101,7 +121,18 @@ export function ProjectHandoverForm({ opportunityId, version, values, existing, 
       <Field label="Risks" htmlFor="ph-risks" hint="One per line." help="Carried over from the enquiry. The Project Manager sees what you leave here.">
         <Textarea id="ph-risks" name="risks" rows={3} defaultValue={(values.risks ?? []).filter((r): r is string => typeof r === "string").join("\n")} />
       </Field>
-      <Field label="Notes for the Project Manager" htmlFor="ph-notes" hint="Site access, the site contact, client preferences, open questions.">
+      {contacts ? (
+        <Field label="Site contact" htmlFor="ph-contact" hint={contacts.length === 0 ? "This enquiry has no contacts linked. Add the person under Contacts on the enquiry, then choose them here." : "Optional. One of this enquiry's contacts: the person the Project Manager calls on site."}
+          help="Their name, role, phone and e-mail are copied onto the brief when you submit, and shown on the project to the Project Manager and Operations. A later change to the contact in Sales does not change an accepted project.">
+          <Select id="ph-contact" name="siteContactId" defaultValue={contacts.some((c) => c.id === values.siteContactId) ? values.siteContactId : ""}>
+            <option value="">No site contact</option>
+            {contacts.map((c) => <option key={c.id} value={c.id}>{[c.name, c.roleTitle, c.organisation].filter(Boolean).join(" · ")}</option>)}
+          </Select>
+        </Field>
+      ) : contactsFailed ? (
+        <p role="alert" className="text-sm text-destructive" data-testid="handover-contact-unavailable">Could not load the contacts to choose a site contact from. The saved choice is left as it is; reload to change it.</p>
+      ) : null}
+      <Field label="Notes for the Project Manager" htmlFor="ph-notes" hint={contacts ? "Site access, client preferences, open questions." : "Site access, the site contact, client preferences, open questions."}>
         <Textarea id="ph-notes" name="notes" rows={3} defaultValue={values.notes} />
       </Field>
       {/* The consequence of the main button stays visible: who is told, and that a refused submission still keeps the draft. */}

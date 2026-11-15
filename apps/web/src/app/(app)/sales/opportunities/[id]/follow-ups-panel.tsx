@@ -30,7 +30,7 @@ export function FollowUpsPanel({ view, withLog = false }: { view: OppView; withL
       actions={isOpen || (withLog && !isLost) ? (
         <>
           {withLog && !isLost ? <LogActivityButton opportunityId={opp.id} {...planNextProps(planNextInput(view))} /> : null}
-          {isOpen ? <NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} /> : null}
+          {isOpen ? <NewFollowUpButton opportunityId={opp.id} people={view.people} canAssign={view.canEdit || view.canAssign} currentUserId={ctx.userId} timeZone={view.timeZone} /> : null}
         </>
       ) : undefined}
     >
@@ -47,12 +47,12 @@ export function FollowUpsPanel({ view, withLog = false }: { view: OppView; withL
                   <p className="min-w-0 break-words text-sm font-medium">{f.title}</p>
                   <Badge variant="outline">{KIND_LABEL[f.kind]}</Badge>
                 </div>
-                <p className="text-sm text-muted-foreground"><DueText dueAt={f.due_at} /> · assigned to {ctx.personName(f.assigned_to)}</p>
+                <p className="text-sm text-muted-foreground"><DueText dueAt={f.due_at} zone={view.timeZone} /> · assigned to {ctx.personName(f.assigned_to)}</p>
                 {mine ? (
                   <div className="flex flex-wrap gap-1.5">
-                    <CompleteFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id, isOnlyOpen: onlyOpen }} />
-                    <RescheduleFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id }} />
-                    {onlyOpen ? null : <CancelFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id }} />}
+                    <CompleteFollowUpButton followUp={{ id: f.id, title: f.title, kind: f.kind, opportunityId: opp.id, isOnlyOpen: onlyOpen, timeZone: view.timeZone }} />
+                    <RescheduleFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id, dueAt: f.due_at, timeZone: view.timeZone }} />
+                    {onlyOpen ? null : <CancelFollowUpButton followUp={{ id: f.id, title: f.title, opportunityId: opp.id, timeZone: view.timeZone }} />}
                   </div>
                 ) : <p className="text-sm text-muted-foreground">Only the assignee, the owner or a founder can change this.</p>}
                 {onlyOpen && mine ? <p className="text-sm text-muted-foreground">This is the only next action. Completing it asks for the next one, or to put the opportunity on hold.</p> : null}

@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { keepFormOnLostAnswer, useSubmissionKey } from "./use-submission-key";
 import { CRM_SOURCES, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import type { ActionState } from "@/lib/actions/companies";
@@ -19,7 +20,7 @@ import {
   CompanyField, CurrencyField, DuplicateWarning, EventEditionPicker, NoSettingsAlert, OrganisationPicker, SavingToLine, type EnquiryCompany, type EnquiryOrganisation,
 } from "@/app/(app)/sales/new/new-enquiry-form";
 import {
-  CARRY_KEY, ADDRESS_TEXT_MAX, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, DUE_TIME_LABEL, ENQUIRY_HELP, ENQUIRY_LABELS, enquiryBlockedReason, fullFormHandOff, resolveCurrency, startingCompanyId,
+  CARRY_KEY, ADDRESS_TEXT_MAX, DEFAULT_NEXT_KIND, DEFAULT_NEXT_TIME, dueTimeLabelFor, ENQUIRY_HELP, ENQUIRY_LABELS, enquiryBlockedReason, fullFormHandOff, resolveCurrency, startingCompanyId,
 } from "@/app/(app)/sales/new/enquiry-form-shared";
 import type { ActiveCompanySource } from "@/lib/crm/active-company";
 import type { EditionOption } from "@/lib/crm/events/data";
@@ -59,6 +60,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   const company = companies.find((c) => c.id === companyId) ?? null;
   const [agencyId, setAgencyId] = useState("");
   const [clientId, setClientId] = useState("");
+  const submissionKey = useSubmissionKey();
   // An event or edition added from this form is offered (and chosen) straight away; the enquiry itself is saved only by its own button.
   const { allEditions: editions, allEvents: events, add: addEdition } = useCreatedEditions(serverEditions, serverEvents);
   const [eventDialog, setEventDialog] = useState<{ name: string } | null>(null);
@@ -107,7 +109,7 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
   // The same checks, in the same words, as the full form, answered before anything is sent. The server and the database check again.
   const save = async (prev: ActionState, formData: FormData): Promise<ActionState> => {
     const blockedBy = enquiryBlockedReason({ company, agencyId, clientId, techError: tech.error });
-    return blockedBy ? { error: blockedBy } : createOpportunity(prev, formData);
+    return blockedBy ? { error: blockedBy } : keepFormOnLostAnswer(createOpportunity)(prev, formData);
   };
 
   // "Open the full form" keeps everything typed here. Short values travel in the address; a long brief and the technologies wait in this browser tab.
@@ -145,6 +147,8 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
       <ActionForm action={save} submitLabel="Add enquiry" pendingLabel="Adding…" onDone={close} disabled={!company || !company.hasSettings}
         secondary={<button type="button" onClick={openFullForm} className="mr-auto rounded-md text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" title="Opens the full form with everything you have typed here">Open the full form</button>}>
         <input type="hidden" name="after" value="panel" />
+        {/* One identifier for this opened dialog: saving it again (after a lost answer) returns the enquiry already saved instead of making a second one. */}
+        {submissionKey ? <input type="hidden" name="submissionKey" value={submissionKey} /> : null}
         <input type="hidden" name="returnTo" value={here} />
         <input type="hidden" name="nextKind" value={DEFAULT_NEXT_KIND} />
         <CompanyField id="qa-company" companies={companies} value={companyId} onChange={setCompanyId} from={activeCompany?.from} />
@@ -178,9 +182,9 @@ function QuickForm({ companies, organisations: serverOrganisations, editions: se
               <Input id="qa-next" name="nextTitle" required maxLength={200} placeholder="e.g. Call to qualify the brief" />
             </Field>
             <Field label="Due" htmlFor="qa-due">
-              <Input id="qa-due" name="nextDate" type="date" required min={today} defaultValue={today} />
+              <Input id="qa-due" name="nextDate" type="date" required min={company?.today ?? today} defaultValue={today} />
             </Field>
-            <Field label={DUE_TIME_LABEL} htmlFor="qa-time">
+            <Field label={dueTimeLabelFor(company)} htmlFor="qa-time">
               <Input id="qa-time" name="nextTime" type="time" defaultValue={DEFAULT_NEXT_TIME} />
             </Field>
           </div>

@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "@/lib/crm/time-zone";
 import Link from "next/link";
 import { AlarmClock, Bell, CalendarClock, CalendarDays } from "lucide-react";
 import { canActOnAccountFollowUp, canActOnFollowUp, isCrmActive } from "@enginious-hr/domain";
@@ -11,8 +12,10 @@ import { PageHeader } from "@/components/projects/parts";
 import { DueText } from "@/components/sales/badges";
 import { CompanySwitch } from "@/components/sales/company-switch";
 import { FollowUpRowActions } from "@/components/sales/follow-up-row-actions";
-import { formatDate, formatDateTime } from "@/components/sales/format";
+import { formatDate, formatDateTime, formatDue } from "@/components/sales/format";
 import { HandoverAttention } from "@/components/sales/handover-attention";
+import { OpsQuestionAttention } from "@/components/sales/ops-question-attention";
+import { loadOpsQuestionNotices } from "@/lib/crm/ops-question-data";
 import { QuickAddEnquiry } from "@/components/sales/quick-add-enquiry";
 import { ClickableRow } from "@/components/workspace/clickable-row";
 import { RememberList } from "@/components/workspace/list-memory";
@@ -107,6 +110,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
 
   // The handover rows (won without a submitted handover, the PM's question, accepted). Never throws: a failed read is its own message on the card.
   const handover = await loadHandoverRows(ctx, opportunities);
+  // Questions Operations asked on the person's enquiries (their own unread notices). Never throws: a failed read is its own message on the card.
+  const opsQuestions = await loadOpsQuestionNotices(ctx);
 
   // "Only open" must be judged on every open follow-up the person can see, not just the filtered ones.
   const openByOpp = new Map<string, number>();
@@ -123,7 +128,9 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   const focusItem = focusId ? (loaded.open.find((f) => f.followUp.id === focusId) ?? null) : null;
   const focusDone = focusId && !focusItem ? (loaded.done.find((f) => f.followUp.id === focusId) ?? null) : null;
   const focusOutside = !!focusItem && !inScope(focusItem);
-  const groups = groupOpenFollowUps(loaded.open.filter((f) => inScope(f) || f === focusItem));
+  // Each follow-up is judged and shown on the clock of its own company (lib/crm/time-zone.ts): "today" is that company's calendar day.
+  const zoneOf = zoneOfCompanies(ctx.companies);
+  const groups = groupOpenFollowUps(loaded.open.filter((f) => inScope(f) || f === focusItem), new Date(), zoneOf);
   const focusGroup = focusItem ? (GROUPS.find((g) => groups[g].includes(focusItem)) ?? null) : null;
   // A link made earlier can name a group the follow-up has since left (due today then, overdue now): show the whole list rather than hide the row.
   const group: Group | null = askedGroup && focusGroup && focusGroup !== askedGroup ? null : askedGroup;
@@ -137,7 +144,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   }).filter((c) => !companyId || c.reminder.company_id === companyId);
   const openById = new Map(loaded.open.map((f) => [f.followUp.id, f]));
   const oppById = new Map(opportunities.map((o) => [o.opp.id, o]));
-  const needs = attentionItems({ opportunities: companyId ? opportunities.filter((o) => o.opp.company_id === companyId) : opportunities, followUps: loaded.open, userId: ctx.userId, scope: who })
+  const needs = attentionItems({ opportunities: companyId ? opportunities.filter((o) => o.opp.company_id === companyId) : opportunities, followUps: loaded.open, zoneOf, userId: ctx.userId, scope: who })
     .filter((a) => a.kind !== "overdue" && a.kind !== "due_today");
   // The person's own open follow-ups that a company filter is hiding: said in words, with the way to see them.
   const mineElsewhere = companyId ? loaded.open.filter((f) => f.followUp.assigned_to === ctx.userId && f.followUp.company_id !== companyId).length : 0;
@@ -223,7 +230,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                       {r.opportunity_id ? <PanelLink href={open(r.opportunity_id)} className="text-muted-foreground underline underline-offset-2 hover:text-foreground">{o ? `${o.opp.reference} · ${o.opp.title}` : "Open enquiry"}</PanelLink> : null}
                     </div>
                     <div className="flex items-center gap-2">
-                      {f ? <DueText dueAt={f.followUp.due_at} className="text-sm" /> : <span className="text-sm text-muted-foreground">{formatDateTime(r.due_at ?? r.created_at)}</span>}
+                      {f ? <DueText dueAt={f.followUp.due_at} zone={zoneOf(f.followUp.company_id)} className="text-sm" /> : <span className="text-sm text-muted-foreground">{r.due_at ? formatDue(r.due_at, zoneOf(r.company_id)) : formatDateTime(r.created_at)}</span>}
                       <MarkRemindersReadButton reminderIds={c.ids} label="Dismiss" about={r.title} />
                     </div>
                   </li>
@@ -233,6 +240,8 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
           </CardContent>
         </Card>
       ) : null}
+
+      {wholeList ? <OpsQuestionAttention check={opsQuestions} /> : null}
 
       {wholeList ? <HandoverAttention check={handover} /> : null}
 
@@ -285,7 +294,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
             <section key={g} aria-labelledby={`g-${g}`}>
               <h2 id={`g-${g}`} className={cn("mb-2 text-sm font-semibold", g === "overdue" && "text-destructive")}>{GROUP_LABEL[g]} <span className="font-normal text-muted-foreground">({groups[g].length})</span>
                 {/* Once, on the first group (not in the column heading: later groups hide theirs, and a hidden heading must not hold a button). */}
-                {index === 0 ? <InfoHint label="Due dates and times" className="ml-1">Due shows the exact date and time, in Dubai time. Overdue means that time has passed; due today means it is still to come today. Complete records what happened and plans the next action; Reschedule only moves the due time.</InfoHint> : null}
+                {index === 0 ? <InfoHint label="Due dates and times" className="ml-1">Due shows the exact date and time on the clock of the company the follow-up belongs to; the place is written after the time. Overdue means that time has passed; due today means it is still to come today. Complete records what happened and plans the next action; Reschedule only moves the due time.</InfoHint> : null}
               </h2>
               <Table className={cn("min-w-[58rem] md:table-fixed", listTable, index > 0 && "md:[&_thead]:sr-only")}>
                 <caption className="sr-only">{GROUP_LABEL[g]} follow-ups</caption>
@@ -316,11 +325,11 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                           <div className="text-sm text-muted-foreground">{KIND_LABEL[fu.kind] ?? fu.kind}</div>
                         </TableCell>
                         <TableCell data-label="Enquiry" className="min-w-[10rem]"><Subject f={f} href={target(f).href} company={showCompany ? ctx.companyName(fu.company_id) : null} /></TableCell>
-                        <TableCell data-label="Due"><DueText dueAt={fu.due_at} className="whitespace-normal" /></TableCell>
+                        <TableCell data-label="Due"><DueText dueAt={fu.due_at} zone={zoneOf(fu.company_id)} className="whitespace-normal" /></TableCell>
                         <TableCell data-label="Assigned to" className="break-words">{f.assigneeName}</TableCell>
                         <TableCell className="min-w-[9rem]">
                           {canAct ? (
-                            <FollowUpRowActions followUp={{ id: fu.id, title: fu.title, kind: fu.kind, dueAt: fu.due_at, opportunityId: fu.opportunity_id, isOnlyOpen }} />
+                            <FollowUpRowActions followUp={{ id: fu.id, title: fu.title, kind: fu.kind, dueAt: fu.due_at, opportunityId: fu.opportunity_id, isOnlyOpen, timeZone: zoneOf(fu.company_id) }} />
                           ) : (
                             <span className="inline-flex items-center gap-1 text-sm text-muted-foreground">
                               View only

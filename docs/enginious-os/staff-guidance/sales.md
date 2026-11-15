@@ -26,7 +26,7 @@ Sales & CRM follows each enquiry from the first message to the handover. An enqu
 - links: Follow-ups -> /sales/follow-ups
 - screens: /sales/follow-ups
 
-A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are in Dubai time. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company, or "What needs my attention today?" for everything.
+A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are on the clock of the company the follow-up belongs to, with the place written after the time. In JARVIS you can also type "Show my overdue Sales follow-ups" to list your own for the selected company, or "What needs my attention today?" for everything.
 
 1. Open Follow-ups in Sales and press the Overdue card to see only what is overdue. Show all to-do brings the whole list back.
 2. Do the work, then press Complete on the row to record what happened and plan the next action.
@@ -83,7 +83,7 @@ JARVIS can draft the scope wording for an estimate: line descriptions, quantitie
 - links: Enquiries -> /sales/opportunities; Full new-enquiry form -> /sales/new
 - screens: /sales/opportunities; /sales/new
 
-Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. The list says how many enquiries it shows and why the rest are hidden, and Clear filters brings back your open enquiries.
+Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. If a save seems to hang, press it again: the same form never makes a second enquiry, it opens the one already saved and says so.
 
 1. Open Enquiries in Sales.
 2. Press Add enquiry and check the company.
@@ -99,12 +99,13 @@ Enquiries live in Sales. The quick form needs the company, What is the enquiry?,
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. View only means the follow-up belongs to someone else. With several companies the page shows them all unless you choose one.
+The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. Dismiss clears a reminder. Times are on the clock of the follow-up's company (Dubai, Riyadh or Warsaw), with the place after them,. Today is that company's day. Older deadlines keep their moment: 10:00 Dubai reads 07:00 (Warsaw) in winter.
 
 1. Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.
 2. Press Complete to record what happened and plan the next action, or Reschedule to move the due time.
 3. To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.
-4. A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days.
+4. A Handover accepted line is news only: Dismiss takes it off your own list and My Day. A line under Questions from Operations opens the question on the enquiry; it goes when you answer.
+5. Still on Dubai time for every company: the reminder for a hold's review date, the daily reminder for an enquiry with no next action, the dates in Sales reports, and anything JARVIS saves or lists.
 
 ## Log a call, email or meeting on an enquiry
 - id: sales-log-update
@@ -159,11 +160,11 @@ The enquiry's owner or a Sales founder moves it: one step back, or any step forw
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. Contacts, prices and files stay in Sales, and your notes stay on the brief for the Project Manager to read. JARVIS does not close, reopen or hand over enquiries.
+Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. The project receives the agency (or that the job is direct), the site contact you choose and your notes. Prices, files and other contacts stay in Sales. JARVIS does not close, reopen or hand over enquiries.
 
 1. Open the enquiry.
 2. Open More at the top, choose Close as won or Close as lost, and fill in the form.
-3. After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Put the site contact in the notes.
+3. After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Check the agency, and choose the Site contact from the enquiry's contacts (add the person under Contacts first if needed).
 4. Submit it, or answer the Project Manager's question and resubmit. When the project exists, Open project takes you to it if you have access.
 5. The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet.
 
@@ -257,7 +258,7 @@ Outreach is your list of accounts to approach before any enquiry exists. Each ro
 1. Open Outreach in Sales and check the company named above the list.
 2. Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.
 3. Choose a status or tick Overdue only to decide what to do first.
-4. When the client is ready, open the account and press Create enquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.
+4. On the account, choose the Contact for this outreach. When the client is ready, press Create enquiry: the form opens with the account, that contact, the source Outreach and your notes; check it and save. One outreach raises one enquiry: a second try opens the first.
 5. Accounts are assigned from Clients & Agencies by the people who manage Sales assignments.
 
 ## Sales reports
@@ -282,11 +283,13 @@ Sales reports are read-only figures in two groups. Current pipeline and follow-u
 - links: Sales settings -> /sales/settings
 - screens: /sales/settings
 
-Sales settings are shown for one company at a time, in three parts: Response targets, Commercial approval, and Estimates & VAT with the VAT choices. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.
+Sales settings are shown for one company at a time: Response targets, Commercial approval, Estimates & VAT with the VAT choices, and the Follow-up time zone, the clock that company's follow-up times are typed and shown on. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.
 
 1. Open Settings in Sales (under Manage in the menu) and choose the company above the page.
 2. Follow a link in the list at the top to the setting that needs filling in.
 3. Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes.
+4. To change the Follow-up time zone, choose the zone by name and press Save time zone. No existing follow-up moves: each keeps its exact moment and is then shown on the new clock, so tell the team first.
+5. The UAE company uses Dubai time, the Saudi company Riyadh time and the Polish company Warsaw time. Hold review reminders, the no next action reminder, report dates and JARVIS stay on Dubai time for every company.
 
 ## Flag an enquiry for Operations planning
 - id: sales-operations-planning
@@ -296,7 +299,7 @@ Sales settings are shown for one company at a time, in three parts: Response tar
 - links: Enquiries -> /sales/opportunities
 - screens: /sales/opportunities/[id]
 
-The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. You are not sent a notice: look at From Operations on the enquiry.
+The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. When Operations asks a question, the enquiry's owner gets one notice on Follow-ups and My Day that opens the question.
 
 1. Open the enquiry. On Overview find Operations planning and press Flag for Operations planning.
 2. Fill Expected decision date, Dismantling date, Expected teams, Still to confirm and Note for Operations. Leave Dates are tentative ticked until the client confirms.

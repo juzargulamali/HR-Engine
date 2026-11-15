@@ -23,12 +23,12 @@ export interface SummaryActionsProps {
   primary: PrimaryAction | null;
   /** The next follow-up, when this person may complete or reschedule it. */
   followUp: FollowUpRef | null;
-  newFollowUp: { people: { id: string; name: string }[]; canAssign: boolean; currentUserId: string } | null;
+  newFollowUp: { people: { id: string; name: string }[]; canAssign: boolean; currentUserId: string; timeZone: string } | null;
   log: Omit<LogActivityProps, "opportunityId"> | null;
   /** The stage moves, or why they are not offered right now. */
   move: { options: MoveOption[] } | { unavailable: string } | null;
   canHold: boolean;
-  resume: { returnsTo: string | null } | null;
+  resume: { returnsTo: string | null; timeZone: string } | null;
   close: { won: boolean; lost: boolean } | null;
   edit: EditDetailsProps | null;
   assign: Omit<AssignOwnerProps, "opportunityId"> | null;
@@ -96,7 +96,7 @@ export function SummaryActions(p: SummaryActionsProps) {
       {p.assign ? <AssignOwnerDialog open={dialog === "assign"} onClose={close} opportunityId={p.opportunityId} {...p.assign} /> : null}
       {orderedMoves && orderedMoves.length > 0 ? <MoveStageDialog open={dialog === "move"} onClose={close} opportunityId={p.opportunityId} version={p.version} stage={p.stage} options={orderedMoves} /> : null}
       {p.canHold ? <HoldDialog open={dialog === "hold"} onClose={close} opportunityId={p.opportunityId} version={p.version} /> : null}
-      {p.resume ? <ResumeDialog open={dialog === "resume"} onClose={close} opportunityId={p.opportunityId} version={p.version} returnsTo={p.resume.returnsTo} /> : null}
+      {p.resume ? <ResumeDialog open={dialog === "resume"} onClose={close} opportunityId={p.opportunityId} version={p.version} returnsTo={p.resume.returnsTo} timeZone={p.resume.timeZone} /> : null}
       {reopen ? <ReopenDialog open={dialog === "reopen"} onClose={close} opportunityId={p.opportunityId} version={p.version} {...reopen} /> : null}
     </div>
   );

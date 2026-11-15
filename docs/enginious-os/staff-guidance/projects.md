@@ -46,7 +46,7 @@ Work is where a project starts. What needs doing is first: under Needs you are b
 2. Read Needs you and open a line to go to that task or record.
 3. For equipment, the Project Manager opens Equipment to review a draft and submit it; nothing is submitted for you.
 4. If the line says Import failed, press Import the handover equipment to try again, or open Equipment.
-5. Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Go to also offers Handover brief and, if you have Sales access, Sales enquiry.
+5. Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Project details shows, from the accepted handover, the agency, the notes for the Project Manager and, for the Project Manager and Operations, the site contact.
 
 ## Project chat
 - id: projects-chat
@@ -71,7 +71,7 @@ Each project has one group in Chat, named by the project's reference and name. I
 - links: Handovers -> /projects/handovers; My Work -> /projects/work
 - screens: /projects/handovers
 
-When Sales wins a job, the handover comes to Projects. Handovers waiting on you are listed first, the longest wait at the top, however many older finished ones there are. My Day opens the exact brief. The brief starts with the agreed scope, the site and dates, the equipment, the dependencies and risks, and any question you already asked Sales.
+When Sales wins a job, the handover comes to Projects. Handovers waiting on you are listed first, the longest wait at the top, however many older finished ones there are. My Day opens the exact brief. The brief starts with the agreed scope, the site and dates with the agency, the equipment, the dependencies and risks, the site contact Sales chose, and any question you already asked Sales.
 
 1. Open the handover from My Day, or open Handovers.
 2. Read the brief.

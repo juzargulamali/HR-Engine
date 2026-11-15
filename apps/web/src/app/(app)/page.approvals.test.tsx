@@ -179,7 +179,7 @@ describe("My Day approvals", () => {
     expect(html).not.toContain("Project budgets");
   });
 
-  const salesOk = (handover: unknown) => ({ status: "ok", data: { attention: [], overdue: 0, dueToday: 0, noFirstResponse: 0, openCount: 1, opportunityCount: 1, pipeline: [], handover, approvals: { status: "none" } } });
+  const salesOk = (handover: unknown) => ({ status: "ok", data: { attention: [], overdue: 0, dueToday: 0, noFirstResponse: 0, openCount: 1, opportunityCount: 1, pipeline: [], handover, opsQuestions: { status: "ok", rows: [] }, approvals: { status: "none" } } });
   const hrow = (kind: string, id: string) => ({ kind, opportunityId: id, reference: `R-${id}`, title: `Job ${id}`, detail: "", scope: "mine", at: null });
 
   it("the Sales owner sees the handover rows on My Day without any Projects access", async () => {
@@ -197,6 +197,21 @@ describe("My Day approvals", () => {
     tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
     const html = await render();
     expect(html).toContain("Sales handovers could not be loaded");
+    expect(html).not.toContain("Nothing needs your attention right now.");
+  });
+
+  it("a question from Operations is on My Day once, opening the question on the enquiry; a failed read is an error row", async () => {
+    tables = { ...tables, approvals: { data: [], error: null, count: 0 } };
+    salesToday = salesOk({ status: "ok", rows: [] });
+    (salesToday.data as Record<string, unknown>).opsQuestions = { status: "ok", rows: [{ noticeId: "n1", opportunityId: "o9", reference: "ENQ-9", title: "Fictional stand", at: "2026-10-30T09:00:00Z" }] };
+    let html = await render();
+    expect(html).toContain("Operations asked a question");
+    expect(html).toContain("Fictional stand");
+    expect(html).toContain("/sales/opportunities/o9?tab=overview#ops-question");
+    expect(html.match(/data-attention-key=/g)).toHaveLength(1);
+    (salesToday.data as Record<string, unknown>).opsQuestions = { status: "error" };
+    html = await render();
+    expect(html).toContain("Questions from Operations could not be loaded");
     expect(html).not.toContain("Nothing needs your attention right now.");
   });
 

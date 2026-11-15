@@ -1,3 +1,4 @@
+import { CRM_TIME_ZONE } from "@enginious-hr/domain";
 import Link from "next/link";
 import { AlertCircle } from "lucide-react";
 import { DueText } from "@/components/sales/badges";
@@ -18,7 +19,7 @@ function FollowUpRow({ item }: { item: AttentionItem }) {
         <p className="text-[13px] text-muted-foreground">{item.reference} · {item.detail}</p>
       </div>
       <div className="text-right text-[13px]">
-        {isFollowUp && item.at ? <DueText dueAt={item.at} /> : <span className="whitespace-nowrap font-medium text-warning">{KIND_LABEL[item.kind]}{item.kind === "hold_review" && item.at ? ` · ${formatDate(item.at)}` : ""}</span>}
+        {isFollowUp && item.at ? <DueText dueAt={item.at} zone={item.timeZone ?? CRM_TIME_ZONE} /> : <span className="whitespace-nowrap font-medium text-warning">{KIND_LABEL[item.kind]}{item.kind === "hold_review" && item.at ? ` · ${formatDate(item.at)}` : ""}</span>}
       </div>
     </li>
   );

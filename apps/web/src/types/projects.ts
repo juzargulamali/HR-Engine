@@ -49,6 +49,8 @@ export type ProjHandoverRow = {
   clarification_requested_by: string | null; submitted_at: string | null; accepted_by: string | null; accepted_at: string | null; project_id: string | null;
   revision: number; version: number; created_at: string; updated_at: string;
   event_edition_id?: string | null; edition_snapshot?: ProjEditionSnapshot | null;
+  /** Direct or agency-led, and the agency's name, copied from the enquiry while Sales prepares the brief and at submission (absent on a database without migration 20270112000100; null = not recorded). */
+  job_type?: "direct" | "agency" | null; agency_name?: string | null; parties_recorded_at?: string | null;
 }
 export type ProjMilestoneRow = {
   id: string; project_id: string; title: string; description: string | null; due_date: string | null; is_required: boolean; client_facing: boolean;

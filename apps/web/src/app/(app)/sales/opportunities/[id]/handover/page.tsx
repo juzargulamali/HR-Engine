@@ -204,7 +204,11 @@ export default async function HandoverPage({ params }: { params: Promise<{ id: s
         opportunityId={opp.id}
         canEdit={canEdit}
         personName={(id) => (id ? ctx.personName(id) : "Unknown")}
-        facts={{ edition: edition?.label ?? null, contactCount: failed.has("contacts") ? null : detail.contacts.length, salesGaps: packageFailed ? [] : pkg.gaps }}
+        facts={{
+          edition: edition?.label ?? null, contactCount: failed.has("contacts") ? null : detail.contacts.length, salesGaps: packageFailed ? [] : pkg.gaps,
+          clientName: detail.item.client?.name ?? null, agencyName: detail.item.agency?.name ?? null,
+          contacts: failed.has("contacts") ? null : detail.contacts.map((c) => ({ id: c.contact.id, name: c.contact.name, roleTitle: c.contact.role_title ?? c.role ?? null, organisation: c.organisation?.name ?? null })),
+        }}
         defaults={{
           title: opp.title, clientName: "", location: opp.location ?? "", siteTimezone: suggestion.zone, siteTimezoneNote: suggestion.because, installStart: opp.install_start ?? "", eventStart: opp.event_start ?? "",
           eventEnd: opp.event_end ?? "", scope: opp.scope ?? "", exclusions: opp.exclusions ?? "", notes: editionNote, technologies: opp.technologies, risks: opp.risks,

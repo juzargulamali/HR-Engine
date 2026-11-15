@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { dubaiDateTimeToIso, hasCrmCapability } from "@enginious-hr/domain";
+import { companyTimeZone, hasCrmCapability } from "@enginious-hr/domain";
+import { dueInZone } from "@/lib/crm/follow-up-zone";
 import { createClient } from "@/lib/supabase/server";
 import { getCrmContext } from "@/lib/crm/context";
 import { friendlyCrmError } from "@/lib/crm/errors";
@@ -127,10 +128,12 @@ export async function createAccountFollowUp(_prev: ActionState, formData: FormDa
   const p = accountFollowUpSchema.safeParse(Object.fromEntries(formData));
   if (!p.success) return { error: firstIssue(p.error) };
   const d = p.data;
-  const due = dubaiDateTimeToIso(d.date, d.time && /^\d{2}:\d{2}$/.test(d.time) ? d.time : "09:00");
-  if (!due) return { error: "Enter a valid date and time." };
   const ctx = await getCrmContext();
   if (!ctx || ctx.loadFailed) return { error: "Could not check your Sales access. Nothing was saved." };
+  // Typed on the clock of the company the follow-up is for (its Sales time zone, read with the person's companies).
+  const dueRes = dueInZone(companyTimeZone(ctx.companies.find((c) => c.id === d.companyId)?.settings), d.date, d.time);
+  if ("error" in dueRes) return { error: dueRes.error };
+  const due = dueRes.iso;
   if (d.assignedTo && d.assignedTo !== ctx.userId && !hasCrmCapability(ctx.grants, d.companyId, "assign_owner")) return { error: "Only a founder, or someone they delegated, can give a follow-up to someone else." };
   const supabase = await createClient();
   const { error } = await supabase.rpc("crm_create_account_follow_up", { p_org: d.orgId, p_company: d.companyId, p_title: d.title, p_due_at: due, p_kind: d.kind, p_assigned_to: d.assignedTo ?? null });

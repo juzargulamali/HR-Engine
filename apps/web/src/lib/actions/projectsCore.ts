@@ -70,6 +70,18 @@ async function saveHandoverCore(fd: FormData): Promise<{ id: string; opportunity
   // Said as that, with what to do, instead of the bare "That already exists."
   if (error && /uq_proj_handovers_open/.test(error.message)) return { state: { error: HANDOVER_ALREADY_SAVED } };
   if (error) return { state: fail(error.message) };
+  // The designated site contact (one of the enquiry's own contacts, or none). The form sends the field only when the database has the function, so an older database
+  // is never asked. The brief is already saved at this point: a refusal here says so, and that the contact was not changed.
+  if (fd.has("siteContactId")) {
+    const chosen = optionalUuid.safeParse(fd.get("siteContactId"));
+    if (!chosen.success) return { state: { error: "Your changes to the brief are saved, but the site contact was not: choose one of the enquiry's contacts, or none." } };
+    const set = await supabase.rpc("proj_set_handover_site_contact", { p_handover_id: data as string, p_contact_id: chosen.data ?? null });
+    if (set.error) {
+      refreshProjects();
+      revalidateOpportunity(p.data.opportunityId);
+      return { state: { error: `Your changes to the brief are saved, but the site contact was not changed: ${friendlyProjectError(set.error.message)}` } };
+    }
+  }
   refreshProjects();
   revalidateOpportunity(p.data.opportunityId);
   return { id: data as string, opportunityId: p.data.opportunityId };

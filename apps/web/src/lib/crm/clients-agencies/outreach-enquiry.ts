@@ -6,8 +6,9 @@ import { OUTREACH_EVENT_LABEL, OUTREACH_OUTCOME_LABEL } from "./outreach";
  * retyping. The form is the review step: nothing is created by following the link. `outreach` is linked to the new enquiry when it is saved
  * (crm_outreach_link_inquiry, called by the form's action), which is what stops a second enquiry being offered for the same outreach.
  *
- * No `source` is sent: the enquiry sources (CRM_SOURCES) have no value that means "from outreach", so the person chooses it on the form.
+ * The source is sent as "outreach" (CRM_SOURCES): the form opens with Outreach chosen and the person can still change it, like every other carried value.
  */
+export const OUTREACH_SOURCE = "outreach";
 export const ENQUIRY_TITLE_MAX = 200;   // the form's own limit on Requirement
 export const ENQUIRY_BRIEF_MAX = 600;   // kept short: it travels in the address
 
@@ -33,8 +34,10 @@ export interface OutreachEnquiryInput {
   orgName: string;
   outreachId: string;
   objective: string | null;
-  /** Sent only when it is certain who the enquiry is from: outreach holds no contact of its own, so this is the account's one recorded contact, or nothing. */
+  /** The contact chosen on the outreach; when none was chosen, the account's one recorded contact; otherwise nothing (the person chooses on the form). */
   contactId?: string | null;
+  /** False on a database that does not know the Outreach source yet: no source is sent and the person chooses it, as before. Default true. */
+  withSource?: boolean;
   latestNote?: { on: string; what: string; note: string } | null;
 }
 
@@ -50,9 +53,10 @@ export function outreachEnquiryBrief(objective: string | null, latestNote?: { on
   return clip(parts.join("\n"), ENQUIRY_BRIEF_MAX);
 }
 
-/** `/sales/new?company&org&outreach&title[&contact][&brief]`: only what is known is sent, each value encoded. */
+/** `/sales/new?company&org&outreach[&source=outreach]&title[&contact][&brief]`: only what is known is sent, each value encoded. */
 export function outreachEnquiryHref(i: OutreachEnquiryInput): string {
   const q = new URLSearchParams({ company: i.companyId, org: i.orgId, outreach: i.outreachId });
+  if (i.withSource !== false) q.set("source", OUTREACH_SOURCE);
   if (i.contactId) q.set("contact", i.contactId);
   q.set("title", outreachEnquiryTitle(i.orgName, i.objective));
   const brief = outreachEnquiryBrief(i.objective, i.latestNote);

@@ -10,7 +10,8 @@ import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ActionForm, Field } from "@/components/sales/action-form";
 import { Modal } from "@/components/sales/modal";
-import { todayInDubai } from "@/components/sales/format";
+import { todayIn } from "@/components/sales/format";
+import { dueTimeLabel } from "@/lib/crm/time-zone";
 import { defaultReopenStage, reopenStageOptions } from "./closure-helpers";
 
 const KINDS = [["call", "Call"], ["email", "Email"], ["meeting", "Meeting"], ["proposal", "Proposal work"], ["other", "Other"]] as const;
@@ -21,13 +22,15 @@ export interface ReopenProps {
   outcome: "won" | "lost";
   stageBeforeClose: string | null;
   hasHandover: boolean;
+  /** The Sales time zone of the enquiry's company: the clock the new next action is typed on. */
+  timeZone: string;
 }
 
 /**
  * Controlled dialog. Only people holding `reopen_closed` (founders, or someone a founder delegated it to) are offered this; the
  * database checks it again. Nothing is erased: the closure stays in the history.
  */
-export function ReopenDialog({ open, onClose, opportunityId, version, outcome, stageBeforeClose, hasHandover }: ReopenProps & { open: boolean; onClose: () => void }) {
+export function ReopenDialog({ open, onClose, opportunityId, version, outcome, stageBeforeClose, hasHandover, timeZone }: ReopenProps & { open: boolean; onClose: () => void }) {
   const options = reopenStageOptions(stageBeforeClose);
   const returnsTo = crmStageLabel(defaultReopenStage(stageBeforeClose));
   const gone = outcome === "won" ? "The purchase order or authorised email" : "The lost reason";
@@ -67,8 +70,8 @@ export function ReopenDialog({ open, onClose, opportunityId, version, outcome, s
           <legend className="text-sm font-medium">New next action</legend>
           <Field label="What needs to happen" htmlFor="reopen-title"><Input id="reopen-title" name="nextTitle" required placeholder="e.g. Call to confirm the revised order" /></Field>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Date" htmlFor="reopen-date"><Input id="reopen-date" name="nextDate" type="date" required min={todayInDubai()} /></Field>
-            <Field label="Time (Dubai)" htmlFor="reopen-time"><Input id="reopen-time" name="nextTime" type="time" defaultValue="10:00" /></Field>
+            <Field label="Date" htmlFor="reopen-date"><Input id="reopen-date" name="nextDate" type="date" required min={todayIn(timeZone)} /></Field>
+            <Field label={dueTimeLabel(timeZone)} htmlFor="reopen-time"><Input id="reopen-time" name="nextTime" type="time" defaultValue="10:00" /></Field>
             <Field label="Type" htmlFor="reopen-kind">
               <Select id="reopen-kind" name="nextKind" defaultValue="call">{KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
             </Field>

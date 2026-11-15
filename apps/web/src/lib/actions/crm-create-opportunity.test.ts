@@ -95,11 +95,46 @@ describe("createOpportunity: raised from an outreach", () => {
   const OUTREACH = "77777777-7777-4777-8777-777777777777";
   const EXISTING = "88888888-8888-4888-8888-888888888888";
   const raised = { ...base, outreachId: OUTREACH };
-  it("an outreach without an enquiry: the enquiry is created and then linked", async () => {
+  const NEW = "99999999-9999-4999-8999-999999999999";
+  const MISSING = { data: null, error: { code: "PGRST202", message: "Could not find the function public.crm_create_enquiry_from_outreach(p_fields, p_outreach) in the schema cache" } };
+  /** The database answers each function by name (anything else: the plain "new-id" the other tests use). */
+  const answer = (byName: Record<string, unknown>) => rpc.mockImplementation(async (name: string) => (name in byName ? byName[name] : { data: "new-id", error: null }));
+
+  it("an outreach without an enquiry: ONE database call creates the enquiry and links it, carrying every field of the form", async () => {
     outreachRow = { data: { opportunity_id: null }, error: null };
-    await expect(createOpportunity({ error: null }, fd(raised))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    answer({ crm_create_enquiry_from_outreach: { data: { id: NEW, created: true, existing: null }, error: null } });
+    await expect(createOpportunity({ error: null }, fd({ ...raised, source: "outreach", contactIds: ORG }))).rejects.toThrow(`redirect:/sales/opportunities/${NEW}`);
     expect(read).toHaveBeenCalledWith("crm_outreach", "opportunity_id", OUTREACH);
-    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_opportunity", "crm_outreach_link_inquiry"]);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry_from_outreach"]);
+    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_outreach: OUTREACH, p_fields: { company_id: UAE, title: "Fictional LED tunnel", source: "outreach", agency_org_id: ORG, client_org_id: null, next_title: "Call the fictional agency",
+      next_due: "2026-12-01T07:00:00.000Z", next_kind: "other", contacts: [{ contact_id: ORG }], technologies: [] } });
+  });
+  it("two tabs past the check: the database returns the existing enquiry, nothing is created, and the person is pointed at it", async () => {
+    outreachRow = { data: { opportunity_id: null }, error: null };                               // the check saw none; the other tab saved in between
+    answer({ crm_create_enquiry_from_outreach: { data: { id: EXISTING, created: false, existing: "outreach" }, error: null } });
+    const r = await createOpportunity({ error: null }, fd(raised));
+    expect(r.error).toMatch(/already has an enquiry, so a second one was not created/);
+    expect(r.existingEnquiryId).toBe(EXISTING);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry_from_outreach"]);
+  });
+  it("a refusal by the database is said in words and nothing else is tried", async () => {
+    outreachRow = { data: { opportunity_id: null }, error: null };
+    answer({ crm_create_enquiry_from_outreach: { data: null, error: { message: "The enquiry must be for the account and the company of the outreach it is raised from" } } });
+    const r = await createOpportunity({ error: null }, fd(raised));
+    expect(r.error).toMatch(/must be for the account and the company of the outreach/);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry_from_outreach"]);
+  });
+  it("an answer that cannot be read is never treated as created or as nothing saved", async () => {
+    outreachRow = { data: { opportunity_id: null }, error: null };
+    answer({ crm_create_enquiry_from_outreach: { data: "new-id", error: null } });
+    const r = await createOpportunity({ error: null }, fd(raised));
+    expect(r.error).toMatch(/may have been saved, but the answer could not be read/);
+  });
+  it("a database without the one-step function: the enquiry is created and then linked, as before", async () => {
+    outreachRow = { data: { opportunity_id: null }, error: null };
+    answer({ crm_create_enquiry_from_outreach: MISSING });
+    await expect(createOpportunity({ error: null }, fd(raised))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry_from_outreach", "crm_create_opportunity", "crm_outreach_link_inquiry"]);
   });
   it("an outreach that already has an enquiry (a stale tab): nothing is created, it says so and points at the existing enquiry", async () => {
     outreachRow = { data: { opportunity_id: EXISTING }, error: null };
@@ -118,5 +153,57 @@ describe("createOpportunity: raised from an outreach", () => {
   it("an enquiry that is not raised from an outreach makes no such read", async () => {
     await expect(createOpportunity({ error: null }, fd(base))).rejects.toThrow("redirect:");
     expect(read).not.toHaveBeenCalled();
+  });
+});
+
+describe("createOpportunity: the form's submission identifier", () => {
+  const KEY = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+  const NEW = "99999999-9999-4999-8999-999999999999";
+  const OUTREACH = "77777777-7777-4777-8777-777777777777";
+  const MISSING = { data: null, error: { code: "PGRST202", message: "Could not find the function public.crm_create_enquiry(p_fields, p_outreach_id, p_submission_key) in the schema cache" } };
+  const answer = (byName: Record<string, unknown>) => rpc.mockImplementation(async (name: string) => (name in byName ? byName[name] : { data: "new-id", error: null }));
+  const keyed = { ...base, submissionKey: KEY };
+
+  it("a first save goes through ONE call that carries the identifier and every field, then opens the new enquiry", async () => {
+    answer({ crm_create_enquiry: { data: { id: NEW, created: true, existing: null }, error: null } });
+    await expect(createOpportunity({ error: null }, fd({ ...keyed, currency: "usd", value: "1500", brief: "LED tunnel" }))).rejects.toThrow(`redirect:/sales/opportunities/${NEW}`);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry"]);
+    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_submission_key: KEY, p_outreach_id: null,
+      p_fields: { company_id: UAE, title: "Fictional LED tunnel", source: "agency_call", agency_org_id: ORG, next_due: "2026-12-01T07:00:00.000Z", currency: "usd", value: 1500, brief: "LED tunnel", owner_id: null } });
+  });
+  it("Quick Add still lands on the list with the new enquiry open beside it", async () => {
+    answer({ crm_create_enquiry: { data: { id: NEW, created: true, existing: null }, error: null } });
+    await expect(createOpportunity({ error: null }, fd({ ...keyed, after: "panel", returnTo: "/sales/follow-ups" }))).rejects.toThrow(`redirect:/sales/follow-ups?open=${NEW}`);
+  });
+  it("the same form saved again (the answer to the first save was lost): the ORIGINAL enquiry is opened, said as already saved, and nothing else is called", async () => {
+    answer({ crm_create_enquiry: { data: { id: NEW, created: false, existing: "submission" }, error: null } });
+    await expect(createOpportunity({ error: null }, fd({ ...keyed, eventEditionId: ORG, after: "panel" }))).rejects.toThrow(`redirect:/sales/opportunities/${NEW}?saved=earlier`);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry"]);                     // no second event link, no second anything
+  });
+  it("from an outreach: the identifier and the outreach travel in the same call, and the earlier read of the outreach is not needed", async () => {
+    answer({ crm_create_enquiry: { data: { id: NEW, created: true, existing: null }, error: null } });
+    await expect(createOpportunity({ error: null }, fd({ ...keyed, outreachId: OUTREACH }))).rejects.toThrow(`redirect:/sales/opportunities/${NEW}`);
+    expect(rpc.mock.calls[0]![1]).toMatchObject({ p_submission_key: KEY, p_outreach_id: OUTREACH });
+    expect(read).not.toHaveBeenCalled();
+    answer({ crm_create_enquiry: { data: { id: NEW, created: false, existing: "outreach" }, error: null } });
+    const r = await createOpportunity({ error: null }, fd({ ...keyed, outreachId: OUTREACH }));
+    expect(r.error).toMatch(/already has an enquiry/);
+    expect(r.existingEnquiryId).toBe(NEW);
+  });
+  it("a refusal is said in words, with nothing else tried; an unreadable answer is never 'created' and never 'nothing saved'", async () => {
+    answer({ crm_create_enquiry: { data: null, error: { message: "Only a founder (or someone they delegated) can assign another owner" } } });
+    expect((await createOpportunity({ error: null }, fd(keyed))).error).toMatch(/assign another owner/);
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry"]);
+    answer({ crm_create_enquiry: { data: "new-id", error: null } });
+    expect((await createOpportunity({ error: null }, fd(keyed))).error).toMatch(/may have been saved, but the answer could not be read/);
+  });
+  it("a database without the function saves through the existing one, as before", async () => {
+    answer({ crm_create_enquiry: MISSING });
+    await expect(createOpportunity({ error: null }, fd(keyed))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_enquiry", "crm_create_opportunity"]);
+  });
+  it("a form without an identifier, or with one that is not an identifier, saves through the existing function", async () => {
+    await expect(createOpportunity({ error: null }, fd({ ...base, submissionKey: "not-a-key" }))).rejects.toThrow("redirect:/sales/opportunities/new-id");
+    expect(rpc.mock.calls.map((c) => c[0])).toEqual(["crm_create_opportunity"]);
   });
 });

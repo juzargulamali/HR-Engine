@@ -13,6 +13,8 @@ export interface BoardMeta {
   stage: string;
   version: number;
   stageBeforeHold: string | null;
+  /** The Sales time zone of the enquiry's company (the Resume dialog names it on its time field). */
+  timeZone: string;
   valueText: string;
   hasValue: boolean;
   openFollowUps: number;
@@ -49,7 +51,7 @@ export function EnquiryBoard({ columns, items, meta }: { columns: BoardColumn[];
       case "hold":
         return { kind: "dialog", render: (close) => <HoldDialog open onClose={close} opportunityId={item.id} version={m.version} /> };
       case "resume":
-        return { kind: "dialog", render: (close) => <ResumeDialog open onClose={close} opportunityId={item.id} version={m.version} returnsTo={m.stageBeforeHold} /> };
+        return { kind: "dialog", render: (close) => <ResumeDialog open onClose={close} opportunityId={item.id} version={m.version} returnsTo={m.stageBeforeHold} timeZone={m.timeZone} /> };
       case "won":
       case "lost":
         return {

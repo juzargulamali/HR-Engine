@@ -1,5 +1,6 @@
 "use client";
 
+import { dueTimeLabel } from "@/lib/crm/time-zone";
 import { useState } from "react";
 import { addActivity } from "@/lib/actions/crm";
 import { Input } from "@/components/ui/input";
@@ -16,7 +17,7 @@ export interface OpenFollowUp { id: string; title: string; /** The only open fol
  * Records what happened and, in the same dialog, plans the next step: what, when (the next working day is suggested) and what kind. If one of the
  * enquiry's open follow-ups is the one just done, tick it and the update becomes its outcome. Nothing is sent to anyone: this is a log, not a message.
  */
-export function AddActivityForm({ opportunityId, onDone, completable = [], suggestedDate, minDate }: { opportunityId: string; onDone?: () => void; completable?: OpenFollowUp[]; suggestedDate: string; minDate: string }) {
+export function AddActivityForm({ opportunityId, onDone, completable = [], suggestedDate, minDate, timeZone }: { opportunityId: string; onDone?: () => void; completable?: OpenFollowUp[]; suggestedDate: string; minDate: string; /** The Sales time zone of the enquiry's company: the clock the next step is typed on. */ timeZone: string }) {
   const [plan, setPlan] = useState(false);
   const [completeId, setCompleteId] = useState("");
   const forced = completable.find((f) => f.id === completeId)?.isOnlyOpen ?? false;
@@ -54,7 +55,7 @@ export function AddActivityForm({ opportunityId, onDone, completable = [], sugge
           <Field label="Next step" htmlFor="act-nt"><Input id="act-nt" name="nextTitle" required placeholder="e.g. Send revised proposal" /></Field>
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Date" htmlFor="act-nd" hint="The next working day, if you do not change it."><Input id="act-nd" name="nextDate" type="date" required min={minDate} defaultValue={suggestedDate} /></Field>
-            <Field label="Time (Dubai)" htmlFor="act-ntm"><Input id="act-ntm" name="nextTime" type="time" defaultValue="10:00" /></Field>
+            <Field label={dueTimeLabel(timeZone)} htmlFor="act-ntm"><Input id="act-ntm" name="nextTime" type="time" defaultValue="10:00" /></Field>
             <Field label="Type" htmlFor="act-nk"><Select id="act-nk" name="nextKind" defaultValue="call">{NEXT_KINDS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></Field>
           </div>
         </div>

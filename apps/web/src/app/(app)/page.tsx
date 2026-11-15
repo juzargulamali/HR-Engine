@@ -33,7 +33,7 @@ import { NextDispatch } from "@/components/my-day/next-dispatch";
 import { PeopleToday } from "@/components/my-day/people-today";
 import { ProjectHealth } from "@/components/my-day/project-health";
 import { SalesPipeline } from "@/components/my-day/sales-pipeline";
-import { approvalCandidates, budgetCandidates, buildAttention, commercialApprovalCandidates, failed, handoverCandidates, hrCandidates, noteCandidates, ok, projectDecisionCandidates, salesCandidates, taskCandidates, type AttentionSourceResult } from "@/lib/my-day/attention";
+import { approvalCandidates, budgetCandidates, buildAttention, commercialApprovalCandidates, failed, handoverCandidates, opsQuestionCandidates, hrCandidates, noteCandidates, ok, projectDecisionCandidates, salesCandidates, taskCandidates, type AttentionSourceResult } from "@/lib/my-day/attention";
 import { dateText } from "@/lib/projects/format";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
 import { loadProjectsDay } from "@/lib/my-day/projects-day";
@@ -360,6 +360,7 @@ export default async function DashboardPage() {
         ? [
             ok("sales", salesCandidates(salesToday.data, dateText)),
             ...(salesToday.data.handover.status === "ok" ? [ok("sales-handover", handoverCandidates(salesToday.data.handover, now))] : salesToday.data.handover.status === "error" ? [failed("sales-handover")] : []),
+            ...(salesToday.data.opsQuestions.status === "ok" ? [ok("sales-ops-question", opsQuestionCandidates(salesToday.data.opsQuestions, now))] : salesToday.data.opsQuestions.status === "error" ? [failed("sales-ops-question")] : []),
             ...(salesToday.data.approvals.status === "ok" ? [ok("sales-approvals", commercialApprovalCandidates(salesToday.data.approvals, now))] : salesToday.data.approvals.status === "error" ? [failed("sales-approvals")] : []),
           ]
         : []),

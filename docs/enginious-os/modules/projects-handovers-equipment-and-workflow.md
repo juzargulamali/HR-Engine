@@ -370,6 +370,22 @@ Steps 5 to 8, 9 to 13 and the budget run in parallel in practice; the order abov
 * `Unverified`: labels of the controls inside People & access, task creation and the Complete project page are left to `projects-people-changes-history-completion.md` and `projects-work-and-tasks.md`; only the functions were read here.
 * The app's own labels "Substitute — not yet accepted" and "Import failed — review" contain a long dash; they are quoted exactly.
 
+## 6. The handover's agency, site contact and notes on the project (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+
+Source: `supabase/migrations/20270112000100_proj_handover_parties.sql` (`proj_project_handover`, `proj_handover_parties`); `apps/web/src/app/(app)/projects/[id]/work/{page.tsx,details-card.tsx}` (`HandoverPartiesFacts`); `apps/web/src/app/(app)/projects/handovers/page.tsx`; `apps/web/src/components/projects/handover-brief.tsx`. Tests: `packages/rls-tests/test/proj-handover-parties.rls.test.ts`; `apps/web/src/lib/projects/handover-parties.test.tsx`.
+
+| Control (label) | Where | Who | What it shows | Function | Failure |
+|---|---|---|---|---|---|
+| **From the handover, as accepted**: **Agency**, **Site contact**, **Notes for the Project Manager** | A client project's Work page, right rail, Project details | Anyone who can open the project's details | Agency: the name, "None: a direct job", or "Not recorded at handover". Notes: Sales' notes, or "None". Site contact: name, role, phone and e-mail links for whoever manages the project and for Operations Managers; for other members "Shown to the Project Manager and Operations"; "None chosen at handover" or "Not recorded at handover" otherwise | `proj_project_handover(project)` | "Could not load the agency, the site contact and the notes from the handover. They are not empty" |
+| **Agency** and **Site contact** on a brief | `/projects/handovers`, each brief shown in full | The named Project Manager, founders, whoever assigns Project Managers | The same two facts before acceptance | `proj_handover_parties(handover)` | "Could not load the site contact" on that brief |
+
+**The access rule, enforced in SQL** (`proj_project_handover`):
+* cannot open the project's details (a summary-only person, someone from another company, a Sales person linked to the project but not on it): **"Project not found"**, no field at all;
+* can open the details (active member, founder, Operations Manager): job type, agency and the notes. The notes were already readable to these people on the project's History page through the handover row;
+* the contact's name, role, phone and e-mail: only `proj_can_manage` (the Project Manager, an acting Project Manager within their dates, a founder) and the company's Operations Managers. For everyone else the function sends `contact_restricted = true` and no contact field.
+
+What the project shows is always the ACCEPTED brief (the function reads the frozen handover row; nothing is copied a second time, so it cannot drift). An internal project has no handover and shows nothing. Coverage rows 344 and 345; catalogue: read-only, no entry.
+
 ## Coverage rows
 
 | Entry | Kind (screen / tab / panel / dialog / form / filter / download / legacy route) | How to reach it | Who can see it | Purpose | Reference (section number in this file) | Status (Documented or Unverified: what) |

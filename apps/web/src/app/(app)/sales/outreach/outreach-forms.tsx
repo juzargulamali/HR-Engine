@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ClipboardPen, Link2, Plus } from "lucide-react";
-import { linkOutreachInquiry, logOutreachActivity, setOutreachNextAction, setOutreachStatus } from "@/lib/actions/outreach";
+import { linkOutreachInquiry, logOutreachActivity, setOutreachContact, setOutreachNextAction, setOutreachStatus } from "@/lib/actions/outreach";
 import { OUTREACH_KIND_LABEL, OUTREACH_KINDS, OUTREACH_OUTCOME_LABEL, OUTREACH_SETTABLE_STATUSES, OUTREACH_STATUS_LABEL, outcomeAfterKindChange, outcomesForKind } from "@/lib/crm/clients-agencies/outreach";
 import type { CrmOutreachStatus } from "@/types/crm";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -102,6 +102,37 @@ export function StatusControl({ outreachId, status }: { outreachId: string; stat
 }
 
 /**
+ * The contact this outreach is with: one of the account's own contacts. It is what "Create enquiry" carries into the New enquiry form, so nobody retypes or guesses
+ * who the enquiry is from. Read-only once the outreach is closed or has raised its enquiry.
+ */
+export function OutreachContactControl({ outreachId, contactId, contacts, readOnly = false }: {
+  outreachId: string; contactId: string | null; contacts: readonly { id: string; name: string; roleTitle: string | null }[]; readOnly?: boolean;
+}) {
+  const id = `oc-${outreachId}`;
+  const current = contacts.find((c) => c.id === contactId) ?? null;
+  const label = (c: { name: string; roleTitle: string | null }) => (c.roleTitle ? `${c.name} · ${c.roleTitle}` : c.name);
+  if (readOnly) {
+    return <p className="text-sm" data-testid="outreach-contact"><span className="text-muted-foreground">Contact: </span>{current ? label(current) : contactId ? "A contact no longer on this account" : "None chosen"}</p>;
+  }
+  if (contacts.length === 0) {
+    return <p className="text-sm" data-testid="outreach-contact"><span className="text-muted-foreground">Contact: </span>This account has no contacts yet. Use Add contact at the top of the page, then choose who this outreach is with.</p>;
+  }
+  return (
+    <div data-testid="outreach-contact">
+      <ActionForm action={setOutreachContact} submitLabel="Save contact" pendingLabel="Saving…">
+        <input type="hidden" name="outreachId" value={outreachId} />
+        <Field label="Contact for this outreach" htmlFor={`${id}-c`} hint="Who you are speaking to. Create enquiry carries this person into the new enquiry.">
+          <Select id={`${id}-c`} name="contactId" defaultValue={current ? current.id : ""} key={contactId ?? "none"}>
+            <option value="">No contact chosen</option>
+            {contacts.map((c) => <option key={c.id} value={c.id}>{label(c)}</option>)}
+          </Select>
+        </Field>
+      </ActionForm>
+    </div>
+  );
+}
+
+/**
  * Raise a real inquiry: create one through the normal enquiry form or link one the account already has. `createHref` opens the New enquiry form with what the
  * outreach already knows (lib/crm/clients-agencies/outreach-enquiry.ts); the form is the review step and nothing exists until it is saved there.
  */
@@ -110,7 +141,7 @@ export function InquiryLinkControls({ outreachId, createHref, inquiries }: { out
   const id = `lk-${outreachId}`;
   return (
     <>
-      <Link href={createHref} className={buttonVariants({ variant: "outline", size: "sm" })} title="Opens the New enquiry form with the account, company and outreach notes filled in. Nothing is created until you save it there.">Create enquiry</Link>
+      <Link href={createHref} className={buttonVariants({ variant: "outline", size: "sm" })} title="Opens the New enquiry form with the account, the company, the contact, the Outreach source and the outreach notes filled in. Nothing is created until you save it there.">Create enquiry</Link>
       {inquiries.length > 0 ? <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}><Link2 className="h-4 w-4" aria-hidden /> Link an enquiry</Button> : null}
       <Modal open={open} onClose={() => setOpen(false)} title="Link an enquiry" description="Link an enquiry this account already has. The outreach becomes Enquiry raised; its history stays on the account. No enquiry or deal is created.">
         <ActionForm action={linkOutreachInquiry} submitLabel="Link enquiry" onDone={() => setOpen(false)} secondary={<Button type="button" variant="ghost" onClick={() => setOpen(false)}>Cancel</Button>}>

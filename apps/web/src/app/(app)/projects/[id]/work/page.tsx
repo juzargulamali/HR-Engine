@@ -1,3 +1,5 @@
+import { loadProjectHandoverDetails } from "@/lib/projects/handover-parties-data";
+import type { ProjectHandoverRead } from "@/lib/projects/handover-parties";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { AlertTriangle, CalendarCheck, CheckCircle2, Clock, FileCheck2, ListChecks, ShieldAlert } from "lucide-react";
@@ -244,6 +246,8 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     const { data: ed, error: edError } = await supabase.from("crm_event_editions").select("id, event_id").eq("id", details.event_edition_id).maybeSingle();
     editionLink = edError ? "error" : ed ? `/sales/events/${ed.event_id}?edition=${ed.id}` : "none";
   }
+  // The agency, the site contact and the notes from the accepted handover. The database decides what this person gets (proj_project_handover).
+  const handoverRead: ProjectHandoverRead = view.project.kind === "client" && details ? await loadProjectHandoverDetails(id) : { status: "none" };
   const holdState = holdReviewState(details?.hold_review_date ?? null, today);
   const acting = view.people.filter((p) => p.role === "acting_pm" && p.acting_until && p.acting_until >= today).map((p) => view.nameOf(p.user_id));
   const teamNames = view.teams.map((t) => `${t.name}${t.head_user_id ? ` (head: ${view.nameOf(t.head_user_id)})` : ""}`);
@@ -453,7 +457,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
             <ProjectDetailsCard
               pmName={view.pmName} acting={acting} team={teamNames} peopleCount={view.people.length} start={view.project.start_date} end={view.project.end_date}
               details={details} internal={view.project.kind === "internal"} feedbackOpen={feedbackOpen} feedbackHref={`/projects/${id}/changes`}
-              edition={details.edition_snapshot ?? null} editionLink={editionLink}
+              edition={details.edition_snapshot ?? null} editionLink={editionLink} handover={handoverRead}
             />
           ) : null}
         </aside>

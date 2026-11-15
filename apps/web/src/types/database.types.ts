@@ -1880,6 +1880,10 @@ export interface Database {
       crm_outreach_set_next: { Args: { p_outreach: string; p_text: string; p_due: string }; Returns: undefined };
       crm_outreach_set_status: { Args: { p_outreach: string; p_status: string; p_reason?: string | null }; Returns: undefined };
       crm_outreach_link_inquiry: { Args: { p_outreach: string; p_opportunity: string }; Returns: undefined };
+      crm_outreach_set_contact: { Args: { p_outreach: string; p_contact: string | null }; Returns: undefined };
+      crm_set_follow_up_time_zone: { Args: { p_company_id: string; p_time_zone: string }; Returns: undefined };
+      crm_create_enquiry: { Args: { p_fields: Record<string, unknown>; p_submission_key?: string | null; p_outreach_id?: string | null }; Returns: unknown };
+      crm_create_enquiry_from_outreach: { Args: { p_outreach: string; p_fields: Record<string, unknown> }; Returns: unknown };
       crm_reassign_follow_up: { Args: { p_follow_up_id: string; p_new_assignee: string }; Returns: undefined };
       crm_import_fingerprints: { Args: { p_company: string; p_items: Record<string, unknown>[] }; Returns: Record<string, string> };
       crm_import_apply: { Args: { p_company: string; p_batch_key: string; p_items: Record<string, unknown>[] }; Returns: Record<string, unknown> };
@@ -2017,6 +2021,9 @@ export interface Database {
       proj_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
       proj_directory: { Args: Record<string, never>; Returns: ProjDirectoryRow[] };
       proj_handover_for_opportunity: { Args: { p_opportunity_id: string }; Returns: ProjHandoverStatusRow[] };
+      proj_set_handover_site_contact: { Args: { p_handover_id: string; p_contact_id: string | null }; Returns: undefined };
+      proj_handover_parties: { Args: { p_handover_id: string }; Returns: unknown };
+      proj_project_handover: { Args: { p_project_id: string }; Returns: unknown };
       proj_save_handover: { Args: { p_opportunity_id: string; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: string };
       proj_submit_handover: { Args: { p_handover_id: string }; Returns: undefined };
       proj_assign_handover_pm: { Args: { p_handover_id: string; p_pm_user_id: string }; Returns: undefined };

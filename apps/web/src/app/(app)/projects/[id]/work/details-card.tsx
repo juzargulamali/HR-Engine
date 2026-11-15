@@ -5,6 +5,8 @@ import { OsCollapsible } from "@/components/os/collapsible";
 import { Fact } from "@/components/projects/parts";
 import { dateRangeText, dateText } from "@/lib/projects/format";
 import type { ProjEditionSnapshot } from "@/types/projects";
+import { SiteContactLines } from "@/components/projects/handover-brief";
+import { agencyWords, noContactWords, type ProjectHandoverRead } from "@/lib/projects/handover-parties";
 
 export const EDITION_NOTE = "These are the dates the organiser published when the handover was submitted. Later changes to the event in Sales do not change this project.";
 
@@ -26,6 +28,28 @@ function EditionFact({ edition, link }: { edition: ProjEditionSnapshot; link: st
   );
 }
 
+/**
+ * What the accepted handover says about who the job is for and who to call: the agency (or that it is a direct job), the site contact Sales chose, and the notes Sales
+ * wrote for the Project Manager. It is the accepted brief, so it does not move when Sales edits the enquiry or the contact afterwards. The database sends the contact
+ * only to whoever manages the project and to Operations Managers; a project accepted before these were recorded says so instead of showing nothing.
+ */
+export function HandoverPartiesFacts({ read }: { read: ProjectHandoverRead }) {
+  if (read.status === "none") return null;
+  if (read.status === "error") return <Fact label="From the handover"><span role="alert" className="text-destructive" data-testid="project-handover-error">Could not load the agency, the site contact and the notes from the handover. They are not empty: reload to try again.</span></Fact>;
+  const d = read.details;
+  if (!d.hasHandover) return null;
+  return (
+    <div className="space-y-3.5 rounded-md border border-border p-2.5" data-testid="project-handover-parties">
+      <p className="text-[13px] text-muted-foreground">From the handover, as accepted<InfoHint label="what the handover carried" className="ml-1">The agency, the site contact and the notes as Sales submitted them. Later changes in Sales do not change this project. The site contact is shown to the Project Manager, a temporary leader, founders and Operations Managers.</InfoHint></p>
+      <Fact label="Agency"><span data-testid="project-agency">{agencyWords(d)}</span></Fact>
+      <Fact label="Site contact">
+        {d.siteContact ? <SiteContactLines contact={d.siteContact} /> : <span className="text-muted-foreground" data-testid="project-no-contact">{noContactWords(d, d.contactRestricted)}</span>}
+      </Fact>
+      <Fact label="Notes for the Project Manager">{d.notes ? <span className="whitespace-pre-wrap" data-testid="project-pm-notes">{d.notes}</span> : <span className="text-muted-foreground">None</span>}</Fact>
+    </div>
+  );
+}
+
 interface Details {
   install_start: string | null; event_start: string | null; event_end: string | null; client_name: string | null; location: string | null; site_timezone: string;
   scope: string | null; exclusions: string | null; technologies: { name: string; qty: number }[];
@@ -35,12 +59,14 @@ interface Details {
  * Who, when and what the project is, read-only, in the right rail. Everything here used to be the project's Overview page; it moved
  * next to the work so nothing was dropped. Folded on a phone and a narrow window; open when there is room.
  */
-export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, end, details, internal, feedbackOpen, feedbackHref, edition, editionLink }: {
+export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, end, details, internal, feedbackOpen, feedbackHref, edition, editionLink, handover }: {
   pmName: string; acting: string[]; team: string[]; peopleCount: number; start: string | null; end: string | null; details: Details; internal: boolean; feedbackOpen: number; feedbackHref: string;
   /** The event edition the project was sold for, as copied at the handover. Absent = the project has none. */
   edition?: ProjEditionSnapshot | null;
   /** Where the event opens in Sales: an address when the viewer can read the edition there, "none" when they cannot (no link, nothing said), "error" when that could not be checked. */
   editionLink?: string | "none" | "error";
+  /** The agency, site contact and notes of the accepted handover (client projects only). */
+  handover?: ProjectHandoverRead;
 }) {
   return (
     <>
@@ -55,6 +81,7 @@ export function ProjectDetailsCard({ pmName, acting, team, peopleCount, start, e
           {edition ? <EditionFact edition={edition} link={editionLink ?? "none"} /> : null}
           {!internal ? <Fact label="Client">{details.client_name ?? "Not recorded"}</Fact> : null}
           <Fact label="Location">{details.location ?? "Not recorded"}<span className="block text-muted-foreground">Site time zone {details.site_timezone}</span></Fact>
+          {!internal && handover ? <HandoverPartiesFacts read={handover} /> : null}
           {feedbackOpen > 0 ? (
             <Fact label="Client feedback">
               <Link href={feedbackHref} className="font-medium text-accent underline-offset-4 hover:underline">{feedbackOpen} open {feedbackOpen === 1 ? "item" : "items"}</Link>

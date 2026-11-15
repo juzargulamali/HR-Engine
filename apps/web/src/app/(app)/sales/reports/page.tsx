@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "@/lib/crm/time-zone";
 import Link from "next/link";
 import { canManageCrmSettings, crmStageLabel, isCrmFounder } from "@enginious-hr/domain";
 import { Alert } from "@/components/ui/alert";
@@ -97,7 +98,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Prom
 
   const stages = openPipelineByStage(opps);
   const owners = openPipelineByOwner(opps);
-  const fuCounts = followUpCounts(scopedFollowUps.map((f) => f.followUp), now);
+  const fuCounts = followUpCounts(scopedFollowUps.map((f) => f.followUp), now, zoneOfCompanies(ctx.companies));
   const wl = wonLostInPeriod(opps, period);
   const sources = enquiriesBySource(opps, period);
   const elapsed = elapsedFirstResponse(opps, period);

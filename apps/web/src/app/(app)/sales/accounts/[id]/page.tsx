@@ -1,3 +1,4 @@
+import { zoneOfCompanies } from "@/lib/crm/time-zone";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { canActOnAccountFollowUp, canActOnFollowUp, hasCrmCapability, isCrmActive, isCrmFounder } from "@enginious-hr/domain";
@@ -82,6 +83,8 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   // Outreach fails softly into its own "could not load" section; the rest of the account still shows.
   const outreach: AccountOutreach[] | "error" = await loadAccountOutreach(company.id, id).catch((e) => { console.error("[clients-agencies] outreach failed", e); return "error" as const; });
   const { org, contacts, profile, view, orgNames } = data;
+  // A follow-up is shown on the clock of the company it belongs to.
+  const zoneOf = zoneOfCompanies(ctx.companies);
   const people = eligibleStaff(staff, company.id).map((p) => ({ id: p.userId, name: p.name }));
   const nameOf = (uid: string | null) => (uid ? (staff.find((p) => p.userId === uid)?.name ?? ctx.personName(uid)) : null);
   const canAssign = hasCrmCapability(ctx.grants, company.id, "assign_owner");
@@ -118,8 +121,8 @@ export default async function AccountPageRoute({ params, searchParams }: { param
   const nextFollowUp = followUpRows[0] ?? null;
 
   const addFollowUp = openInquiries.length > 0
-    ? <AddFollowUpButton inquiries={openInquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))} people={people} defaultAssigneeId={ctx.userId} />
-    : <AddAccountFollowUpButton orgId={org.id} companyId={company.id} people={people} currentUserId={ctx.userId} canAssign={canAssign} />;
+    ? <AddFollowUpButton inquiries={openInquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))} people={people} defaultAssigneeId={ctx.userId} timeZone={zoneOf(company.id)} />
+    : <AddAccountFollowUpButton orgId={org.id} companyId={company.id} people={people} currentUserId={ctx.userId} canAssign={canAssign} timeZone={zoneOf(company.id)} />;
 
   const contactsCard = (
     <Card id="contacts">
@@ -186,10 +189,10 @@ export default async function AccountPageRoute({ params, searchParams }: { param
                   {n === 0 ? <OsBadge tone={r.state === "overdue" ? "red" : r.state === "today" ? "amber" : "neutral"} className="mr-1.5 whitespace-nowrap">Next</OsBadge> : null}
                   <span className="font-medium">{r.f.title}</span>
                   <span className="text-muted-foreground"> · {r.href ? <Link href={r.href} className="underline-offset-2 hover:underline">{r.where}</Link> : r.where} · {nameOf(r.f.assigned_to) ?? "Former colleague"} · </span>
-                  <DueText dueAt={r.f.due_at} />
+                  <DueText dueAt={r.f.due_at} zone={zoneOf(r.f.company_id)} />
                 </span>
                 <span className="flex flex-wrap items-center gap-1.5">
-                  {r.canAct ? <FollowUpRowActions followUp={{ id: r.f.id, title: r.f.title, opportunityId: r.f.opportunity_id, isOnlyOpen: r.isOnlyOpen }} /> : null}
+                  {r.canAct ? <FollowUpRowActions followUp={{ id: r.f.id, title: r.f.title, opportunityId: r.f.opportunity_id, isOnlyOpen: r.isOnlyOpen, dueAt: r.f.due_at, timeZone: zoneOf(r.f.company_id) }} /> : null}
                   {r.mayHandOver ? <ReassignFollowUpButton followUpId={r.f.id} assigneeId={r.f.assigned_to} people={people} title={r.f.title} /> : null}
                 </span>
               </li>
@@ -204,8 +207,9 @@ export default async function AccountPageRoute({ params, searchParams }: { param
     <OutreachSection
       items={outreach} orgId={org.id} orgName={org.name} companyId={company.id} today={todayInDubai()} canAssign={canAssign}
       nameOf={(uid) => nameOf(uid) ?? "Former colleague"} inquiries={view.inquiries.map((i) => ({ id: i.opp.id, label: `${i.opp.reference}: ${i.opp.title}` }))}
-      // Outreach holds no contact of its own: only when the account has exactly one is it certain who a new enquiry is from.
+      // The contact chosen on the outreach is carried into a new enquiry; when none was chosen, the account's one recorded contact is (it is then certain who it is from).
       onlyContactId={contacts.length === 1 ? contacts[0]!.id : null}
+      contacts={contacts.map((ct) => ({ id: ct.id, name: ct.name, roleTitle: ct.role_title ?? null }))}
     />
   );
 
@@ -235,7 +239,7 @@ export default async function AccountPageRoute({ params, searchParams }: { param
           <>
             <span className="text-muted-foreground">Next follow-up:</span>
             <span className="min-w-0 break-words font-medium">{nextFollowUp.f.title}</span>
-            <DueText dueAt={nextFollowUp.f.due_at} />
+            <DueText dueAt={nextFollowUp.f.due_at} zone={zoneOf(nextFollowUp.f.company_id)} />
             <span className="text-muted-foreground">· {nameOf(nextFollowUp.f.assigned_to) ?? "Former colleague"}</span>
             <a href="#follow-ups" className="underline underline-offset-2">Open follow-ups</a>
           </>
