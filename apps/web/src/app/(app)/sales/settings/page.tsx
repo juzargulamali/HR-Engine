@@ -1,5 +1,6 @@
 import { companyTimeZone, timeZoneCity } from "@enginious-hr/domain";
 import { FollowUpTimeZoneForm } from "./time-zone-form";
+import { STILL_ON_DUBAI_CLOCK } from "@/lib/crm/time-zone";
 import Link from "next/link";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { canManageApprovalRules, canManageCrmAccess, canManageCrmSettings, isCrmFounder, parseWorkingCalendar } from "@enginious-hr/domain";
@@ -51,7 +52,7 @@ function ReadOnlySettings({ company, ctx }: { company: CrmCompanyInfo; ctx: CrmC
     ["Working calendar", cal
       ? `${DAY_ORDER.filter((d) => cal.workdays.includes(d)).map((d) => DAY_NAMES[d]).join(", ")}, ${cal.start} to ${cal.end} Dubai time${cal.holidays.length ? `, ${cal.holidays.length} ${cal.holidays.length === 1 ? "holiday" : "holidays"}` : ""}`
       : "Not configured"],
-    ["Follow-up time zone", `${companyTimeZone(s)} (${timeZoneCity(companyTimeZone(s))} time)`],
+    ["Follow-up time zone", <span key="tz">{companyTimeZone(s)} ({timeZoneCity(companyTimeZone(s))} time)<span className="block text-sm text-muted-foreground">{STILL_ON_DUBAI_CLOCK}</span></span>],
     ["Duplicate window", `${s.duplicate_window_days} days`],
     ["Email reminders to owners", s.owner_email_enabled ? "On" : "Off"],
     ["Commercial approval policy", (

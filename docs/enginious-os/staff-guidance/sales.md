@@ -99,12 +99,13 @@ Enquiries live in Sales. The quick form needs the company, What is the enquiry?,
 - links: Follow-ups -> /sales/follow-ups; Enquiries -> /sales/opportunities
 - screens: /sales/follow-ups
 
-The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. Times are on the clock of the follow-up's company, with the place after them, and Today is that company's day. Questions from Operations are listed here too.
+The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. Dismiss clears a reminder. Times are on the clock of the follow-up's company (Dubai, Riyadh or Warsaw), with the place after them,. Today is that company's day. Older deadlines keep their moment: 10:00 Dubai reads 07:00 (Warsaw) in winter.
 
 1. Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.
 2. Press Complete to record what happened and plan the next action, or Reschedule to move the due time.
 3. To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.
-4. A Handover accepted line is news only: Dismiss takes it off your own list and My Day, and it goes after seven days. A line under Questions from Operations opens the question on the enquiry; it goes when you answer.
+4. A Handover accepted line is news only: Dismiss takes it off your own list and My Day. A line under Questions from Operations opens the question on the enquiry; it goes when you answer.
+5. Still on Dubai time for every company: the reminder for a hold's review date, the daily reminder for an enquiry with no next action, the dates in Sales reports, and anything JARVIS saves or lists.
 
 ## Log a call, email or meeting on an enquiry
 - id: sales-log-update
@@ -288,6 +289,7 @@ Sales settings are shown for one company at a time: Response targets, Commercial
 2. Follow a link in the list at the top to the setting that needs filling in.
 3. Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes.
 4. To change the Follow-up time zone, choose the zone by name and press Save time zone. No existing follow-up moves: each keeps its exact moment and is then shown on the new clock, so tell the team first.
+5. The UAE company uses Dubai time, the Saudi company Riyadh time and the Polish company Warsaw time. Hold review reminders, the no next action reminder, report dates and JARVIS stay on Dubai time for every company.
 
 ## Flag an enquiry for Operations planning
 - id: sales-operations-planning

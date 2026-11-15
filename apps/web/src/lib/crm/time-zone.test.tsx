@@ -25,7 +25,7 @@ import { dueFor, dueInZone, followUpZone } from "./follow-up-zone";
 import { resultingDue, whenShortcuts } from "./follow-up-reschedule";
 import { attentionItems, followUpCounts } from "./reports";
 import { enquiryNeeds } from "./enquiry-list";
-import { dueTimeLabel, zoneOfCompanies } from "./time-zone";
+import { dueTimeLabel, STILL_ON_DUBAI_CLOCK, zoneOfCompanies } from "./time-zone";
 
 // Fictional companies: one on the Dubai clock, one on the Warsaw clock, one with no settings yet.
 const UAE = "11111111-1111-4111-8111-111111111111";
@@ -172,5 +172,47 @@ describe("changing a company's zone", () => {
     expect((await setFollowUpTimeZone({ error: null }, fd({ companyId: PL, timeZone: WAW }))).error).toMatch(/Not allowed/);
     rpc.mockResolvedValue({ data: null, error: { code: "PGRST202", message: "Could not find the function public.crm_set_follow_up_time_zone in the schema cache" } });
     expect((await setFollowUpTimeZone({ error: null }, fd({ companyId: PL, timeZone: WAW }))).error).toMatch(/not available in this environment yet/);
+  });
+});
+
+describe("a company that moves from the Dubai clock to its own (the Polish and the Saudi company on rollout)", () => {
+  const RUH = "Asia/Riyadh";
+  // Typed before the change as "15 Jan 2027, 10:00 (Dubai)" = 06:00 UTC. The stored moment is never rewritten.
+  const typedAsTenDubai = "2027-01-15T06:00:00.000Z";
+  // Typed as 01:30 (Dubai) on the 16th = 21:30 UTC on the 15th = 22:30 on the 15th in Warsaw = 00:30 on the 16th in Riyadh.
+  const lateNight = "2027-01-15T21:30:00.000Z";
+  const item = (id: string, company_id: string, due_at: string) => ({ id, followUp: { id, due_at, status: "open", company_id, assigned_to: "me", title: id }, opportunity: { id: `o-${id}`, reference: `R-${id}`, title: id } });
+  const KSA = "66666666-6666-4666-8666-666666666666";
+  const zones = zoneOfCompanies([...companies, { id: KSA, settings: { follow_up_time_zone: RUH } }]);
+
+  it("the same moment reads 10:00 (Dubai), 09:00 (Riyadh) and 07:00 (Warsaw) in winter, 08:00 (Warsaw) in summer", () => {
+    expect(formatDue(typedAsTenDubai, "Asia/Dubai")).toBe("15 Jan 2027, 10:00 (Dubai)");
+    expect(formatDue(typedAsTenDubai, RUH)).toBe("15 Jan 2027, 09:00 (Riyadh)");
+    expect(formatDue(typedAsTenDubai, WAW)).toBe("15 Jan 2027, 07:00 (Warsaw)");
+    expect(formatDue("2027-07-15T06:00:00.000Z", WAW)).toBe("15 Jul 2027, 08:00 (Warsaw)");
+  });
+
+  it("a deadline typed late at night in Dubai falls on the day before in Warsaw: it is shown that way and grouped by the company's own day", () => {
+    expect(formatDue(lateNight, "Asia/Dubai")).toBe("16 Jan 2027, 01:30 (Dubai)");
+    expect(formatDue(lateNight, WAW)).toBe("15 Jan 2027, 22:30 (Warsaw)");
+    expect(formatDue(lateNight, RUH)).toBe("16 Jan 2027, 00:30 (Riyadh)");
+    // 20:00 on the 15th in Warsaw (23:00 in Dubai, 22:00 in Riyadh): the same moment is Today for Warsaw, Upcoming (tomorrow) for Dubai and Riyadh
+    const evening = new Date("2027-01-15T19:00:00.000Z");
+    const g = groupOpenFollowUps([item("uae", UAE, lateNight), item("pl", PL, lateNight), item("ksa", KSA, lateNight)], evening, zones);
+    expect(g.today.map((x) => x.id)).toEqual(["pl"]);
+    expect(g.upcoming.map((x) => x.id).sort()).toEqual(["ksa", "uae"]);
+    // My Day lists only what is due today on its own clock; each row carries its zone
+    const mine = attentionItems({ opportunities: [], followUps: [item("uae", UAE, lateNight), item("pl", PL, lateNight), item("ksa", KSA, lateNight)], userId: "me", scope: "mine", zoneOf: zones }, evening);
+    expect(mine.map((a) => [a.reference, a.kind, a.timeZone])).toEqual([["R-pl", "due_today", WAW]]);
+    // overdue never depends on the zone: one minute after the moment all three are overdue
+    const after = attentionItems({ opportunities: [], followUps: [item("uae", UAE, lateNight), item("pl", PL, lateNight), item("ksa", KSA, lateNight)], userId: "me", scope: "mine", zoneOf: zones }, new Date("2027-01-15T21:31:00.000Z"));
+    expect(after.map((a) => a.kind)).toEqual(["overdue", "overdue", "overdue"]);
+  });
+
+  it("says plainly what still runs on the Dubai clock", () => {
+    expect(STILL_ON_DUBAI_CLOCK).toMatch(/hold's review date/);
+    expect(STILL_ON_DUBAI_CLOCK).toMatch(/no next action/);
+    expect(STILL_ON_DUBAI_CLOCK).toMatch(/Sales reports/);
+    expect(STILL_ON_DUBAI_CLOCK).toMatch(/JARVIS/);
   });
 });

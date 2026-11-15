@@ -279,13 +279,29 @@ try {
   // ============================================================================================================================ 5. Time zone
   console.log("\n# 5. A company on the Warsaw clock");
   const dueBefore = psql(`select string_agg(id::text || ':' || extract(epoch from due_at)::text, ',' order by id) from crm_follow_ups`);
+  check(psql(`select follow_up_time_zone from crm_company_settings where company_id = '${PL}'`) === "Europe/Warsaw" && psql(`select follow_up_time_zone from crm_company_settings where company_id = '${UAE}'`) === "Asia/Dubai", "defaults from the country: the Polish company starts on Europe/Warsaw, the UAE company on Asia/Dubai");
+  // an existing deadline of the Polish company, typed before as 10:00 (Dubai) on a winter day: the same moment, now read on the Warsaw clock
+  const OLD_PL = psql(`insert into crm_follow_ups (opportunity_id, company_id, assigned_to, title, kind, due_at, created_by) values ('${OPP_PL}', '${PL}', '${EMP}', 'Typed as ten Dubai', 'call', '2027-01-15T06:00:00Z', '${EMP}') returning id`).split("\n")[0];
+  await emp.goto(`${BASE}/sales/opportunities/${OPP_PL}`);
+  await emp.getByText(/Typed as ten Dubai/).first().waitFor({ timeout: 20000 });
+  check(/15 Jan 2027, 07:00 \(Warsaw\)/.test(await text(emp.locator("main"))), "a deadline typed earlier as 10:00 (Dubai) reads 07:00 (Warsaw) for the Polish company: same moment, its own clock");
+  check(psql(`select extract(epoch from due_at)::bigint from crm_follow_ups where id = '${OLD_PL}'`) === String(Date.parse("2027-01-15T06:00:00Z") / 1000), "and its stored moment is untouched");
+  await shot(emp, "16a-existing-deadline-on-warsaw-clock");
+  psql(`delete from crm_follow_ups where id = '${OLD_PL}'`);
+  // the founder moves the company to another zone and back through the screen
+  await ceo.goto(`${BASE}/sales/settings?company=${PL}#follow-up-time-zone`);
+  check(/Still on Dubai time for every company/.test(await text(ceo.locator("#follow-up-time-zone"))), "Settings says what still runs on the Dubai clock");
+  await ceo.locator("#follow-up-time-zone").getByLabel("Time zone").selectOption("Europe/Berlin");
+  await ceo.locator("#follow-up-time-zone").getByRole("button", { name: "Save time zone" }).click();
+  await ceo.waitForTimeout(1500);
+  check(psql(`select follow_up_time_zone from crm_company_settings where company_id = '${PL}'`) === "Europe/Berlin", "the founder changes the zone in Sales settings");
   await ceo.goto(`${BASE}/sales/settings?company=${PL}#follow-up-time-zone`);
   const zonePanel = ceo.locator("#follow-up-time-zone");
   await zonePanel.getByLabel("Time zone").selectOption("Europe/Warsaw");
   await shot(ceo, "16-settings-time-zone");
   await zonePanel.getByRole("button", { name: "Save time zone" }).click();
   await ceo.waitForTimeout(1500);
-  check(psql(`select follow_up_time_zone from crm_company_settings where company_id = '${PL}'`) === "Europe/Warsaw" && psql(`select follow_up_time_zone from crm_company_settings where company_id = '${UAE}'`) === "Asia/Dubai", "the founder sets the Polish company to Europe/Warsaw; the UAE company stays on Asia/Dubai");
+  check(psql(`select follow_up_time_zone from crm_company_settings where company_id = '${PL}'`) === "Europe/Warsaw" && psql(`select follow_up_time_zone from crm_company_settings where company_id = '${UAE}'`) === "Asia/Dubai", "and sets it back to Europe/Warsaw; the UAE company stays on Asia/Dubai");
   check(psql(`select string_agg(id::text || ':' || extract(epoch from due_at)::text, ',' order by id) from crm_follow_ups`) === dueBefore, "changing the zone moved no existing deadline");
   await emp.goto(`${BASE}/sales/settings?company=${PL}`);
   check(/Europe\/Warsaw \(Warsaw time\)/.test(await text(emp.locator("main"))) && (await emp.getByRole("button", { name: "Save time zone" }).count()) === 0, "a Sales employee reads the zone and cannot change it");

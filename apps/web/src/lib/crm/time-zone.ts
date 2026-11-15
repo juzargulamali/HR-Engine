@@ -25,3 +25,9 @@ export const dueTimeLabel = (zone: string) => `Time (${timeZoneCity(zone)})`;
 
 /** "Warsaw time", for sentences. */
 export const zoneWords = (zone: string) => `${timeZoneCity(zone)} time`;
+
+/**
+ * What does NOT follow a company's zone in this release (owner decision, 2026-11-15) and still runs on the Dubai clock for every company. Said in Sales settings
+ * next to the zone, and in the staff guidance, so nobody assumes otherwise.
+ */
+export const STILL_ON_DUBAI_CLOCK = "Still on Dubai time for every company: the reminder for a hold's review date, the daily reminder for an enquiry with no next action, the dates of the Sales reports, and anything JARVIS saves or lists.";

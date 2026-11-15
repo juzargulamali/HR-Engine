@@ -2773,12 +2773,13 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "handover accepted notice",
       "remove handover accepted"
     ],
-    "summary": "The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. Times are on the clock of the follow-up's company, with the place after them, and Today is that company's day. Questions from Operations are listed here too.",
+    "summary": "The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. Dismiss clears a reminder. Times are on the clock of the follow-up's company (Dubai, Riyadh or Warsaw), with the place after them,. Today is that company's day. Older deadlines keep their moment: 10:00 Dubai reads 07:00 (Warsaw) in winter.",
     "steps": [
       "Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.",
       "Press Complete to record what happened and plan the next action, or Reschedule to move the due time.",
       "To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.",
-      "A Handover accepted line is news only: Dismiss takes it off your own list and My Day, and it goes after seven days. A line under Questions from Operations opens the question on the enquiry; it goes when you answer."
+      "A Handover accepted line is news only: Dismiss takes it off your own list and My Day. A line under Questions from Operations opens the question on the enquiry; it goes when you answer.",
+      "Still on Dubai time for every company: the reminder for a hold's review date, the daily reminder for an enquiry with no next action, the dates in Sales reports, and anything JARVIS saves or lists."
     ],
     "links": [
       {
@@ -3241,7 +3242,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open Settings in Sales (under Manage in the menu) and choose the company above the page.",
       "Follow a link in the list at the top to the setting that needs filling in.",
       "Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes.",
-      "To change the Follow-up time zone, choose the zone by name and press Save time zone. No existing follow-up moves: each keeps its exact moment and is then shown on the new clock, so tell the team first."
+      "To change the Follow-up time zone, choose the zone by name and press Save time zone. No existing follow-up moves: each keeps its exact moment and is then shown on the new clock, so tell the team first.",
+      "The UAE company uses Dubai time, the Saudi company Riyadh time and the Polish company Warsaw time. Hold review reminders, the no next action reminder, report dates and JARVIS stay on Dubai time for every company."
     ],
     "links": [
       {
