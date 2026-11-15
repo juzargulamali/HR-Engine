@@ -49,3 +49,19 @@ describe("buildActivityPreviews", () => {
     expect(m.get("p1")!.more).toBe(1);
   });
 });
+
+describe("work package indicator", () => {
+  it("counts each project's packages from one list of rows, leaves cancelled ones out, and gives no entry to a project without any", async () => {
+    const { countWorkPackages, workPackageText } = await import("./list-extras");
+    const m = countWorkPackages([
+      { project_id: "p1", status: "accepted" }, { project_id: "p1", status: "ready_for_review" }, { project_id: "p1", status: "open" }, { project_id: "p1", status: "cancelled" },
+      { project_id: "p2", status: "accepted" }, { project_id: "p3", status: "cancelled" },
+    ]);
+    expect(m.get("p1")).toEqual({ total: 3, accepted: 1, ready: 1 });
+    expect(m.get("p2")).toEqual({ total: 1, accepted: 1, ready: 0 });
+    expect(m.has("p3")).toBe(false);
+    expect(m.has("p4")).toBe(false);
+    expect(workPackageText(m.get("p1")!)).toEqual({ short: "1/3 work packages", long: "1 of 3 work packages accepted, 1 ready for review", attention: true });
+    expect(workPackageText(m.get("p2")!)).toEqual({ short: "1/1 work package", long: "1 of 1 work package accepted", attention: false });
+  });
+});

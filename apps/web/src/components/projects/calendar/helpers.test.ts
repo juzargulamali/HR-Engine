@@ -60,8 +60,8 @@ describe("row mapping", () => {
   ];
   it("maps my-calendar rows with project links, kind and status in words", () => {
     const [task, booking] = mapMyRows(my);
-    expect(task).toMatchObject({ kindLabel: "Task deadline", statusLabel: "In progress", href: "/projects/p1/work", onDate: "2099-02-15" });
-    expect(booking).toMatchObject({ kindLabel: "Site booking", statusLabel: "Confirmed", href: "/projects/p1/plan?plan=site&mode=list#bookings" });
+    expect(task).toMatchObject({ kindLabel: "Task deadline", statusLabel: "In progress", href: "/projects/p1/work?from=calendar", onDate: "2099-02-15" });
+    expect(booking).toMatchObject({ kindLabel: "Site booking", statusLabel: "Confirmed", href: "/projects/p1/plan?plan=site&mode=list&from=calendar#bookings" });
   });
   it("keeps a date-only deadline on its day in every viewing zone, and an overnight booking on both nights", () => {
     const entries = mapMyRows(my);
@@ -84,7 +84,7 @@ describe("row mapping", () => {
   it("maps project rows including dependencies with their site-time clock", () => {
     const rows = [{ kind: "dependency", item_id: "d1", title: "Power ready", on_date: "2099-03-04", end_date: "2099-03-04", starts_at: null, ends_at: null, tz: null, status: "pending", who: "Expo Builders", detail: "09:00:00" }];
     const [e] = mapProjectRows(rows, "p1", "REF", "Floor");
-    expect(e).toMatchObject({ kindLabel: "Dependency on others", statusLabel: "Not yet confirmed", href: "/projects/p1/plan?plan=site&mode=list" });
+    expect(e).toMatchObject({ kindLabel: "Dependency on others", statusLabel: "Not yet confirmed", href: "/projects/p1/plan?plan=site&mode=list&from=plan-calendar" });
     expect(e!.detail).toBe("Expo Builders · at 09:00 site time");
   });
   it("maps company rows to spans carrying summary fields only and drops undated projects", () => {
@@ -94,7 +94,7 @@ describe("row mapping", () => {
     ];
     const entries = mapCompanyRows(rows);
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ onDate: "2099-02-01", endDate: "2099-02-01", href: "/projects/p1", detail: "Client project" });
+    expect(entries[0]).toMatchObject({ onDate: "2099-02-01", endDate: "2099-02-01", href: "/projects/p1?from=calendar", detail: "Client project" });
   });
   it("filters by kind, and returns everything when no kind is chosen", () => {
     const e = mapMyRows(my);
@@ -128,7 +128,7 @@ describe("mapSiteActivities", () => {
   }) as never;
   it("uses the shared phase words and links to the exact Site schedule row", () => {
     const [e] = mapSiteActivities([row({})], "2099-02-01", "2099-02-28");
-    expect(e).toMatchObject({ statusLabel: "Tentative Setup on 10 Feb", href: "/projects/p1/plan?plan=site&mode=list#site-a1", kindLabel: "Site activity", title: "Setup · Run 1" });
+    expect(e).toMatchObject({ statusLabel: "Tentative Setup on 10 Feb", href: "/projects/p1/plan?plan=site&mode=list&from=calendar#site-a1", kindLabel: "Site activity", title: "Setup · Run 1" });
   });
   it("never says started because a date passed, and leaves out undated activities and other periods", () => {
     const [passed] = mapSiteActivities([row({ phase: "date_passed" })], "2099-02-01", "2099-02-28");

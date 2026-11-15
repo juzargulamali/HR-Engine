@@ -47,7 +47,7 @@ import { PlanAddMenu } from "./plan-add-menu";
 import { holdReviewState, resolutionSummary } from "../overview-helpers";
 import { RememberList } from "@/components/workspace/list-memory";
 import { NextOnSite, WorkOverviewAreas } from "@/components/projects/work-overview";
-import { describeSitePhase, type SitePhaseInfo } from "@/lib/projects/site-state";
+import { siteActivityState, type SitePhaseInfo } from "@/lib/projects/site-state";
 import { formatAt, recentText, type SiteActivityRead } from "@/lib/projects/phase2/model";
 import { WorkSummary } from "@/components/projects/work-summary";
 import { milestoneSummary, outputLines, outputSummary } from "@/lib/projects/work-summary";
@@ -335,7 +335,7 @@ export default async function WorkPage({ params, searchParams }: { params: Promi
     const { data: phaseRows } = await supabase.rpc("proj_site_activities_read", { p_company_id: view.project.company_id, p_project_id: id, p_limit: 50 });
     if (Array.isArray(phaseRows)) sitePhases = Object.fromEntries((phaseRows as SiteActivityRead[]).filter((r) => r?.id && r.phase).map((r) => [r.id, r.phase]));
   }
-  const siteStateLabel = (a: { id: string }) => { const ph = sitePhases[a.id]; return ph ? describeSitePhase(ph).label : null; };
+  const siteStateLabel = (a: { id: string }) => { const ph = sitePhases[a.id]; return ph ? siteActivityState(ph).label : null; };
   // The overview's recent changes (new output version, review decision, site schedule change), as lines of the same block. Still the five newest, as before.
   const overviewActivity: ActivityLine[] = (overview?.recent ?? []).slice(0, 5).map((r, n) => ({ key: `o-${r.entity_id}-${r.at}-${n}`, subject: recentText(r), when: formatAt(r.at, overview?.tz), at: r.at }));
   const recentLines = mergeActivity(activity, overviewActivity);

@@ -11,7 +11,7 @@ import type { OpsResult } from "@/lib/operations/data";
 import {
   AT_RISK_WINDOW_DAYS, STALLED_DAYS, datesWord, DECISION_WORDS, decisions, deliveryByWeek, EQUIPMENT_ISSUE_WORDS, equipmentIssues, eventLine, groupEntries, HEALTH_ORDER, HEALTH_WORDS, healthCounts, installationsWithin, isFinished,
   laterEntries, NEXT_ON_SITE_DAYS, nextOnSite, nextUnresolved, pressure, projectHealth, readiness, SITE_ACTIVITY_LIMIT, splitDecisions, TIMELINE_DAYS, unitsOut, type DecisionItem, type Overview, type OverviewProject, type TimelineEntry,
-  type UpcomingRow,
+  type CrewOverlapsRead, type UpcomingRow,
 } from "@/lib/operations/model";
 import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { dateRangeText, dateText } from "@/lib/projects/format";
@@ -28,8 +28,10 @@ const EVIDENCE_SHOWN = 3;
  * Every figure is the length of the list it opens, built from the same read, so a figure and its list cannot disagree. Nothing is scored. Colour is always
  * paired with a word. A part whose read failed says so and is never drawn as zero, empty or "on track".
  */
-export function OverviewView({ header, companies, company, ov, up, sites, today, viewerId }: {
-  header: React.ReactNode; companies: { id: string; name: string }[]; company: { id: string; name: string }; ov: { data: Overview }; up: OpsResult<UpcomingRow[]>; sites: OpsResult<SiteActivityRead[]>; today: string; viewerId: string;
+export function OverviewView({ header, companies, company, ov, up, sites, crew, today, viewerId }: {
+  header: React.ReactNode; companies: { id: string; name: string }[]; company: { id: string; name: string }; ov: { data: Overview }; up: OpsResult<UpcomingRow[]>; sites: OpsResult<SiteActivityRead[]>;
+  /** Who is booked twice (person and both assignments). Optional: without it, or when its read failed, the panel says so and keeps the activity-level warning. */
+  crew?: OpsResult<CrewOverlapsRead>; today: string; viewerId: string;
 }) {
   const self = `/operations?company=${company.id}`;
   const upcomingHref = `/operations/upcoming?company=${company.id}`;
@@ -47,7 +49,8 @@ export function OverviewView({ header, companies, company, ov, up, sites, today,
   const counts = healthCounts(o, today);
   const live = o.projects.filter((p) => !isFinished(p.status) || unitsOut(p) > 0 || p.release_failed).map((p) => ({ p, h: projectHealth(p, today) }))
     .sort((a, b) => HEALTH_ORDER.indexOf(a.h.health) - HEALTH_ORDER.indexOf(b.h.health) || (a.p.install_start ?? a.p.event_start ?? "9999").localeCompare(b.p.install_start ?? b.p.event_start ?? "9999") || a.p.reference.localeCompare(b.p.reference));
-  const overlaps = pressure(o, acts).filter((x) => x.kind === "overlap" || x.kind === "crew_overlap" || x.kind === "reviews_overdue");
+  const crewRead = crew?.state === "ok" ? crew.data : null;
+  const overlaps = pressure(o, acts, crewRead).filter((x) => x.kind === "overlap" || x.kind === "crew_overlap" || x.kind === "reviews_overdue");
 
   return (
     <div className="space-y-4">
@@ -201,16 +204,18 @@ export function OverviewView({ header, companies, company, ov, up, sites, today,
         </Panel>
 
         <Panel title={`Team pressure (${overlaps.length})`}
-          hint={<><p>People on two projects whose dates overlap, two confirmed crewed activities that overlap, and reviews past the task&apos;s date. Each overlap lists both commitments with their dates or times. Only what is recorded; it is not a capacity figure.</p><p className="mt-1.5">A person-level overlap needs both projects to have their dates and people recorded. The activity-level one cannot say which person is on both: check the Site schedule.</p></>}>
-          {overlaps.length === 0 ? <Muted>Nothing recorded.</Muted> : (
+          hint={<><p>People on two projects whose dates overlap, a crew member on two confirmed site assignments that overlap, and reviews past the task&apos;s date. Each overlap names the person and lists both assignments with their dates or times and a link to each. Only what is recorded; it is not a capacity figure.</p><p className="mt-1.5">Times are local time at each site. An assignment in a company you are not an Operations Manager of is shown as a time window only, with no project name and no link.</p></>}>
+          {crew && crew.state === "error" ? <p className="mb-2 text-[13px] text-[hsl(var(--os-amber))]" role="status" data-testid="ops-crew-overlaps-error">Who is booked twice could not be loaded. Overlapping crewed activities are listed without names; check the Site schedule.</p> : null}
+          {crewRead?.truncated ? <p className="mb-2 text-[13px] text-muted-foreground" data-testid="ops-crew-overlaps-more">Showing the first {crewRead.overlaps.length} of {crewRead.total} overlapping assignments.</p> : null}
+          {overlaps.length === 0 ? <Muted>{crew && crew.state === "error" ? "Nothing else is recorded." : "Nothing recorded."}</Muted> : (
             <ul className="space-y-2.5 text-[13px]" data-testid="ops-pressure">
               {overlaps.map((x) => (
-                <li key={x.key} data-testid={x.commitments ? "ops-pressure-pair" : undefined}>
-                  <Link href={x.href} className="underline-offset-4 hover:underline">{x.text}</Link>
+                <li key={x.key} data-testid={x.commitments ? "ops-pressure-pair" : undefined} data-kind={x.kind}>
+                  {x.kind === "crew_overlap" && x.who ? <p><span className="font-medium" data-testid="ops-overlap-person">{x.who}</span> is on two confirmed assignments that overlap.</p> : <Link href={x.href} className="underline-offset-4 hover:underline">{x.text}</Link>}
                   {x.commitments ? (
                     <ul className="mt-1 space-y-0.5 border-l pl-3" aria-label="Both commitments">
                       {x.commitments.map((c, i) => (
-                        <li key={i} data-testid="ops-commitment"><Link href={c.href} className="font-medium underline-offset-4 hover:underline">{c.title}</Link> <span className="text-muted-foreground">· {c.project} · {c.when}</span></li>
+                        <li key={i} data-testid="ops-commitment" data-source={c.source}>{c.href ? <Link href={c.href} className="font-medium underline-offset-4 hover:underline">{c.title}</Link> : <span className="font-medium">{c.title}</span>} <span className="text-muted-foreground">· {c.source === "other_company" ? "" : `${c.project} · `}{c.when}</span></li>
                       ))}
                     </ul>
                   ) : null}

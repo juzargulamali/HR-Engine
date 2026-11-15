@@ -214,7 +214,31 @@ export function upcomingDelivery(o: Overview): OverviewProject[] {
 }
 
 /** One thing a person or crew is committed to: the project, the activity (or the project header window it falls back to) and when. */
-export interface Commitment { project: string; title: string; when: string; href: string; source: "activity" | "project_header" }
+export interface Commitment { project: string; title: string; when: string; /** Null for a commitment in a company the reader holds no Operations right for: it has no name and no link. */ href: string | null; source: "activity" | "project_header" | "booking" | "other_company" }
+
+/** One side of a per-person overlap as `ops_crew_overlaps` returns it. A hidden side (another company the reader cannot see) carries its window only. */
+export interface CrewOverlapSide {
+  hidden: boolean; starts_at: string; ends_at: string; tz: string; all_day: boolean; starts_local: string; ends_local: string;
+  kind?: "crew" | "booking"; id?: string; project_id?: string; reference?: string; project_name?: string; title?: string; run_label?: string | null;
+}
+export interface CrewOverlap { user_id: string; person: string; overlap_from: string; overlap_to: string; a: CrewOverlapSide; b: CrewOverlapSide }
+export interface CrewOverlapsRead { company_id: string; taken_at: string; overlaps: CrewOverlap[]; total: number; truncated: boolean }
+
+/** The window of a commitment in the SITE's own time zone, from the local date and time the database worked out there (never the reader's zone). */
+export function sideWhen(s: Pick<CrewOverlapSide, "starts_local" | "ends_local" | "all_day" | "tz">): string {
+  const d1 = s.starts_local.slice(0, 10); const d2 = s.ends_local.slice(0, 10);
+  const zone = s.tz.replace(/_/g, " ");
+  if (s.all_day) return `${d1 === d2 ? shortDay(d1) : `${shortDay(d1)} to ${shortDay(d2)}`}, all day (${zone})`;
+  const t1 = s.starts_local.slice(11, 16); const t2 = s.ends_local.slice(11, 16);
+  return `${d1 === d2 ? `${shortDay(d1)}, ${t1} to ${t2}` : `${shortDay(d1)} ${t1} to ${shortDay(d2)} ${t2}`} (${zone})`;
+}
+/** A side of an overlap as a line. A hidden side says only that it is in another company, with its window: no project, title or link. */
+export function sideCommitment(s: CrewOverlapSide): Commitment {
+  if (s.hidden || !s.project_id || !s.id) return { project: "Another company", title: "A confirmed assignment in another company (details not shown)", when: sideWhen(s), href: null, source: "other_company" };
+  const project = `${s.reference ?? ""} ${s.project_name ?? ""}`.trim();
+  if (s.kind === "booking") return { project, title: s.title ?? "Site booking", when: sideWhen(s), href: `/projects/${s.project_id}/plan?plan=site&mode=list&check=${s.id}#bookings`, source: "booking" };
+  return { project, title: s.run_label ? `${s.title ?? "Site activity"} · ${s.run_label}` : (s.title ?? "Site activity"), when: sideWhen(s), href: siteHref({ project_id: s.project_id, id: s.id }), source: "activity" };
+}
 export interface PressureItem { kind: "overlap" | "crew_overlap" | "reviews_overdue" | "shortage" | "partial_dispatch" | "overdue_return"; key: string; text: string; href: string; /** Both sides of an overlap. */ commitments?: Commitment[]; who?: string }
 
 /** The site schedule link of one activity: the exact row on the project's Site schedule. */
@@ -246,9 +270,11 @@ const activityCommitment = (a: SiteActivityRead): Commitment => ({ project: `${a
  *     header window, labelled as such;
  *   - two CONFIRMED site activities of different projects that overlap in time and both have crew places. This is the activity-level part of the existing conflict rule (a confirmed commitment
  *     that overlaps another); it cannot say WHICH person is on both, because the activity read carries crew counts, not people, so it asks for that check on the Site schedule.
+ *   - when the per-person read (`ops_crew_overlaps`) is given, it REPLACES the activity-level lines: each item names the crew member and both confirmed assignments with their windows in the
+ *     site's own time zone and a link to each. An assignment in a company the reader holds no Operations right for has no name and no link.
  * Nothing is estimated.
  */
-export function pressure(o: Overview, activities?: readonly SiteActivityRead[] | null): PressureItem[] {
+export function pressure(o: Overview, activities?: readonly SiteActivityRead[] | null, crew?: CrewOverlapsRead | null): PressureItem[] {
   const out: PressureItem[] = [];
   const acts = activities ?? [];
   const byProject = new Map<string, SiteActivityRead[]>();
@@ -270,8 +296,14 @@ export function pressure(o: Overview, activities?: readonly SiteActivityRead[] |
     out.push({ kind: "overlap", key: `overlap:${x.user_id}:${x.a_id}:${x.b_id}`, who: x.person, commitments, href: commitments[0]?.href ?? `/projects/${x.a_id}/people`,
       text: `${x.person} is on ${x.a} and ${x.b}, whose delivery dates overlap ${day(x.from)} to ${day(x.to)}.` });
   }
-  // Activity-level: confirmed crewed activities of different projects that overlap in time.
-  const crewed = acts.filter((a) => a.state === "confirmed" && a.crew_total > 0 && span(a));
+  // Person-level: the crew member and both confirmed assignments, from the database (the same windows the Site schedule warning uses).
+  for (const x of crew?.overlaps ?? []) {
+    const commitments = [sideCommitment(x.a), sideCommitment(x.b)];
+    out.push({ kind: "crew_overlap", key: `crewp:${x.user_id}:${x.a.id ?? x.a.starts_at}:${x.b.id ?? `hidden-${x.b.starts_at}`}`, who: x.person, commitments, href: commitments[0]!.href ?? `/operations?company=${o.company_id}`,
+      text: `${x.person} is on two confirmed assignments that overlap.` });
+  }
+  // Activity-level (only when the per-person read is not available): confirmed crewed activities of different projects that overlap in time.
+  const crewed = crew ? [] : acts.filter((a) => a.state === "confirmed" && a.crew_total > 0 && span(a));
   let pairs = 0;
   for (let i = 0; i < crewed.length && pairs < 20; i += 1) {
     for (let j = i + 1; j < crewed.length && pairs < 20; j += 1) {
