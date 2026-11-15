@@ -509,7 +509,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Read Needs you and open a line to go to that task or record.",
       "For equipment, the Project Manager opens Equipment to review a draft and submit it; nothing is submitted for you.",
       "If the line says Import failed, press Import the handover equipment to try again, or open Equipment.",
-      "Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Go to also offers Handover brief and, if you have Sales access, Sales enquiry."
+      "Use Recent activity and Go to for the timeline, files, dependencies and site bookings. Project details shows, from the accepted handover, the agency, the notes for the Project Manager and, for the Project Manager and Operations, the site contact."
     ],
     "links": [
       {
@@ -569,7 +569,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "new project from sales",
       "handovers waiting"
     ],
-    "summary": "When Sales wins a job, the handover comes to Projects. Handovers waiting on you are listed first, the longest wait at the top, however many older finished ones there are. My Day opens the exact brief. The brief starts with the agreed scope, the site and dates, the equipment, the dependencies and risks, and any question you already asked Sales.",
+    "summary": "When Sales wins a job, the handover comes to Projects. Handovers waiting on you are listed first, the longest wait at the top, however many older finished ones there are. My Day opens the exact brief. The brief starts with the agreed scope, the site and dates with the agency, the equipment, the dependencies and risks, the site contact Sales chose, and any question you already asked Sales.",
     "steps": [
       "Open the handover from My Day, or open Handovers.",
       "Read the brief.",
@@ -2584,7 +2584,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "what is overdue",
       "overdue actions"
     ],
-    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are in Dubai time. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company, or \"What needs my attention today?\" for everything.",
+    "summary": "A follow-up is overdue once its due time has passed and it is still open. The Follow-ups page counts them on the Overdue card and lists them first. Due times are on the clock of the company the follow-up belongs to, with the place written after the time. In JARVIS you can also type \"Show my overdue Sales follow-ups\" to list your own for the selected company, or \"What needs my attention today?\" for everything.",
     "steps": [
       "Open Follow-ups in Sales and press the Overdue card to see only what is overdue. Show all to-do brings the whole list back.",
       "Do the work, then press Complete on the row to record what happened and plan the next action.",
@@ -2728,7 +2728,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "create event or edition",
       "add a missing event"
     ],
-    "summary": "Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. The list says how many enquiries it shows and why the rest are hidden, and Clear filters brings back your open enquiries.",
+    "summary": "Enquiries live in Sales. The quick form needs the company, What is the enquiry?, where it came from, an agency or an end client (or both) and the next action with its date. It starts in the company you are working in; if you have several and none can be assumed, choose one first. The line Saving to shows the company and currency before you save. If a save seems to hang, press it again: the same form never makes a second enquiry, it opens the one already saved and says so.",
     "steps": [
       "Open Enquiries in Sales.",
       "Press Add enquiry and check the company.",
@@ -2773,12 +2773,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "handover accepted notice",
       "remove handover accepted"
     ],
-    "summary": "The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. View only means the follow-up belongs to someone else. With several companies the page shows them all unless you choose one.",
+    "summary": "The Follow-ups page lists what you need to do next. The Overdue, Today and Upcoming cards count your follow-ups and narrow the list when pressed. Every enquiry still being worked needs one open next action, so the only one cannot be cancelled: complete it with a new one, or put the enquiry on hold. You get one reminder per follow-up, and Dismiss clears it. Times are on the clock of the follow-up's company, with the place after them, and Today is that company's day. Questions from Operations are listed here too.",
     "steps": [
       "Open Follow-ups in Sales. Press a card to see one group, or Everyone to see the team's.",
       "Press Complete to record what happened and plan the next action, or Reschedule to move the due time.",
       "To add one, open the enquiry and use Add follow-up, then choose what to do, the date and who it is for.",
-      "A Handover accepted line is news only. Press Dismiss to take it off your own list and off My Day; nobody else's list changes. If you leave it, it goes after seven days."
+      "A Handover accepted line is news only: Dismiss takes it off your own list and My Day, and it goes after seven days. A line under Questions from Operations opens the question on the enquiry; it goes when you answer."
     ],
     "links": [
       {
@@ -2940,11 +2940,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "open project",
       "pm asked a question"
     ],
-    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. Contacts, prices and files stay in Sales, and your notes stay on the brief for the Project Manager to read. JARVIS does not close, reopen or hand over enquiries.",
+    "summary": "Won and Lost are closed on their own form, which asks for the evidence or the reason. After Won, the top of the enquiry shows where the delivery handover stands and who has it next. The handover page says Ready for handover or Not ready, what the project will receive and what is not copied. The project receives the agency (or that the job is direct), the site contact you choose and your notes. Prices, files and other contacts stay in Sales. JARVIS does not close, reopen or hand over enquiries.",
     "steps": [
       "Open the enquiry.",
       "Open More at the top, choose Close as won or Close as lost, and fill in the form.",
-      "After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Put the site contact in the notes.",
+      "After Won, press the main button to prepare the handover. Write the scope of work: the brief cannot be submitted without it. Check the agency, and choose the Site contact from the enquiry's contacts (add the person under Contacts first if needed).",
       "Submit it, or answer the Project Manager's question and resubmit. When the project exists, Open project takes you to it if you have access.",
       "The chip My won: handover open on the Enquiries list finds your won enquiries whose handover is not accepted yet."
     ],
@@ -3175,7 +3175,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open Outreach in Sales and check the company named above the list.",
       "Press the button on a row: Log activity after a call, email or meeting, or Set next action when nothing is planned.",
       "Choose a status or tick Overdue only to decide what to do first.",
-      "When the client is ready, open the account and press Create enquiry. The enquiry form opens with the account and your outreach notes filled in; check it and save. One outreach raises one enquiry.",
+      "On the account, choose the Contact for this outreach. When the client is ready, press Create enquiry: the form opens with the account, that contact, the source Outreach and your notes; check it and save. One outreach raises one enquiry: a second try opens the first.",
       "Accounts are assigned from Clients & Agencies by the people who manage Sales assignments."
     ],
     "links": [
@@ -3236,11 +3236,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "vat choices",
       "settings"
     ],
-    "summary": "Sales settings are shown for one company at a time, in three parts: Response targets, Commercial approval, and Estimates & VAT with the VAT choices. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.",
+    "summary": "Sales settings are shown for one company at a time: Response targets, Commercial approval, Estimates & VAT with the VAT choices, and the Follow-up time zone, the clock that company's follow-up times are typed and shown on. Anything that stops work is listed first, for example a missing reference code and currency, which stops enquiries being recorded. Founders and people who manage Sales settings can change them; others can read them.",
     "steps": [
       "Open Settings in Sales (under Manage in the menu) and choose the company above the page.",
       "Follow a link in the list at the top to the setting that needs filling in.",
-      "Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes."
+      "Change a part and press its save button. Parts with changes say Changes not saved yet, and the page asks before you leave with unsaved changes.",
+      "To change the Follow-up time zone, choose the zone by name and press Save time zone. No existing follow-up moves: each keeps its exact moment and is then shown on the new clock, so tell the team first."
     ],
     "links": [
       {
@@ -3268,7 +3269,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "remove from operations planning",
       "dismantling date"
     ],
-    "summary": "The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. You are not sent a notice: look at From Operations on the enquiry.",
+    "summary": "The owner of an enquiry, or a Sales founder, can flag it so Operations can plan early. Operations then sees its dates, place, technologies, event and your planning notes, never prices, quotes or Sales notes. Tentative means the client has not confirmed the dates; once the enquiry is won it reads as confirmed. Nothing is booked, and a provisional Project Manager named by Operations is only a note. When Operations asks a question, the enquiry's owner gets one notice on Follow-ups and My Day that opens the question.",
     "steps": [
       "Open the enquiry. On Overview find Operations planning and press Flag for Operations planning.",
       "Fill Expected decision date, Dismantling date, Expected teams, Still to confirm and Note for Operations. Leave Dates are tentative ticked until the client confirms.",

@@ -1194,6 +1194,75 @@ All three are one database function, `crm_set_ops_planning(id, flag, fields, exp
 | (10) Retry | Safe: a repeat replaces the answer with the same text; a second notice is not added while the first is unread. The version check refuses a stale repeat |
 | (11) Surface | UI over DB function |
 
+### 3.11 Added on the branch `claude/pr2-sales-ops-projects-handover` (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+
+Five actions. Each needs its migration (install-order rows 44 to 48); without it the control is not offered or says it is not available.
+
+#### `sales.handover.set_site_contact`
+| Field | Entry |
+|---|---|
+| (1) Reached | The **Site contact** select of the delivery brief form, saved with **Save draft**, **Save and submit** or **Save changes** (`saveHandoverCore`, `apps/web/src/lib/actions/projectsCore.ts`); `proj_set_handover_site_contact` |
+| (2) Record | `proj_handover_site_contacts` row of the handover (one per handover; a copy of the Sales contact) |
+| (3) Inputs | The handover; one of the enquiry's linked contacts, or none |
+| (4) Permissions | The enquiry's owner or a Sales founder. Others: refused |
+| (5) Starting states | Handover `draft`, `submitted` (no Project Manager yet) or `clarification_requested`. With the Project Manager, accepted or withdrawn: "This handover can no longer be edited" |
+| (6) Changes | The copy (name, role, phone, e-mail), or its removal; handover `version + 1` when the contact changed |
+| (7) Side effects | None (no notice). The copy is taken again at submission |
+| (8) Verify | Handover page: Ready for handover, line Site contact; the brief preview |
+| (9) STOP | No. Ask when it is unclear which contact is the site contact: do not guess one |
+| (10) Retry | Safe: choosing the same contact again changes nothing |
+| (11) Surface | UI over DB function |
+
+#### `sales.ops_question.dismiss`
+| Field | Entry |
+|---|---|
+| (1) Reached | **Dismiss** on a row of **Questions from Operations** (Follow-ups) (`dismissHandoverNotice`, `apps/web/src/lib/actions/crmHandoverNotice.ts`); `proj_mark_notifications_read` |
+| (2) Record | The person's own `notifications` row of type `project_ops_question` |
+| (3) Inputs | The notice id |
+| (4) Permissions | Only the person the notice belongs to (the database changes the caller's own rows only) |
+| (5) Starting states | An unread notice |
+| (6) Changes | `read_at` on that notice. The question, the answer and the enquiry are untouched |
+| (7) Side effects | The row leaves Follow-ups and My Day for that person only |
+| (8) Verify | Reload Follow-ups: the row is gone; the question is still on the enquiry |
+| (9) STOP | No. Dismissing is not answering: Operations is still waiting |
+| (10) Retry | Safe |
+| (11) Surface | UI over DB function |
+
+#### `sales.outreach.set_contact`
+| Field | Entry |
+|---|---|
+| (1) Reached | **Contact for this outreach**, **Save contact** on the account's Outreach section (`setOutreachContact`, `apps/web/src/lib/actions/outreach.ts`); `crm_outreach_set_contact` |
+| (2) Record | `crm_outreach.contact_id` |
+| (3) Inputs | The outreach; one of the account's own contacts, or none |
+| (4) Permissions | The outreach's assignee, or `assign_owner` / founder |
+| (5) Starting states | Outreach not closed |
+| (6) Changes | The contact on the outreach |
+| (7) Side effects | None. It is what Create enquiry carries into the New enquiry form |
+| (8) Verify | The account page shows the contact chosen |
+| (9) STOP | No |
+| (10) Retry | Safe |
+| (11) Surface | UI over DB function |
+
+#### `sales.settings.set_follow_up_time_zone`
+| Field | Entry |
+|---|---|
+| (1) Reached | **Save time zone** in the panel Follow-up time zone of Sales settings (`setFollowUpTimeZone`, `apps/web/src/lib/actions/crm.ts`); `crm_set_follow_up_time_zone` |
+| (2) Record | `crm_company_settings.follow_up_time_zone` of one company |
+| (3) Inputs | The company; an IANA zone name (never an offset) |
+| (4) Permissions | `manage_settings` or founder of that company |
+| (5) Starting states | The company has Sales settings |
+| (6) Changes | The zone. **No follow-up is changed**: every stored due moment stays; it is shown on the new clock and Today is the new zone's day |
+| (7) Side effects | Every screen of that company's follow-ups shows different clock times for the same moments from then on; audited by the settings table's trigger |
+| (8) Verify | Settings shows the zone; a follow-up of that company shows the new place after its time |
+| (9) STOP | **Yes: owner decision.** It changes what every Sales person of that company reads. Never set it on a guess from the company's country |
+| (10) Retry | Safe (the same zone again changes nothing) |
+| (11) Surface | UI over DB function |
+
+#### `sales.enquiry.create` (changed)
+The entry in section 3.1 stands, with three differences once migrations `20270112000300` and `20270112000400` are applied: (a) the forms send a submission identifier and the action calls `crm_create_enquiry`, so **retrying the same form is now safe**: it returns the enquiry already saved and creates nothing (the "Duplicate risk" in field (10) remains for a NEW form, a form without an identifier, a database without the function, and JARVIS, which has its own ledger); (b) raised from an outreach, creation and linking are one transaction and a second attempt returns the outreach's existing enquiry; (c) the source list has a ninth value, `outreach`. The next action's time is typed on the clock of the company the enquiry is for.
+
+Other entries whose inputs changed with migration `20270112000500` (the date and time are typed on the company's clock; nothing else): `sales.follow_up.create`, `.reschedule`, `.complete`, `sales.enquiry.add_activity`, `.resume`, `.reopen`, `sales.account.follow_up.create`.
+
 ## 4. Actions that communicate outside the system
 
 | Action or job | Reaches outside? | What leaves, to whom |
@@ -1258,3 +1327,5 @@ After a handover is submitted, the next steps are Projects screens and functions
 * **Recount, 2026-11-14 (Sales & CRM upgrade, draft PR #96, not merged; code read at `d016c28`): still 68 actions** (`#### \`sales.` headings counted: 13 + 6 + 8 + 9 + 4 + 4 + 9 + 12 + 3). The upgrade adds **no** action that changes data: it changes how existing actions are reached and worded, and four entries were edited in place (`sales.enquiry.create`: two refusals before the database and the outreach guard; `sales.enquiry.add_activity`: no second Note on a completion; `sales.reminder.mark_read`: several ids and a reported partial failure; `sales.proposal.add_version`: upload in the same step). The active Sales company is a browser cookie (`sales_company`), not a record, and is not an action. Stop-and-ask (34) and not-safely-retryable (23) are unchanged: `sales.enquiry.create` stays a duplicate risk. No migration, no SQL. **A documented function is still not an approved tool.**
 * **Gap named 2026-11-14:** the Events & Exhibitions actions (add an event with its first edition, add or edit an edition, edit an event, archive an event or edition, record an observation, import events, set the outreach priority) have **no entries in this catalogue**; they are described only in [`sales-events-and-exhibitions.md`](./sales-events-and-exhibitions.md). They were not added in this pass because their functions were not re-read (`Unverified`); a worker must treat them as not catalogued and stop and ask.
 * **Entries whose permission or starting state was not fully confirmed:** `sales.enquiry.add_link` (the Lost-enquiry refusal of `crm_register_file` was not read), `sales.company.save_issuer_details` (the exact write mechanism behind the System Administrator rule), `sales.estimate.finalise` (clean-up of pinned copies after a failed finalise), `sales.estimate.save_draft` (partial-failure behaviour), `sales.enquiry.upload_file` (the storage side needs a running stack). Hosted state of every action is `Unverified` (nothing was run against any hosted project).
+
+* **Recount, 2026-11-15 (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed): 72 actions** on the branch: the 68 above plus the four of section 3.11 (`sales.handover.set_site_contact`, `sales.ops_question.dismiss`, `sales.outreach.set_contact`, `sales.settings.set_follow_up_time_zone`); `sales.enquiry.create` is changed, not new. New internal functions that are not tools: `crm_create_opportunity_json`, `crm_outreach_one_enquiry`, `ops_question_recipients`, `ops_question_notify`, `crm_valid_time_zone`, and the five `proj_handover_*` triggers and helpers. `crm_create_enquiry` and `crm_create_enquiry_from_outreach` are reached only through `sales.enquiry.create`. No new action communicates outside the system: the Operations question notice is in-app only.

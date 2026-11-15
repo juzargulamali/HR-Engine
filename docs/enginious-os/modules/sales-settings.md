@@ -73,3 +73,14 @@ Layout, wording and guards only. `saveCrmSettings` -> `crm_upsert_settings` and 
 Tests: `sales/settings/page.test.tsx`, `settings-form.test.tsx`, `blockers.test.ts`.
 
 **Known risk at `d016c28`, `Unverified`:** the server page imports the constants `APPROVAL_POLICY_LABEL` and `APPROVAL_POLICY_EXPLANATION` from `settings-form.tsx`, a client file; in the real app a server page may not be able to read values exported from a client file, so the read-only view may fail there although the unit tests pass. At the time of writing QA held an uncommitted fix that moves them to a plain file (`settings/approval-policy.ts`); it is not part of `d016c28`.
+
+## 8. Follow-up time zone (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+
+Source: `apps/web/src/app/(app)/sales/settings/{page.tsx,time-zone-form.tsx}`; `apps/web/src/lib/actions/crm.ts` (`setFollowUpTimeZone`); `supabase/migrations/20270112000500_crm_follow_up_time_zone.sql`. Tests: `packages/rls-tests/test/crm-follow-up-time-zone.rls.test.ts`; `apps/web/src/lib/crm/time-zone.test.tsx`.
+
+| Control (label) | Who | What it does | Function | Failure |
+|---|---|---|---|---|
+| Panel **Follow-up time zone for <company>**: select **Time zone**, button **Save time zone** | People who may change that company's Sales settings (`manage_settings` or founder), once the company has settings | Sets the clock the company's follow-up deadlines are typed and shown on. The list is the common zones plus the company's own; names only | `setFollowUpTimeZone` -> `crm_set_follow_up_time_zone(company, zone)` (not `crm_upsert_settings`, which is unchanged and keeps the value) | Not allowed: "Not allowed to change CRM settings for this company"; an offset or unknown name: "Choose a time zone by its name, for example Asia/Dubai or Europe/Warsaw"; a database without the setting: the panel says the zone cannot be changed yet |
+| Row **Follow-up time zone** in the read-only view | Anyone with Sales access to the company | "Europe/Warsaw (Warsaw time)" | reads `crm_company_settings.follow_up_time_zone` | |
+
+Saving moves no deadline: each keeps its exact moment and is then shown on the new clock (a deadline saved as 11:00 Dubai reads 08:00 Warsaw in winter). The form says so and asks to tell the team first. The change is in the Sales audit log through the table's existing trigger. The working calendar ("Working day starts (Dubai time)") is a separate setting and is unchanged. Coverage row 105; catalogue `sales.settings.set_follow_up_time_zone`.

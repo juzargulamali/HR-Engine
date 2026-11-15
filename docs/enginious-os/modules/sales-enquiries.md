@@ -338,3 +338,29 @@ Words only: "Risk" reads **Operational risk**; "Question from Operations" reads 
 ### 9.7 Tests added or changed for this section (reported passing in the web run at `d016c28`; not re-run by the documentation author)
 
 `sales/opportunities/page.test.tsx`, `enquiry-board.test.tsx`, `lib/crm/enquiry-list.test.ts`, `sales/new/enquiry-form-shared.test.ts`, `sales/new/enquiry-forms.test.tsx`, `lib/actions/crm-create-opportunity.test.ts`, `opportunities/[id]/primary-action.test.ts`, `summary.test.tsx`, `enquiry-guide.test.tsx`, `detail-tabs.test.tsx`, `timeline.test.ts`, `scope-panel.test.tsx`, `page.test.tsx`, `lib/crm/active-company.test.ts`. What each asserts was not re-read line by line (`Unverified`).
+
+## 10. Saving once, and the question from Operations (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+
+### 10.1 The submission identifier: a retried save returns the enquiry already saved
+
+Source: `supabase/migrations/20270112000400_crm_enquiry_submission_key.sql`; `apps/web/src/components/sales/use-submission-key.ts`; `apps/web/src/lib/actions/crm.ts` (`createOpportunity`, `enquiryFields`, `parseCreateResult`, `afterCreate`); `apps/web/src/app/(app)/sales/new/new-enquiry-form.tsx`; `apps/web/src/components/sales/quick-add-enquiry-form.tsx`; `apps/web/src/app/(app)/sales/opportunities/[id]/page.tsx` (`?saved=earlier`). Tests: `packages/rls-tests/test/crm-enquiry-submission-key.rls.test.ts`; `apps/web/src/lib/actions/crm-create-opportunity.test.ts`; `apps/web/src/components/sales/use-submission-key.test.tsx`.
+
+* Quick Add and the full form make a random identifier in the browser when the form appears (never on the server) and send it as the hidden field `submissionKey` with every attempt to save that form. Quick Add's dialog is rendered only while open, so each opening has a new one.
+* `createOpportunity` then makes ONE call, `crm_create_enquiry(fields, identifier, outreach)`. A first attempt creates the enquiry through the existing `crm_create_opportunity` (every rule of it applies) and records the identifier in the same transaction (`crm_enquiry_submissions`, primary key on person and identifier). The same identifier again creates nothing and returns the original: the person lands on `/sales/opportunities/<id>?saved=earlier`, which says "This enquiry was already saved by your earlier attempt, so a second one was not created...". Two attempts at the same moment are serialised by a transaction lock on (person, identifier): exactly one creates.
+* Two forms opened separately have two identifiers: both enquiries are created however alike they are (the duplicate warning is unchanged and still only warns).
+* A refused save records nothing, so the same form can be corrected and saved.
+* A form without an identifier (an older cached page) and a database without the function take the earlier path (`crm_create_opportunity`), without this protection.
+* **JARVIS** creates through `jarvis_create_enquiry`, which has its own ledger keyed by the confirmation and already returns the original result on a repeat; it calls `crm_create_opportunity`, which is not changed. It neither needs nor uses the identifier.
+
+### 10.2 Operations asked a question: one notice for Sales
+
+Source: `supabase/migrations/20270112000200_ops_question_notice.sql`; `apps/web/src/lib/crm/ops-question.ts` and `ops-question-data.ts`; `apps/web/src/components/sales/ops-question-attention.tsx`; `apps/web/src/components/sales/scroll-to-anchor.tsx`; `apps/web/src/app/(app)/sales/opportunities/[id]/ops-planning-panel.tsx`; `apps/web/src/lib/my-day/attention.ts` (`opsQuestionCandidates`); `apps/web/src/lib/projects/notification-text.ts`. Tests: `packages/rls-tests/test/ops-question-notice.rls.test.ts`; `apps/web/src/lib/crm/ops-question.test.tsx`; `apps/web/src/app/(app)/page.approvals.test.tsx`.
+
+* **When.** A trigger on `ops_enquiry_planning` sends the notice when the question is new or its text changed. Saving the same question again, saving other planning fields, a retry and simultaneous saves send nothing more.
+* **To whom.** The enquiry's owner, when that person is active and holds Sales access to the company. Otherwise (the owner left, lost Sales access, or is the Operations Manager who asked) the company's active Sales founders, never the person who asked. Section 9.6's sentence "No notice is sent" describes the database before this migration.
+* **One notice.** It goes through the existing `proj_notify` with the key `ops_question:<enquiry id>`: while a notice about that enquiry is unread, a changed question does not add a second one (the notice opens the enquiry, which shows the current question). After it was read, a changed question sends a new one. The notice carries the enquiry's id and reference, never the question's text.
+* **Cleared** by the database when Sales answers or Operations withdraws the question, and by the person with **Dismiss** (`sales.ops_question.dismiss`, the existing `proj_mark_notifications_read`).
+* **Where Sales sees it.** Follow-ups: the card **Questions from Operations** (above Handover), one row per enquiry. My Day: one attention item "Operations asked a question" under the enquiry's own key. Project notices (for people who also hold Projects access): "Operations asked a question on <reference>". Each opens `/sales/opportunities/<id>?tab=overview#ops-question`: the Overview tab, scrolled to the question block of the Operations planning panel (`AnchorTarget`, which brings itself into view when it appears).
+* A failed read says "Could not check whether Operations has asked you a question"; it never reads as "no questions".
+
+Coverage rows 101 and 102.

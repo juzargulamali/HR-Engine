@@ -132,7 +132,7 @@ The Sales overview that `/sales` used to show is gone; its parts live on Follow-
 
 ## 5. Summary and completion check
 
-**99 rows** are the reachable surface (recounted 2026-11-14: 83 until the Sales & CRM upgrade, plus its 16 rows in section 9, rows 84 to 99): the **70 baseline rows** of sections 1 to 4, namely menu and shell (4), follow-ups (9), enquiries (17), stages, proposals and commercial controls (8), close, reopen and handover (7), estimates (3), accounts, import, export and outreach (10), reports, settings and company (4), older and redirecting routes (7) and the scheduled route (1), plus the **6 rows added by PR #72** in section 7 (Events & Exhibitions, calendar import, the shared outreach priority and the enquiry's event link: rows 71 to 76) and the **3 rows added on 2026-11-11** (the events calendar, the event and edition form, and the Estimate sent stage with Record estimate as sent: rows 77, 78 and 79) the **2 rows of the Sales employee launch** (rows 80 and 81) and the **2 rows of Projects & Tasks Phase 2B** in section 8 (rows 82 and 83: the enquiry's Operations planning panel and the Delivery projects card on the event page; merged as PR #86, merge `5b75ade`). Of the 99, **92 are `Documented`** (15 of them in section 9, from the code only, not seen in a browser) and **7 are `Documented, with named verification gap`**: rows 30 (Inventory's stock-check card), 38 (the Zoho Books side), 43 (Projects-side handover steps), 46 (estimate photo upload and storage-backed export not re-verified), 62 (Admin Companies screen beyond the two estimate controls), 70 (hosted cron schedule and e-mail switch) and 91 (the storage side of the proposal document upload, added 2026-11-14). **Every reachable Sales & CRM screen has a detailed reference or a named gap; none is undocumented.** The Dismiss control added on 2026-11-12 is part of row 8 (the Handover card), so the count stayed 83 until the 2026-11-14 branch (now 99). Row counts and gaps are repeated in `../README.md`, `../06-change-log.md` and the pass report.
+**105 rows since 2026-11-15 (section 10 adds rows 100 to 105 on a draft branch); 99 rows** are the reachable surface on `main` (recounted 2026-11-14: 83 until the Sales & CRM upgrade, plus its 16 rows in section 9, rows 84 to 99): the **70 baseline rows** of sections 1 to 4, namely menu and shell (4), follow-ups (9), enquiries (17), stages, proposals and commercial controls (8), close, reopen and handover (7), estimates (3), accounts, import, export and outreach (10), reports, settings and company (4), older and redirecting routes (7) and the scheduled route (1), plus the **6 rows added by PR #72** in section 7 (Events & Exhibitions, calendar import, the shared outreach priority and the enquiry's event link: rows 71 to 76) and the **3 rows added on 2026-11-11** (the events calendar, the event and edition form, and the Estimate sent stage with Record estimate as sent: rows 77, 78 and 79) the **2 rows of the Sales employee launch** (rows 80 and 81) and the **2 rows of Projects & Tasks Phase 2B** in section 8 (rows 82 and 83: the enquiry's Operations planning panel and the Delivery projects card on the event page; merged as PR #86, merge `5b75ade`). Of the 99, **92 are `Documented`** (15 of them in section 9, from the code only, not seen in a browser) and **7 are `Documented, with named verification gap`**: rows 30 (Inventory's stock-check card), 38 (the Zoho Books side), 43 (Projects-side handover steps), 46 (estimate photo upload and storage-backed export not re-verified), 62 (Admin Companies screen beyond the two estimate controls), 70 (hosted cron schedule and e-mail switch) and 91 (the storage side of the proposal document upload, added 2026-11-14). **Every reachable Sales & CRM screen has a detailed reference or a named gap; none is undocumented.** The Dismiss control added on 2026-11-12 is part of row 8 (the Handover card), so the count stayed 83 until the 2026-11-14 branch (now 99). Row counts and gaps are repeated in `../README.md`, `../06-change-log.md` and the pass report.
 
 **Not Sales screens and not covered here**: People & Access grants (`../03-roles-access-and-approvals.md`), the Projects pages reached after acceptance, Inventory pages, My Day.
 
@@ -223,3 +223,33 @@ Four facts kept apart: merged: no. Required CI: has not run on a head. Hosted da
 ### 9.3 Recount (2026-11-14)
 
 Sections 1 to 4: 70 rows (4 + 9 + 17 + 8 + 7 + 3 + 10 + 4 + 7 + 1). Section 7: 11 rows (71 to 81). Section 8: 2 rows (82, 83). Section 9: 16 rows (84 to 99). **Total 99**, numbers unique. `Documented`: 92. `Documented, with named verification gap`: 7 (rows 30, 38, 43, 46, 62, 70 and the new row 91). 92 + 7 = 99.
+
+## 10. Handover, Operations question, outreach conversion, retried save, follow-up time zones (2026-11-15; draft PR from `claude/pr2-sales-ops-projects-handover`, not merged; CI not yet run; hosted SQL not applied; Production not deployed)
+
+Written against the implementation on the branch (code read; unit, database and local browser runs are recorded in `../06-change-log.md` and the PR's report). Every row needs its migration (`docs/launch-refinement-install-order.md` rows 44 to 48); on a database without it the screen is as the earlier rows describe.
+
+### 10.1 New rows
+
+| # | Screen or control | Route or entry | Who can reach it | Reference | Catalogue | Status |
+|---|---|---|---|---|---|---|
+| 100 | Handover brief: **Agency** line, **Site contact** select, the readiness lines Client / Agency / Site contact / Notes for the Project Manager, and both on the brief as the Project Manager sees it | `/sales/opportunities/[id]/handover` | Sales grant opens it; changes by owner or founder | [H section 7](./sales-close-and-handover.md) | `sales.handover.set_site_contact` | Documented |
+| 101 | Card **Questions from Operations** (one row per enquiry, opens the question, **Dismiss**), and the My Day item "Operations asked a question" | on `/sales/follow-ups`; My Day (`/`) | The person the notice was sent to (the enquiry's owner, or the Sales founders) | [E section 10.2](./sales-enquiries.md) | `sales.ops_question.dismiss` | Documented |
+| 102 | The question block as a link target (`#ops-question`) on the Operations planning panel | `/sales/opportunities/[id]?tab=overview#ops-question` | Sales grant | [E section 10.2](./sales-enquiries.md) | read-only | Documented |
+| 103 | **Contact for this outreach** with **Save contact** (read-only once closed or converted) | `/sales/accounts/[id]#outreach` | Assignee or lead | [C section 12](./sales-clients-and-agencies.md) | `sales.outreach.set_contact` | Documented |
+| 104 | Enquiry source **Outreach**; **Create enquiry** carrying account, contact and source; the second attempt returning the existing enquiry; "This enquiry was already saved" on a retried save | `/sales/new?...&source=outreach`; Quick Add; `/sales/opportunities/[id]?saved=earlier` | Sales grant with a company | [C section 12](./sales-clients-and-agencies.md), [E section 10.1](./sales-enquiries.md) | `sales.enquiry.create` (changed) | Documented |
+| 105 | **Follow-up time zone** panel in Settings; the place written after every follow-up time and on every time field; Today on the company's own day | `/sales/settings#follow-up-time-zone`; every screen that shows or takes a follow-up time | Change: `manage_settings` or founder; read: Sales grant | [F section 8](./sales-followups.md), [S section 8](./sales-settings.md) | `sales.settings.set_follow_up_time_zone` | Documented |
+
+### 10.2 Earlier rows whose controls changed
+
+| Rows | What changed | Reference |
+|---|---|---|
+| 5, 8, 85 | Follow-ups: a new card above Handover; due times carry the place; Today is each company's day | F section 8, E section 10.2 |
+| 16, 17, 88 | Add enquiry forms: a hidden submission identifier; the time label names the company's place; the Outreach source | E section 10.1, C section 12 |
+| 42, 43, 99 | Handover page: agency, site contact, notes carried to the project | H section 7 |
+| 57, 95 | Outreach section: the contact control; Create enquiry carries more | C section 12 |
+| 60, 98 | Settings: the Follow-up time zone panel and read-only row | S section 8 |
+| 82 | Operations planning panel: the question is a link target; a question now notifies Sales | E section 10.2 |
+
+### 10.3 Recount (2026-11-15)
+
+**105 rows**: the 99 of section 5 plus rows 100 to 105 of this section. (If another pull request open at the same time also adds rows from 100, the later one to merge renumbers its own.)
