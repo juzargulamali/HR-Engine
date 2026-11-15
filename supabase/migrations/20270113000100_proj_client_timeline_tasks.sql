@@ -126,7 +126,7 @@ begin
   v_id := proj_issue_plan(p_project_id, p_client_reference, p_note);
   select payload_hash into v_hash from proj_issued_plans where id = v_id;
   if v_hash is distinct from btrim(p_expected_hash) then
-    raise exception 'The timeline changed after you opened the preview. Nothing was issued. Check the preview again, then issue' using errcode = '40001';
+    raise exception 'The timeline changed after you opened the preview. Nothing was issued. Check the preview again, then issue' using errcode = '23514';
   end if;
   return v_id;
 end;

@@ -138,7 +138,8 @@ export async function issueClientTimeline(_prev: S, fd: FormData): Promise<S> {
   if (!p.success) return { error: firstIssue(p.error) };
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("proj_issue_plan_checked", { p_project_id: p.data.projectId, p_expected_hash: p.data.previewHash, p_client_reference: p.data.clientReference ?? null, p_note: p.data.note ?? null });
-  if (error) { if (error.code === "40001") refreshProjects(p.data.projectId); return fail(error.message); }
+  // A stale preview is refused by the database; the page is refreshed so the preview shows what would be issued now.
+  if (error) { if (/changed after you opened the preview/i.test(error.message)) refreshProjects(p.data.projectId); return fail(error.message); }
   refreshProjects(p.data.projectId);
   return ok(data);
 }

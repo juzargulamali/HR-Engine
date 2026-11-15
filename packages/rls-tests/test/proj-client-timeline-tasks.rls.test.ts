@@ -173,7 +173,8 @@ describe("Client timeline: individual tasks by explicit choice, from an allowlis
     const same = await call<string>(U.pm, `proj_issue_plan_checked('${P}', '${prev.hash}', null, null)`);
     expect((await admin<Row>(`select version from proj_issued_plans where id = '${same}'`))[0]!.version).toBe(2);
     await admin(`update proj_tasks set status = 'done', completed_at = now(), completed_by = '${U.member}', blocked_at = null, blocked_reason = null, unblock_action = null where id = '${T1}'`);
-    expect(await code(call(U.pm, `proj_issue_plan_checked('${P}', '${prev.hash}', null, null)`))).toBe("40001");
+    expect(await code(call(U.pm, `proj_issue_plan_checked('${P}', '${prev.hash}', null, null)`))).toBe("23514");
+    await expect(call(U.pm, `proj_issue_plan_checked('${P}', '${prev.hash}', null, null)`)).rejects.toThrow(/changed after you opened the preview/);
     expect(await code(call(U.pm, `proj_issue_plan_checked('${P}', '', null, null)`))).toBe("22023");
     expect((await admin<Row>(`select count(*)::int as n from proj_issued_plans where project_id = '${P}'`))[0]!.n).toBe(2);
     expect(await call<boolean>(U.pm, `proj_plan_outdated('${P}')`)).toBe(true);
