@@ -1713,7 +1713,7 @@ export interface Database {
       proj_scope_changes: ProjReadOnlyTable<ProjScopeChangeRow>;
       proj_scope_change_commercial: ProjReadOnlyTable<ProjScopeChangeCommercialRow>;
       proj_issued_plans: ProjReadOnlyTable<ProjIssuedPlanRow>;
-      // 20270111000100: the tasks a manager chose for the next client timeline (readable by the project's managers only; written through proj_set_client_timeline_tasks).
+      // 20270113000100: the tasks a manager chose for the next client timeline (readable by the project's managers only; written through proj_set_client_timeline_tasks).
       proj_client_timeline_tasks: ProjReadOnlyTable<{ task_id: string; project_id: string; client_title: string; selected_by: string; selected_at: string; updated_at: string }>;
       proj_completions: ProjReadOnlyTable<ProjCompletionRow>;
       // Sales & CRM (20261115000000-300): read-only to clients; every write is a crm_* function below.

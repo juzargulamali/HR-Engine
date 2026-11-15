@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER applying 20270111000200_ops_crew_overlaps.sql. Changes nothing.
+-- READ ONLY. Run AFTER applying 20270113000200_ops_crew_overlaps.sql. Changes nothing.
 -- Expect: rows 1 to 4 'OK'.
 select item, result from (
   select 1 as ord, 'ops_crew_overlaps exists and a signed-in user may call it (it checks the Operations right for the company itself)' as item,

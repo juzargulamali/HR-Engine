@@ -672,7 +672,7 @@ Full reference: [`operations-office-board.md`](./operations-office-board.md). So
 * **Stale and clear:** a failed refresh keeps the last good board with a Stale bar and the last successful time; sign-out, access loss or revocation clears the board at once and says why.
 * **Not done:** Site notes stay off (no approved-for-display field; a `display_note` with an explicit tick is proposed, not built); a session already issued cannot be ended by id (the database refuses its reads and the proxy closes every other page to it).
 
-## 17. Who is booked twice (2026-11-15; draft PR, migration `20270111000200` not applied by Claude)
+## 17. Who is booked twice (2026-11-15; draft PR, migration `20270113000200` not applied by Claude)
 
 Earlier sections say the activity-level overlap in Team pressure "cannot say which person is on both". With the read `ops_crew_overlaps` it can: Team pressure names the crew member and both confirmed assignments, with each window in its site's own time zone and a link to each; an assignment in a company the reader holds no Operations right for is shown as a time window only. The activity-level line remains only when the read is not installed or failed, and a failed read says so. The office board (`/tv`) is unchanged and carries none of this. Reference: [`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md) section 2; coverage rows 338 and 339; action 139.
 

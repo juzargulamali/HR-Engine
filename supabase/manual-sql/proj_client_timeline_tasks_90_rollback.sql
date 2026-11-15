@@ -1,4 +1,4 @@
--- ROLLBACK for 20270111000100_proj_client_timeline_tasks.sql. Deploy the app from before this change FIRST (the Files & client plan page calls proj_plan_preview,
+-- ROLLBACK for 20270113000100_proj_client_timeline_tasks.sql. Deploy the app from before this change FIRST (the Files & client plan page calls proj_plan_preview,
 -- proj_issue_plan_checked and proj_set_client_timeline_tasks; without them it says the task chooser and the preview could not be loaded).
 -- It STOPS while any task is still chosen for a client timeline: clear the choice in the app first (Files & client plan, untick the tasks, Save), then run this again.
 -- It deletes no project, task, milestone or issued timeline. Issued versions are never changed: a version that was issued WITH tasks keeps its payload, but the app from before

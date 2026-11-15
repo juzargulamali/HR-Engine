@@ -432,7 +432,7 @@ Four facts kept apart: merged: no. Required CI: has not run on a head. Hosted da
 
 ## 13. Scheduling, client timelines and QA (Q) (2026-11-15; draft PR from `claude/pr3-project-scheduling-timelines-qa`, not merged)
 
-Reference: [`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md). Migrations `20270111000100` and `20270111000200` not applied by Claude; written from the code, the RLS suite and the local browser flows `projects-flow.mjs` and `project-scheduling-flow.mjs`; nothing signed in on Preview and no real phone was seen by Claude.
+Reference: [`projects-scheduling-timelines-qa.md`](./projects-scheduling-timelines-qa.md). Migrations `20270113000100` and `20270113000200` not applied by Claude; written from the code, the RLS suite and the local browser flows `projects-flow.mjs` and `project-scheduling-flow.mjs`; nothing signed in on Preview and no real phone was seen by Claude.
 
 | # | Entry | Kind | How to reach it | Who can see it | Purpose | Reference | Status |
 |---|---|---|---|---|---|---|---|
