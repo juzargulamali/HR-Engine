@@ -226,7 +226,7 @@ Sections 1 to 4: 70 rows (4 + 9 + 17 + 8 + 7 + 3 + 10 + 4 + 7 + 1). Section 7: 1
 
 ## 10. Estimate revisions and the retired Estimate sent stage (2026-11-15; draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed)
 
-Four facts kept apart: merged: no. Required CI: has not run. Hosted database: migration `20270111000100` (install-order row 39) not applied. Production: not deployed. Rows below were driven in a browser on the isolated local stack (`quotations-flow.mjs`, `estimate-sent-record-flow.mjs`); nothing was seen signed-in on Preview or Production.
+Four facts kept apart: merged: no. Required CI: has not run. Hosted database: migration `20270112000200` (install-order row 42) not applied. Production: not deployed. Rows below were driven in a browser on the isolated local stack (`quotations-flow.mjs`, `estimate-sent-record-flow.mjs`); nothing was seen signed-in on Preview or Production.
 
 | # | Screen / control | Route | Who | Reference | Catalogue | Status |
 |---|---|---|---|---|---|---|

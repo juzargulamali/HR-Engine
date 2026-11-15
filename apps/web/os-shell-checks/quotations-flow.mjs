@@ -364,6 +364,8 @@ await step("an enquiry with ONE linked party: it is suggested with the reason bu
   const refused = asDbTry(4, `select crm_quote_save_section('${directId}', null, 'Nope')`);
   if (refused.ok || !/owner of this opportunity or a founder/.test(refused.out)) throw new Error("non-owner was not refused: " + refused.out);
 });
+const GUARD_MIGRATION = new URL("../../../supabase/migrations/20270112000100_crm_quote_terms_guard.sql", import.meta.url).pathname;
+const GUARD_ROLLBACK = new URL("../../../supabase/manual-sql/crm_quote_terms_guard_90_rollback.sql", import.meta.url).pathname;
 const SIX = "Site access and readiness,Site services and other trades,Changes,Start of work,Scope exclusions,Confidentiality";
 const OLD_LABEL = "Standard terms (working draft, pending legal review)";
 const termsOf = (id) => sql(`select coalesce((select string_agg(t->>'title', ',') from jsonb_array_elements(q.terms) t), '') || '|' || coalesce(q.terms_label, '') from crm_quotations q where proposal_id='${id}'`);
@@ -377,7 +379,12 @@ await step("a quotation frozen BEFORE this change keeps its wording on screen an
   asDb(5, `select crm_quote_save_header('${q}', '{"currency":"EUR","vat_choice_id":"${vat}","bill_to_org_id":"${client}","validity_date":"2099-12-31","milestones":[{"label":"Deposit","kind":"percent","value":"100","due":"On acceptance"}]}'::jsonb)`);
   const sec = asDb(5, `select crm_quote_save_section('${q}', null, 'Fabrication')`);
   asDb(5, `select crm_quote_save_line('${q}', null, '${sec}', '{"description":"Legacy stage deck","unit":"m2","quantity":"3","unit_price":"33.33"}'::jsonb)`);
+  // The database now refuses to issue a draft with these terms (migration 20270112000100), so the document is issued as it was THEN: the guard's own rollback
+  // restores the earlier functions, the quotation is issued, and the migration is applied again (as on a hosted database, where such documents predate it).
+  if (asDbTry(5, `select crm_quote_issue('${q}')`).ok) throw new Error("the database finalised a draft that still carries the standard terms");
+  psqlInput(`\\i ${GUARD_ROLLBACK}\n`);
   asDb(5, `select crm_quote_issue('${q}')`);
+  psqlInput(`\\i ${GUARD_MIGRATION}\n`);
   legacyQ = q; legacyHash = snap(q);
   if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${q}'`) !== OLD_LABEL) throw new Error("not a legacy-shaped snapshot");
   await page.goto(`${BASE}/sales/opportunities/${oppLegacy}/quotations/${q}`, { waitUntil: "networkidle" });
@@ -424,6 +431,12 @@ await step("its REVISION says the terms were INHERITED (which clauses, from whic
   const fin = page.getByRole("button", { name: "Finalise estimate" });
   if (await fin.isEnabled()) { await fin.click(); await has(/Review the terms carried over/, "refusal"); }
   if (sql(`select coalesce(issued_at::text, 'draft') from crm_quotations where proposal_id='${rev}'`) !== "draft") throw new Error("a draft with inherited terms was finalised");
+  // The database refuses it too, for the owner and for a founder calling it directly, and for an approval request.
+  for (const who of [5, 3]) for (const fn of ["crm_quote_issue", "crm_quote_request_approval"]) {
+    const r = asDbTry(who, `select ${fn}('${rev}')`);
+    if (r.ok || !/Replace the terms carried over into this draft with the current estimate format/.test(r.out)) throw new Error(`${fn} as ${who} was not refused: ${r.out}`);
+  }
+  if (termsOf(rev) !== `${SIX}|${OLD_LABEL}`) throw new Error("a refused database call changed the terms");
   await termsShot("pr1-02-legacy-revision-finalise-held");
   if (snap(legacyQ) !== legacyHash) throw new Error("the legacy snapshot changed");
 });

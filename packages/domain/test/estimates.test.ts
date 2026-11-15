@@ -127,4 +127,25 @@ describe("terms a draft inherited (a revision of a quotation issued before the e
     expect(termsReviewFingerprint(termsReview(LABEL, SIX.map((c, i) => (i === 0 ? { ...c, body: "edited" } : c))))).not.toBe(a);
     expect(TERMS_REVIEW_BLOCKER).toMatch(/replace them with the current estimate format/);
   });
+  it("is ONE rule shared with the database (crm_quote_terms_need_review, migration 20270112000100): the same vectors are asserted in packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts", () => {
+    const OLD = "Standard terms (working draft, pending legal review)";
+    const vectors: [string | null, string[], boolean][] = [
+      ["estimate-format:2", [], false],
+      ["estimate-format:1", [], false],
+      ["estimate-format:2", ["Assumptions", "Next steps"], false],
+      ["estimate-format:0002", [], false],
+      [OLD, ["Changes"], true],
+      [OLD, [], true],
+      [null, [], true],
+      ["", [], true],
+      ["estimate-format:3", [], true],
+      ["estimate-format:", [], true],
+      ["estimate-format:2 ", [], true],
+      ["Estimate-format:2", [], true],
+      ["estimate-format:2", ["Confidentiality"], true],
+      ["estimate-format:2", ["Assumptions", "Changes"], true],
+      ["estimate-format:2", ["assumptions"], true],
+    ];
+    for (const [label, titles, needed] of vectors) expect(termsReview(label, titles.map((title) => ({ title, body: "x" }))).needed, `${label} / ${titles.join(",")}`).toBe(needed);
+  });
 });

@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270111000100_crm_retire_estimate_sent_stage.sql. Changes nothing. One result table, read it top to bottom.
+-- READ ONLY. Run BEFORE applying 20270112000200_crm_retire_estimate_sent_stage.sql. Changes nothing. One result table, read it top to bottom.
 --
 -- Rows 1 to 3 (prerequisites). Expect: 1 and 2 'OK'; 3 'not installed yet' (or 'already installed' on a second run).
 -- Rows 10+ (one per company that has any): how many enquiries hold Estimate sent today, as their stage / as the stage an on-hold enquiry returns to / as the

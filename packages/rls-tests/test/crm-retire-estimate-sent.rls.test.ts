@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Sales & CRM: "Estimate sent" is retired as a pipeline stage; "record as sent" stays (migration 20270111000100_crm_retire_estimate_sent_stage.sql).
+// Sales & CRM: "Estimate sent" is retired as a pipeline stage; "record as sent" stays (migration 20270112000200_crm_retire_estimate_sent_stage.sql).
 // Fictional data only. Against a real Postgres with every earlier migration applied, the enquiries below are put at Estimate sent with the functions the
 // DEPLOYED app uses (so they are shaped like hosted rows), then the owner pack and the migration run:
 //   * the read-only preflight proposes, per enquiry, exactly what the migration then does, with the evidence, and lists the ambiguous ones;
@@ -16,7 +16,7 @@ import { RlsTestDatabase } from "../src/harness";
 //   * history is kept: no timeline line is changed or removed; every move adds one system line; closed enquiries are untouched;
 //   * a second run changes nothing; the rollback restores the three functions exactly and puts back only the enquiries nobody touched since.
 
-const MIGRATION = "20270111000100_crm_retire_estimate_sent_stage.sql";
+const MIGRATION = "20270112000200_crm_retire_estimate_sent_stage.sql";
 const __dirname = path.dirname(new URL(import.meta.url).pathname);
 const id = () => randomUUID();
 const CO = { uae: id(), ksa: id() };
@@ -50,7 +50,7 @@ describe("Estimate sent retired as a stage", () => {
   const newOpp = async (title: string, who = U.sara, company = CO.uae) => (await commit<{ id: string }>(who, `select crm_create_opportunity(p_company_id => '${company}', p_title => '${title}', p_source => 'direct_client', p_next_title => 'Call', p_next_due => ${soon}, p_client_org_id => '${company === CO.uae ? clientUae : clientKsa}') as id`))[0].id;
   const finalEstimate = async (opp: string, who = U.sara, company = CO.uae) => {
     const p = (await commit<{ id: string }>(who, `select crm_quote_create('${opp}') as id`))[0].id;
-    await commit(who, `select crm_quote_save_header('${p}', ${j({ currency: "EUR", vat_choice_id: vat[company]!["5%"], bill_to_org_id: company === CO.uae ? clientUae : clientKsa })})`);
+    await commit(who, `select crm_quote_save_header('${p}', ${j({ currency: "EUR", vat_choice_id: vat[company]!["5%"], bill_to_org_id: company === CO.uae ? clientUae : clientKsa, terms_label: "estimate-format:2", terms: [] })})`);
     const s = (await commit<{ id: string }>(who, `select crm_quote_save_section('${p}', null, 'Fabrication') as id`))[0].id;
     await commit(who, `select crm_quote_save_line('${p}', null, '${s}', ${j({ description: "Stage deck", unit: "m2", quantity: "3", unit_price: "33.33" })})`);
     await commit(who, `select crm_quote_issue('${p}')`);
@@ -315,33 +315,6 @@ describe("Estimate sent retired as a stage", () => {
       // The previous behaviour is back: the stage can be entered again, and record-as-sent can move.
       const oid = await newOpp("Fictional after rollback"); const est = await finalEstimate(oid);
       expect((await record(est, { move: true }))[0].r).toMatchObject({ moved: true, stage: "estimate_sent" });
-    });
-  });
-
-  describe("why a revision of an earlier quotation needs a person's review (the unchanged revision function)", () => {
-    it("crm_quote_create_revision copies the terms and their label as they are: six standard clauses from a quotation issued without the estimate marker, the marker from an estimate", async () => {
-      const oid = await newOpp("Fictional revision terms");
-      // A quotation as the app issued it before the estimates-only change: the template terms, no marker.
-      const legacy = (await commit<{ id: string }>(U.sara, `select crm_quote_create('${oid}') as id`))[0].id;
-      await commit(U.sara, `select crm_quote_save_header('${legacy}', ${j({ currency: "EUR", vat_choice_id: vat[CO.uae]!["5%"], bill_to_org_id: clientUae })})`);
-      const s = (await commit<{ id: string }>(U.sara, `select crm_quote_save_section('${legacy}', null, 'Fabrication') as id`))[0].id;
-      await commit(U.sara, `select crm_quote_save_line('${legacy}', null, '${s}', ${j({ description: "Legacy deck", unit: "m2", quantity: "1", unit_price: "10" })})`);
-      await commit(U.sara, `select crm_quote_issue('${legacy}')`);
-      const snapBefore = (await admin<{ h: string }>(`select md5(content::text) || content_hash h from crm_quotation_snapshots where proposal_id = '${legacy}'`))[0].h;
-      const rev = (await commit<{ id: string }>(U.sara, `select crm_quote_create_revision('${legacy}') as id`))[0].id;
-      const terms = async (p: string) => (await admin<{ label: string | null; titles: string }>(`select terms_label label, coalesce((select string_agg(t->>'title', ', ') from jsonb_array_elements(terms) t), '') titles from crm_quotations where proposal_id = '${p}'`))[0];
-      expect(await terms(rev)).toEqual({ label: "Standard terms (working draft, pending legal review)", titles: "Site access and readiness, Site services and other trades, Changes, Start of work, Scope exclusions, Confidentiality" });
-      // The explicit step the app runs when the person confirms (the same call): the draft takes the estimate marker and loses the clauses; the issued revision is untouched.
-      await commit(U.sara, `select crm_quote_save_header('${rev}', ${j({ terms_label: "estimate-format:2", terms: [] })})`);
-      expect(await terms(rev)).toEqual({ label: "estimate-format:2", titles: "" });
-      expect(await terms(legacy)).toMatchObject({ label: "Standard terms (working draft, pending legal review)" });
-      expect((await admin<{ h: string }>(`select md5(content::text) || content_hash h from crm_quotation_snapshots where proposal_id = '${legacy}'`))[0].h).toBe(snapBefore);
-      // A colleague who is not the owner cannot run that step; nor can another company.
-      await commit(U.sara, `select crm_quote_issue('${rev}')`);
-      const rev3 = (await commit<{ id: string }>(U.sara, `select crm_quote_create_revision('${rev}') as id`))[0].id;
-      expect(await terms(rev3)).toEqual({ label: "estimate-format:2", titles: "" });      // a revision of an estimate needs no review
-      await expect(commit(U.omar, `select crm_quote_save_header('${rev3}', ${j({ terms_label: "x", terms: [] })})`)).rejects.toThrow(/owner of this opportunity or a founder/);
-      await expect(commit(U.faisal, `select crm_quote_save_header('${rev3}', ${j({ terms_label: "x", terms: [] })})`)).rejects.toThrow();
     });
   });
 });

@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER applying 20270111000100_crm_retire_estimate_sent_stage.sql. Changes nothing. One result table.
+-- READ ONLY. Run AFTER applying 20270112000200_crm_retire_estimate_sent_stage.sql. Changes nothing. One result table.
 -- Expect: rows 1 to 8 'OK'. Rows 9 to 12 are numbers for information. Rows 100+ list every enquiry that still holds Estimate sent (the ambiguous ones the
 -- migration did not move, plus any that a person put on hold from it since): each still opens and can be moved out by its owner or a founder.
 with holding as (

@@ -87,6 +87,12 @@ export interface TermsReview {
   inherited: NoteClause[];
 }
 /**
+ * ONE RULE, IN TWO PLACES THAT MUST STAY IDENTICAL: this function and the database function `crm_quote_terms_need_review`
+ * (supabase/migrations/20270112000100_crm_quote_terms_guard.sql), which makes `crm_quote_issue` and `crm_quote_request_approval` refuse such a draft for every
+ * caller. A draft's terms need review unless (1) its label is an estimate format marker of a known version (`estimateFormatVersion`: 1 or 2 today; add a new
+ * version in both places together) and (2) every clause is one of the two client notes (`NOTE_HEADINGS.assumptions`, `.nextSteps`). The same vectors are
+ * asserted against both (packages/domain/test/estimates.test.ts, packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts).
+ *
  * Whether a draft's terms need a person's review before it can go out. An estimate prints the budgetary notice and NO standard terms, so a draft is in order
  * only when it carries an estimate format marker and nothing but the two client notes. Anything else was inherited and is replaced by an explicit, confirmed
  * step (never silently, and never carried into a client file).
