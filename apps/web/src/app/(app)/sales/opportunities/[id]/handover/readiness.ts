@@ -9,8 +9,17 @@
  *     date, show dates, scope, exclusions, technologies and risks on its details. The NOTES are not in that insert: they stay on the brief.
  *   - 20270102000100_ops_phase2b.sql section 4 copies the enquiry's event edition onto the brief while it is prepared and again when it is submitted, and from the brief
  *     onto the project when it is created.
- *   - No function copies contacts, proposals, estimates, files, the value, payment terms or the purchase order.
+ *   - 20270112000100_proj_handover_parties.sql records on the brief whether the job is direct or agency-led (and the agency's name), from the enquiry, at the same
+ *     moments as the edition, and keeps a copy of ONE site contact that Sales chooses from the enquiry's contacts. The project reads the accepted brief: the agency and
+ *     the notes for everyone who works on it, the contact for whoever manages it and for Operations Managers (proj_project_handover).
+ *   - No function copies the other contacts, proposals, estimates, files, the value, payment terms or the purchase order.
  */
+
+/**
+ * The enquiry's parties, when the database records them at handover (`parties` is left out on a database without the migration: the lines then read as they did before).
+ * `siteContact` is the saved choice (or the one the form opens with); `agencyName` and `clientName` are the enquiry's own organisations.
+ */
+export interface ReadinessParties { clientName: string | null; agencyName: string | null; siteContact: { name: string; roleTitle: string | null } | null }
 
 export interface ReadinessBrief {
   title: string; clientName: string; location: string; siteTimezone: string; installStart: string; eventStart: string; eventEnd: string;
@@ -33,9 +42,10 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  * block submitting). `formatDate` words a YYYY-MM-DD date.
  */
 export function handoverReadiness(a: {
-  brief: ReadinessBrief; saved: boolean; edition: string | null; contactCount: number | null; salesGaps?: readonly string[]; formatDate: (d: string) => string;
+  brief: ReadinessBrief; saved: boolean; edition: string | null; contactCount: number | null; salesGaps?: readonly string[]; formatDate: (d: string) => string; parties?: ReadinessParties | null;
 }): Readiness {
   const b = a.brief;
+  const p = a.parties ?? null;
   const has = (s: string | null | undefined) => !!s && s.trim() !== "";
   const line = (key: string, label: string, value: string | null, emptyWords: string): TransferLine => ({ key, label, value: value ?? emptyWords, missing: value === null });
   const techs = b.technologies.filter((t) => has(t.name));
@@ -47,7 +57,13 @@ export function handoverReadiness(a: {
     line("scope", "Scope of work", has(b.scope) ? short(b.scope) : null, "Not written yet"),
     line("exclusions", "Exclusions", has(b.exclusions) ? short(b.exclusions) : null, "None recorded"),
     // A new brief left blank takes the client or agency name from the enquiry when it is saved (proj_save_handover).
-    line("client", "Client", has(b.clientName) ? short(b.clientName) : a.saved ? null : "The client or agency on the enquiry", "Not given"),
+    // The name it will take is said when it is known (the end client, or the agency when the enquiry has no end client), never a generic phrase.
+    line("client", "Client", has(b.clientName) ? short(b.clientName) : a.saved ? null : (p?.clientName ?? p?.agencyName ? `${short((p?.clientName ?? p?.agencyName) as string)} (from the enquiry)` : "The client or agency on the enquiry"), "Not given"),
+    ...(p ? [
+      line("agency", "Agency", p.agencyName ? short(p.agencyName) : "None: a direct job", ""),
+      line("contact", "Site contact", p.siteContact ? short(p.siteContact.roleTitle ? `${p.siteContact.name}, ${p.siteContact.roleTitle}` : p.siteContact.name) : null, "None chosen"),
+      line("notes", "Notes for the Project Manager", has(b.notes) ? short(b.notes) : null, "None"),
+    ] : []),
     line("location", "Location", has(b.location) ? short(b.location) : null, "Not given"),
     line("install", "Installation date", has(b.installStart) ? a.formatDate(b.installStart) : null, "Not set"),
     line("show", "Show dates", show, "Not set"),
@@ -65,6 +81,17 @@ export function handoverReadiness(a: {
   if (techs.length === 0) attention.push({ key: "technologies", kind: "check", text: "No technologies are listed, so the Project Manager has nothing to bring into the Project Plan." });
   for (const [i, g] of (a.salesGaps ?? []).entries()) attention.push({ key: `gap-${i}`, kind: "check", text: `On the enquiry: ${g}` });
 
+  if (p) {
+    if (!p.siteContact) attention.push({ key: "contact", kind: "check", text: a.contactCount === 0
+      ? "No site contact is chosen, and this enquiry has no contacts to choose from. Add the person under Contacts on the enquiry, or write who to call on site in the notes."
+      : "No site contact is chosen. The Project Manager will not see who to call on site unless you choose one or write it in the notes." });
+    attention.push({
+      key: "contacts", kind: "not_copied",
+      text: a.contactCount === null
+        ? "Only the site contact you choose is carried to the project. The enquiry's contacts could not be loaded just now, so their number is not shown."
+        : `Only the site contact you choose is carried to the project (name, role, phone and e-mail, as they stand when you submit). ${a.contactCount === 0 ? "This enquiry has no contacts linked." : `The ${a.contactCount === 1 ? "contact" : `${a.contactCount} contacts`} on the enquiry otherwise stay in Sales & CRM.`} A later change to the contact in Sales does not change an accepted project.`,
+    });
+  } else {
   attention.push({
     key: "contacts", kind: "not_copied",
     text: a.contactCount === null
@@ -74,6 +101,7 @@ export function handoverReadiness(a: {
         : `Contacts are not copied: the ${plural(a.contactCount, "contact")} and their roles stay on the enquiry. The Project Manager opens them from the enquiry link, which needs Sales access, so put the site contact in the notes.`,
   });
   attention.push({ key: "notes", kind: "not_copied", text: "Notes for the Project Manager stay on this brief. The Project Manager reads them under Projects, Handovers; they are not copied onto the project itself." });
+  }
   attention.push({ key: "commercial", kind: "not_copied", text: "The value, payment terms, purchase order or authorised email, proposals, estimates and files stay in Sales & CRM. The project never shows them." });
   if (techs.length > 0) attention.push({ key: "plan", kind: "not_copied", text: "Technologies are copied as a list. They become Project Plan rows only when the Project Manager brings them in after accepting." });
 

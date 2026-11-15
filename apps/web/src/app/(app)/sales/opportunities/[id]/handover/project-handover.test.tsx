@@ -23,8 +23,11 @@ beforeEach(() => { tables = {}; rpcs = {}; });
 
 describe("the project handover read", () => {
   it("nothing prepared yet is installed, not failed, no status", async () => {
-    rpcs = { proj_handover_for_opportunity: rows([]) }; tables = { proj_handovers: row(null) };
-    expect(await loadProjectHandover("o1")).toEqual({ installed: true, status: null, row: null });
+    rpcs = { proj_handover_for_opportunity: rows([]), proj_handover_parties: NOT_INSTALLED }; tables = { proj_handovers: row(null) };
+    expect(await loadProjectHandover("o1")).toEqual({ installed: true, status: null, row: null, parties: "none" });
+    // With the agency and site contact functions in the database, a brief that is not saved yet has nothing to read: null, and the page offers the choice.
+    rpcs = { proj_handover_for_opportunity: rows([]), proj_handover_parties: { data: null, error: { message: "Handover not found", code: "P0002" } } };
+    expect(await loadProjectHandover("o1")).toEqual({ installed: true, status: null, row: null, parties: null });
   });
   it("Projects not installed here is 'not installed' (unchanged)", async () => {
     rpcs = { proj_handover_for_opportunity: NOT_INSTALLED }; tables = { proj_handovers: NOT_INSTALLED };

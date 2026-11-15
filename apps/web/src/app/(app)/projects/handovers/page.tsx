@@ -12,6 +12,8 @@ import { PageTitle } from "@/components/projects/page-title";
 import { LoadError } from "@/components/workspace/states";
 import { formatDateTime } from "@/components/sales/format";
 import { getProjectsContext } from "@/lib/projects/context";
+import { loadHandoverParties } from "@/lib/projects/handover-parties-data";
+import type { HandoverParties } from "@/lib/projects/handover-parties";
 import { handoverNext } from "@/lib/projects/handover-next";
 import { createClient } from "@/lib/supabase/server";
 import type { ProjHandoverRow } from "@/types/projects";
@@ -83,6 +85,14 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
   if (salesRes.error) console.error("[projects] Sales access check for the handover links failed", salesRes.error.message);
   const readable = new Set(((salesRes.data ?? []) as { id: string }[]).map((r) => r.id));
   const salesHref = (h: ProjHandoverRow) => (h.crm_opportunity_id && readable.has(h.crm_opportunity_id) ? `/sales/opportunities/${h.crm_opportunity_id}/handover` : null);
+  // The agency and the site contact of each brief shown in full, read through the function that decides who may see them (the Project Manager named on it, founders and
+  // whoever assigns Project Managers). A database without it shows the brief as before; a failed read says so on the brief, never "no contact".
+  const partiesBy = new Map<string, HandoverParties | "error">();
+  await Promise.all(briefs.map(async (h) => {
+    const r = await loadHandoverParties(h.id);
+    if (r.status === "ok") partiesBy.set(h.id, r.parties);
+    else if (r.status === "error") partiesBy.set(h.id, "error");
+  }));
   const clarificationOf = (h: ProjHandoverRow) => (h.clarification_note ? { note: h.clarification_note, at: h.clarification_requested_at, answered: h.status !== "clarification_requested" } : null);
   const isMine = (h: ProjHandoverRow) => h.pm_user_id === ctx.userId && (h.status === "pm_assigned" || h.status === "clarification_requested");
 
@@ -109,7 +119,7 @@ export default async function HandoversPage({ searchParams }: { searchParams?: P
             {canChoose ? <AssignPmForm handoverId={h.id} people={people} current={h.pm_user_id} /> : h.status === "submitted" ? <Muted>Only a founder, or someone they gave PM assignment to, can name the Project Manager.</Muted> : null}
             {/* The same read-only brief Sales sees on the enquiry's handover page (one component), so the two sides cannot drift. An accepted brief is frozen by the database. */}
             {h.status === "accepted" ? <Muted>Accepted brief, kept as agreed: it can no longer be changed, by Sales or by anyone else.</Muted> : null}
-            <HandoverBrief h={h} clarification={clarificationOf(h)} salesHref={salesHref(h)} />
+            <HandoverBrief h={h} clarification={clarificationOf(h)} salesHref={salesHref(h)} parties={partiesBy.get(h.id)} />
             {salesHref(h) ? <Link href={salesHref(h) as string} className="inline-block text-sm font-medium text-accent underline-offset-4 hover:underline" data-testid="handover-open-enquiry">Open the enquiry in Sales ({h.crm_reference})</Link> : null}
           </div>
         </Panel>

@@ -28,7 +28,7 @@ let failedSections: string[] = [];
 let estimateSends: Record<string, unknown>[] = [];
 vi.mock("@/lib/crm/data", () => ({
   loadOpportunityDetailResult: async () => (outcome.kind === "ok"
-    ? { kind: "ok", failed: new Set(failedSections), detail: { item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ id: "k1" }], zoho: null, estimateSends } }
+    ? { kind: "ok", failed: new Set(failedSections), detail: { item: { opp, companyName: "Enginious KSA", value: 100000, availability: "confirmed" }, handover, proposals: [], files: [], contacts: [{ contact: { id: "k1", name: "Fictional Contact", role_title: "Site lead" }, role: null, organisation: null }], zoho: null, estimateSends } }
     : outcome),
 }));
 vi.mock("../view", () => ({ buildOppView: () => ({ opp, canEdit, isWon: true, ownerName: "Sales Owner" }) }));

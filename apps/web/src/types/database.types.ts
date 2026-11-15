@@ -2015,6 +2015,9 @@ export interface Database {
       proj_staff_directory: { Args: Record<string, never>; Returns: { user_id: string; full_name: string | null; email: string | null }[] };
       proj_directory: { Args: Record<string, never>; Returns: ProjDirectoryRow[] };
       proj_handover_for_opportunity: { Args: { p_opportunity_id: string }; Returns: ProjHandoverStatusRow[] };
+      proj_set_handover_site_contact: { Args: { p_handover_id: string; p_contact_id: string | null }; Returns: undefined };
+      proj_handover_parties: { Args: { p_handover_id: string }; Returns: unknown };
+      proj_project_handover: { Args: { p_project_id: string }; Returns: unknown };
       proj_save_handover: { Args: { p_opportunity_id: string; p_fields?: Record<string, unknown>; p_expected_version?: number | null }; Returns: string };
       proj_submit_handover: { Args: { p_handover_id: string }; Returns: undefined };
       proj_assign_handover_pm: { Args: { p_handover_id: string; p_pm_user_id: string }; Returns: undefined };
