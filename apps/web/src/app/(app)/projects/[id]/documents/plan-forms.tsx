@@ -6,15 +6,17 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { DialogForm } from "../changes/dialog-form";
 
-export function IssueTimelineForm({ projectId, reference, hasIssued }: { projectId: string; reference: string; hasIssued: boolean }) {
+/** `previewHash` is the fingerprint of the preview on the page: the database issues only when the content is still exactly that preview. */
+export function IssueTimelineForm({ projectId, reference, hasIssued, previewHash }: { projectId: string; reference: string; hasIssued: boolean; previewHash: string }) {
   return (
     <DialogForm
       triggerLabel={hasIssued ? "Issue a new version" : "Issue this timeline"} triggerVariant="default" title="Issue the client timeline"
-      description="This freezes the preview as a numbered version. It does not send anything to the client."
-      help="Issuing the same content again returns the version that already exists."
+      description="This freezes the preview on this page as a numbered version. It does not send anything to the client."
+      help="Exactly what the preview shows is issued. If anything on the timeline changed after this page was opened, nothing is issued and you are asked to check the preview again. Issuing the same content again returns the version that already exists."
       action={issueClientTimeline} submitLabel="Issue version"
     >
       <input type="hidden" name="projectId" value={projectId} />
+      <input type="hidden" name="previewHash" value={previewHash} />
       <Field label="Reference shown to the client (optional)" htmlFor="it-ref" help={`Left empty it uses the project reference, ${reference}. Use a reference that is safe to show the client; never a price or PO number.`}>
         <Input id="it-ref" name="clientReference" maxLength={100} />
       </Field>

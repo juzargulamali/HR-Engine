@@ -14,6 +14,8 @@ const INV = invItem ? ["/inventory", `/inventory?open=${invItem}`, ...(invUnit ?
 const PAGES = [
   ...(projId ? ["/projects", "/projects?view=board", "/projects?show=finished", `/projects?open=${projId}`, "/projects/work", "/projects/work?view=board", "/projects/work?show=overdue", `/projects/work?task=${taskId}`, "/projects/calendar", "/projects/handovers", "/projects/new", "/projects/access",
     P, `${P}/work`, `${P}/work?view=board`, `${P}/work?group=status`, `${P}/work?task=${taskId}`, `${P}/work/tasks/${taskId}`, `${P}/plan`, `${P}/plan?plan=site`, `${P}/plan?mode=calendar`, `${P}/plan?mode=timeline`, `${P}/plan?plan=site&mode=timeline`, `${P}/discussion`,
+    // The Project Plan and its Work schedule chart (the chart scrolls inside itself: the page must not), the Plan calendar, and the client timeline chooser.
+    `${P}/delivery`, `${P}/delivery?view=work-schedule`, `${P}/plan?plan=site&mode=calendar&view=agenda`,
     `${P}/people`, `${P}/changes`, `${P}/documents`, `${P}/history`, `${P}/complete`, `${P}/timeline`, `${P}/calendar`] : []),
   ...INV,
   "/", "/sales", "/sales/follow-ups", "/sales/follow-ups?view=done&who=all", `/sales/follow-ups?open=${oppId}`, "/sales/opportunities", "/sales/opportunities?status=all", "/sales/opportunities?view=board&status=all", `/sales/opportunities?open=${oppId}`, `/sales/opportunities?view=board&open=${oppId}`, "/sales/opportunities?add=1", `/sales/opportunities/${oppId}`, "/sales/pipeline",

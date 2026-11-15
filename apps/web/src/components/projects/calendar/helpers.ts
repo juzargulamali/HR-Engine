@@ -1,6 +1,6 @@
 import { addDays, addMonths, barPosition, daysBetween, describeTimedEvent, monthEnd, monthStart, startOfWeek, isDateOnly, type CalendarEntry } from "@enginious-hr/domain";
 import { COMMON_TIME_ZONES } from "@/lib/projects/format";
-import { describeSitePhase } from "@/lib/projects/site-state";
+import { siteActivityState, type SitePhaseInfo } from "@/lib/projects/site-state";
 import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import type { ProjCompanyCalendarRow, ProjMyCalendarRow, ProjProjectCalendarRow } from "@/types/projects";
 
@@ -116,11 +116,18 @@ const STATUS_LABELS: Record<string, string> = {
 };
 export const statusText = (s: string | null | undefined) => (s ? (STATUS_LABELS[s] ?? s.replace(/_/g, " ")) : null);
 
+/** Which calendar an entry was opened from, carried on its link so the record can offer "Back to Calendar" (see BackToCalendar). Placed before any #anchor. */
+export type CalendarOrigin = "calendar" | "plan-calendar";
+export function withFrom(href: string, from: CalendarOrigin): string {
+  const [path, hash] = href.split("#") as [string, string | undefined];
+  return `${path}${path.includes("?") ? "&" : "?"}from=${from}${hash ? `#${hash}` : ""}`;
+}
+
 export function mapMyRows(rows: readonly ProjMyCalendarRow[]): DisplayEntry[] {
   return rows.map((r) => ({
     kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
     kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: r.project_reference, projectName: r.project_name,
-    href: r.kind === "booking" ? `/projects/${r.project_id}/plan?plan=site&mode=list#bookings` : `/projects/${r.project_id}/work`,
+    href: withFrom(r.kind === "booking" ? `/projects/${r.project_id}/plan?plan=site&mode=list#bookings` : `/projects/${r.project_id}/work`, "calendar"),
     detail: r.detail,
   }));
 }
@@ -134,13 +141,21 @@ function planEntryHref(projectId: string, kind: string, itemId?: string): string
   return `/projects/${projectId}/work`;
 }
 
-export function mapProjectRows(rows: readonly ProjProjectCalendarRow[], projectId: string, reference: string, name: string): DisplayEntry[] {
-  return rows.map((r) => ({
-    kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
-    kindLabel: kindLabel(r.kind), status: r.status, statusLabel: statusText(r.status), projectRef: reference, projectName: name,
-    href: planEntryHref(projectId, r.kind, r.item_id),
-    detail: [r.who, r.kind === "dependency" && r.detail ? `at ${r.detail.slice(0, 5)} site time` : r.detail].filter(Boolean).join(" · ") || null,
-  }));
+/**
+ * The project's own calendar. A site activity (`plan_site`) is worded by the shared state function from the database phase, exactly as on the Site schedule and Work: never from the
+ * plan item's stored status and never from the clock. `sitePhases` is the phase of each open activity by id (from `proj_site_activities_read`); pass `null` when that read failed, and the
+ * activity then says its state is not available instead of guessing one. A finished activity says Finished from its own status.
+ */
+export function mapProjectRows(rows: readonly ProjProjectCalendarRow[], projectId: string, reference: string, name: string, sitePhases?: Readonly<Record<string, SitePhaseInfo>> | null): DisplayEntry[] {
+  return rows.map((r) => {
+    const site = r.kind === "plan_site" && sitePhases !== undefined ? siteActivityState(sitePhases?.[r.item_id] ?? null, r.status) : null;
+    return {
+      kind: r.kind, id: `${r.kind}:${r.item_id}`, title: r.title, onDate: r.on_date, endDate: r.end_date ?? r.on_date, startsAt: r.starts_at, endsAt: r.ends_at, tz: r.tz,
+      kindLabel: kindLabel(r.kind), status: site ? site.key : r.status, statusLabel: site ? site.label : statusText(r.status), projectRef: reference, projectName: name,
+      href: withFrom(planEntryHref(projectId, r.kind, r.item_id), "plan-calendar"),
+      detail: [site?.detail, r.who, r.kind === "dependency" && r.detail ? `at ${r.detail.slice(0, 5)} site time` : r.detail].filter(Boolean).join(" · ") || null,
+    };
+  });
 }
 
 /**
@@ -155,11 +170,11 @@ export function mapSiteActivities(rows: readonly SiteActivityRead[], from: strin
     if (!first) continue;
     const last = a.phase.last_day ?? a.end_date ?? first;
     if (last < from || first > to) continue;
-    const t = describeSitePhase(a.phase);
+    const t = siteActivityState(a.phase);
     out.push({
       kind: "site_activity", id: `site_activity:${a.id}`, title: a.run_label ? `${a.title} · ${a.run_label}` : a.title, onDate: first, endDate: last, startsAt: a.starts_at, endsAt: a.ends_at, tz: a.tz,
-      kindLabel: kindLabel("site_activity"), status: a.phase.phase, statusLabel: t.label, projectRef: a.reference, projectName: a.project_name,
-      href: `/projects/${a.project_id}/plan?plan=site&mode=list#site-${a.id}`, detail: [t.detail, a.owner_name ? `Owner ${a.owner_name}` : null].filter(Boolean).join(" · ") || null,
+      kindLabel: kindLabel("site_activity"), status: t.key, statusLabel: t.label, projectRef: a.reference, projectName: a.project_name,
+      href: withFrom(`/projects/${a.project_id}/plan?plan=site&mode=list#site-${a.id}`, "calendar"), detail: [t.detail, a.owner_name ? `Owner ${a.owner_name}` : null].filter(Boolean).join(" · ") || null,
     });
   }
   return out;
@@ -171,7 +186,7 @@ export function mapCompanyRows(rows: readonly ProjCompanyCalendarRow[]): Display
     .filter((r) => r.start_date)
     .map((r) => ({
       kind: "project", id: `project:${r.project_id}`, title: r.name, onDate: r.start_date, endDate: r.end_date ?? r.start_date, startsAt: null, endsAt: null, tz: null,
-      kindLabel: kindLabel("project"), status: r.status, statusLabel: statusText(r.status), projectRef: r.reference, projectName: r.name, href: `/projects/${r.project_id}`, detail: r.kind === "client" ? "Client project" : "Internal project",
+      kindLabel: kindLabel("project"), status: r.status, statusLabel: statusText(r.status), projectRef: r.reference, projectName: r.name, href: withFrom(`/projects/${r.project_id}`, "calendar"), detail: r.kind === "client" ? "Client project" : "Internal project",
     }));
 }
 

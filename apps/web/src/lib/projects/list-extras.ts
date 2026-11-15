@@ -63,6 +63,33 @@ export function teamStanding(teamsWithLead: number, memberCount: number): TeamSt
   return { state: "ok", label: null };
 }
 
+export interface WorkPackageCount { total: number; accepted: number; ready: number }
+/**
+ * Work packages per project (the team-level packages on the Work page, `proj_deliverables`), counted from ONE read for the whole list. A cancelled package is not counted. A project
+ * with no package has no entry, so the list shows the indicator only where it is relevant.
+ */
+export function countWorkPackages(rows: readonly { project_id: string; status: string }[]): Map<string, WorkPackageCount> {
+  const out = new Map<string, WorkPackageCount>();
+  for (const r of rows) {
+    if (r.status === "cancelled") continue;
+    const c = out.get(r.project_id) ?? { total: 0, accepted: 0, ready: 0 };
+    c.total += 1;
+    if (r.status === "accepted") c.accepted += 1;
+    if (r.status === "ready_for_review") c.ready += 1;
+    out.set(r.project_id, c);
+  }
+  return out;
+}
+/** The compact words for the indicator, and the longer ones for assistive technology and the tooltip. */
+export function workPackageText(c: WorkPackageCount): { short: string; long: string; attention: boolean } {
+  const ready = c.ready > 0 ? `, ${c.ready} ready for review` : "";
+  return {
+    short: `${c.accepted}/${c.total} work ${c.total === 1 ? "package" : "packages"}`,
+    long: `${c.accepted} of ${c.total} work ${c.total === 1 ? "package" : "packages"} accepted${ready}`,
+    attention: c.ready > 0,
+  };
+}
+
 export interface ActivityPreview { projectId: string; lines: { key: string; text: string }[]; more: number }
 /**
  * The latest few events per project merged into one preview (the newest first), with how many more there are, so the list carries ONE History link per project instead of one per event.

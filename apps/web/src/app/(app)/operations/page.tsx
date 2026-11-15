@@ -1,7 +1,7 @@
 import { PageHeader } from "@/components/projects/parts";
 import { OverviewView } from "@/components/operations/overview-view";
 import { CompanyTabs, ReadState } from "@/components/operations/parts";
-import { getOperationsContext, loadOverview, loadSiteActivities, loadUpcoming, pickCompany } from "@/lib/operations/data";
+import { getOperationsContext, loadCrewOverlaps, loadOverview, loadSiteActivities, loadUpcoming, pickCompany } from "@/lib/operations/data";
 import { todayIso } from "@/lib/projects/format";
 
 export const metadata = { title: "Operations" };
@@ -21,10 +21,10 @@ export default async function OperationsOverviewPage({ searchParams }: { searchP
   if (!company) return null;
   const self = `/operations?company=${company.id}`;
   // One bounded read of the dated site activities per page: Next on site, the timeline and team pressure all use it.
-  const [ov, up, sites] = await Promise.all([loadOverview(company.id), loadUpcoming(company.id), loadSiteActivities(company.id)]);
+  const [ov, up, sites, crew] = await Promise.all([loadOverview(company.id), loadUpcoming(company.id), loadSiteActivities(company.id), loadCrewOverlaps(company.id)]);
   const today = todayIso();
   const header = <PageHeader title="Operations" description={company.name} />;
   if (ov.state !== "ok") return <div className="space-y-5">{header}<CompanyTabs companies={ctx.companies} current={company.id} base="/operations" /><ReadState result={ov} what="the Operations Overview" retryHref={self} /></div>;
 
-  return <OverviewView header={header} companies={ctx.companies} company={company} ov={ov} up={up} sites={sites} today={today} viewerId={ctx.projects.userId} />;
+  return <OverviewView header={header} companies={ctx.companies} company={company} ov={ov} up={up} sites={sites} crew={crew} today={today} viewerId={ctx.projects.userId} />;
 }

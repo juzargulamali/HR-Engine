@@ -12,6 +12,7 @@ import { loadDirectory } from "@/lib/projects/data";
 import { todayIso } from "@/lib/projects/format";
 import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { createClient } from "@/lib/supabase/server";
+import { RememberList } from "@/components/workspace/list-memory";
 
 export const metadata = { title: "Project calendar" };
 
@@ -66,6 +67,7 @@ export default async function ProjectsCalendarPage({ searchParams }: { searchPar
 
   return (
     <div className="space-y-5">
+      <RememberList section="calendar" />
       <PageTitle title="Calendar" hint={<>
         <p><strong>My calendar:</strong> deadlines, reviews, milestones and site bookings that are yours. Tick Site activities to add the dated setup, show and dismantling activities of your companies; each opens its row in the Site schedule. On a phone, Agenda lists the days one under the other.</p>
         <p className="mt-1.5"><strong>Company calendar:</strong> the company&apos;s project dates at summary level only: reference, name, status and the start and end dates. Milestones, tasks and bookings are not shown there.{hasGrants ? "" : " People who are only linked to a project as Sales see just their own projects."}</p>

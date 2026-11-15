@@ -1,12 +1,16 @@
 // Real-browser regression of Projects & Tasks through the ENGINIOUS OS interface (LOCAL STACK ONLY; see README.md).
 // Seed first with the local stack (founder ceo@, PM mgr@, department head lead@, member hr@, directory-only hr1@, Sales emp@ who owns a Won
 // opportunity, admin@ with no Projects access), then run this against the production build. Writes to the local database only.
+// Repaired against the current People (project teams), Work (work packages), Plan (suggested stages behind a disclosure, the Site schedule above "All site timeline items") and
+// Chat (the project's group replaced the Discussion tab) screens; then extended with individual tasks on the client timeline (explicit choice, preview, issue, PDF, secret strings).
+// STEP_TIMEOUT (ms) shortens Playwright's default wait while repairing; a normal run leaves it unset.
 import { execSync } from "node:child_process";
 import { chromium, newPage, login, BASE, optionTexts, choose, psql as sql } from "./lib.mjs";
 const SHOTS = process.env.SHOTS_DIR ?? "/tmp";
 const browser = await chromium.launch();
 let page = null; let fails = 0; let passes = 0; let url = "";
-const as = async (email, viewport, theme) => { if (page) await page.context().close(); page = await newPage(browser, viewport, theme); await login(page, email); return page; };
+const STEP_TIMEOUT = Number(process.env.STEP_TIMEOUT ?? 0);
+const as = async (email, viewport, theme) => { if (page) await page.context().close(); page = await newPage(browser, viewport, theme); if (STEP_TIMEOUT) page.setDefaultTimeout(STEP_TIMEOUT); await login(page, email); return page; };
 const step = async (name, fn) => {
   try { await fn(); passes++; console.log("PASS", name); }
   catch (e) {
@@ -43,6 +47,10 @@ const menuItems = async (button) => { await openMenu(button); const t = (await p
 const pick = async (button, item) => { await openMenu(button); await page.locator("main").getByRole("menuitem", { name: item }).first().click(); };
 // The Milestones & deliverables section is collapsed once milestones exist.
 const openMilestones = async () => { for (const sel of ["details#milestones", "details#work-packages"]) { const d = page.locator(sel); if ((await d.count()) && !(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); } };   // work packages are their own collapsed section
+// The Site plan lists its items (client-facing, milestone, status) inside a closed "All site timeline items" section under the Site schedule.
+const openSiteItems = async () => { const d = page.getByTestId("site-all-items"); if ((await d.count()) && !(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); };
+// "Start from suggested stages" is a closed disclosure on an empty plan.
+const openSuggestions = async () => { const d = page.getByTestId("plan-suggested-stages"); await d.waitFor(); if (!(await d.evaluate((e) => e.open))) await d.locator("summary").first().click(); };
 const taskRow = (title) => page.locator("main tbody tr", { hasText: title }).first();
 // Add task (Quick Add): what, who, when; "more" fills the optional details first.
 const addTask = async (t, { assignee, due, more, dbl = false } = {}) => {
@@ -159,10 +167,10 @@ await step("PM: create the Programming team with lead@ as head (head is added as
 });
 await step("PM: add hr@ (an HR admin) to the Programming team; a person without Projects access cannot be added", async () => {
   await go(`/projects/${P}/people`);
-  await page.getByLabel("Person").selectOption({ label: "hr" }); await page.getByLabel(/Department \(optional\)/).selectOption({ label: "Programming" });
+  await page.getByLabel("Person", { exact: true }).selectOption({ label: "hr" }); await page.getByLabel(/Project team \(optional\)/).selectOption({ label: "Programming" });
   await page.getByRole("button", { name: /add to project/i }).click();
   await until(() => db(`select team_id is not null from proj_project_members where user_id='${U(2)}' and removed_at is null`) === "t");
-  const options = await page.getByLabel("Person").locator("option").allInnerTexts();
+  const options = await page.getByLabel("Person", { exact: true }).locator("option").allInnerTexts();
   if (options.some((o) => /admin|pol\./.test(o))) throw new Error("a person without Projects access is offered: " + options.join(","));
 });
 await step("PM: appoint and end temporary leadership; it grants no HR rights", async () => {
@@ -178,7 +186,13 @@ await step("PM: appoint and end temporary leadership; it grants no HR rights", a
 await as("hr@e2e.local");
 await step("Member: cannot manage people or milestones (no controls, a short Manage menu, and the database refuses)", async () => {
   await go(`/projects/${P}/people`); const t = await mainText();
-  if (/Add department team|Add to project|Appoint/.test(t)) throw new Error("management controls shown to a member");
+  if (/Add project team|Add department team|Add to project|Appoint|Change Project Manager/.test(t)) throw new Error("management controls shown to a member");
+  if ((await page.locator("#am-user, #ap-user").count()) > 0) throw new Error("the add-a-person or temporary-leadership form is drawn for a member");
+  // the database refuses the same things, whatever the screen shows
+  for (const stmt of [`select proj_add_member('${P}', '${U(1)}', null)`, `select proj_save_milestone('${P}', null, '{"title":"Not allowed"}'::jsonb)`]) {
+    let refused = false; try { asDb(2, stmt); } catch { refused = true; }
+    if (!refused) throw new Error("the database let a member run: " + stmt);
+  }
   await go(`/projects/${P}/work?tasks=all`);
   if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("Plan menu (add milestone / deliverable) shown to a member");
   const items = await menuItems("Manage project");
@@ -190,7 +204,7 @@ await step("Member: cannot manage people or milestones (no controls, a short Man
 // ---- milestones, deliverables, tasks ---------------------------------------------------------------------------------
 await as("mgr@e2e.local");
 let MS1 = ""; let DL = "";
-await step("PM: add two milestones and a deliverable for Programming (Plan menu on Work)", async () => {
+await step("PM: add two milestones and a work package for Programming (Plan menu on Work)", async () => {
   await go(`/projects/${P}/work?tasks=all`);
   await pick("Plan", /Add milestone/);
   await dialog().getByLabel("Title").fill("First draft approved"); await dialog().getByLabel("Due date").fill(dayIso(30));
@@ -199,10 +213,10 @@ await step("PM: add two milestones and a deliverable for Programming (Plan menu 
   await dialog().getByLabel("Title").fill("Final render approved"); await dialog().getByLabel("Due date").fill(dayIso(45));
   await dialog().getByRole("button", { name: /^Add milestone$/ }).click(); await closed();
   MS1 = db("select id from proj_milestones where title='First draft approved'");
-  await pick("Plan", /Add deliverable/);
-  await dialog().getByLabel("Title").fill("Interactive floor build"); await dialog().getByLabel("Department team").selectOption({ label: "Programming" });
+  await pick("Plan", /Add work package/);
+  await dialog().getByLabel("Title").fill("Interactive floor build"); await dialog().getByLabel("Project team").selectOption({ label: "Programming" });
   await dialog().getByLabel("Milestone").selectOption({ label: "First draft approved" }); await dialog().getByLabel("Due date").fill(dayIso(25));
-  await dialog().getByRole("button", { name: /^Add deliverable$/ }).click(); await closed();
+  await dialog().getByRole("button", { name: /^Add work package$/ }).click(); await closed();
   DL = db("select id from proj_deliverables"); if (!DL || db("select count(*) from proj_milestones") !== "2") throw new Error("not saved");
   await openMilestones(); await seen(/Interactive floor build/);
 });
@@ -213,7 +227,7 @@ await step("Department head: Add task for a team member with the review rule; ca
   await addTask("Shader prototype", {
     assignee: "hr", due: dayIso(10),
     more: async (d) => {
-      await d.getByLabel("Department team").selectOption({ label: "Programming" });
+      await d.getByLabel("Project team").selectOption({ label: "Programming" });
       await d.getByLabel("Deliverable").selectOption({ label: "Interactive floor build" });
       await d.getByLabel("Start date").fill(dayIso(3));
       await d.getByLabel("Needs review").check();
@@ -301,7 +315,7 @@ await step("Department head: accepts the team's deliverable (only theirs); has n
   await go(`/projects/${P}/work?tasks=all`);
   if ((await page.getByRole("button", { name: /^Plan$/, exact: true }).count()) > 0) throw new Error("PM-only Plan menu shown to a head");
   await openMilestones();
-  if ((await page.getByRole("button", { name: /add milestone|add deliverable/i }).count()) > 0) throw new Error("PM-only controls shown to a head");
+  if ((await page.getByRole("button", { name: /add milestone|add deliverable|add work package/i }).count()) > 0) throw new Error("PM-only controls shown to a head");
   await page.locator("#deliverables li", { hasText: "Interactive floor build" }).getByRole("button", { name: /change status/i }).click();
   await dialog().getByLabel("New status").selectOption({ label: "Accepted" });
   await dialog().getByRole("button", { name: /change status/i }).click(); await closed();
@@ -321,19 +335,22 @@ await step("PM: accepts the milestone; progress states its basis (1 of 2 require
 await as("mgr@e2e.local");
 await step("PM: start the delivery and site plans from the suggestions (editable, nothing client-visible)", async () => {
   await go(`/projects/${P}/plan`);
+  await openSuggestions();
   await page.getByLabel(/First day of work/).fill(dayIso(7));
   await page.getByRole("button", { name: /create suggested stages/i }).first().click();
   await until(() => db("select count(*) from proj_plan_items where plan='delivery'") === "7");
   await go(`/projects/${P}/plan?plan=site`);
+  await openSiteItems(); await openSuggestions();
   await page.getByRole("button", { name: /create suggested stages/i }).first().click();
   await until(() => db("select count(*) from proj_plan_items where plan='site'") === "8");
   if (db("select count(*) from proj_plan_items where client_facing") !== "0") throw new Error("something is client-visible by default");
-  await expectText(/Dismantling/);
+  await go(`/projects/${P}/plan?plan=site`); await openSiteItems(); await expectText(/Dismantling/);
   await go(`/projects/${P}/plan`); await expectText(/Moodboard/);
 });
 await step("PM: mark the site installation client-facing and add an external dependency", async () => {
   await go(`/projects/${P}/plan?plan=site`);
-  await page.locator("tr", { hasText: "Installation" }).getByRole("button", { name: /edit/i }).first().click();
+  await openSiteItems();
+  await page.getByTestId("site-all-items").locator("tr", { hasText: "Installation" }).getByRole("button", { name: /edit/i }).first().click();
   await dialog().getByLabel(/client/i).first().check();
   await dialog().getByRole("button", { name: /save/i }).last().click(); await closed();
   await until(() => db("select count(*) from proj_plan_items where client_facing and title='Installation'") === "1");
@@ -473,49 +490,73 @@ for (const who of ["mgr@e2e.local", "lead@e2e.local"]) {
 }
 
 
-// ---- discussion, mentions, notifications -----------------------------------------------------------------------------
+// ---- the project's conversation: its group in Chat (the Discussion tab was replaced), mentions, unread ---------------------
+// The project header's Chat button opens the project's group in the Chat panel, over the page.
+const openProjectChat = async (p) => { await p.goto(`${BASE}/projects/${P}/work`, { waitUntil: "networkidle" }); await p.getByRole("button", { name: "Open project chat" }).first().click(); await p.getByTestId("chat-thread-title").waitFor(); };
+const chatBox = (p) => p.getByRole("textbox", { name: /^Message / });
+const GROUP = () => db(`select id from chat_groups where project_id='${P}'`);
 await as("hr@e2e.local");
-const lp = await newPage(browser); await login(lp, "lead@e2e.local"); await lp.goto(`${BASE}/projects/${P}/discussion`, { waitUntil: "networkidle" });
-await step("Discussion: a mention posts once (double click), appears on another person's open page without refreshing, and notifies without the text", async () => {
-  await go(`/projects/${P}/discussion`);
-  await page.getByLabel("Message", { exact: true }).fill("Truss arrives Thursday, please plan the install.");
-  await page.getByLabel(/Mention someone/).selectOption({ label: "@lead" });
-  await page.getByRole("button", { name: /^send$/i }).dblclick();
-  await until(() => db("select count(*) from proj_messages where body like 'Truss arrives Thursday%'") === "1");
+const lp = await newPage(browser); await login(lp, "lead@e2e.local"); await lp.goto(`${BASE}/projects/work`, { waitUntil: "networkidle" });
+await step("Chat: a mention posts once (double click) and marks the mentioned person, with no notification that carries the message text", async () => {
+  await openProjectChat(page);
+  if (!/UAE-P-\d{4}-0001/.test(await page.getByTestId("chat-thread-title").innerText())) throw new Error("the project header did not open the project's own group");
+  await chatBox(page).pressSequentially("Truss arrives Thursday, please plan the install. @le");
+  await page.getByTestId("chat-mention-list").getByRole("option", { name: /lead/ }).click();
+  await page.getByRole("button", { name: "Send message" }).dblclick();
+  await until(() => db("select count(*) from chat_messages where body like 'Truss arrives Thursday%'") === "1");
   await new Promise((r) => setTimeout(r, 1500));
-  if (db("select count(*) from proj_messages where body like 'Truss arrives Thursday%'") !== "1") throw new Error("duplicate message after a double click");
-  if (db("select count(*) from proj_message_mentions") !== "1") throw new Error("mention not stored");
-  await lp.waitForFunction(() => /Truss arrives Thursday/.test(document.querySelector("main").innerText), null, { timeout: 25000 });
-  const payload = db(`select payload::text from notifications where user_id='${U(7)}' and type='project_mention'`);
-  if (!payload || /Truss arrives/.test(payload)) throw new Error("mention notification missing or carries the message text: " + payload);
+  if (db("select count(*) from chat_messages where body like 'Truss arrives Thursday%'") !== "1") throw new Error("duplicate message after a double click");
+  if (db(`select count(*) from chat_message_mentions m join chat_messages c on c.id = m.message_id where c.group_id = '${GROUP()}' and m.user_id = '${U(7)}'`) !== "1") throw new Error("mention not stored once for the mentioned person");
+  if (db(`select count(*) from notifications where payload::text like '%Truss arrives%'`) !== "0") throw new Error("a notification carries the message text");
 });
-await step("Notifications: the mentioned person sees it in My Work, in plain words, without the message text", async () => {
-  await lp.goto(`${BASE}/projects/work?tasks=all`, { waitUntil: "networkidle" });
+await step("Chat: the mentioned person is told (unread count and mention marker on the group, on their next refresh) and My Work never shows the message text", async () => {
+  await lp.reload({ waitUntil: "networkidle" });
+  await lp.getByTestId("chat-total-unread").waitFor({ timeout: 45000 });
   const t = (await lp.locator("main").innerText()).replace(/\s+/g, " ");
-  if (!/mention/i.test(t)) throw new Error("no mention notice: " + t.slice(0, 300));
-  if (/Truss arrives/.test(t)) throw new Error("message text in a notification");
+  if (/Truss arrives/.test(t)) throw new Error("message text on My Work");
+  await lp.getByTestId("chat-launcher").click(); await lp.getByTestId("chat-panel").waitFor();
+  const row = lp.locator('button[data-testid^="chat-group-project:"]', { hasText: "Floor projection for the Orbit launch" }).first();
+  if ((await row.getByTestId("chat-group-mention").count()) !== 1) throw new Error("no mention marker on the project's group for the mentioned person");
+  if ((await row.getByTestId("chat-group-unread").innerText()).trim() !== "1") throw new Error("the group's unread count is not 1");
+  await row.click(); await lp.getByTestId("chat-mention-me").first().waitFor();
+});
+await step("Chat: a new message appears in another member's open thread without reloading the page", async () => {
+  if (!(await chatBox(page).count())) await openProjectChat(page);
+  await chatBox(page).pressSequentially("Loading dock is booked for 08:00.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await until(() => db("select count(*) from chat_messages where body like 'Loading dock is booked%'") === "1");
+  await lp.getByTestId("chat-messages").getByText("Loading dock is booked for 08:00.").first().waitFor({ timeout: 60000 });
 });
 await lp.context().close();
 await as("emp@e2e.local");
-await step("Discussion: a linked Sales person who is not a member cannot read it", async () => {
-  await go(`/projects/${P}/discussion`); if (/Truss arrives/.test(await mainText())) throw new Error("discussion visible to Sales");
+await step("Chat: a linked Sales person who is not a member cannot read the conversation (no group, no text, and the database refuses)", async () => {
+  await go(`/projects/${P}/discussion`); if (/Truss arrives|Loading dock/.test(await mainText())) throw new Error("conversation visible to Sales on the old address");
+  await go("/projects");
+  if (await page.getByTestId("chat-launcher").count()) {
+    await page.getByTestId("chat-launcher").click(); await page.getByTestId("chat-panel").waitFor();
+    if (/Floor projection for the Orbit launch|Truss arrives|Loading dock/.test(await page.getByTestId("chat-panel").innerText())) throw new Error("the project's group is listed for a Sales person who is not on the project");
+  }
+  let refused = false; try { asDb(5, `select chat_messages('${GROUP()}')`); } catch { refused = true; }
+  if (!refused) throw new Error("the database let a non-member read the project's messages");
+  refused = false; try { asDb(5, `select chat_post('${GROUP()}', 'hello')`); } catch { refused = true; }
+  if (!refused) throw new Error("the database let a non-member post in the project's group");
 });
 await as("hr@e2e.local");
-await step("Discussion history: the page opens on the latest 100; Show earlier messages reaches the very first message, without losing the live ones", async () => {
-  db(`insert into proj_messages (project_id, author_id, body, created_at) select '${P}', '${U(4)}', 'History note ' || g, now() - interval '30 days' + (g || ' minutes')::interval from generate_series(1, 130) g`);
-  await go(`/projects/${P}/discussion`);
-  let t = await mainText();
-  if (!/History note 130\b/.test(t)) throw new Error("the latest message is missing");
-  if (/Truss arrives Thursday/.test(t)) throw new Error("the oldest message should not be loaded up front");
-  const more = page.getByRole("button", { name: /show earlier messages/i });
-  if ((await more.count()) !== 1) throw new Error("no Show earlier messages button");
-  for (let i = 0; i < 6 && (await more.count()) > 0; i++) { await more.click(); await page.waitForTimeout(900); }
+await step("Chat history: the thread opens on the latest messages; Load earlier messages reaches the very first one without losing the newest", async () => {
+  db(`insert into chat_messages (group_id, sender_id, body, created_at) select '${GROUP()}', '${U(4)}', 'History note ' || g, now() + (g || ' seconds')::interval from generate_series(1, 130) g`);
+  await openProjectChat(page);
+  const thread = page.getByTestId("chat-messages");
+  await thread.getByText("History note 130", { exact: true }).first().waitFor();
+  if (/Truss arrives Thursday/.test(await thread.innerText())) throw new Error("the oldest message should not be loaded up front");
+  const more = page.getByRole("button", { name: /load earlier messages/i });
+  if ((await more.count()) !== 1) throw new Error("no Load earlier messages button");
+  for (let i = 0; i < 12 && (await more.count()) > 0; i++) { await more.click(); await page.waitForTimeout(900); }
   if ((await more.count()) !== 0) throw new Error("the button never went away");
-  t = await mainText();
+  const t = await thread.innerText();
   if (!/Truss arrives Thursday/.test(t)) throw new Error("the first message was not reached");
   if (!/History note 1\b/.test(t) || !/History note 130\b/.test(t)) throw new Error("history is incomplete");
-  const n = await page.locator("[id^='msg-']").count();
-  const total = Number(db(`select count(*) from proj_messages where project_id = '${P}'`));
+  const n = await thread.getByTestId("chat-message").count();
+  const total = Number(db(`select count(*) from chat_messages where group_id = '${GROUP()}'`));
   if (n !== total) throw new Error(`${n} messages shown, ${total} stored`);
 });
 
@@ -596,6 +637,125 @@ await step("PM: records 'sent' and 'client accepted' separately", async () => {
   await dialog().getByRole("button", { name: /record acceptance/i }).click(); await closed();
   await until(() => db("select accepted_on is not null from proj_issued_plans") === "t");
 });
+
+// ---- client timeline: individual tasks, by explicit choice, from an allowlist (PR 3) ---------------------------------------
+// Recognisable secrets are planted in every internal field of the two tasks that get chosen; none may appear in the preview, the issued version, any read of it or the PDF.
+const TASK_SECRETS = ["TASKSECRET-DESCRIPTION", "TASKSECRET-BLOCKED-REASON", "TASKSECRET-UNBLOCK", "TASKSECRET-OUTPUT", "TASKSECRET-COMMENT", "TASKSECRET-FILE"];
+const INTERNAL_TITLES = ["Rig test", "Hardware demo", "Shader prototype", "Prepare test rig"];
+let V1_PAYLOAD = ""; let PDF2_URL = "";
+await step("PM: no task is on the client timeline by default; tasks are chosen one by one, each with the title the client sees", async () => {
+  V1_PAYLOAD = db("select payload::text || '|' || payload_hash from proj_issued_plans where version = 1");
+  const rig = db("select id from proj_tasks where title='Rig test'"); const demo = db("select id from proj_tasks where title='Hardware demo'");
+  db(`update proj_tasks set description = 'TASKSECRET-DESCRIPTION', blocked_at = now(), blocked_reason = 'TASKSECRET-BLOCKED-REASON', unblock_action = 'TASKSECRET-UNBLOCK', output_label = 'TASKSECRET-OUTPUT' where id = '${rig}'`);
+  db(`update proj_tasks set description = 'TASKSECRET-DESCRIPTION' where id = '${demo}'`);
+  db(`insert into proj_task_events (task_id, project_id, kind, note, actor_id) values ('${rig}', '${P}', 'comment', 'TASKSECRET-COMMENT', '${U(2)}')`);
+  db(`insert into proj_files (project_id, kind, purpose, label, url, restricted, uploaded_by) values ('${P}', 'link', 'document', 'TASKSECRET-FILE', 'https://docs.example.com/TASKSECRET-FILE', false, '${U(4)}')`);
+  if (db("select count(*) from proj_client_timeline_tasks") !== "0") throw new Error("a task is chosen before anyone chose it");
+  await go(`/projects/${P}/documents`);
+  const picks = page.locator('[data-testid^="ct-task-pick-"]');
+  if ((await picks.count()) < 3) throw new Error("the tasks are not offered: " + (await picks.count()));
+  for (let i = 0; i < (await picks.count()); i++) if (await picks.nth(i).isChecked()) throw new Error("a task is ticked by default");
+  if (/all tasks|select all|choose all/i.test(await page.getByTestId("ct-choose-tasks").innerText())) throw new Error("an 'all tasks' control is offered");
+  if (/Rigging checked on site|TASKSECRET/.test(await page.getByTestId("ct-preview").innerText())) throw new Error("the preview shows a task before it was chosen");
+  await page.getByTestId(`ct-task-pick-${rig}`).check();
+  if ((await page.getByTestId(`ct-task-title-${rig}`).inputValue()) !== "Rig test") throw new Error("the client title is not offered from the task");
+  await page.getByTestId(`ct-task-title-${rig}`).fill("Rigging checked on site");
+  await page.getByTestId(`ct-task-pick-${demo}`).check(); await page.getByTestId(`ct-task-title-${demo}`).fill("Equipment demonstration");
+  await page.getByRole("button", { name: /^Save the chosen tasks$/ }).click();
+  await until(() => db("select count(*) from proj_client_timeline_tasks") === "2");
+  if (db("select string_agg(client_title, '|' order by client_title) from proj_client_timeline_tasks") !== "Equipment demonstration|Rigging checked on site") throw new Error("client titles not stored");
+  if (db("select count(*) from proj_issued_plans") !== "1") throw new Error("choosing tasks issued something");
+  if (db("select payload::text || '|' || payload_hash from proj_issued_plans where version = 1") !== V1_PAYLOAD) throw new Error("choosing tasks changed the issued version");
+});
+await step("PM: the client-facing preview shows the chosen tasks exactly as they will be issued (client title, dates, status in client words) and nothing internal", async () => {
+  await go(`/projects/${P}/documents`);
+  const prev = (await page.getByTestId("ct-preview").innerText()).replace(/\s+/g, " ");
+  for (const must of ["Tasks", "Rigging checked on site", "Equipment demonstration", "Planned"]) if (!prev.includes(must)) throw new Error(`the preview lacks ${must}: ${prev.slice(0, 400)}`);
+  for (const hidden of [...TASK_SECRETS, ...INTERNAL_TITLES, "Blocked", "Urgent", "hr@", "COST-SECRET"]) if (prev.includes(hidden)) throw new Error(`the preview shows ${hidden}`);
+  await expectText(/outdated/i);                              // the latest issued version no longer matches what would be issued
+  await page.screenshot({ path: `${SHOTS}/timeline-tasks-preview.png`, fullPage: true });
+});
+await step("PM: issuing freezes exactly the preview as version 2; version 1 is byte for byte what it was and still renders", async () => {
+  const previewHash = db(`select md5(proj_build_plan_payload('${P}')::text)`);
+  await page.getByRole("button", { name: /issue a new version/i }).first().click();
+  await dialog().getByRole("button", { name: /issue version/i }).click(); await closed();
+  await until(() => db("select count(*) from proj_issued_plans") === "2");
+  if (db("select payload_hash from proj_issued_plans where version = 2") !== previewHash) throw new Error("version 2 is not the previewed content");
+  const tasks = db("select (payload->'tasks')::text from proj_issued_plans where version = 2");
+  const list = JSON.parse(tasks);
+  if (list.length !== 2) throw new Error("version 2 does not hold exactly the two chosen tasks: " + tasks);
+  for (const t of list) if (Object.keys(t).sort().join(",") !== "due_date,start_date,status,title") throw new Error("a task in the issued version carries a field that is not on the allowlist: " + JSON.stringify(t));
+  const payload = db("select payload::text || title || client_reference from proj_issued_plans where version = 2");
+  for (const hidden of [...TASK_SECRETS, ...INTERNAL_TITLES, U(2), "Truss arrives", "COST-SECRET", "250000", "PO-SECRET"]) if (payload.includes(hidden)) throw new Error(`version 2 contains ${hidden}`);
+  if (db("select payload::text || '|' || payload_hash from proj_issued_plans where version = 1") !== V1_PAYLOAD) throw new Error("issuing version 2 rewrote version 1");
+  if (db("select payload ? 'tasks' from proj_issued_plans where version = 1") !== "f") throw new Error("version 1 gained tasks");
+  await page.reload({ waitUntil: "networkidle" });
+  const versions = page.getByTestId("ct-issued").locator("li", { has: page.locator("h4") });
+  if ((await versions.count()) !== 2) throw new Error("both versions are not listed");
+  for (let i = 0; i < 2; i++) await versions.nth(i).locator("summary").click();
+  const v2 = (await versions.nth(0).innerText()).replace(/\s+/g, " "); const v1 = (await versions.nth(1).innerText()).replace(/\s+/g, " ");
+  if (!/Version 2/.test(v2) || !v2.includes("Rigging checked on site")) throw new Error("version 2 does not show its tasks");
+  if (!/Version 1/.test(v1) || !/Installation/.test(v1) || /Rigging checked on site|Tasks/.test(v1.replace(/Show this version as a table/, ""))) throw new Error("version 1 does not render as it was issued: " + v1.slice(0, 300));
+  PDF2_URL = await versions.nth(0).locator("a", { hasText: /download pdf/i }).getAttribute("href");
+  await page.screenshot({ path: `${SHOTS}/timeline-tasks-issued.png`, fullPage: true });
+});
+await step("PDF: version 2 carries the chosen tasks in client words and none of the planted secrets or internal titles; version 1's PDF is unchanged", async () => {
+  const fs = await import("node:fs"); const { execSync: sh } = await import("node:child_process");
+  const res = await page.request.get(`${BASE}${PDF2_URL}`); if (res.status() !== 200) throw new Error("status " + res.status());
+  const body = await res.body(); if (body.subarray(0, 5).toString() !== "%PDF-") throw new Error("not a PDF");
+  const f = `${SHOTS}/timeline-v2.pdf`; fs.writeFileSync(f, body);
+  const txt = sh(`pdftotext -layout ${f} -`).toString();
+  for (const must of ["Tasks", "Rigging checked on site", "Equipment demonstration", "Planned", "Installation"]) if (!txt.includes(must)) throw new Error(`the PDF lacks ${must}`);
+  for (const hidden of [...TASK_SECRETS, ...INTERNAL_TITLES, "Truss arrives", "COST-SECRET", "250000", "PO-SECRET", "TERMS-SECRET", "BUDGET-SECRET", "Blocked", "e2e.local"]) if (txt.includes(hidden)) throw new Error(`the PDF contains ${hidden}`);
+  if (body.toString("latin1").includes("TASKSECRET")) throw new Error("the raw PDF bytes contain a planted secret");
+  const r1 = await page.request.get(`${BASE}${PDF_URL}`); if (r1.status() !== 200) throw new Error("version 1's PDF no longer downloads: " + r1.status());
+  const f1 = `${SHOTS}/timeline-v1-after.pdf`; fs.writeFileSync(f1, await r1.body());
+  const t1 = sh(`pdftotext -layout ${f1} -`).toString();
+  if (/Rigging checked on site|Equipment demonstration/.test(t1) || !t1.includes("Installation")) throw new Error("version 1's PDF changed");
+  // the read a signed-in member can make of the issued version carries nothing more
+  const asMember = asDb(2, `select string_agg(payload::text, ' ') from proj_issued_plans where project_id = '${P}'`);
+  for (const hidden of [...TASK_SECRETS, ...INTERNAL_TITLES]) if (asMember.includes(hidden)) throw new Error(`a member's read of the issued versions contains ${hidden}`);
+});
+await step("PM: a timeline that changed after the preview was opened is not issued (nothing is frozen that was not seen)", async () => {
+  await go(`/projects/${P}/documents`);
+  db(`update proj_client_timeline_tasks set client_title = 'Changed in another tab' where client_title = 'Equipment demonstration'`);
+  await page.getByRole("button", { name: /issue a new version/i }).first().click();
+  await dialog().getByRole("button", { name: /issue version/i }).click();
+  await page.waitForFunction(() => /changed after you opened the preview/i.test(document.querySelector("dialog[open]")?.innerText ?? ""), null, { timeout: 12000 });
+  if (db("select count(*) from proj_issued_plans") !== "2") throw new Error("a version was issued from a stale preview");
+  await page.keyboard.press("Escape");
+  db(`update proj_client_timeline_tasks set client_title = 'Equipment demonstration' where client_title = 'Changed in another tab'`);
+});
+await as("hr@e2e.local");
+await step("Member: reads the issued versions but cannot choose tasks, see the choice or the preview, or issue (screen and database)", async () => {
+  await go(`/projects/${P}/documents`);
+  await expectText(/Version 2/);
+  for (const id of ["ct-choose", "ct-choose-tasks", "ct-preview"]) if ((await page.getByTestId(id).count()) > 0) throw new Error(`${id} is drawn for a member`);
+  if ((await page.getByRole("button", { name: /issue (this timeline|a new version)|save the chosen tasks/i }).count()) > 0) throw new Error("issue or save offered to a member");
+  const rig = db("select id from proj_tasks where title='Rig test'");
+  for (const stmt of [`select proj_set_client_timeline_tasks('${P}', '[{"task_id":"${rig}","client_title":"x"}]'::jsonb)`, `select proj_issue_plan_checked('${P}', 'abc', null, null)`, `select proj_issue_plan('${P}')`]) {
+    let refused = false; try { asDb(2, stmt); } catch { refused = true; }
+    if (!refused) throw new Error("the database let a member run: " + stmt);
+  }
+  if (asDb(2, `select count(*) from proj_client_timeline_tasks`) !== "0") throw new Error("a member can read which tasks were chosen");
+  if (asDb(2, `select coalesce(proj_plan_preview('${P}')::text, 'null')`) !== "null") throw new Error("a member can read the preview");
+  if (db("select count(*) from proj_client_timeline_tasks") !== "2") throw new Error("the choice changed");
+});
+await as("hr1@e2e.local");
+await step("Summary-only person: no documents page, no issued version, no choice, no preview; the database refuses every call", async () => {
+  await go(`/projects/${P}/documents`);
+  const t = await mainText();
+  if (/Rigging checked on site|Equipment demonstration|Version 2|Client timeline/.test(t)) throw new Error("the client timeline is visible to a summary-only person");
+  const rig = db("select id from proj_tasks where title='Rig test'");
+  for (const stmt of [`select proj_set_client_timeline_tasks('${P}', '[{"task_id":"${rig}","client_title":"x"}]'::jsonb)`, `select proj_issue_plan_checked('${P}', 'abc', null, null)`]) {
+    let refused = false; try { asDb(1, stmt); } catch { refused = true; }
+    if (!refused) throw new Error("the database let a summary-only person run: " + stmt);
+  }
+  if (asDb(1, `select count(*) from proj_client_timeline_tasks`) !== "0" || asDb(1, `select count(*) from proj_issued_plans`) !== "0") throw new Error("a summary-only person can read the choice or the issued versions");
+  if (asDb(1, `select coalesce(proj_plan_preview('${P}')::text, 'null')`) !== "null") throw new Error("a summary-only person can read the preview");
+  const r = await page.request.get(`${BASE}${PDF2_URL}`); if (r.status() === 200) throw new Error("a summary-only person could download the PDF");
+});
+await as("mgr@e2e.local");
 
 // ---- completion, reopening --------------------------------------------------------------------------------------------
 await step("Completion: refused without the client's confirmation; every unfinished item needs its own decision", async () => {

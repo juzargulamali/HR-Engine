@@ -125,7 +125,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
   const scale: TimelineScale | null = userMode && model.range ? timelineScale(model.range, userMode) : model.scale;
   const todayIdx = scale ? dayIndex(scale, today) : -1;
   const n = scale?.days.length ?? 1;
-  const cols = "grid-cols-[10rem_minmax(0,1fr)] sm:grid-cols-[12rem_minmax(0,1fr)]";
+  const cols = "grid-cols-[9rem_minmax(0,1fr)] sm:grid-cols-[12rem_minmax(0,1fr)]";
   const rowByKey = new Map(model.rows.map((r) => [r.key, r]));
   const active = tip ? rowByKey.get(tip.key) ?? null : null;
 
@@ -168,7 +168,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
 
   const modeButton = (m: TimelineMode, label: string) => (
     <button type="button" aria-pressed={scale?.mode === m} data-testid={`tl-mode-${m}`} onClick={() => setUserMode(m)}
-      className={cn("inline-flex h-9 min-w-16 items-center justify-center rounded px-3 text-sm font-medium transition-colors sm:h-7 sm:min-w-14 sm:text-[13px]", scale?.mode === m ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</button>
+      className={cn("inline-flex h-10 min-w-16 items-center justify-center rounded px-3 text-sm font-medium transition-colors sm:h-7 sm:min-w-14 sm:text-[13px]", scale?.mode === m ? "bg-primary/15 text-foreground" : "text-muted-foreground hover:text-foreground")}>{label}</button>
   );
 
   return (
@@ -183,7 +183,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
               <p className="mt-1.5">Bars are read-only: change a date on the task or in the Breakdown; it follows the task&apos;s own approval rules.</p>
             </InfoHint>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={jumpToToday} disabled={todayIdx < 0} data-testid="tl-today-jump" className="h-9 sm:h-8"
+          <Button type="button" variant="outline" size="sm" onClick={jumpToToday} disabled={todayIdx < 0} data-testid="tl-today-jump" className="h-10 sm:h-8"
             title={todayIdx < 0 ? "Today is outside this schedule" : "Scroll to today"}><CalendarCheck className="h-4 w-4" aria-hidden /> Today</Button>
         </div>
       )}
@@ -191,9 +191,9 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
         <div
           ref={attachScroller} data-testid="tl-scroll" role="region" aria-label="Work schedule chart. Scroll sideways with a swipe, the trackpad or the arrow keys." tabIndex={0} onKeyDown={onKeyDown}
           className="max-h-[75vh] max-w-full overflow-auto overscroll-x-contain rounded-md border border-border outline-none focus-visible:ring-2 focus-visible:ring-ring">
-          <div className="min-w-[calc(10rem+var(--tl-chart))] sm:min-w-[calc(12rem+var(--tl-chart))]" style={{ "--tl-chart": `${scale?.widthPx ?? 392}px` } as React.CSSProperties}>
+          <div className="min-w-[calc(9rem+var(--tl-chart))] sm:min-w-[calc(12rem+var(--tl-chart))]" style={{ "--tl-chart": `${scale?.widthPx ?? 392}px` } as React.CSSProperties}>
             <div className={cn("sticky top-0 z-30 grid border-b border-border bg-muted text-[12px] font-semibold text-muted-foreground", cols)}>
-              <div data-testid="tl-corner" className="sticky left-0 z-20 border-r border-border bg-muted px-3 py-2">Activation / requirement, with its dates</div>
+              <div data-testid="tl-corner" className="sticky left-0 z-20 border-r border-border bg-muted px-2 py-2 sm:px-3">Activation / requirement, with its dates</div>
               <div className="relative h-[4.5rem]" data-testid="tl-header">
                 {scale && todayIdx >= 0 ? (
                   <span data-testid="tl-today-marker" title={`Today, ${full(today)}`} className="absolute top-0 z-10 -translate-x-1/2 rounded-b bg-[hsl(var(--os-red))] px-1.5 text-[11px] font-semibold leading-4 text-white"
@@ -225,7 +225,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
             <ul>
               {model.rows.map((r) => (
                 <li key={r.key} className={cn("group grid border-b border-border/70 transition-colors last:border-b-0 hover:bg-muted/30 focus-within:bg-muted/30", cols, r.kind === "activation" && "bg-muted/40")} data-testid={`tl-row-${r.kind}`}>
-                  <div className={cn("sticky left-0 z-10 min-w-0 border-r border-border px-3 py-2 transition-colors group-hover:bg-muted group-focus-within:bg-muted", r.kind === "activation" ? "bg-muted" : "bg-card", r.kind === "line" && "pl-5 sm:pl-7")}>
+                  <div className={cn("sticky left-0 z-10 min-w-0 border-r border-border px-2 py-2 transition-colors sm:px-3 group-hover:bg-muted group-focus-within:bg-muted", r.kind === "activation" ? "bg-muted" : "bg-card", r.kind === "line" && "pl-3.5 sm:pl-7")}>
                     <Link href={`/projects/${projectId}/delivery?open=${r.itemKey}#${r.anchor}`} className={cn("block break-words text-sm underline-offset-2 hover:underline", r.kind === "activation" ? "font-semibold" : "")}>{r.label}</Link>
                     <p className="break-words text-[13px] text-muted-foreground sm:text-[12px]">{r.sub}</p>
                     <p className="mt-0.5 break-words text-sm font-medium sm:text-[13px]" data-testid={`tl-dates-${r.key}`}>
@@ -247,7 +247,7 @@ export function PlanTimeline({ projectId, model, today }: { projectId: string; m
           </div>
         </div>
         {edges.left ? (
-          <div data-testid="tl-more-left" aria-hidden className="pointer-events-none absolute inset-y-px left-[10rem] z-20 flex w-8 items-center bg-gradient-to-r from-foreground/15 to-transparent sm:left-[12rem]">
+          <div data-testid="tl-more-left" aria-hidden className="pointer-events-none absolute inset-y-px left-[9rem] z-20 flex w-8 items-center bg-gradient-to-r from-foreground/15 to-transparent sm:left-[12rem]">
             <ChevronLeft className="h-4 w-4 text-muted-foreground" />
           </div>
         ) : null}
