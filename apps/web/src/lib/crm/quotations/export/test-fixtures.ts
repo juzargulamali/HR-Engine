@@ -82,7 +82,7 @@ export function bundleFixture(o: { snapshot?: QuotationSnapshot | null; draft?: 
   const sections: QuotationSectionRow[] = [{ id: "s1", proposal_id: PROPOSAL, position: 1, title: "Fabrication" }];
   const lines: QuotationLineRow[] = [{ id: "l1", proposal_id: PROPOSAL, section_id: "s1", position: 1, description: "Stage deck", image_file_id: null, unit: "m2", quantity: "3", unit_price: "33.33", vat_choice_id: null, vat_kind: null, vat_label: null, vat_rate: null }];
   return {
-    header, proposal: { id: PROPOSAL } as never, sections, lines, vatChoices: [], files: [], imageUrls: {}, logoUrl: null, approvals: [], contentHash: null, revisions: [],
+    header, proposal: { id: PROPOSAL } as never, sections, lines, vatChoices: [], files: [], imageUrls: {}, logoUrl: null, approvals: [], contentHash: null, revisions: [], revisedFrom: null,
     issuer: { id: COMPANY, legal_name: o.liveIssuerName ?? "LIVE Issuer Name Ltd", trn: o.liveTrn ?? "999999999999999", address: "Live Address", phone: null, email: null, website: null, logo_path: `${COMPANY}/live-logo.png` },
     organisations: [], billTo: { id: "org-1", name: o.liveBillName ?? "LIVE Bill-To Name", country_code: "AE", place: "Live Place", vat_trn: "777", trade_licence_no: "888" },
     snapshot: issued && o.snapshot ? { content: o.snapshot, content_hash: "x", issued_at: "2026-11-02T08:00:00Z" } : null,

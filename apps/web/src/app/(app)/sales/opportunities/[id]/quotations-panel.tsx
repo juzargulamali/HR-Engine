@@ -2,12 +2,12 @@ import Link from "next/link";
 import { FileSpreadsheet } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { LoadError } from "@/components/workspace/states";
-import { formatDate } from "@/components/sales/format";
+import { formatDate, formatDateTime } from "@/components/sales/format";
 import { ActionForm } from "@/components/sales/action-form";
 import { createQuotation } from "@/lib/actions/quotations";
 import { loadQuotationList, type QuotationListItem } from "@/lib/crm/quotations/data";
 import { QUOTATION_STATE_LABEL, quotationState } from "@/lib/crm/quotations/model";
-import { canAdvanceToEstimateSent, crmStageLabel } from "@enginious-hr/domain";
+import { crmStageLabel } from "@enginious-hr/domain";
 import { RecordEstimateSentButton } from "./estimate-sent-form";
 import { Muted, Panel } from "./parts";
 import { money } from "./quotations/[proposalId]/money";
@@ -31,9 +31,6 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
   // Which revisions were explicitly recorded as sent. A failed read is said, never shown as "not sent" (and the action is then not offered, so nothing is recorded twice).
   const sendsFailed = anyFailed(view, "estimateSends");
   const sentBy = new Map(detail.estimateSends.map((s) => [s.proposal_id, s]));
-  const offerMove = canAdvanceToEstimateSent(opp.stage);
-  const stageNote = opp.stage === "estimate_sent" ? "The enquiry is already at Estimate sent." : view.isHold ? "The enquiry is on hold, so its stage stays as it is. Only the estimate is recorded as sent."
-    : `The enquiry is at ${crmStageLabel(opp.stage)}, so its stage stays as it is. Only the estimate is recorded as sent.`;
   return (
     <div className="space-y-6">
       <Panel title="Estimates" hint="A priced bill of quantities built in the app. Each estimate is also a proposal version, but never an official quotation. Only the enquiry owner or a founder can start or change one.">
@@ -41,7 +38,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
         <ol className="mb-4 grid gap-2 text-sm sm:grid-cols-3" aria-label="How an estimate goes out">
           <li className="rounded-md border border-border p-3"><p className="font-semibold">1. Create draft</p><p className="mt-0.5 text-muted-foreground">Starts an editable draft with a new reference. Nothing is sent, reserved or promised.</p></li>
           <li className="rounded-md border border-border p-3"><p className="font-semibold">2. Finalise</p><p className="mt-0.5 text-muted-foreground">Makes a frozen copy: a finalised version cannot be edited again (a change needs a new revision). Nothing is sent.</p></li>
-          <li className="rounded-md border border-border p-3"><p className="font-semibold">3. Record as sent</p><p className="mt-0.5 text-muted-foreground">After you have sent a finalised estimate to the client yourself, record it as sent here. It only records the date: nothing is emailed from here.</p></li>
+          <li className="rounded-md border border-border p-3"><p className="font-semibold">3. Record as sent</p><p className="mt-0.5 text-muted-foreground">After you have sent a finalised estimate to the client yourself, record it as sent here. It records the exact revision and the date: nothing is emailed from here, and the enquiry&apos;s stage does not change.</p></li>
         </ol>
         {sendsFailed ? <p role="alert" className="mb-3 text-sm text-destructive">Could not load which estimates were recorded as sent, so that is not shown and cannot be recorded right now. Reload the page.</p> : null}
         {items.length === 0 ? <Muted>No estimate yet.{canEdit && isOpen ? " Start one below." : ""}</Muted> : (
@@ -54,7 +51,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
                   <Link href={`/sales/opportunities/${opp.id}/quotations/${proposal.id}`} className="text-sm font-semibold underline-offset-2 hover:underline">{header.reference} · revision {header.revision}</Link>
                   <Badge variant={state === "issued" ? "success" : state === "superseded" ? "secondary" : "warning"}>{QUOTATION_STATE_LABEL[state]}</Badge>
                   {proposal.status === "sent" || proposal.status === "accepted" ? <Badge variant="outline">{proposal.status === "sent" ? "Recorded as sent" : "Accepted"}</Badge> : null}
-                  {sentBy.has(proposal.id) ? <Badge variant="outline">Sent to client {formatDate(sentBy.get(proposal.id)!.sent_on)}</Badge> : null}
+                  {sentBy.has(proposal.id) ? <><Badge variant="outline">Sent to client {formatDate(sentBy.get(proposal.id)!.sent_on)}</Badge><span className="text-sm text-muted-foreground" data-testid="estimate-send-record">recorded {formatDateTime(sentBy.get(proposal.id)!.recorded_at)} by {view.ctx.personName(sentBy.get(proposal.id)!.recorded_by)}</span></> : null}
                   <span className="text-sm text-muted-foreground">
                     {header.issue_date ? `finalised ${formatDate(header.issue_date)}` : `updated ${formatDate(header.content_changed_at)}`}{totalGross && header.currency ? ` · ${money(totalGross, header.currency)} incl. VAT` : ""}
                   </span>
@@ -63,7 +60,7 @@ export async function QuotationsPanel({ view }: { view: OppView }) {
                   {state === "issued" && canEdit && isOpen && detail.estimateSendsInstalled && !sendsFailed && !sentBy.has(proposal.id) ? (
                     <span className="ml-auto">
                       <RecordEstimateSentButton proposalId={proposal.id} opportunityId={opp.id} version={opp.version} label={`${header.reference} · revision ${header.revision}`} issueDate={header.issue_date}
-                        offerMove={offerMove} stageNote={offerMove ? null : stageNote} />
+                        stageLabel={crmStageLabel(opp.stage)} />
                     </span>
                   ) : null}
                 </li>

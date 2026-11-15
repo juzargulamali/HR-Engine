@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   BUDGETARY_NOTICE, ESTIMATE_FORMAT_MARKER, ESTIMATE_NOTICES, UNSECTIONED_TITLE, calculateQuotation, clausesToNotes, estimateFormatVersion, estimateNumbering,
-  isEstimateFormat, isUnsectionedTitle, addressLines, normaliseWebsiteUrl, salesContact, lineDisplayNumber, noteParagraphs, notesToClauses, reviewPricingSentence, sectionDisplayNumber, unsectionedFirst, validateClientNotes,
+  isEstimateFormat, isUnsectionedTitle, addressLines, normaliseWebsiteUrl, salesContact, lineDisplayNumber, noteParagraphs, notesToClauses, reviewPricingSentence, sectionDisplayNumber, unsectionedFirst, validateClientNotes, TERMS_REVIEW_BLOCKER, inheritedTermClauses, termsReview, termsReviewFingerprint,
 } from "../src";
 
 describe("the mandatory budgetary notice", () => {
@@ -100,5 +100,52 @@ describe("issuer branding: sales enquiries line, website link, address lines", (
   it("keeps the address lines as stored", () => {
     expect(addressLines("Line one\r\n  Line two  \n\n")).toEqual(["Line one", "Line two"]);
     expect(addressLines(null)).toEqual([]);
+  });
+});
+
+describe("terms a draft inherited (a revision of a quotation issued before the estimates-only change)", () => {
+  const SIX = ["Site access and readiness", "Site services and other trades", "Changes", "Start of work", "Scope exclusions", "Confidentiality"].map((title) => ({ title, body: `${title} text.` }));
+  const LABEL = "Standard terms (working draft, pending legal review)";
+  it("needs a person's review while the draft is not in an estimate format or holds any clause that is not one of the two client notes", () => {
+    expect(termsReview(LABEL, SIX)).toEqual({ needed: true, label: LABEL, inherited: SIX });
+    expect(termsReview(null, [])).toEqual({ needed: true, label: null, inherited: [] });
+    expect(termsReview("  ", [])).toMatchObject({ needed: true, label: null });
+    expect(termsReview(ESTIMATE_FORMAT_MARKER, [SIX[0]!])).toEqual({ needed: true, label: null, inherited: [SIX[0]] });
+  });
+  it("needs none for a draft in an estimate format with only the client notes (any layout version)", () => {
+    const notes = notesToClauses({ assumptions: "Power by venue.", nextSteps: "Review." });
+    expect(termsReview(ESTIMATE_FORMAT_MARKER, notes)).toEqual({ needed: false, label: null, inherited: [] });
+    expect(termsReview("estimate-format:1", []).needed).toBe(false);
+    expect(inheritedTermClauses([...SIX, ...notes])).toEqual(SIX);
+    expect(inheritedTermClauses(null)).toEqual([]);
+  });
+  it("the fingerprint is what the person was shown: it changes when a clause or the label changes, not when the notes do", () => {
+    const a = termsReviewFingerprint(termsReview(LABEL, SIX));
+    expect(termsReviewFingerprint(termsReview(LABEL, [...SIX, { title: "Next steps", body: "Review." }]))).toBe(a);
+    expect(termsReviewFingerprint(termsReview(LABEL, SIX.slice(1)))).not.toBe(a);
+    expect(termsReviewFingerprint(termsReview("Other", SIX))).not.toBe(a);
+    expect(termsReviewFingerprint(termsReview(LABEL, SIX.map((c, i) => (i === 0 ? { ...c, body: "edited" } : c))))).not.toBe(a);
+    expect(TERMS_REVIEW_BLOCKER).toMatch(/replace them with the current estimate format/);
+  });
+  it("is ONE rule shared with the database (crm_quote_terms_need_review, migration 20270111000100): the same vectors are asserted in packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts", () => {
+    const OLD = "Standard terms (working draft, pending legal review)";
+    const vectors: [string | null, string[], boolean][] = [
+      ["estimate-format:2", [], false],
+      ["estimate-format:1", [], false],
+      ["estimate-format:2", ["Assumptions", "Next steps"], false],
+      ["estimate-format:0002", [], false],
+      [OLD, ["Changes"], true],
+      [OLD, [], true],
+      [null, [], true],
+      ["", [], true],
+      ["estimate-format:3", [], true],
+      ["estimate-format:", [], true],
+      ["estimate-format:2 ", [], true],
+      ["Estimate-format:2", [], true],
+      ["estimate-format:2", ["Confidentiality"], true],
+      ["estimate-format:2", ["Assumptions", "Changes"], true],
+      ["estimate-format:2", ["assumptions"], true],
+    ];
+    for (const [label, titles, needed] of vectors) expect(termsReview(label, titles.map((title) => ({ title, body: "x" }))).needed, `${label} / ${titles.join(",")}`).toBe(needed);
   });
 });

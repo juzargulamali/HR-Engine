@@ -1,4 +1,4 @@
-import { QUOTATION_CURRENCIES, calculateQuotation, isUnsectionedTitle, unsectionedFirst, validateMilestones, type CalculatedQuotation, type PaymentMilestone, type QuotationInput, type QuotationVat } from "@enginious-hr/domain";
+import { QUOTATION_CURRENCIES, TERMS_REVIEW_BLOCKER, calculateQuotation, isUnsectionedTitle, unsectionedFirst, validateMilestones, type CalculatedQuotation, type PaymentMilestone, termsReview, type QuotationInput, type QuotationVat } from "@enginious-hr/domain";
 
 /** Row shapes of the quotation tables (migration 20261220000100). Hand-written like types/crm.ts; every write is a crm_quote_* function. */
 export interface QuotationHeader {
@@ -65,6 +65,8 @@ export function pendingApprovalIsStale(h: Pick<QuotationHeader, "proposal_id">, 
 /** What still stands between this draft and finalising it (the database repeats every check). Empty = ready. */
 export function issueBlockers(h: QuotationHeader, sections: readonly QuotationSectionRow[], lines: readonly QuotationLineRow[], approvals: readonly ApprovalLite[], policy: ApprovalPolicy, today: string, contentHash: string | null = null): string[] {
   const out: string[] = [];
+  // Terms carried over from an earlier quotation (or never marked as an estimate) are replaced by a person, explicitly, before anything else can go out.
+  if (termsReview(h.terms_label, h.terms).needed) out.push(TERMS_REVIEW_BLOCKER);
   if (!h.currency) out.push("Choose the currency.");
   if (!h.vat_kind) out.push("Choose the VAT treatment.");
   if (!h.bill_to_org_id) out.push("Choose and confirm who this estimate is addressed to.");

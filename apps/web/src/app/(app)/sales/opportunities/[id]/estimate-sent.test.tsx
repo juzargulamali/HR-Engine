@@ -77,64 +77,62 @@ describe("Estimates tab: Record estimate as sent", () => {
 
 describe("the confirmation", () => {
   const posted = () => Object.fromEntries((recordEstimateSent.mock.calls[0]![1] as FormData).entries());
-  const open = (offerMove: boolean, stageNote: string | null = null) => {
-    render(<RecordEstimateSentButton proposalId="p2" opportunityId="o1" version={7} label="EST-X-2026-0001 · revision 2" issueDate="2026-11-05" offerMove={offerMove} stageNote={stageNote} />);
+  const open = (stageLabel = "Qualified") => {
+    render(<RecordEstimateSentButton proposalId="p2" opportunityId="o1" version={7} label="EST-X-2026-0001 · revision 2" issueDate="2026-11-05" stageLabel={stageLabel} />);
     fireEvent.click(screen.getByRole("button", { name: /Record estimate as sent/ }));
   };
-  it("asks for the sent date (not before it was finalised, not in the future) and offers the move, ticked, when it is not a step backwards", async () => {
+  it("asks for the sent date (not before it was finalised, not in the future) and posts the exact revision, the date and the version: no stage move", async () => {
     recordEstimateSent.mockResolvedValue({ error: null });
-    open(true);
+    open();
     const date = screen.getByLabelText("Date it was sent") as HTMLInputElement;
     expect(date.required).toBe(true);
     expect(date.min).toBe("2026-11-05");
     expect(date.max).toBe(date.value);                                   // today, and today is the latest allowed
     expect(screen.getByText(/Enginious OS does not send it\. Finalising or downloading an estimate does not record it as sent/)).toBeTruthy();
-    expect((screen.getByRole("checkbox", { name: /Move the enquiry to Estimate sent/ }) as HTMLInputElement).checked).toBe(true);
     fireEvent.change(date, { target: { value: "2026-11-06" } });
     fireEvent.click(screen.getByRole("button", { name: "Record as sent" }));
     await waitFor(() => expect(recordEstimateSent).toHaveBeenCalled());
-    expect(posted()).toEqual({ proposalId: "p2", opportunityId: "o1", version: "7", sentOn: "2026-11-06", move: "on" });
+    expect(posted()).toEqual({ proposalId: "p2", opportunityId: "o1", version: "7", sentOn: "2026-11-06" });
   });
-  it("unticked, it records only; past Estimate sent there is no move to tick and it says the stage stays", async () => {
-    recordEstimateSent.mockResolvedValue({ error: null });
-    open(true);
-    fireEvent.click(screen.getByRole("checkbox", { name: /Move the enquiry to Estimate sent/ }));
-    fireEvent.click(screen.getByRole("button", { name: "Record as sent" }));
-    await waitFor(() => expect(recordEstimateSent).toHaveBeenCalled());
-    expect(posted().move).toBeUndefined();
-    cleanup();
-    open(false, "The enquiry is at Quote sent, so its stage stays as it is. Only the estimate is recorded as sent.");
-    expect(screen.queryByRole("checkbox")).toBeNull();
-    expect(screen.getByRole("note").textContent).toMatch(/Quote sent, so its stage stays as it is/);
+  it("never offers to move the enquiry: there is no box, and it says the stage stays where it is and what the record is not", () => {
+    for (const stage of ["New enquiry", "Qualified", "Proposal sent", "Quote sent", "On hold"]) {
+      open(stage);
+      expect(screen.queryByRole("checkbox")).toBeNull();
+      expect(screen.queryByText(/Move the enquiry to Estimate sent/)).toBeNull();
+      expect(screen.getByRole("note").textContent).toBe(`The enquiry stays at ${stage}. Recording an estimate as sent does not move the enquiry: move the stage yourself when its own evidence is recorded.`);
+      expect(screen.getByText(/It is not a sent proposal, not a Zoho Books quote, not an approval and not a win/)).toBeTruthy();
+      cleanup();
+    }
   });
   it("a refusal stays on screen in words", async () => {
     recordEstimateSent.mockResolvedValue({ error: "The sent date cannot be before the estimate was finalised (2026-11-05)" });
-    open(true);
+    open();
     fireEvent.click(screen.getByRole("button", { name: "Record as sent" }));
     expect((await screen.findByRole("alert")).textContent).toMatch(/before the estimate was finalised/);
     expect(screen.getByLabelText("Date it was sent")).toBeTruthy();
   });
-  it("the stage note on the tab follows the stage", async () => {
+  it("the tab offers the action at every open stage, the retired one included", async () => {
     list = [item("p2", 2)];
-    // The note is passed to the (closed) dialog; the tab offers the action at every open stage.
     for (const stage of ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold"]) expect(offers(await panel({ stage })), stage).toBe(1);
   });
 });
 
 describe("move hints and history wording", () => {
-  it("Estimate sent needs an estimate recorded as sent; the Proposal sent and Quote sent hints are unchanged and independent", () => {
-    const none = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
-    expect(stageMoveRequirement("estimate_sent", none)).toBe("Record an estimate as sent first (Estimates tab).");
-    expect(stageMoveRequirement("estimate_sent", { ...none, hasSentEstimate: true })).toBeNull();
-    expect(stageMoveRequirement("estimate_sent", { ...none, hasSentProposal: true })).toBe("Record an estimate as sent first (Estimates tab).");   // a sent proposal does not unlock it
-    expect(stageMoveRequirement("proposal_sent", { ...none, hasSentEstimate: true })).toBe("Record a proposal as sent first (Proposals & files tab).");   // nor the other way round
-    expect(stageMoveRequirement("quote_sent", { ...none, hasSentEstimate: true, hasSentProposal: true })).toBe("Record the Zoho Books quote reference first (Commercial tab).");
+  it("there is no Estimate sent move to hint at; the Proposal sent and Quote sent hints are unchanged and an estimate send satisfies neither", () => {
+    const none = { hasSentProposal: false, hasQuoteRef: false };
+    expect(stageMoveRequirement("estimate_sent", none)).toBeNull();                                  // not a target: nothing to require
+    expect(stageMoveRequirement("proposal_sent", none)).toBe("Record a proposal as sent first (Proposals & files tab).");
+    expect(stageMoveRequirement("quote_sent", { ...none, hasSentProposal: true })).toBe("Record the Zoho Books quote reference first (Commercial tab).");
     expect(stageMoveRequirement("quote_sent", { ...none, hasQuoteRef: true })).toBeNull();
   });
   it("the timeline names the exact revision and the date, and the stage by its label", () => {
     const name = () => "Someone";
     expect(describeEvent({ kind: "proposal", from_value: null, to_value: "Estimate EST-UAE-2026-0007 rev 2 recorded as sent on 2026-11-06", reason: "p2" }, name)).toBe("Estimate EST-UAE-2026-0007 revision 2 recorded as sent to the client on 2026-11-06.");
-    expect(describeEvent({ kind: "stage_changed", from_value: "qualified", to_value: "estimate_sent", reason: null }, name)).toBe("Stage changed from Qualified to Estimate sent.");
+    // History stays readable: an old line that mentions the retired stage names it and says it is no longer used.
+    expect(describeEvent({ kind: "stage_changed", from_value: "qualified", to_value: "estimate_sent", reason: null }, name)).toBe("Stage changed from Qualified to Estimate sent (stage no longer used).");
+    // The system line written when the stage was removed says why the enquiry was moved.
+    expect(describeEvent({ kind: "stage_changed", from_value: "estimate_sent", to_value: "qualified", reason: "Estimate sent is no longer a pipeline stage. Moved by the system update because the stage history shows it entered Estimate sent from qualified" }, name))
+      .toBe("Stage changed from Estimate sent (stage no longer used) to Qualified. Estimate sent is no longer a pipeline stage. Moved by the system update because the stage history shows it entered Estimate sent from qualified.");
     expect(describeEvent({ kind: "proposal", from_value: null, to_value: "EST-UAE-2026-0007 rev 2 issued", reason: null }, name)).toBe("Estimate EST-UAE-2026-0007 revision 2 finalised.");
   });
 });

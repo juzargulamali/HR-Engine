@@ -59,7 +59,12 @@ describe("sortEnquiries", () => {
 
 describe("board", () => {
   it("has the pipeline stages, then on hold, then won and lost", () => {
-    expect(boardColumns().map((c) => c.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);   // Estimate sent sits next to Proposal sent
+    expect(boardColumns().map((c) => c.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);   // Estimate sent is not a lane
+    // ... unless an enquiry still holds the retired stage: then it gets its own lane after Proposal sent, labelled as no longer used, so it is shown where it really is.
+    expect(boardColumns(["new", "won"]).map((c) => c.id)).not.toContain("estimate_sent");
+    expect(boardColumns(["new", "estimate_sent"]).map((c) => c.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardColumns(["estimate_sent"]).find((c) => c.id === "estimate_sent")!.label).toBe("Estimate sent (stage no longer used)");
+    expect(boardColumnFor("estimate_sent")).toBe("estimate_sent");
     expect(boardColumnFor("on_hold")).toBe("on_hold");
     expect(boardColumnFor("mystery")).toBe("new");
   });
@@ -73,13 +78,14 @@ describe("board", () => {
   });
   const base = { stageBeforeHold: null, canEdit: true, ownerName: "Ann" };
   it("offers a working card one step back or any step forward, hold, won and lost", () => {
-    expect(boardMoveTargets({ ...base, stage: "qualified" }).moveTo).toEqual(["new", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
-    expect(boardMoveTargets({ ...base, stage: "new" }).moveTo).toEqual(["qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
-    // Proposal sent and Estimate sent are the same step: each offers the other, one step back is Proposal preparation, and Quote sent steps back to either.
+    expect(boardMoveTargets({ ...base, stage: "qualified" }).moveTo).toEqual(["new", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "new" }).moveTo).toEqual(["qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    // Estimate sent is retired: no card is ever offered it. A card still holding it is not stranded: it moves out like any card at that step, and can be held or closed.
     expect(boardMoveTargets({ ...base, stage: "estimate_sent" }).moveTo).toEqual(["proposal_prep", "proposal_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
-    expect(boardMoveTargets({ ...base, stage: "proposal_sent" }).moveTo).toEqual(["proposal_prep", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
-    expect(boardMoveTargets({ ...base, stage: "quote_sent" }).moveTo).toEqual(["proposal_sent", "estimate_sent", "negotiation", "on_hold", "won", "lost"]);
-    expect(boardMoveTargets({ ...base, stage: "on_hold", stageBeforeHold: "estimate_sent" }).moveTo).toEqual(["estimate_sent", "lost"]);
+    expect(boardMoveTargets({ ...base, stage: "proposal_sent" }).moveTo).toEqual(["proposal_prep", "quote_sent", "negotiation", "on_hold", "won", "lost"]);
+    for (const stage of ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"]) expect(boardMoveTargets({ ...base, stage }).moveTo, stage).not.toContain("estimate_sent");
+    expect(boardMoveTargets({ ...base, stage: "on_hold", stageBeforeHold: "estimate_sent" }).moveTo).toEqual(["lost"]);      // resuming into it is done from the enquiry's own page
+    expect(boardMoveTargets({ ...base, stage: "quote_sent" }).moveTo).toEqual(["proposal_sent", "negotiation", "on_hold", "won", "lost"]);
   });
   it("lets a held card resume into the stage it came from or be lost, never won", () => {
     expect(boardMoveTargets({ ...base, stage: "on_hold", stageBeforeHold: "quote_sent" }).moveTo).toEqual(["quote_sent", "lost"]);
@@ -175,18 +181,17 @@ describe("filter chips, the row action and the default columns", () => {
 });
 
 describe("the board's check before a move (the same rule as the Move stage dialog)", () => {
-  const none = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
-  it("says what is missing for the three stages that need evidence, and where to record it", () => {
-    for (const to of ["proposal_sent", "estimate_sent", "quote_sent"]) expect(boardMoveCheck(to, none)?.message).toBe(stageMoveRequirement(to, none));
+  const none = { hasSentProposal: false, hasQuoteRef: false };
+  it("says what is missing for the two stages that need evidence, and where to record it", () => {
+    for (const to of ["proposal_sent", "quote_sent"]) expect(boardMoveCheck(to, none)?.message).toBe(stageMoveRequirement(to, none));
     expect(boardMoveCheck("proposal_sent", none)).toMatchObject({ tab: "proposals" });
-    expect(boardMoveCheck("estimate_sent", none)).toMatchObject({ tab: "quotations" });
     expect(boardMoveCheck("quote_sent", none)).toMatchObject({ tab: "commercial", message: expect.stringMatching(/Zoho/) });
   });
-  it("each stage needs its OWN evidence: a sent proposal does not unlock Estimate sent, a sent estimate does not unlock Proposal sent", () => {
-    expect(boardMoveCheck("estimate_sent", { ...none, hasSentProposal: true })).not.toBeNull();
-    expect(boardMoveCheck("proposal_sent", { ...none, hasSentEstimate: true })).not.toBeNull();
+  it("each stage needs its OWN evidence, and an estimate recorded as sent is evidence for neither (the evidence has no such fact)", () => {
+    expect(Object.keys(none)).toEqual(["hasSentProposal", "hasQuoteRef"]);
+    expect(boardMoveCheck("proposal_sent", { ...none, hasQuoteRef: true })).not.toBeNull();
+    expect(boardMoveCheck("quote_sent", { ...none, hasSentProposal: true })).not.toBeNull();
     expect(boardMoveCheck("proposal_sent", { ...none, hasSentProposal: true })).toBeNull();
-    expect(boardMoveCheck("estimate_sent", { ...none, hasSentEstimate: true })).toBeNull();
     expect(boardMoveCheck("quote_sent", { ...none, hasQuoteRef: true })).toBeNull();
   });
   it("stages without an evidence rule are never stopped here, and unknown evidence assumes nothing (the database decides)", () => {

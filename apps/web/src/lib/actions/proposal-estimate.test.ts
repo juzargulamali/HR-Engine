@@ -47,12 +47,13 @@ describe("recording a proposal version as sent (the existing Zoho / proposal wor
 
 describe("recording an ESTIMATE as sent (its own fact, on the Estimates tab)", () => {
   const form = { proposalId: P, opportunityId: O, sentOn: "2026-11-06", version: "7" };
-  it("calls the one database function with the exact revision, the date, the version and whether to move; never the proposal status function", async () => {
+  it("calls the one database function with the exact revision, the date and the version, and NEVER asks for a stage move; never the proposal status function", async () => {
+    // Even a forged `move` field (the earlier form had a tick box) is ignored: recording an estimate as sent does not move the enquiry.
     expect(await recordEstimateSent({ error: null }, fd({ ...form, move: "on" }))).toEqual({ error: null });
     expect(rpc).toHaveBeenCalledTimes(1);
-    expect(rpc).toHaveBeenCalledWith("crm_record_estimate_sent", { p_proposal: P, p_sent_on: "2026-11-06", p_move: true, p_expected_version: 7 });
+    expect(rpc).toHaveBeenCalledWith("crm_record_estimate_sent", { p_proposal: P, p_sent_on: "2026-11-06", p_move: false, p_expected_version: 7 });
     rpc.mockClear();
-    expect(await recordEstimateSent({ error: null }, fd(form))).toEqual({ error: null });            // the box unticked: record only
+    expect(await recordEstimateSent({ error: null }, fd(form))).toEqual({ error: null });
     expect(rpc).toHaveBeenCalledWith("crm_record_estimate_sent", { p_proposal: P, p_sent_on: "2026-11-06", p_move: false, p_expected_version: 7 });
   });
   it("needs a real date and ids before the database is called", async () => {

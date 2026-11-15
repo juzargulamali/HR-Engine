@@ -1,4 +1,4 @@
-import { CRM_PIPELINE_STAGES, crmStageLabel, type CrmStageId } from "@enginious-hr/domain";
+import { CRM_PIPELINE_STAGES, crmStageLabel, isCrmRetiredStage, type CrmStageId } from "@enginious-hr/domain";
 import { formatMoney } from "@/components/sales/format";
 import type { CrmClosureRow, CrmOpportunityEventRow } from "@/types/crm";
 
@@ -8,6 +8,11 @@ import type { CrmClosureRow, CrmOpportunityEventRow } from "@/types/crm";
  */
 
 export const REOPEN_FALLBACK_STAGE: CrmStageId = "negotiation";
+/**
+ * Closed from a stage that no longer exists ("Estimate sent"): nothing can be reopened into it, and no later stage is assumed. The suggestion is the last stage
+ * before it that needs no recorded evidence; the person reopening can choose another.
+ */
+export const REOPEN_FROM_RETIRED_STAGE: CrmStageId = "proposal_prep";
 
 export const HANDOVER_REOPENED_NOTICE =
   "This opportunity was reopened after its handover was prepared. The handover record is kept as it was; check it again when the opportunity is Won again.";
@@ -16,7 +21,7 @@ export const REOPEN_NOT_ALLOWED_NOTE = "Only a founder, or someone a founder gav
 
 /** The working stage a reopened opportunity goes back to unless another is chosen. */
 export function defaultReopenStage(stageBeforeClose: string | null | undefined): CrmStageId {
-  return CRM_PIPELINE_STAGES.find((s) => s === stageBeforeClose) ?? REOPEN_FALLBACK_STAGE;
+  return CRM_PIPELINE_STAGES.find((s) => s === stageBeforeClose) ?? (isCrmRetiredStage(stageBeforeClose) ? REOPEN_FROM_RETIRED_STAGE : REOPEN_FALLBACK_STAGE);
 }
 
 export interface ReopenStageOption {
@@ -32,7 +37,7 @@ export function reopenStageOptions(stageBeforeClose: string | null | undefined):
   return CRM_PIPELINE_STAGES.map((id) => ({
     id,
     isDefault: id === def,
-    label: id === def ? `${crmStageLabel(id)} (${recorded ? "where it was closed from" : "default; no earlier stage was recorded"})` : crmStageLabel(id),
+    label: id === def ? `${crmStageLabel(id)} (${recorded ? "where it was closed from" : isCrmRetiredStage(stageBeforeClose) ? "suggested; it was closed from Estimate sent, which is no longer a stage" : "default; no earlier stage was recorded"})` : crmStageLabel(id),
   }));
 }
 

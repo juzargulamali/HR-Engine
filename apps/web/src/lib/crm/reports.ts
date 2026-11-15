@@ -6,6 +6,7 @@
 import { DUBAI_ZONE, type ZoneOf } from "./time-zone";
 import {
   CRM_PIPELINE_STAGES,
+  CRM_RETIRED_STAGES,
   crmSourceLabel,
   crmToday,
   followUpTiming,
@@ -125,10 +126,20 @@ function bucketOf(opps: readonly ReportOpp[]): Bucket {
   return { count: opps.length, totals: totalsByCurrency(opps.map((o) => ({ currency: o.currency, value: o.value }))), unvalued: opps.filter((o) => o.value == null).length };
 }
 
-/** The six working stages plus On hold, open opportunities only. */
-export function openPipelineByStage(opps: readonly ReportOpp[], stages: readonly CrmStageId[] = [...CRM_PIPELINE_STAGES, "on_hold"]): (Bucket & { stage: CrmStageId })[] {
+/**
+ * The six working stages plus On hold, open opportunities only. A retired stage ("Estimate sent") gets a row ONLY while an open enquiry still holds it, placed
+ * after Proposal sent, so the rows always add up to every open enquiry and nothing is counted under a stage it is not in.
+ */
+export function openPipelineByStage(opps: readonly ReportOpp[], stages?: readonly CrmStageId[]): (Bucket & { stage: CrmStageId })[] {
   const open = openOnly(opps);
-  return stages.map((stage) => ({ stage, ...bucketOf(open.filter((o) => o.stage === stage)) }));
+  let list = stages;
+  if (!list) {
+    const base: CrmStageId[] = [...CRM_PIPELINE_STAGES, "on_hold"];
+    const held = CRM_RETIRED_STAGES.map((s) => s.id).filter((id) => open.some((o) => o.stage === id));
+    base.splice(base.indexOf("proposal_sent") + 1, 0, ...held);
+    list = base;
+  }
+  return list.map((stage) => ({ stage, ...bucketOf(open.filter((o) => o.stage === stage)) }));
 }
 
 export function openPipelineByOwner(opps: readonly ReportOpp[]): (Bucket & { ownerId: string })[] {

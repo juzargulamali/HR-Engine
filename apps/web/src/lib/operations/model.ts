@@ -49,7 +49,7 @@ export interface OutputReviewItem {
 export interface Overview { company_id: string; taken_at: string; handovers: OverviewHandover[]; projects: OverviewProject[]; overlaps: OverviewOverlap[]; output_reviews?: OutputReviewItem[] }
 
 export const STAGE_WORDS: Record<string, string> = {
-  new: "New", qualified: "Qualified", proposal_prep: "Preparing proposal", proposal_sent: "Proposal sent", estimate_sent: "Estimate sent", quote_sent: "Quote sent", negotiation: "Negotiation",
+  new: "New", qualified: "Qualified", proposal_prep: "Preparing proposal", proposal_sent: "Proposal sent", estimate_sent: "Estimate sent (stage no longer used)", quote_sent: "Quote sent", negotiation: "Negotiation",
   on_hold: "On hold", won: "Won", lost: "Lost",
 };
 export const TEAM_WORDS: Record<string, string> = { engineering: "Engineering", content: "Content", programming: "Programming", installation: "Installation", warehouse: "Warehouse" };

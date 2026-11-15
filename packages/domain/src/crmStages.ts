@@ -1,17 +1,21 @@
 /**
  * Sales pipeline stages. Ids are stable (stored in the database and in reports); labels are display text and may be
- * renamed without changing history. Mirrors crm_stage_index / crm_move_stage in
- * supabase/migrations/20261115000200_crm_workflow_functions.sql.
+ * renamed without changing history. Mirrors crm_stage_index / crm_move_stage (supabase/migrations/20270111000200_crm_retire_estimate_sent_stage.sql).
+ *
+ * `estimate_sent` is a RETIRED stage (2027-01-11): nobody can be moved into it any more. Sending an estimate is a recorded fact about one estimate revision
+ * (`crm_estimate_sends`, "Record as sent" on the Estimates tab) and no longer a place in the pipeline. The id stays in `CRM_STAGE_IDS` because history lines
+ * mention it and an enquiry whose earlier stage could not be worked out from its records may still hold it until a person moves it on: such an enquiry is still
+ * open, still needs a next action and can be moved out (never in).
  */
 export const CRM_STAGE_IDS = ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation", "on_hold", "won", "lost"] as const;
 export type CrmStageId = (typeof CRM_STAGE_IDS)[number];
 
+/** The stages an enquiry can be put in today (filters, lanes and move targets are built from this list). */
 export const CRM_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [
   { id: "new", label: "New enquiry", open: true },
   { id: "qualified", label: "Qualified", open: true },
   { id: "proposal_prep", label: "Proposal preparation", open: true },
   { id: "proposal_sent", label: "Proposal sent", open: true },
-  { id: "estimate_sent", label: "Estimate sent", open: true },
   { id: "quote_sent", label: "Quote sent", open: true },
   { id: "negotiation", label: "Negotiation", open: true },
   { id: "on_hold", label: "On hold", open: true },
@@ -19,35 +23,39 @@ export const CRM_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [
   { id: "lost", label: "Lost", open: false },
 ];
 
-/**
- * The working stages (everything open except On hold), in the order the board shows them. Proposal sent and Estimate sent are ALTERNATIVE milestones at the same
- * level: an enquiry reaches either (or both, one after the other), each on its own recorded evidence, before Quote sent.
- */
-export const CRM_PIPELINE_STAGES: CrmStageId[] = ["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"];
+/** Stages that were removed from the pipeline. They are never offered as a target; their label says so wherever history or an enquiry still shows one. */
+export const CRM_RETIRED_STAGES: { id: CrmStageId; label: string; open: boolean }[] = [{ id: "estimate_sent", label: "Estimate sent (stage no longer used)", open: true }];
+export const isCrmRetiredStage = (stage: string | null | undefined): boolean => CRM_RETIRED_STAGES.some((s) => s.id === stage);
 
-/** The step a working stage is at (crm_stage_index in the database): Proposal sent and Estimate sent share step 4. null for On hold, Won, Lost and anything unknown. */
+/** The working stages (everything open except On hold), in the order the board shows them. A retired stage is not one of them. */
+export const CRM_PIPELINE_STAGES: CrmStageId[] = ["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"];
+/** Every stage id an open, not-held enquiry can HOLD in the database: the working stages plus the retired one. Use this for reads, so no enquiry is left out. */
+export const CRM_WORKING_STAGE_IDS: CrmStageId[] = [...CRM_PIPELINE_STAGES, ...CRM_RETIRED_STAGES.map((s) => s.id)];
+
+/**
+ * The step a working stage is at (crm_stage_index in the database). The retired Estimate sent keeps the step it had (4, beside Proposal sent) so an enquiry still
+ * holding it can be moved out by the same rule as any other. null for On hold, Won, Lost and anything unknown.
+ */
 const STAGE_STEP: Record<string, number> = { new: 1, qualified: 2, proposal_prep: 3, proposal_sent: 4, estimate_sent: 4, quote_sent: 5, negotiation: 6 };
 export const crmStageStep = (stage: string): number | null => STAGE_STEP[stage] ?? null;
 
-export const crmStageLabel = (id: string): string => CRM_STAGES.find((s) => s.id === id)?.label ?? id;
+export const crmStageLabel = (id: string): string => (CRM_STAGES.find((s) => s.id === id) ?? CRM_RETIRED_STAGES.find((s) => s.id === id))?.label ?? id;
 export const isCrmClosed = (stage: string) => stage === "won" || stage === "lost";
 export const isCrmOpen = (stage: string) => !isCrmClosed(stage);
-/** Open, not on hold: needs a next action at all times. */
-export const isCrmActive = (stage: string) => (CRM_PIPELINE_STAGES as string[]).includes(stage);
+/** Open, not on hold: needs a next action at all times. True for an enquiry still holding the retired stage too (it is open and must not be forgotten). */
+export const isCrmActive = (stage: string) => crmStageStep(stage) !== null;
 
 /**
- * Plain stage moves: one step back or any step forward within the working stages, and across between Proposal sent and Estimate sent (the same step). On hold,
- * Won and Lost are never plain moves (they carry a reason or evidence), and a held or closed opportunity does not move. Mirrors crm_move_stage
- * (supabase/migrations/20261228000100_crm_estimate_sent_stage.sql); the database also checks the evidence each "sent" stage needs.
+ * Plain stage moves: one step back or any step forward within the working stages. The retired Estimate sent is never a target; an enquiry still holding it
+ * can go to Proposal preparation, Proposal sent, Quote sent or Negotiation (the database checks the evidence each "sent" stage needs). On hold, Won and Lost
+ * are never plain moves (they carry a reason or evidence), and a held or closed opportunity does not move. Mirrors crm_move_stage
+ * (supabase/migrations/20270111000200_crm_retire_estimate_sent_stage.sql).
  */
 export function crmAllowedMoves(from: string): CrmStageId[] {
   const step = crmStageStep(from);
   if (step === null) return [];
   return CRM_PIPELINE_STAGES.filter((s) => s !== from && STAGE_STEP[s]! >= step - 1);
 }
-
-/** True when moving to Estimate sent from this stage would not be a step backwards (the "record estimate as sent" form offers the move only then). */
-export const canAdvanceToEstimateSent = (stage: string): boolean => { const step = crmStageStep(stage); return step !== null && stage !== "estimate_sent" && step <= STAGE_STEP.estimate_sent!; };
 
 export const CRM_SOURCES: { id: string; label: string }[] = [
   { id: "agency_call", label: "Agency call (outbound)" },

@@ -67,10 +67,20 @@ describe("where it stands: recorded facts only", () => {
     expect(text(stageGuide(f({ estimates: { finalisedUnsent: 0, drafts: 2 } })))).toMatch(/2 draft estimates are not finalised yet/);
   });
   it("awaiting the client: says exactly what was recorded as sent (reference, revision, date) and never invents a reply", () => {
-    const g = stageGuide(f({ stage: "estimate_sent", sentEstimate: { reference: "EST-QA-2026-0007", revision: 2, sentOn: "2026-11-06" } }));
-    expect(g.headline).toBe("Estimate sent: awaiting the client");
+    // The record of a sent estimate is shown at whatever stage the enquiry is in (it does not put the enquiry anywhere).
+    const g = stageGuide(f({ stage: "proposal_sent", sentEstimate: { reference: "EST-QA-2026-0007", revision: 2, sentOn: "2026-11-06" } }));
+    expect(g.headline).toBe("Proposal sent: awaiting the client");
     expect(text(g)).toContain("Estimate EST-QA-2026-0007, revision 2, recorded as sent on 6 Nov 2026.");
     expect(text(g)).toContain("No client reply is assumed");
+    // An enquiry still holding the retired stage: it says so, says nobody decided for it, and how it is moved out. Nothing is assumed about where it belongs.
+    const r = stageGuide(f({ stage: "estimate_sent", canEdit: true, sentEstimate: { reference: "EST-QA-2026-0007", revision: 2, sentOn: "2026-11-06" } }));
+    expect(r.headline).toBe("Move this enquiry to a current stage");
+    expect(r.tone).toBe("amber");
+    expect(text(r)).toContain("Estimate sent is no longer a pipeline stage.");
+    expect(text(r)).toContain("Choose its stage with Move stage.");
+    expect(text(r)).toContain("an estimate recorded as sent counts for neither");
+    expect(text(r)).toContain("Estimate EST-QA-2026-0007, revision 2, recorded as sent on 6 Nov 2026.");
+    expect(text(stageGuide(f({ stage: "estimate_sent", canEdit: false })))).toContain("Its owner or a founder can move it to the right stage.");
     const p = stageGuide(f({ stage: "proposal_sent", sentProposal: { version: 3, sentOn: "2026-11-02" }, waitingOn: "client" }));
     expect(text(p)).toContain("Proposal version 3 recorded as sent on 2 Nov 2026.");
     expect(text(p)).toContain("Recorded as waiting on the client.");
