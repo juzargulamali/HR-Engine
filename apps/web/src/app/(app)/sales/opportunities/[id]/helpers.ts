@@ -45,7 +45,8 @@ export function describeEvent(e: Pick<CrmOpportunityEventRow, "kind" | "from_val
   const reason = e.reason ? ` Reason: ${e.reason}.` : "";
   switch (e.kind) {
     case "created": return e.from_value === "jarvis" ? "Enquiry created through JARVIS: the person who saved it reviewed and approved it first." : "Enquiry created.";
-    case "stage_changed": return `Stage changed from ${crmStageLabel(e.from_value ?? "")} to ${crmStageLabel(e.to_value ?? "")}.`;
+    // A plain move has no reason. The system line written when the Estimate sent stage was removed carries one (why this enquiry was moved, on which record).
+    case "stage_changed": return `Stage changed from ${crmStageLabel(e.from_value ?? "")} to ${crmStageLabel(e.to_value ?? "")}.${e.reason ? ` ${e.reason.replace(/\.$/, "")}.` : ""}`;
     case "held": return `Put on hold.${reason}`;
     case "resumed": return `Resumed${e.to_value ? ` (back to ${crmStageLabel(e.to_value)})` : ""}.`;
     case "won": {
@@ -109,9 +110,9 @@ export function planNextProps(view: { openFollowUps: readonly Pick<CrmFollowUpRo
 }
 
 /** What the database insists on before a plain move, stated in words; null when the move has no extra requirement. */
-export function stageMoveRequirement(to: string, ctx: { hasSentProposal: boolean; hasQuoteRef: boolean; hasSentEstimate: boolean }): string | null {
+export function stageMoveRequirement(to: string, ctx: { hasSentProposal: boolean; hasQuoteRef: boolean }): string | null {
+  // An estimate recorded as sent is evidence for NEITHER gate: it is not a sent proposal and not a Zoho Books quote reference.
   if (to === "proposal_sent" && !ctx.hasSentProposal) return "Record a proposal as sent first (Proposals & files tab).";
-  if (to === "estimate_sent" && !ctx.hasSentEstimate) return "Record an estimate as sent first (Estimates tab).";
   if (to === "quote_sent" && !ctx.hasQuoteRef) return "Record the Zoho Books quote reference first (Commercial tab).";
   return null;
 }

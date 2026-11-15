@@ -102,30 +102,26 @@ export async function loadEnquiryScope(ctx: CrmContext, company: string): Promis
 }
 
 /**
- * For the board's check before a move: which of these enquiries have a proposal recorded as sent, an estimate recorded as sent and a Zoho Books quote reference
- * (the three facts crm_move_stage insists on). Read as the signed-in person, in small batches of ids. Returns null when any read fails: the board then assumes
+ * For the board's check before a move: which of these enquiries have a proposal recorded as sent and a Zoho Books quote reference
+ * (the two facts crm_move_stage insists on; an estimate recorded as sent unlocks no stage). Read as the signed-in person, in small batches of ids. Returns null when any read fails: the board then assumes
  * nothing, sends the move and shows the database's own answer.
  */
 export async function loadStageEvidence(ids: readonly string[]): Promise<Record<string, StageEvidence> | null> {
   const out: Record<string, StageEvidence> = {};
-  for (const id of ids) out[id] = { hasSentProposal: false, hasQuoteRef: false, hasSentEstimate: false };
+  for (const id of ids) out[id] = { hasSentProposal: false, hasQuoteRef: false };
   if (ids.length === 0) return out;
   try {
     const supabase = (await createClient()) as unknown as SupabaseClient;
     for (let at = 0; at < ids.length; at += 80) {
       const chunk = ids.slice(at, at + 80);
-      const [proposals, zoho, sends] = await Promise.all([
+      const [proposals, zoho] = await Promise.all([
         supabase.from("crm_proposals").select("opportunity_id").in("opportunity_id", chunk).in("status", ["sent", "accepted"]).limit(2000),
         supabase.from("crm_zoho_references").select("opportunity_id, quote_ref").in("opportunity_id", chunk).limit(2000),
-        supabase.from("crm_estimate_sends").select("opportunity_id").in("opportunity_id", chunk).limit(2000),
       ]);
-      // A database without the sent-estimates table (its migration is not applied) is a known state: there are no sent estimates, as on the enquiry's own page.
-      const sendsMissing = !!sends.error && /42P01|PGRST205|does not exist|could not find the table/i.test(`${(sends.error as { code?: string }).code ?? ""} ${sends.error.message}`);
-      const failed = proposals.error ?? zoho.error ?? (sendsMissing ? null : sends.error);
+      const failed = proposals.error ?? zoho.error;
       if (failed) throw new Error(failed.message);
       for (const r of (proposals.data ?? []) as { opportunity_id: string }[]) { const e = out[r.opportunity_id]; if (e) e.hasSentProposal = true; }
       for (const r of (zoho.data ?? []) as { opportunity_id: string; quote_ref: string | null }[]) { const e = out[r.opportunity_id]; if (e && (r.quote_ref ?? "").trim() !== "") e.hasQuoteRef = true; }
-      for (const r of (sendsMissing ? [] : (sends.data ?? [])) as { opportunity_id: string }[]) { const e = out[r.opportunity_id]; if (e) e.hasSentEstimate = true; }
     }
     return out;
   } catch (e) {

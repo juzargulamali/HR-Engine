@@ -106,15 +106,25 @@ export function stageGuide(f: GuideFacts): StageGuide {
       if (w) lines.push(w);
       return { tone: hasEstimateToRecord ? "amber" : "blue", headline: f.stage === "new" ? "New enquiry: qualify it and respond" : f.stage === "qualified" ? "Qualified: prepare what the client asked for" : "Preparing the proposal or estimate", lines, links };
     }
+    case "estimate_sent": {
+      // A retired stage: this enquiry was at Estimate sent when the stage was removed and its records did not show which stage it belongs in, so nobody moved it.
+      // It is still open and can be moved out (never back in); nothing is assumed about where it should go.
+      lines.push("Estimate sent is no longer a pipeline stage. This enquiry was left here because its records did not show clearly which stage it belongs in.");
+      lines.push(f.canEdit ? "Choose its stage with Move stage. Proposal sent needs a proposal recorded as sent; Quote sent needs the Zoho Books quote reference; an estimate recorded as sent counts for neither." : "Its owner or a founder can move it to the right stage.");
+      lines.push(...sentLines(f));
+      estimateHint();
+      if (w) lines.push(w);
+      links.push({ label: "Estimates", tab: "quotations" }, { label: "Proposals & files", tab: "proposals" }, { label: "Commercial", tab: "commercial" });
+      return { tone: "amber", headline: "Move this enquiry to a current stage", lines, links };
+    }
     case "proposal_sent":
-    case "estimate_sent":
     case "quote_sent":
     case "negotiation": {
       const sent = sentLines(f);
       lines.push(...(sent.length ? sent : ["Nothing is recorded as sent for this enquiry."]));
       estimateHint();
       lines.push(w ?? "No client reply is assumed: log it under Activity when it arrives.");
-      if (f.stage === "proposal_sent" || f.stage === "estimate_sent") lines.push("Quote sent needs the Zoho Books quote reference (Commercial tab).");
+      if (f.stage === "proposal_sent") lines.push("Quote sent needs the Zoho Books quote reference (Commercial tab).");
       links.push({ label: "Log the client's reply", tab: "activity" }, { label: hasEstimateToRecord ? "Record estimate as sent" : "Estimates", tab: "quotations", primary: hasEstimateToRecord }, { label: "Commercial", tab: "commercial" });
       return { tone: hasEstimateToRecord ? "amber" : "blue", headline: f.stage === "negotiation" ? "Negotiation" : `${crmStageLabel(f.stage)}: awaiting the client`, lines, links };
     }

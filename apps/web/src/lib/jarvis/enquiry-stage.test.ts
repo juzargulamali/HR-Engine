@@ -44,7 +44,7 @@ describe("the transition table (derived from crm_move_stage; JARVIS is narrower)
     for (const from of WORKING) expect(transitionsFrom(from, { proposalSent: true, zohoQuoteRef: true }).map((t) => t.to)).not.toContain("estimate_sent");
     const from = transitionsFrom("estimate_sent", { proposalSent: true, zohoQuoteRef: true });
     expect(from.every((t) => !t.enabled)).toBe(true);
-    expect(from[0]!.reason).toMatch(/to or from Estimate sent is not available through JARVIS.*Estimates tab/);
+    expect(from[0]!.reason).toMatch(/Estimate sent is no longer a pipeline stage, so JARVIS cannot move an enquiry to it or from it.*Estimates tab: it does not change the stage/);
     // The words are understood (so the answer can say where to do it), not acted on.
     expect(stageFromText("move it to estimate sent")).toBe("estimate_sent");
     expect(stageFromText("change the status to proposal sent")).toBe("proposal_sent");

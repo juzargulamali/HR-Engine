@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Download } from "lucide-react";
-import { REVIEW_PRICING_LABEL, estimateFormatVersion, isSysAdmin } from "@enginious-hr/domain";
+import { REVIEW_PRICING_LABEL, estimateFormatVersion, isSysAdmin, termsReview } from "@enginious-hr/domain";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
@@ -19,6 +19,7 @@ import { buildOppView } from "../../view";
 import { ApprovalReview, EstimateBuilder, ReviseButton } from "./editor";
 import { money } from "./money";
 import { SnapshotView } from "./snapshot-view";
+import { TermsPanel } from "./terms-panel";
 
 export const metadata = { title: "Estimate" };
 
@@ -57,6 +58,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
   const bt = bundle.billTo;
   const cur = header.currency ?? "";
   const legacy = issued && !!bundle.snapshot && estimateFormatVersion(bundle.snapshot.content.terms?.label) === null;
+  const review = termsReview(header.terms_label, header.terms);
 
   return (
     <div className="space-y-5">
@@ -101,9 +103,11 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
               imageUrls={bundle.imageUrls} imageNames={imageNames} blockers={blockers}
               needsApproval={policy === "required" && !hasValidApproval(header, bundle.approvals, bundle.contentHash)}
               approvalPending={pending && !pendingApprovalIsStale(header, bundle.approvals, bundle.contentHash)}
+              termsReview={review} revisedFrom={bundle.revisedFrom}
             />
           ) : (
             <Panel title="Draft summary">
+              <div className="mb-3"><TermsPanel review={review} revisedFrom={bundle.revisedFrom} opportunityId={id} /></div>
               <dl className="grid gap-2 text-sm sm:grid-cols-4">
                 <div><dt className="text-muted-foreground">Prepared for</dt><dd>{bt ? bt.name : "Not chosen"}</dd></div>
                 <div><dt className="text-muted-foreground">Currency</dt><dd>{header.currency ?? "Not chosen"}</dd></div>
@@ -122,7 +126,7 @@ export default async function EstimatePage({ params }: { params: Promise<{ id: s
       ) : null}
 
       {issued && view.canEdit && view.isOpen && !bundle.revisions.some((r) => !r.issued) ? (
-        <Panel title="Revise" description="Makes a new draft copy (revision + 1, same reference). Finalising it replaces this revision; this one is never altered.">
+        <Panel title="Revise" description={`Makes a new draft copy (revision + 1, same reference). Finalising it replaces this revision; this one is never altered.${legacy ? " This one was issued as a quotation: the new draft shows the terms it carries over, and you replace them with the current estimate format, as a step you confirm, before the draft can be finalised." : ""}`}>
           <ReviseButton ids={ids} />
         </Panel>
       ) : null}

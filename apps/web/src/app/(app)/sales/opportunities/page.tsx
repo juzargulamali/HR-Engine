@@ -2,7 +2,7 @@ import Link from "next/link";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
-import { CRM_STAGES, crmSourceLabel, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
+import { CRM_RETIRED_STAGES, CRM_STAGES, crmSourceLabel, crmStageLabel, isCrmActive } from "@enginious-hr/domain";
 import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { InfoHint } from "@/components/ui/info-hint";
@@ -57,7 +57,8 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
   // Anything that is not a known value is ignored rather than trusted from the URL.
   const view = parseView(firstParam(sp, "view"));
   const q = firstParam(sp, "q").slice(0, 100);
-  const stage = CRM_STAGES.some((s) => s.id === firstParam(sp, "stage")) ? firstParam(sp, "stage") : "";
+  // A retired stage is still a valid filter value (Reports links to it while an enquiry holds it), but it is only listed in the menu while it is the one chosen.
+  const stage = [...CRM_STAGES, ...CRM_RETIRED_STAGES].some((s) => s.id === firstParam(sp, "stage")) ? firstParam(sp, "stage") : "";
   // The company. `?company=<id>` (as in every saved link) shows that company; `?company=all` shows every company the person has; with neither, the list opens
   // in the active Sales company (the one used last, then the person's own). With several companies and no reliable default it shows them all: nothing is
   // assumed and nothing is hidden. A company the person has no Sales access to is ignored, and the database only returns what they may see in any case.
@@ -162,7 +163,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
 
   // The company is chosen above the list (it is where the list is, not a filter), so the toolbar holds the three filters only and none is tucked away.
   const filters: ToolbarFilter[] = [
-    ...(view === "table" ? [{ name: "stage", label: "Stage", value: stage, options: [{ value: "", label: "Any stage" }, ...CRM_STAGES.map((s) => ({ value: s.id, label: s.label }))] }] : []),
+    ...(view === "table" ? [{ name: "stage", label: "Stage", value: stage, options: [{ value: "", label: "Any stage" }, ...[...CRM_STAGES, ...CRM_RETIRED_STAGES.filter((s) => s.id === stage)].map((s) => ({ value: s.id, label: s.label }))] }] : []),
     { name: "owner", label: "Owner", value: owner, options: [{ value: "", label: "Anyone" }, { value: "me", label: "Mine" }, ...ctx.people.filter((p) => p.id !== ctx.userId).map((p) => ({ value: p.id, label: p.name }))] },
     { name: "status", label: "Show", value: status === "open" ? "" : status, options: [{ value: "", label: "Open (includes on hold)" }, { value: "closed", label: "Won and lost" }, { value: "all", label: "Everything" }] },
   ];
@@ -216,7 +217,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
     );
   }
 
-  // The board's cards that can move: their recorded evidence (sent proposal, sent estimate, Zoho quote reference), so a move the database would refuse says
+  // The board's cards that can move: their recorded evidence (sent proposal, Zoho quote reference), so a move the database would refuse says
   // what is missing before it is sent. Null when it could not be read: the board then sends the move and shows the database's answer.
   let evidence: Record<string, StageEvidence> | null = null;
   if (view === "board" && rows.length > 0) {
@@ -254,7 +255,7 @@ export default async function EnquiriesPage({ searchParams }: { searchParams: Pr
 function BoardView({ rows, stages, ctx, here, evidence }: { rows: EnquiryListItem[]; stages: StageSummary[]; ctx: NonNullable<Awaited<ReturnType<typeof getCrmContext>>>; here: (patch?: Record<string, string | null>) => string; evidence: Record<string, StageEvidence> | null }) {
   const byDue = (a: EnquiryListItem, b: EnquiryListItem) => (a.nextFollowUp?.due_at ?? "9999").localeCompare(b.nextFollowUp?.due_at ?? "9999");
   // The lane's count and per-currency totals cover EVERY matching enquiry of that stage (from the database), not only the cards on the page.
-  const columns = boardColumns().map((c) => {
+  const columns = boardColumns([...stages.filter((s) => s.count > 0).map((s) => s.stage), ...rows.map((r) => r.opp.stage)]).map((c) => {
     const s = stages.find((x) => boardColumnFor(x.stage) === c.id && x.stage === c.id);
     return {
       ...c, tone: BOARD_TONE[c.id], total: s?.count ?? 0,

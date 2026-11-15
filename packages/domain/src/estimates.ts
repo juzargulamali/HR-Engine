@@ -69,6 +69,43 @@ export function clausesToNotes(clauses: readonly NoteClause[] | null | undefined
   const find = (title: string) => (clauses ?? []).find((c) => c.title === title)?.body ?? "";
   return { assumptions: find(NOTE_HEADINGS.assumptions), nextSteps: find(NOTE_HEADINGS.nextSteps) };
 }
+/**
+ * Clauses of a draft's `terms` that are NOT the two client notes: terms carried over from somewhere else (the six historical standard clauses a revision of a
+ * quotation issued before the estimates-only change copies from it, or the company template copied into a draft that was never marked as an estimate).
+ */
+export function inheritedTermClauses(clauses: readonly NoteClause[] | null | undefined): NoteClause[] {
+  const notes: readonly string[] = [NOTE_HEADINGS.assumptions, NOTE_HEADINGS.nextSteps];
+  return (clauses ?? []).filter((c) => !notes.includes(c.title));
+}
+
+export interface TermsReview {
+  /** True while the draft still carries terms (or a terms label) that are not the current estimate format: it cannot be finalised or sent for approval until a person replaces them. */
+  needed: boolean;
+  /** The stored label of the carried-over terms (for example "Standard terms (working draft, pending legal review)"); null when there is none. */
+  label: string | null;
+  /** The carried-over clauses, as stored. */
+  inherited: NoteClause[];
+}
+/**
+ * ONE RULE, IN TWO PLACES THAT MUST STAY IDENTICAL: this function and the database function `crm_quote_terms_need_review`
+ * (supabase/migrations/20270111000100_crm_quote_terms_guard.sql), which makes `crm_quote_issue` and `crm_quote_request_approval` refuse such a draft for every
+ * caller. A draft's terms need review unless (1) its label is an estimate format marker of a known version (`estimateFormatVersion`: 1 or 2 today; add a new
+ * version in both places together) and (2) every clause is one of the two client notes (`NOTE_HEADINGS.assumptions`, `.nextSteps`). The same vectors are
+ * asserted against both (packages/domain/test/estimates.test.ts, packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts).
+ *
+ * Whether a draft's terms need a person's review before it can go out. An estimate prints the budgetary notice and NO standard terms, so a draft is in order
+ * only when it carries an estimate format marker and nothing but the two client notes. Anything else was inherited and is replaced by an explicit, confirmed
+ * step (never silently, and never carried into a client file).
+ */
+export function termsReview(termsLabel: string | null | undefined, clauses: readonly NoteClause[] | null | undefined): TermsReview {
+  const inherited = inheritedTermClauses(clauses);
+  const marked = isEstimateFormat(termsLabel);
+  return { needed: !marked || inherited.length > 0, label: marked ? null : ((termsLabel ?? "").trim() || null), inherited };
+}
+/** A stable fingerprint of what the person was shown, sent back with the confirmation so a draft that changed meanwhile is not replaced blind. */
+export const termsReviewFingerprint = (r: Pick<TermsReview, "label" | "inherited">): string => JSON.stringify([r.label, r.inherited.map((c) => [c.title, c.body])]);
+export const TERMS_REVIEW_BLOCKER = "Review the terms carried over into this draft and replace them with the current estimate format (Details step).";
+
 /** Null when fine, otherwise a sentence. */
 export function validateClientNotes(n: ClientNotes): string | null {
   if (n.assumptions.length > CLIENT_NOTE_MAX) return `Assumptions are too long (${CLIENT_NOTE_MAX} characters at most).`;

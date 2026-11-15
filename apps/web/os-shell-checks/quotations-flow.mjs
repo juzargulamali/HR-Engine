@@ -13,7 +13,10 @@
 //      profile afterwards leaves the finalised revision's files unchanged while a NEW revision picks the new profile up. (The local stack has no object storage,
 //      so the logo itself is covered by the unit tests, not here.)
 //   5. a quotation frozen BEFORE the change (created through the unchanged database functions, exactly as the old app did) still shows and exports with its
-//      original wording, its snapshot is byte-identical after everything else ran, and its revision becomes an estimate.
+//      original wording and its snapshot is byte-identical after everything else ran. Its REVISION shows the six terms it inherited, says where they came
+//      from, and keeps them (database and screen) through Save draft; it cannot be finalised until the person replaces them with the current estimate format
+//      in a step they confirm; a colleague who is not the owner sees the same facts and no button; then the revision is an estimate (database, PDF, Excel).
+//   5b. a revision of a CURRENT-format estimate needs no such step: it says its terms are the current estimate format, as the revision it was copied from.
 // Screenshots (light theme, 1440 x 900): SHOTS_DIR (default /tmp/q-shots).
 import { chromium, newPage, login, BASE, psql as sql } from "./lib.mjs";
 import { asDb, asDbTry } from "./inventory-flow-lib.mjs";
@@ -361,35 +364,150 @@ await step("an enquiry with ONE linked party: it is suggested with the reason bu
   const refused = asDbTry(4, `select crm_quote_save_section('${directId}', null, 'Nope')`);
   if (refused.ok || !/owner of this opportunity or a founder/.test(refused.out)) throw new Error("non-owner was not refused: " + refused.out);
 });
-await step("a quotation frozen BEFORE this change keeps its wording on screen and in its files, its snapshot is untouched, and its revision becomes an estimate", async () => {
+const GUARD_MIGRATION = new URL("../../../supabase/migrations/20270111000100_crm_quote_terms_guard.sql", import.meta.url).pathname;
+const GUARD_ROLLBACK = new URL("../../../supabase/manual-sql/crm_quote_terms_guard_90_rollback.sql", import.meta.url).pathname;
+const SIX = "Site access and readiness,Site services and other trades,Changes,Start of work,Scope exclusions,Confidentiality";
+const OLD_LABEL = "Standard terms (working draft, pending legal review)";
+const termsOf = (id) => sql(`select coalesce((select string_agg(t->>'title', ',') from jsonb_array_elements(q.terms) t), '') || '|' || coalesce(q.terms_label, '') from crm_quotations q where proposal_id='${id}'`);
+const termsShot = (name) => page.screenshot({ path: `${process.env.TERMS_SHOTS_DIR ?? SHOTS}/${name}.png`, fullPage: true });
+let legacyQ = null; let legacyRev = null; let legacyHash = null;
+const snap = (id) => sql(`select md5(content::text) || ':' || content_hash from crm_quotation_snapshots where proposal_id='${id}'`);
+await step("a quotation frozen BEFORE this change keeps its wording on screen and in its files, and its snapshot is untouched", async () => {
   // Exactly what the previous app did: the unchanged database functions, standard terms copied in, no format marker.
   const q = asDb(5, `select crm_quote_create('${oppLegacy}')`);
   const vat = sql(`select id from crm_quote_vat_choices where company_id='${CO}' and label='5%'`);
   asDb(5, `select crm_quote_save_header('${q}', '{"currency":"EUR","vat_choice_id":"${vat}","bill_to_org_id":"${client}","validity_date":"2099-12-31","milestones":[{"label":"Deposit","kind":"percent","value":"100","due":"On acceptance"}]}'::jsonb)`);
   const sec = asDb(5, `select crm_quote_save_section('${q}', null, 'Fabrication')`);
   asDb(5, `select crm_quote_save_line('${q}', null, '${sec}', '{"description":"Legacy stage deck","unit":"m2","quantity":"3","unit_price":"33.33"}'::jsonb)`);
+  // The database now refuses to issue a draft with these terms (migration 20270111000100), so the document is issued as it was THEN: the guard's own rollback
+  // restores the earlier functions, the quotation is issued, and the migration is applied again (as on a hosted database, where such documents predate it).
+  if (asDbTry(5, `select crm_quote_issue('${q}')`).ok) throw new Error("the database finalised a draft that still carries the standard terms");
+  psqlInput(`\\i ${GUARD_ROLLBACK}\n`);
   asDb(5, `select crm_quote_issue('${q}')`);
-  const snap = (id) => sql(`select md5(content::text) || ':' || content_hash from crm_quotation_snapshots where proposal_id='${id}'`);
-  const hashBefore = snap(q);
-  if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${q}'`) !== "Standard terms (working draft, pending legal review)") throw new Error("not a legacy-shaped snapshot");
+  psqlInput(`\\i ${GUARD_MIGRATION}\n`);
+  legacyQ = q; legacyHash = snap(q);
+  if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${q}'`) !== OLD_LABEL) throw new Error("not a legacy-shaped snapshot");
   await page.goto(`${BASE}/sales/opportunities/${oppLegacy}/quotations/${q}`, { waitUntil: "networkidle" });
   await page.getByTestId("issued-snapshot").waitFor();
   await has(/issued before the estimates-only change as a quotation/, "legacy note"); await has(/Standard terms/, "frozen terms shown as frozen"); await has(/valid until 2099-12-31/, "frozen wording");
+  await has(/This one was issued as a quotation: the new draft shows the terms it carries over, and you replace them with the current estimate format, as a step you confirm/, "what Create revision will ask");
   const pdf = await download("Download PDF"); const xlsx = await download("Download Excel (.xlsx)");
   const t = pdfText(pdf.file);
   if (!/Quotation/.test(t) || !/Terms and conditions/.test(t) || !/Valid until: 2099-12-31/.test(t) || /budgetary estimate/i.test(t)) throw new Error("the legacy PDF does not keep its original wording");
   const c = await cells(xlsx.file); if (c.name !== "Quotation" || !/Terms and conditions/.test(c.all)) throw new Error("the legacy Excel does not keep its original wording");
-  if (snap(q) !== hashBefore) throw new Error("the legacy snapshot changed");
+  if (snap(q) !== legacyHash) throw new Error("the legacy snapshot changed");
+});
+await step("its REVISION says the terms were INHERITED (which clauses, from which revision); Save draft keeps them; nothing can be finalised or sent for approval until they are replaced", async () => {
   await page.getByRole("button", { name: "Create revision" }).click();
-  await page.waitForURL((u) => u.pathname.includes("/quotations/") && !u.pathname.endsWith(q));
-  const rev = page.url().split("/").pop();
+  await page.waitForURL((u) => u.pathname.includes("/quotations/") && !u.pathname.endsWith(legacyQ));
+  const rev = legacyRev = page.url().split("/").pop();
   await has(/Revision 2/, "revision 2");
+  // The cause, at the database: the revision function copies the terms and their label as they are.
+  if (termsOf(rev) !== `${SIX}|${OLD_LABEL}`) throw new Error(`the new revision does not hold the six inherited terms: ${termsOf(rev)}`);
+  const box = page.getByTestId("terms-review"); await box.waitFor();
+  if ((await box.getAttribute("data-terms")) !== "inherited") throw new Error("the panel does not say inherited");
+  const said = flat(await box.innerText());
+  for (const need of ["Inherited.", "copied from revision 1, which was issued as a quotation before estimates replaced quotations", `Label stored with them: ${OLD_LABEL}`, "The 6 carried-over clauses: Site access and readiness, Site services and other trades, Changes, Start of work, Scope exclusions, Confidentiality",
+    "Removed from this draft: the 6 clauses above and their label.", "Used instead: the current estimate format.", NOTICE, "Not changed: revision 1 and its files.", "Until this is confirmed, the draft cannot be finalised or sent for approval. Saving the draft does not replace these terms."])
+    if (!said.includes(need)) throw new Error(`the terms panel does not say: ${need}`);
+  if (await page.getByTestId("terms-origin").count()) throw new Error("the draft claims the current format before anyone chose it");
+  await termsShot("pr1-01-legacy-revision-terms-inherited");
+  // Save draft with nothing edited, then an edit and a save: the inherited terms stay exactly as they are (never a silent swap).
   await page.getByRole("button", { name: "Save draft" }).click(); await waitSaved();
-  const terms = sql(`select coalesce((select string_agg(t->>'title', ',') from jsonb_array_elements(q.terms) t), '') || '|' || q.terms_label from crm_quotations q where proposal_id='${rev}'`);
-  if (terms !== "|estimate-format:2") throw new Error(`the revision still holds the old terms: ${terms}`);
-  asDb(5, `select crm_quote_issue('${rev}')`);
-  if (snap(q) !== hashBefore) throw new Error("the legacy snapshot changed after its revision was finalised");
-  if (sql(`select content->'terms'->>'label' from crm_quotation_snapshots where proposal_id='${rev}'`) !== "estimate-format:2") throw new Error("the revision snapshot is not in the current estimate format");
+  if (termsOf(rev) !== `${SIX}|${OLD_LABEL}`) throw new Error(`Save draft changed the inherited terms: ${termsOf(rev)}`);
+  await page.getByTestId("more-options").locator("summary").click();
+  await page.locator("#est-review").fill("2099-11-30");
+  await page.getByRole("button", { name: "Save draft" }).click(); await waitSaved();
+  if (sql(`select validity_date::text from crm_quotations where proposal_id='${rev}'`) !== "2099-11-30") throw new Error("the edit was not saved");
+  if (termsOf(rev) !== `${SIX}|${OLD_LABEL}`) throw new Error(`a save with an edit changed the inherited terms: ${termsOf(rev)}`);
+  // A draft download before the step: marked DRAFT, the estimate layout, and none of the inherited clauses (they never reach a file a client could receive).
+  const dpdf = await download("Download PDF"); const draw = flat(pdfRaw(dpdf.file));
+  if (!/-rev2-DRAFT\.pdf$/.test(dpdf.name) || !/DRAFT, NOT FINALISED/.test(draw) || !draw.includes(NOTICE)) throw new Error("the draft download is not a marked draft estimate");
+  for (const re of [/Terms and conditions/i, /working draft/i, /Site access and readiness/, /Confidentiality/, /Quotation(?! or an offer)/]) if (re.test(draw.replace(NOTICE, ""))) throw new Error(`inherited wording ${re} in the draft PDF`);
+  // Finalise is held: the page says why, the button does nothing, and the database row is still a draft with its inherited terms.
+  await goStep("Preview & finalise");
+  await has(/Review the terms carried over into this draft and replace them with the current estimate format \(Details step\)\./, "the blocker on the finalise step");
+  await page.getByLabel(/I have checked who this estimate is addressed to/).check();
+  const fin = page.getByRole("button", { name: "Finalise estimate" });
+  if (await fin.isEnabled()) { await fin.click(); await has(/Review the terms carried over/, "refusal"); }
+  if (sql(`select coalesce(issued_at::text, 'draft') from crm_quotations where proposal_id='${rev}'`) !== "draft") throw new Error("a draft with inherited terms was finalised");
+  // The database refuses it too, for the owner and for a founder calling it directly, and for an approval request.
+  for (const who of [5, 3]) for (const fn of ["crm_quote_issue", "crm_quote_request_approval"]) {
+    const r = asDbTry(who, `select ${fn}('${rev}')`);
+    if (r.ok || !/Replace the terms carried over into this draft with the current estimate format/.test(r.out)) throw new Error(`${fn} as ${who} was not refused: ${r.out}`);
+  }
+  if (termsOf(rev) !== `${SIX}|${OLD_LABEL}`) throw new Error("a refused database call changed the terms");
+  await termsShot("pr1-02-legacy-revision-finalise-held");
+  if (snap(legacyQ) !== legacyHash) throw new Error("the legacy snapshot changed");
+});
+await step("a colleague who is not the owner (mgr@) sees the same facts on that draft and cannot replace the terms: no button, and the database refuses", async () => {
+  const mgr = await newPage(browser, { width: 1440, height: 900 }, "light", { deviceScaleFactor: 2 });
+  await login(mgr, "mgr@e2e.local");
+  await mgr.goto(`${BASE}/sales/opportunities/${oppLegacy}/quotations/${legacyRev}`, { waitUntil: "networkidle" });
+  const box = mgr.getByTestId("terms-review"); await box.waitFor();
+  const t = flat(await box.innerText());
+  if (!t.includes("The 6 carried-over clauses") || !t.includes("Only the enquiry owner or a founder can replace them.")) throw new Error("the colleague's view of the terms: " + t.slice(0, 300));
+  if (await mgr.getByRole("button", { name: /Replace with the current estimate format|Finalise estimate|Save draft/ }).count()) throw new Error("a colleague is offered an action on someone else's estimate");
+  await mgr.screenshot({ path: `${process.env.TERMS_SHOTS_DIR ?? SHOTS}/pr1-03-legacy-revision-colleague-read-only.png`, fullPage: true });
+  const refused = asDbTry(4, `select crm_quote_save_header('${legacyRev}', '{"terms_label":"estimate-format:2","terms":[]}'::jsonb)`);
+  if (refused.ok || !/owner of this opportunity or a founder/.test(refused.out)) throw new Error("the colleague was not refused by the database: " + refused.out);
+  if (termsOf(legacyRev) !== `${SIX}|${OLD_LABEL}`) throw new Error("the colleague changed the terms");
+  await mgr.context().close();
+});
+await step("the owner REPLACES them in a step they confirm (cancel changes nothing); the draft then says SELECTED, holds no old terms, and finalises as an estimate; revision 1 is untouched", async () => {
+  await goStep("Details");
+  await page.getByRole("button", { name: "Replace with the current estimate format" }).click();
+  const dlg = page.getByRole("dialog"); await dlg.waitFor();
+  const asked = flat(await dlg.innerText());
+  if (!/Replace the carried-over terms\?/.test(asked) || !asked.includes("The 6 clauses carried over into this draft will be removed from it") || !asked.includes("Revision 1 and its files stay exactly as issued.")) throw new Error("the confirmation does not say what changes: " + asked.slice(0, 300));
+  await termsShot("pr1-04-legacy-revision-confirm-dialog");
+  await dlg.getByRole("button", { name: "Cancel" }).click();
+  if (termsOf(legacyRev) !== `${SIX}|${OLD_LABEL}`) throw new Error("Cancel changed the terms");
+  await page.getByRole("button", { name: "Replace with the current estimate format" }).click();
+  await page.getByRole("dialog").getByRole("button", { name: "Yes, replace the terms" }).click();
+  const line = page.getByTestId("terms-origin"); await line.waitFor();
+  const now = flat(await line.innerText());
+  if (now !== "Terms: current estimate format (selected). It was chosen in place of the terms of revision 1, which was issued as a quotation and keeps its own terms exactly as issued. The client file prints the budgetary estimate notice and no terms clauses.") throw new Error("after replacing: " + now);
+  if (await page.getByTestId("terms-review").count()) throw new Error("the inherited panel is still shown");
+  // The saved draft (database state): no old term, the current format marker; the edit made earlier is kept.
+  if (termsOf(legacyRev) !== "|estimate-format:2") throw new Error(`the revision still holds the old terms: ${termsOf(legacyRev)}`);
+  if (sql(`select validity_date::text || '|' || (select count(*) from crm_quotation_lines where proposal_id='${legacyRev}') from crm_quotations where proposal_id='${legacyRev}'`) !== "2099-11-30|1") throw new Error("the replacement lost the draft's own content");
+  await termsShot("pr1-05-legacy-revision-terms-selected");
+  // Finalise through the screen (the real path a person takes), then the files a client would receive.
+  await goStep("Preview & finalise");
+  await page.getByLabel(/I have checked who this estimate is addressed to/).check();
+  await page.getByRole("button", { name: "Finalise estimate" }).click();
+  await page.getByTestId("issued-snapshot").waitFor();
+  if (snap(legacyQ) !== legacyHash) throw new Error("the legacy snapshot changed after its revision was finalised");
+  if (sql(`select content->'terms'->>'label' || '|' || jsonb_array_length(content->'terms'->'clauses') from crm_quotation_snapshots where proposal_id='${legacyRev}'`) !== "estimate-format:2|0") throw new Error("the revision snapshot is not in the current estimate format");
+  const f = await exportBoth(); const raw = flat(pdfRaw(f.pdf.file));
+  if (!/-rev2\.pdf$/.test(f.pdf.name) || /DRAFT/.test(raw) || !raw.includes(NOTICE) || !raw.includes("Estimate")) throw new Error("the finalised revision is not an estimate PDF");
+  for (const re of [/Terms and conditions/i, /working draft/i, /Site access and readiness/, /Confidentiality/, /Valid until/i, /Quotation(?! or an offer)/]) if (re.test(raw.replace(NOTICE, "")) || re.test(f.c.all.replace(NOTICE, ""))) throw new Error(`superseded wording ${re} in the finalised revision's files`);
+  if (f.c.name !== "Estimate" || !f.c.all.includes(NOTICE)) throw new Error("the finalised revision's Excel is not an estimate");
+  await termsShot("pr1-06-legacy-revision-finalised-as-estimate");
+  // Revision 1 still shows and exports exactly as issued.
+  await page.goto(`${BASE}/sales/opportunities/${oppLegacy}/quotations/${legacyQ}`, { waitUntil: "networkidle" });
+  const old = pdfText((await download("Download PDF")).file);
+  if (!/Quotation/.test(old) || !/Terms and conditions/.test(old) || !/Site access and readiness/.test(old) || /budgetary estimate/i.test(old)) throw new Error("revision 1 no longer exports as issued");
+  if (snap(legacyQ) !== legacyHash || termsOf(legacyQ) !== `${SIX}|${OLD_LABEL}`) throw new Error("revision 1 changed");
+});
+await step("a revision of a CURRENT-format estimate needs no review: it says its terms are the current format, as the revision it was copied from, and saves and exports as an estimate", async () => {
+  await page.goto(`${BASE}/sales/opportunities/${oppLegacy}/quotations/${legacyRev}`, { waitUntil: "networkidle" });
+  await page.getByRole("button", { name: "Create revision" }).click();
+  await page.waitForURL((u) => u.pathname.includes("/quotations/") && !u.pathname.endsWith(legacyRev));
+  const rev3 = page.url().split("/").pop();
+  await has(/Revision 3/, "revision 3");
+  const line = flat(await page.getByTestId("terms-origin").innerText());
+  if (line !== "Terms: current estimate format (selected). The same format as revision 2, which this draft was copied from. The client file prints the budgetary estimate notice and no terms clauses.") throw new Error("revision of an estimate: " + line);
+  if (await page.getByTestId("terms-review").count() || await page.getByRole("button", { name: "Replace with the current estimate format" }).count()) throw new Error("a revision of an estimate asks for a terms review");
+  if (termsOf(rev3) !== "|estimate-format:2") throw new Error(`revision 3 terms: ${termsOf(rev3)}`);
+  await page.getByRole("button", { name: "Save draft" }).click(); await waitSaved();
+  if (termsOf(rev3) !== "|estimate-format:2") throw new Error("Save draft changed the terms of a current-format draft");
+  const d = await download("Download PDF"); const raw = flat(pdfRaw(d.file));
+  if (!/-rev3-DRAFT\.pdf$/.test(d.name) || !raw.includes(NOTICE) || /Terms and conditions|working draft/i.test(raw)) throw new Error("the draft of revision 3 is not a draft estimate");
+  await goStep("Preview & finalise");
+  if (/Review the terms carried over/.test(await text())) throw new Error("revision 3 is held for a terms review");
+  await termsShot("pr1-07-estimate-revision-no-review");
 });
 await step("Sales settings no longer offer standard terms", async () => {
   await page.goto(`${BASE}/sales/settings`, { waitUntil: "networkidle" });

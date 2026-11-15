@@ -1,4 +1,4 @@
-import { CRM_PIPELINE_STAGES, CRM_STAGES, crmAllowedMoves, crmStageLabel, followUpTiming, isCrmActive, isCrmOpen } from "@enginious-hr/domain";
+import { CRM_PIPELINE_STAGES, CRM_RETIRED_STAGES, CRM_STAGE_IDS, crmAllowedMoves, crmStageLabel, followUpTiming, isCrmActive, isCrmOpen, isCrmRetiredStage } from "@enginious-hr/domain";
 import { compareNullable, type SortState } from "@/components/workspace/url-state";
 import { stageMoveRequirement } from "@/app/(app)/sales/opportunities/[id]/helpers";
 import { organisationLabel } from "./reports";
@@ -40,7 +40,8 @@ export const ENQUIRY_DEFAULT_SORT: SortState<EnquirySortKey> = { key: "due", dir
 /** The installation date, or the show start when there is no installation date (the first date that matters to the team). */
 export const installOrShowDate = (opp: { install_start: string | null; event_start: string | null }): string | null => opp.install_start ?? opp.event_start ?? null;
 
-const stageRank = (stage: string): string => String(Math.max(0, CRM_STAGES.findIndex((s) => s.id === stage))).padStart(2, "0");
+// Every id a row can hold, the retired stage included (it keeps its old place beside Proposal sent, as in crm_enquiry_list).
+const stageRank = (stage: string): string => String(Math.max(0, (CRM_STAGE_IDS as readonly string[]).indexOf(stage))).padStart(2, "0");
 
 /** A stable copy of the list in the requested order. Missing values always sort last. Values sort by currency first: amounts in different currencies are never compared. */
 /** What the list helpers need of an enquiry: both the full list item and the bounded list item have it. */
@@ -88,10 +89,20 @@ export function sortEnquiries<T extends SortableEnquiry>(items: readonly T[], so
 /** The pipeline stages, then On hold, then the two closing lanes that are only ever entered through their forms. */
 export const BOARD_COLUMN_IDS: readonly string[] = [...CRM_PIPELINE_STAGES, "on_hold", "won", "lost"];
 
-export const boardColumns = (): { id: string; label: string }[] => BOARD_COLUMN_IDS.map((id) => ({ id, label: crmStageLabel(id) }));
+/**
+ * The lanes. A retired stage ("Estimate sent") has no lane of its own unless an enquiry still holds it: `presentStages` are the stages of the matching
+ * enquiries, and a retired one among them gets a lane after Proposal sent so those enquiries are shown where they really are. Nothing can be dropped into it
+ * (no card ever lists it as a target).
+ */
+export function boardColumns(presentStages: readonly string[] = []): { id: string; label: string }[] {
+  const retired = CRM_RETIRED_STAGES.map((s) => s.id as string).filter((id) => presentStages.includes(id));
+  const ids = [...BOARD_COLUMN_IDS];
+  if (retired.length > 0) ids.splice(ids.indexOf("proposal_sent") + 1, 0, ...retired);
+  return ids.map((id) => ({ id, label: crmStageLabel(id) }));
+}
 
-/** Which lane a record sits in (an unknown stage never disappears: it is shown in the first lane). */
-export const boardColumnFor = (stage: string): string => (BOARD_COLUMN_IDS.includes(stage) ? stage : (BOARD_COLUMN_IDS[0] ?? "new"));
+/** Which lane a record sits in (an unknown stage never disappears: it is shown in the first lane; a retired stage is shown in its own lane). */
+export const boardColumnFor = (stage: string): string => (BOARD_COLUMN_IDS.includes(stage) || isCrmRetiredStage(stage) ? stage : (BOARD_COLUMN_IDS[0] ?? "new"));
 
 export type BoardMoveKind = "stage" | "hold" | "won" | "lost" | "resume";
 
@@ -217,7 +228,7 @@ export function listFromItems<T extends SortableEnquiry>(all: readonly T[], quer
 // ---------------------------------------------------------------------------------------------------------------
 
 /** The recorded facts three stages need before the database lets an enquiry into them (crm_move_stage, migration 20261228000100). */
-export interface StageEvidence { hasSentProposal: boolean; hasQuoteRef: boolean; hasSentEstimate: boolean }
+export interface StageEvidence { hasSentProposal: boolean; hasQuoteRef: boolean }
 export interface BoardRefusal {
   /** What is missing, in the same words as the Move stage dialog on the enquiry's own page. */
   message: string;
@@ -228,13 +239,12 @@ export interface BoardRefusal {
 
 const EVIDENCE_PLACE: Record<string, { tab: string; linkLabel: string }> = {
   proposal_sent: { tab: "proposals", linkLabel: "Open Proposals & files to record it" },
-  estimate_sent: { tab: "quotations", linkLabel: "Open Estimates to record it" },
   quote_sent: { tab: "commercial", linkLabel: "Open Commercial to record it" },
 };
 
 /**
  * Whether a plain move to `to` would be refused for missing evidence, using the SAME rule as the enquiry's own page (`stageMoveRequirement`): Proposal sent needs
- * a proposal recorded as sent, Estimate sent an estimate recorded as sent, Quote sent the Zoho Books quote reference. Null = nothing is missing as far as is
+ * a proposal recorded as sent, Quote sent the Zoho Books quote reference (an estimate recorded as sent is evidence for neither). Null = nothing is missing as far as is
  * known. `evidence` null means it could not be read: nothing is assumed either way, the move is sent and the database decides, as it always does.
  * This only answers sooner and says where to go; it never allows a move the database refuses.
  */

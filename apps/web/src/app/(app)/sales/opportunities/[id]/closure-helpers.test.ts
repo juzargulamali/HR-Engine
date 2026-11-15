@@ -22,7 +22,13 @@ describe("defaultReopenStage", () => {
 });
 
 describe("reopenStageOptions", () => {
-  it("lists exactly the working stages (Estimate sent next to Proposal sent)", () => expect(reopenStageOptions("qualified").map((o) => o.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "estimate_sent", "quote_sent", "negotiation"]));
+  it("lists exactly the working stages (never the retired Estimate sent)", () => expect(reopenStageOptions("qualified").map((o) => o.id)).toEqual(["new", "qualified", "proposal_prep", "proposal_sent", "quote_sent", "negotiation"]));
+  it("an enquiry closed from Estimate sent is never offered it: Proposal preparation is suggested (no evidence needed), and the label says why", () => {
+    const opts = reopenStageOptions("estimate_sent");
+    expect(opts.map((o) => o.id)).not.toContain("estimate_sent");
+    expect(defaultReopenStage("estimate_sent")).toBe("proposal_prep");
+    expect(opts.find((o) => o.isDefault)).toMatchObject({ id: "proposal_prep", label: "Proposal preparation (suggested; it was closed from Estimate sent, which is no longer a stage)" });
+  });
   it("marks the stage it was closed from as the default", () => {
     const opts = reopenStageOptions("quote_sent");
     expect(opts.filter((o) => o.isDefault).map((o) => o.id)).toEqual(["quote_sent"]);

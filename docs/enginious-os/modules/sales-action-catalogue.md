@@ -235,11 +235,11 @@ Shared meanings:
 #### `sales.enquiry.move_stage`
 | Field | Entry |
 |---|---|
-| (1) Reached | `moveStage` (`crm.ts`); `crm_move_stage`; Move stage dialog, panel menu, board drag. **2026-11-14 branch (draft PR #96):** on the enquiry page the dialog opens from the summary's More menu or its main button; on the board a move into Proposal sent, Estimate sent or Quote sent is checked first and, when the evidence is missing, the action is not called at all ([pipeline 2.2](./sales-pipeline-and-stages.md)). The database rule is unchanged |
+| (1) Reached | `moveStage` (`crm.ts`); `crm_move_stage`; Move stage dialog, panel menu, board drag. **2026-11-14 branch (draft PR #96):** on the enquiry page the dialog opens from the summary's More menu or its main button; on the board a move into Proposal sent or Quote sent (Estimate sent is not a target since 2026-11-15) is checked first and, when the evidence is missing, the action is not called at all ([pipeline 2.2](./sales-pipeline-and-stages.md)). The database rule is unchanged |
 | (2) Record | `crm_opportunities` by id and version |
-| (3) Inputs | Target working stage (one step back or any forward) |
+| (3) Inputs | Target working stage (one step back or any forward); **never Estimate sent** (retired 2026-11-15, `20270111000200`: refused with "Estimate sent is no longer a pipeline stage...") |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | A working stage only. Refused: On hold ("Resume first"), Won/Lost, same stage, more than one step back, to On hold/Won/Lost. Proposal sent needs a proposal `sent` or `accepted`; Quote sent needs a non-blank Zoho quote reference |
+| (5) Starting states | A working stage, or the retired Estimate sent for an enquiry left there (it moves out like a step-4 stage). Refused: On hold ("Resume first"), Won/Lost, same stage, more than one step back, to On hold/Won/Lost. Proposal sent needs a proposal `sent` or `accepted`; Quote sent needs a non-blank Zoho quote reference |
 | (6) Changes | `stage`, `stage_changed_at`, `version + 1` |
 | (7) Side effects | Event `stage_changed` (from, to) |
 | (8) Verify | Stage badge; timeline "Stage changed from X to Y." |
@@ -310,7 +310,7 @@ Shared meanings:
 #### `sales.enquiry.reopen`
 | Field | Entry |
 |---|---|
-| (1) Reached | `reopenOpportunity` (`crm.ts`); `crm_reopen_opportunity` |
+| (1) Reached (since `20270111000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) | `reopenOpportunity` (`crm.ts`); `crm_reopen_opportunity` (since `20270111000200`: a reopen into the retired Estimate sent is refused, asked for or as the default of an enquiry closed from it; the dialog offers the six working stages) |
 | (2) Record | `crm_opportunities`, `crm_closures` |
 | (3) Inputs | Reason (required), target working stage (default: where it was closed from, else Negotiation), a new next action (title, date, type) |
 | (4) Permissions | `reopen_closed` capability (founder implies); **not the owner as such** |
@@ -960,7 +960,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | New `crm_approvals` row bound to the estimate's content hash |
 | (3) Inputs | Estimate id |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically) |
+| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically). **No inherited terms** (refused by the app, and by the database since `20270111000100_crm_quote_terms_guard.sql`) |
 | (6) Changes | `crm_approvals` (`pending`, `quote_content_hash`) |
 | (7) Side effects | Event `approval`; founders see it on My Day |
 | (8) Verify | Estimate page "Waiting for a founder" |
@@ -990,7 +990,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | The estimate: `crm_quotations.issued_at`, a frozen `crm_quotation_snapshots` row |
 | (3) Inputs | Complete estimate: currency, VAT, bill-to, at least one item, no empty section, valid dates, milestones adding up; issuing company has a legal name |
 | (4) Permissions | Owner/founder; if policy `required`, a founder's approval of this exact content |
-| (5) Starting states | Draft estimate; open enquiry |
+| (5) Starting states | Draft estimate; open enquiry; **the draft carries no inherited terms** (app: `ensureEstimateFormat`; database since `20270111000100_crm_quote_terms_guard.sql`, not applied: "Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed"; do `sales.estimate.replace_inherited_terms` first, which is itself stop-and-ask) |
 | (6) Changes | `issued_at`, `issued_by`, `issue_date`; snapshot (immutable); **earlier revisions of the same reference that were draft or sent become superseded** |
 | (7) Side effects | Event `proposal` "<ref> rev N issued"; **changes no stage and creates no reservation or Zoho row; sends nothing**; exports now come from the frozen snapshot |
 | (8) Verify | Estimate page shows "finalised"; the PDF download carries no DRAFT marking; the Estimates tab badge |
@@ -1013,19 +1013,36 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (10) Retry | Safe: a second call is refused ("already an unissued revision") |
 | (11) Surface | UI over DB function |
 
+#### `sales.estimate.replace_inherited_terms`
+Added 2026-11-15 (draft PR #98 from `main` `0dffeba`: not merged, hosted SQL not applied, Production not deployed). It uses the existing `crm_quote_save_header`; the database then lets the draft be finalised (`20270111000100_crm_quote_terms_guard.sql`).
+
+| Field | Entry |
+|---|---|
+| (1) Reached | Estimate page of a draft that still carries inherited terms: "Replace with the current estimate format", then the dialog "Yes, replace the terms": `replaceInheritedTerms` (`lib/actions/quotations.ts`); `crm_quote_save_header(p_proposal, {terms_label, terms})` |
+| (2) Record | `crm_quotations` row of that draft |
+| (3) Inputs | The fingerprint of the terms the screen showed (`termsReviewFingerprint`) |
+| (4) Permissions | Owner/founder (`crm_require_owner_or_founder` inside the function), Sales access to the company |
+| (5) Starting states | A draft (not finalised) whose `terms_label` is not an estimate marker or whose `terms` hold a clause other than Assumptions and Next steps; the stored terms still equal what was shown (otherwise refused, nothing written) |
+| (6) Changes | `terms_label` becomes the current estimate marker; `terms` keeps only the person's Assumptions and Next steps. Nothing else. **The revision it was copied from, its snapshot and its files are not touched** |
+| (7) Side effects | The content hash changes, so an approval requested before it is void (none can exist: approval is refused while the terms are inherited) |
+| (8) Verify | The page shows "Terms: current estimate format (selected)"; `crm_quotations.terms_label = 'estimate-format:2'` |
+| (9) STOP | **Yes**: it decides what terms a client document will carry. Approver: the enquiry owner, having read the carried-over clauses |
+| (10) Retry | Safe: a second call finds nothing to replace and writes nothing |
+| (11) Surface | UI over DB function. Not a JARVIS action |
+
 #### `sales.estimate.record_sent`
-Added (2026-11-11, branch `claude/events-first-edition-calendar`, PR #79 not merged at the time of writing; migration `20261228000100_crm_estimate_sent_stage.sql`, **not applied by Claude, hosted status `Unverified`**).
+**Changed 2026-11-15 (draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed; migration `20270111000200`): it never moves the enquiry's stage.** Fields (3), (5), (6), (7) and (8) below are rewritten; history: added (2026-11-11, branch `claude/events-first-edition-calendar`, PR #79 not merged at the time of writing; migration `20261228000100_crm_estimate_sent_stage.sql`, **not applied by Claude, hosted status `Unverified`**).
 
 | Field | Entry |
 |---|---|
 | (1) Reached | Estimates tab, "Record estimate as sent" on a finalised revision: `recordEstimateSent` (`crm.ts`); `crm_record_estimate_sent(p_proposal, p_sent_on, p_move, p_expected_version)` |
 | (2) Record | New `crm_estimate_sends` row (one per estimate revision; `proposal_id` is the exact revision) |
-| (3) Inputs | The date it was actually sent (not in the future, not before the estimate was finalised); whether to also move the enquiry to Estimate sent |
+| (3) Inputs | The date it was actually sent (not in the future, not before the estimate was finalised). `p_move` is always sent as `false` and the function ignores it |
 | (4) Permissions | Owner/founder, with Sales access to the enquiry's company |
-| (5) Starting states | The estimate is finalised and not replaced by a later revision; not yet recorded; the enquiry is not Won or Lost. The move is possible only from New enquiry, Qualified, Proposal preparation or Proposal sent (never backwards; refused on hold) |
-| (6) Changes | The record; with the move, the enquiry's stage and version (`crm_move_stage`). **The estimate's proposal row is not changed** (it never becomes `sent`; no proposal is superseded) |
-| (7) Side effects | Event `proposal` ("Estimate <ref> rev N recorded as sent on <date>", the revision id in `reason`); with the move, event `stage_changed`. It unlocks the Estimate sent stage move for that enquiry only. **Nothing is sent to the client by the system** |
-| (8) Verify | "Sent to client <date>" on the revision's row; the timeline line; the stage if moved |
+| (5) Starting states | The estimate is finalised and not replaced by a later revision; not yet recorded; the enquiry is not Won or Lost (On hold is allowed: only the record is made) |
+| (6) Changes | The record only (`proposal_id` = the exact revision, `reference`, `revision`, `sent_on`, `recorded_by`, `recorded_at`). The enquiry's stage, `stage_changed_at` and version are not changed. **The estimate's proposal row is not changed** (it never becomes `sent`; no proposal is superseded) |
+| (7) Side effects | Event `proposal` ("Estimate <ref> rev N recorded as sent on <date>", the revision id in `reason`). No stage event. It unlocks no stage: it is evidence for neither Proposal sent nor Quote sent. **Nothing is sent to the client by the system** |
+| (8) Verify | "Sent to client <date>", "recorded <date and time> by <name>" on the revision's row; the timeline line; the stage unchanged |
 | (9) STOP | **Yes**: records that an estimate went to the client. Approver: the enquiry owner, with the real send date |
 | (10) Retry | Safe: a second call for the same revision is refused ("already recorded as sent") |
 | (11) Surface | UI over DB function. **Not a JARVIS action**: JARVIS neither records an estimate as sent nor moves an enquiry to or from Estimate sent |
@@ -1252,6 +1269,7 @@ After a handover is submitted, the next steps are Projects screens and functions
 
 ## 8. Totals and gaps
 
+* **69 actions** catalogued in section 3 since 2026-11-15 (`sales.estimate.replace_inherited_terms` added: estimates 13; stop-and-ask 35, of which 26 unconditional; it is safely retryable, so the not-safely-retryable count stays 23 and the others are 46). The lines below are the earlier counts, kept as history.
 * **68 actions** catalogued in section 3 (plus one enabled JARVIS action and six disabled ones in section 3.9, counted separately: they sit on top of the actions below) (enquiries, contacts and files 13; stage changes 6; follow-ups, reminders and the handover notice 8, with `sales.handover_notice.dismiss` added 2026-11-12; proposals, availability, approval and Zoho 9; handover 4; settings and company 4; accounts, import and outreach 9; estimates 12, with `sales.estimate.record_sent` added 2026-11-11; Operations planning 3, section 3.10, added 2026-11-12 on branch `claude/projects-phase-2b-operations`). Plus 6 read-only action groups (section 5), the external-communication table (section 4) and the internal list (section 6).
 * **Flagged stop-and-ask: 34** (25 unconditional, `sales.estimate.record_sent` added 2026-11-11; 9 conditional, `sales.ops.set_planning` added 2026-11-12: `sales.enquiry.edit_details`, `.move_stage`, `sales.followup.complete`, `.reassign`, `sales.account.save_profile`, `sales.outreach.set_status`, `sales.estimate.delete_section`, `.delete_line`, `sales.ops.set_planning`). Unconditional: `sales.enquiry.assign_owner`, `.mark_won`, `.mark_lost`, `.reopen`, `.remove_file`, `sales.contact.update_shared`, `sales.proposal.record_sent`, `.record_accepted`, `.supersede`, `sales.zoho.save_references`, `sales.availability.record_result`, `sales.approval.decide`, `sales.handover.save_and_submit`, `.withdraw`, `.update_legacy`, `sales.settings.save_company`, `.save_vat_choice`, `sales.company.save_issuer_details`, `.upload_logo`, `sales.account.assign_owner`, `sales.import.apply`, `sales.outreach.assign`, `sales.estimate.decide_approval`, `.finalise`.
 * **Not safely retryable without reading first: 23** (was 24: `sales.zoho.save_references` moved out after the merge fix). Duplicate risk (15): `sales.enquiry.create`, `.add_activity`, `.contact_create_and_link`, `.add_link`, `.upload_file`, `sales.contact.create`, `sales.organisation.create_simple`, `sales.followup.create`, `.create_on_account`, `sales.proposal.add_version`, `sales.settings.save_vat_choice`, `sales.account.create`, `sales.outreach.log_activity`, `sales.estimate.create`, `.save_section` (without an id). Repeats a side effect or overwrites (8): `sales.estimate.finalise` (repeats the asset copying; the database itself refuses a second finalisation), `sales.proposal.record_sent`, `sales.availability.request`, `.record_result`, `sales.settings.save_company`, `sales.company.upload_logo`, `sales.contact.update_shared`, `sales.outreach.link_inquiry`. The other 45 (68 less the 23 above; the three Operations planning actions and `sales.handover_notice.dismiss` are among them; this line read 40 while the total was 64, one short since `sales.estimate.record_sent` was added, and 44 while the total was 67) are idempotent, refused on repeat, or protected by a version check (the strongest guards: `sales.import.apply` by batch key and advisory lock, `sales.enquiry.*` stage actions by the version check and by refusing a repeat).
