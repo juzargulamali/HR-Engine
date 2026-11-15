@@ -960,7 +960,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | New `crm_approvals` row bound to the estimate's content hash |
 | (3) Inputs | Estimate id |
 | (4) Permissions | Owner/founder |
-| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically) |
+| (5) Starting states | Draft estimate; policy `required`; none pending (an older pending request for different content is withdrawn automatically). **No inherited terms** (refused by the app, and by the database since `20270112000100_crm_quote_terms_guard.sql`) |
 | (6) Changes | `crm_approvals` (`pending`, `quote_content_hash`) |
 | (7) Side effects | Event `approval`; founders see it on My Day |
 | (8) Verify | Estimate page "Waiting for a founder" |
@@ -990,7 +990,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (2) Record | The estimate: `crm_quotations.issued_at`, a frozen `crm_quotation_snapshots` row |
 | (3) Inputs | Complete estimate: currency, VAT, bill-to, at least one item, no empty section, valid dates, milestones adding up; issuing company has a legal name |
 | (4) Permissions | Owner/founder; if policy `required`, a founder's approval of this exact content |
-| (5) Starting states | Draft estimate; open enquiry |
+| (5) Starting states | Draft estimate; open enquiry; **the draft carries no inherited terms** (app: `ensureEstimateFormat`; database since `20270112000100_crm_quote_terms_guard.sql`, not applied: "Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed"; do `sales.estimate.replace_inherited_terms` first, which is itself stop-and-ask) |
 | (6) Changes | `issued_at`, `issued_by`, `issue_date`; snapshot (immutable); **earlier revisions of the same reference that were draft or sent become superseded** |
 | (7) Side effects | Event `proposal` "<ref> rev N issued"; **changes no stage and creates no reservation or Zoho row; sends nothing**; exports now come from the frozen snapshot |
 | (8) Verify | Estimate page shows "finalised"; the PDF download carries no DRAFT marking; the Estimates tab badge |
@@ -1014,7 +1014,7 @@ All estimate edits go through `crm_quote_load_editable` (owner/founder, estimate
 | (11) Surface | UI over DB function |
 
 #### `sales.estimate.replace_inherited_terms`
-Added 2026-11-15 (draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed). No migration: it uses the existing `crm_quote_save_header`.
+Added 2026-11-15 (draft PR #98 from `main` `0dffeba`: not merged, hosted SQL not applied, Production not deployed). It uses the existing `crm_quote_save_header`; the database then lets the draft be finalised (`20270112000100_crm_quote_terms_guard.sql`).
 
 | Field | Entry |
 |---|---|

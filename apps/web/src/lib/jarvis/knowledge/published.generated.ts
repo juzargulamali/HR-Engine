@@ -3028,7 +3028,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Create an estimate and fill in the details and the items.",
       "Preview, then finalise. A finalised estimate is frozen; make a revision to change it.",
       "After you have sent it to the client, press Record estimate as sent on that revision and confirm the date it went out. The row then shows the sent date, when it was recorded and by whom. The enquiry's stage does not change.",
-      "A revision of a quotation issued before estimates replaced quotations shows the terms it carried over. Read them, then press Replace with the current estimate format and confirm. Until you do, that draft cannot be finalised or sent for approval. The earlier revision and its files stay as issued."
+      "A revision of a quotation issued before estimates replaced quotations shows the terms it carried over. Read them, then press Replace with the current estimate format and confirm. Until you do, that draft cannot be finalised or sent for approval; if you try, you are told to replace the terms carried over into the draft first. The earlier revision and its files stay as issued."
     ],
     "links": [
       {

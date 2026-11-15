@@ -135,7 +135,7 @@ Words and layout of the enquiry's **Estimates** tab only (`opportunities/[id]/qu
 
 ## 6. Revisions of an earlier quotation, and "Record as sent" without a stage (2026-11-15; draft branch `claude/pr1-quotation-revisions-estimate-stage` from `main` `0dffeba`: not merged, CI not yet run, hosted SQL not applied, Production not deployed)
 
-Status, four facts kept apart: merged: no. Required CI: has not run. Hosted database: migration `20270112000200_crm_retire_estimate_sent_stage.sql` (install-order row 42) is **not applied**; part 6.1 needs no SQL. Production: not deployed. Verified on the isolated local stack only.
+Status, four facts kept apart: merged: no. Required CI: has not run. Hosted database: migrations `20270112000100_crm_quote_terms_guard.sql` (install-order row 41, section 6.5) and `20270112000200_crm_retire_estimate_sent_stage.sql` (row 42) are **not applied**; parts 6.1 to 6.3 work without either. Production: not deployed. Verified on the isolated local stack only.
 
 ### 6.1 The defect and its cause
 
@@ -150,12 +150,36 @@ Cause, read in code: `crm_quote_create_revision` copies `terms_label` and `terms
 * **The issued document is never touched**: only the draft's own `crm_quotations` row is written; the earlier revision's row, snapshot (guard triggers) and files are as issued (browser flow compares the snapshot hash before and after, and re-exports revision 1).
 * **A draft download before the step** is marked DRAFT, uses the estimate layout and leaves the inherited clauses out, as before (`doc-model.ts` builds every draft as an estimate).
 * **A revision of a current-format estimate** shows "Selected ... The same format as revision N", needs no step, and saves, finalises and exports as before.
-* **Still open at the database (unchanged, stated):** `crm_quote_issue` itself does not check the marker, so a direct database call by the owner or a founder on an unconverted draft would freeze a quotation-shaped snapshot. The app never makes that call. Closing it needs a migration replacing `crm_quote_issue` (not done: the function is applied and other flows build their legacy fixtures through it).
+* **The database repeats it (section 6.5, migration `20270112000100_crm_quote_terms_guard.sql`, not applied):** `crm_quote_issue` and `crm_quote_request_approval` refuse a draft that still carries inherited terms, whoever calls them.
 
 ### 6.3 Checked against the current estimate workflow
 
-The module reference (section 0 "Format marker", "No acceptance wording"), the browser flow's end state and the code agree on what a client receives from a revision of an earlier quotation: an **Estimate** with the budgetary notice and no standard terms. This change keeps that output exactly and puts a confirmed step in front of it. The flow's expectation that pressing Save draft alone converts the draft was the part that did not match the rule "no silent swap"; the flow now asserts that Save draft keeps the inherited terms and that the confirmed step converts them (`quotations-flow.mjs`, four steps from "its REVISION says the terms were INHERITED"). Open question for the owner: `../05-data-tests-and-release-ledger.md` section D item 20.
+The module reference (section 0 "Format marker", "No acceptance wording"), the browser flow's end state and the code agree on what a client receives from a revision of an earlier quotation: an **Estimate** with the budgetary notice and no standard terms. This change keeps that output exactly and puts a confirmed step in front of it. The flow's expectation that pressing Save draft alone converts the draft was the part that did not match the rule "no silent swap"; the flow now asserts that Save draft keeps the inherited terms and that the confirmed step converts them (`quotations-flow.mjs`, four steps from "its REVISION says the terms were INHERITED"). **Decided by the owner on 2026-11-15** (`../05-data-tests-and-release-ledger.md` section D items 20 to 22): keep the confirmed step; add the database guard (6.5); keep the send history in Estimates with no stage.
 
 ### 6.4 "Record as sent" and the stage
 
 Section 2.1 row "Record estimate as sent" as rewritten; the full account of the retired stage is [`sales-pipeline-and-stages.md`](./sales-pipeline-and-stages.md) section 8.
+
+### 6.5 The database guard (owner decision, 2026-11-15; migration `20270112000100_crm_quote_terms_guard.sql`, install-order row 41; not applied by Claude)
+
+* **Rule, one definition in two places kept identical:** `termsReview` (`packages/domain/src/estimates.ts`) and `crm_quote_terms_need_review(label, terms)` (the migration). A draft's terms need review unless (1) `terms_label` is an estimate format marker of a known version (`estimate-format:1` or `estimate-format:2`) and (2) every clause of `terms` is titled Assumptions or Next steps. "Confirmed" needs no new column: the confirmed step writes exactly that marker and keeps only those clauses. The same 15 vectors are asserted against both (`packages/domain/test/estimates.test.ts`, `packages/rls-tests/test/crm-quote-terms-guard.rls.test.ts`). A new format version must be added in both places together.
+* **What refuses:** `crm_quote_issue` ("Replace the terms carried over into this draft with the current estimate format before finalising it (estimate page, Details step). Nothing was changed") and `crm_quote_request_approval` (the same sentence, "before requesting approval"). Same signatures; each is the applied body of `20261220000100` plus that one check right after the draft is loaded. The app refuses earlier with its own sentence, so staff meet the database's words only through a direct call or a stale page.
+* **What it never touches:** issued documents. Both functions load a draft through `crm_quote_load_editable`, which refuses an issued one first; no row, snapshot, file or approval is rewritten or re-validated. Proved: the snapshot and hash of a quotation issued before the migration are identical before and after it, after the refusals and after its revision is finalised; it is still readable and can still be revised (RLS test "ISSUED DOCUMENTS ARE UNTOUCHED"); in the browser it still opens and exports as a Quotation with its terms (`quotations-flow.mjs`).
+* **Existing drafts:** not changed. The read-only preflight counts, per company, the drafts that hold inherited terms (and how many are revisions, and how many have an approval waiting) and lists each one. After the migration each needs the confirmed step before it can go out.
+* **Rollback:** `crm_quote_terms_guard_90_rollback.sql` restores the exact earlier two functions and drops the rule function.
+* **Local fixtures:** a "quotation issued before the change" can no longer be issued on a database that has the guard, so `quotations-flow.mjs` issues its fixture with the guard rolled back and applies it again (as on hosted, where such documents predate it).
+
+### 6.6 Release sequence, verified state by state on the isolated stack (2026-11-15)
+
+Apply order: **(1) guard `20270112000100` at any time, also before the app deploy; (2) deploy the app; (3) stage removal `20270112000200`.** Each state was driven in a browser as emp@ (owner) with the build named, plus direct database calls as the owner and a founder.
+
+| State | Build | Guard | Stage removal | Revision of an earlier quotation | Ordinary estimate | Record estimate as sent | Estimate sent stage |
+|---|---|---|---|---|---|---|---|
+| A | deployed (`main` `0dffeba`) | yes | no | Finalises through the screen as an estimate (that build converts by itself just before finalising); a direct database call is refused | Finalises | Works as today (its box moves the stage) | Offered, as today |
+| A2 (if both are applied before the deploy) | deployed | yes | yes | as A | Finalises | Recorded; the ticked box does nothing, the stage stays | Still listed by that build; choosing it is refused in words |
+| B (the deploy moment) | this branch | no | no | Inherited terms shown; Finalise held until Replace and confirm; then an estimate. A direct database call is still allowed (the gap the guard closes) | Finalises | Recorded, no box, stage stays | Not offered; the database would still accept a direct move |
+| C | this branch | yes | no | as B, and the direct database call is refused | Finalises | as B | as B |
+| D (final) | this branch | yes | yes | as C | Finalises | as B | Not offered; the database refuses a move into it |
+| Alternative (not recommended) | this branch | no | yes | as B (direct call still allowed) | Finalises | as B | as D |
+
+In every state the earlier quotation's snapshot was unchanged. The alternative order works too; it only leaves the direct-call gap open longer. Evidence: scratch script output recorded in `06-change-log.md` (entry of 2026-11-15); final state also by `quotations-flow.mjs` and `estimate-sent-record-flow.mjs`.

@@ -164,7 +164,7 @@ Never: an estimate recorded as sent treated as a sent proposal or as the Zoho qu
 
 ### 8.4 Rollout order and compatibility with the deployed app (`main` `0dffeba`)
 
-Either order is safe; **recommended: deploy the app, then run the SQL.**
+Either order is safe; **decided sequence: the terms guard (row 41) at any time, the app deploy, then this migration (row 42).** State table, verified in a browser with both builds: [`sales-estimates-and-quotations.md`](./sales-estimates-and-quotations.md) section 6.6.
 
 * New app before the SQL: nothing offers the stage or the move, `p_move` is always `false`, and an enquiry at Estimate sent is shown as above. The earlier database functions still accept the old calls, which nothing sends.
 * SQL before the new app: the deployed app's Record estimate as sent still works (it calls `crm_record_estimate_sent` with `p_move = true` when its box is ticked: the send is recorded and the stage stays; the ticked box then does nothing). Choosing Estimate sent in Move stage, on the board or when reopening is refused with a sentence the deployed app shows. The deployed app renders every stage value, moved or not.
@@ -172,6 +172,6 @@ Either order is safe; **recommended: deploy the app, then run the SQL.**
 
 ### 8.5 Verification (local only)
 
-* RLS `packages/rls-tests/test/crm-retire-estimate-sent.rls.test.ts` (17 tests, real PostgreSQL 16): eleven enquiries put at the stage with the functions the deployed app uses, across two companies; the preflight's proposal equals what the migration did; ambiguous ones kept; no move past a gate; history hashes unchanged; second run changes nothing; `p_move = true` records and leaves the stage; refusals; owner, founder, colleague and other-company boundaries; rollback exact.
+* RLS `packages/rls-tests/test/crm-retire-estimate-sent.rls.test.ts` (16 tests, real PostgreSQL 16): eleven enquiries put at the stage with the functions the deployed app uses, across two companies; the preflight's proposal equals what the migration did; ambiguous ones kept; no move past a gate; history hashes unchanged; second run changes nothing; `p_move = true` records and leaves the stage; refusals; owner, founder, colleague and other-company boundaries; rollback exact.
 * Browser `apps/web/os-shell-checks/estimate-sent-record-flow.mjs` (isolated local stack, emp@, ceo@, mgr@): see `apps/web/os-shell-checks/README.md`.
 * **Not verified:** anything hosted (the preflight was never run against hosted data: the counts and the ambiguous list are unknown until the owner runs it); a signed-in Preview or Production check; a real phone.
