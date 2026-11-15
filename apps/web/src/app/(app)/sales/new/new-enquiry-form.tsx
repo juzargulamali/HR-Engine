@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, TriangleAlert, X } from "lucide-react";
+import { useSubmissionKey } from "@/components/sales/use-submission-key";
 import { CRM_SOURCES, crmStageLabel, type DuplicateMatch } from "@enginious-hr/domain";
 import { checkDuplicates, createOpportunity } from "@/lib/actions/crm";
 import type { ActionState } from "@/lib/actions/companies";
@@ -298,6 +299,7 @@ export function NewEnquiryForm({
   prefillIgnored?: readonly string[];
 }) {
   const [state, formAction, pending] = useActionState(createOpportunity, initialState);
+  const submissionKey = useSubmissionKey();
   const [clientError, setClientError] = useState<string | null>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   // A second click or Enter while the first save is on its way must not send the enquiry twice. `pending` only changes with the next render, so the lock is a
@@ -441,6 +443,8 @@ export function NewEnquiryForm({
     <>
       <form onSubmit={onSubmit} className="grid gap-6 lg:grid-cols-3">
         {prefill?.outreachId ? <input type="hidden" name="outreachId" value={prefill.outreachId} /> : null}
+        {/* One identifier for this opened form: saving it again (after a lost answer) returns the enquiry already saved instead of making a second one. */}
+        {submissionKey ? <input type="hidden" name="submissionKey" value={submissionKey} /> : null}
         <div className="min-w-0 space-y-6 lg:col-span-2">
           {prefill?.outreachId ? (
             <Alert role="status" data-testid="enquiry-carried-over"><strong>Carried over from outreach: check before saving.</strong> The account, the company and anything else below came from the outreach. Saving links this enquiry to that outreach.</Alert>

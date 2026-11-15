@@ -108,11 +108,29 @@ export async function createOpportunity(_prev: ActionState, formData: FormData):
   if (!company.settings) return { error: `${company.name} has no Sales settings yet (reference code and default currency), so an enquiry cannot be recorded for it.` };
 
   const supabase = await createClient();
+  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
+  // The form's submission identifier (made when the form opened, sent with every attempt to save it). With it, ONE database call decides: a first attempt creates
+  // the enquiry; the same identifier again (a retry after the answer was lost, a double click that got past the browser) returns the enquiry ALREADY saved and
+  // creates nothing; an outreach that already has an enquiry returns that one (crm_create_enquiry, 20270112000400). A form without an identifier, and a database
+  // without that function, take the earlier path below.
+  const submissionKey = uuid.safeParse(formData.get("submissionKey"));
+  if (submissionKey.success) {
+    const made = await supabase.rpc("crm_create_enquiry", { p_fields: enquiryFields(d, nextDue), p_submission_key: submissionKey.data, p_outreach_id: fromOutreach.success ? fromOutreach.data : null });
+    if (!made.error) {
+      const res = parseCreateResult(made.data);
+      if (!res) return { error: "The enquiry may have been saved, but the answer could not be read. Open Enquiries to check before saving again." };
+      refresh();
+      if (res.created) return afterCreate(supabase, formData, d, res.id);
+      if (res.existing === "outreach") return { error: OUTREACH_HAS_ENQUIRY, existingEnquiryId: res.id };
+      // The same form was already saved: open that enquiry and say so. Nothing typed after the first save was applied.
+      redirect(`/sales/opportunities/${res.id}?saved=earlier`);
+    }
+    if (!isMissingDatabaseFunction(made.error)) return fail(made.error.message);
+  }
   // Raised from an outreach: an outreach holds ONE enquiry (crm_outreach.opportunity_id, set by crm_outreach_link_inquiry). A tab left open after the enquiry was
   // already raised would otherwise create a second, unlinked one. So the outreach is read first, as the signed-in person: if it already has an enquiry nothing is
   // created and the person is sent to that one. A check that fails saves nothing and says so; it never goes ahead as if there were none. (An outreach the person
   // cannot read comes back as no row: the enquiry is created and the link step below reports its own refusal, as before.)
-  const fromOutreach = uuid.safeParse(formData.get("outreachId"));
   if (fromOutreach.success) {
     const outreach = await (supabase as unknown as SupabaseClient).from("crm_outreach").select("opportunity_id").eq("id", fromOutreach.data).maybeSingle();
     if (outreach.error) return { error: "Could not check whether this outreach already has an enquiry, so nothing was saved. What you entered is still here: try again." };

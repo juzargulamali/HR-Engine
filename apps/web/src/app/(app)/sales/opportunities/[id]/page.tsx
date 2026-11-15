@@ -31,8 +31,8 @@ const BACK = {
   enquiries: { section: "enquiries", fallback: "/sales/opportunities", label: "Enquiries" },
 } as const;
 
-export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; event_link?: string; from?: string }> }) {
-  const [{ id }, { tab, event_link: eventLink, from }] = await Promise.all([params, searchParams]);
+export default async function OpportunityPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ tab?: string; event_link?: string; from?: string; saved?: string }> }) {
+  const [{ id }, { tab, event_link: eventLink, from, saved }] = await Promise.all([params, searchParams]);
   const back = from === "follow-ups" ? BACK["follow-ups"] : BACK.enquiries;
   const backLink = <BackLink section={back.section} fallback={back.fallback}>{back.label}</BackLink>;
   const ctx = await getCrmContext();
@@ -87,6 +87,10 @@ export default async function OpportunityPage({ params, searchParams }: { params
           <h1 className="mt-1 min-w-0 break-words text-2xl font-semibold">{opp.title}</h1>
         </div>
 
+        {/* The New enquiry form was saved a second time (a retry after the answer to the first save was lost): the database returned this enquiry instead of making another. */}
+        {saved === "earlier" ? (
+          <Alert role="status" data-testid="enquiry-already-saved">This enquiry was already saved by your earlier attempt, so a second one was not created. This is that enquiry. Anything you changed in the form after the first save was not applied: check the details below and edit them here if needed.</Alert>
+        ) : null}
         {eventLink === "failed" ? (
           <Alert variant="warning" role="status">The enquiry was created, but it could not be linked to the event edition you chose (only the enquiry owner or a founder can link it). Ask the owner, or use Edit details (under More) to link it.</Alert>
         ) : null}
