@@ -10,7 +10,7 @@ import {
   gapText, effectiveReadyText, EFFECTIVE_LABELS, type SiteActivity, type SiteBriefing, type SiteSchedule, type SiteShipment,
 } from "@/lib/projects/phase2/model";
 import { dateText } from "@/lib/projects/format";
-import { describeSitePhase } from "@/lib/projects/site-state";
+import { siteActivityState } from "@/lib/projects/site-state";
 import { projectReadyText } from "@/lib/projects/site-assignments";
 
 const KIND_BAR: Record<string, string> = { setup: "bg-[hsl(var(--os-info))] border-[hsl(var(--os-info))]", show: "bg-[hsl(var(--os-green))] border-[hsl(var(--os-green))]", dismantling: "bg-[hsl(var(--os-amber))] border-[hsl(var(--os-amber))]", mockup: "bg-muted-foreground border-muted-foreground", other: "bg-muted-foreground border-muted-foreground" };
@@ -29,7 +29,7 @@ function ActivityRow({ a, projectId, schedule, canEdit, members, briefing }: { a
         <div className="min-w-0 flex-1 basis-64">
           <p className="break-words text-sm"><span className="font-medium">{a.title}</span> <span className="text-[13px] text-muted-foreground">{a.kind ? ACTIVITY_KIND_LABELS[a.kind] : "Activity"}</span></p>
           <p className="break-words text-[13px] font-medium" data-testid={`site-when-${a.id}`}>{activityWhen(a, schedule.tz)}</p>
-          {briefing?.phase ? (() => { const st = describeSitePhase(briefing.phase); return <p className={cn("break-words text-[13px]", st.tone === "green" ? "text-[hsl(var(--os-green))]" : st.tone === "amber" ? "text-[hsl(var(--os-amber))]" : st.tone === "blue" ? "text-[hsl(var(--os-info))]" : "text-muted-foreground")} data-testid={`site-phase-${a.id}`}><span className="font-medium">{st.label}</span>{st.detail ? <span className="text-muted-foreground"> · {st.detail}</span> : null}</p>; })() : null}
+          {briefing?.phase || a.status === "done" ? (() => { const st = siteActivityState(briefing?.phase, a.status); return <p data-state={st.key} className={cn("break-words text-[13px]", st.tone === "green" ? "text-[hsl(var(--os-green))]" : st.tone === "amber" ? "text-[hsl(var(--os-amber))]" : st.tone === "blue" ? "text-[hsl(var(--os-info))]" : "text-muted-foreground")} data-testid={`site-phase-${a.id}`}><span className="font-medium">{st.label}</span>{st.detail ? <span className="text-muted-foreground"> · {st.detail}</span> : null}</p>; })() : null}
           {briefing && !a.start_date && !a.starts_at && briefing.effective.start_date && briefing.effective.date_source === "project" ? <p className="break-words text-[13px]" data-testid={`site-project-date-${a.id}`}>{dateText(briefing.effective.start_date)}{briefing.effective.end_date && briefing.effective.end_date !== briefing.effective.start_date ? ` to ${dateText(briefing.effective.end_date)}` : ""} <span className="text-muted-foreground">(from the project dates; the time is not set)</span></p> : null}
           <p className="break-words text-[13px] text-muted-foreground" data-testid={`site-venue-${a.id}`}>{a.location ?? (briefing?.effective.venue ? `${briefing.effective.venue} (the project's venue)` : "No venue")} · Owner {a.owner_name ?? "not named"}</p>
           {a.crew.length > 0 ? <p className="break-words text-[13px]" data-testid={`site-crew-text-${a.id}`}>{Object.entries(crewByRole).map(([r, n]) => `${CREW_ROLE_LABELS[r as keyof typeof CREW_ROLE_LABELS]}: ${n.join(", ")}`).join(" · ")}</p> : null}

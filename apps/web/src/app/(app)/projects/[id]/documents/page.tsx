@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { AddFileForms, OpenFileButton, RemoveFileButton } from "./file-forms";
 import { IssueTimelineForm, RecordAcceptedForm, RecordSentForm } from "./plan-forms";
 import { ClientTimelinePicker, type PickerRow } from "./client-timeline-picker";
+import { ClientTimelineTaskPicker, type TaskPickRow } from "./client-timeline-task-picker";
 import { PlanTable } from "./plan-table";
 import { planItemWhen } from "../timeline/timeline-helpers";
 import { PLAN_KIND_LABELS } from "@/lib/projects/plan-view";
@@ -45,14 +46,25 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
   const finished = isFinishedProject(project.status);
   const isClient = project.kind === "client";
 
-  const [filesRes, plansRes, outdatedRes, previewRes, pickMilestonesRes, pickItemsRes] = await Promise.all([
+  const [filesRes, plansRes, outdatedRes, previewRes, pickMilestonesRes, pickItemsRes, pickTasksRes, chosenTasksRes] = await Promise.all([
     supabase.from("proj_files").select("*").eq("project_id", id).is("deleted_at", null).order("created_at", { ascending: false }),
     isClient ? supabase.from("proj_issued_plans").select("*").eq("project_id", id).order("version", { ascending: false }) : Promise.resolve({ data: [] }),
     isClient ? supabase.rpc("proj_plan_outdated", { p_project_id: id }) : Promise.resolve({ data: null }),
-    isClient && view.canManage ? supabase.rpc("proj_current_plan_payload", { p_project_id: id }) : Promise.resolve({ data: null }),
+    // The preview is the payload exactly as it would be issued now, with its fingerprint: issuing sends the fingerprint back, so only this preview can be issued.
+    isClient && view.canManage ? supabase.rpc("proj_plan_preview", { p_project_id: id }) : Promise.resolve({ data: null, error: null }),
     isClient && view.canManage ? supabase.from("proj_milestones").select("id, title, due_date, client_facing, version").eq("project_id", id).order("sort_order").limit(300) : Promise.resolve({ data: null }),
     isClient && view.canManage ? supabase.from("proj_plan_items").select("id, plan, title, start_date, end_date, starts_at, ends_at, tz, client_facing, version, status, sort_order").eq("project_id", id).neq("status", "cancelled").order("sort_order").limit(300) : Promise.resolve({ data: null }),
+    // Individual tasks that could be chosen, and the ones already chosen (readable by the project's managers only). Never read for anyone else.
+    isClient && view.canManage ? supabase.from("proj_tasks").select("id, title, start_date, due_date, status").eq("project_id", id).neq("status", "cancelled").order("due_date", { nullsFirst: false }).order("title").limit(300) : Promise.resolve({ data: null, error: null }),
+    isClient && view.canManage ? supabase.from("proj_client_timeline_tasks").select("task_id, client_title").eq("project_id", id) : Promise.resolve({ data: null, error: null }),
   ]);
+  const tasksFailed = Boolean(pickTasksRes.error || chosenTasksRes.error);
+  const chosenTitle = new Map((chosenTasksRes.data ?? []).map((c) => [c.task_id, c.client_title]));
+  const TASK_STATUS: Record<string, string> = { todo: "To do", in_progress: "In progress", ready_for_review: "Ready for review", done: "Done", deferred: "Deferred" };
+  const taskRows: TaskPickRow[] = (pickTasksRes.data ?? []).map((t) => ({
+    id: t.id, title: t.title, statusLabel: TASK_STATUS[t.status] ?? t.status, chosen: chosenTitle.has(t.id), clientTitle: chosenTitle.get(t.id) ?? null,
+    when: t.start_date && t.due_date ? `${formatDate(t.start_date)} to ${formatDate(t.due_date)}` : t.due_date ? `Due ${formatDate(t.due_date)}` : t.start_date ? `From ${formatDate(t.start_date)}` : "No date",
+  }));
   // The existing milestones and timeline activities, as tick boxes (a failed read just hides the chooser; the preview and issued versions still show).
   const pickRows: PickerRow[] = [
     ...(pickMilestonesRes.data ?? []).map((m) => ({ kind: "mile" as const, id: m.id, title: m.title, when: m.due_date ? `Due ${formatDate(m.due_date)}` : "No date", group: "Milestones", clientFacing: m.client_facing, version: m.version })),
@@ -64,7 +76,10 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
   const files = filesRes.data ?? [];
   const plans = plansRes.data ?? [];
   const outdated = outdatedRes.data === true;
-  const preview = (previewRes.data ?? null) as IssuedPlanPayload | null;
+  const previewData = (previewRes.data ?? null) as { payload?: IssuedPlanPayload; hash?: string } | null;
+  const preview = previewData?.payload ?? null;
+  const previewHash = typeof previewData?.hash === "string" ? previewData.hash : null;
+  const previewFailed = isClient && view.canManage && (Boolean(previewRes.error) || !preview || !previewHash);
   const today = todayIso();
   const latest = plans.find((p) => !p.superseded_at) ?? null;
 
@@ -119,8 +134,8 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
       <Panel
         title="Client timeline"
         description="Issued versions are frozen."
-        hint={<>The timeline the client sees: only the milestones, activities and dependencies the Project Manager marked client-facing. Nothing is client-facing by default; mark items on their own pages. It never contains internal tasks, discussions, staff notes, commercial figures or confidential attachments.</>}
-        actions={isClient && view.canManage && !finished ? <IssueTimelineForm projectId={id} reference={project.reference} hasIssued={plans.length > 0} /> : null}
+        hint={<>The timeline the client sees: only the milestones, activities, dependencies and individual tasks the Project Manager chose. Nothing is client-facing by default. Of a chosen task the client sees a title, its dates and its status in plain words. It never contains task notes, files or outputs, who a task is assigned to, why something is blocked, discussions, staff notes, commercial figures or confidential attachments.</>}
+        actions={isClient && view.canManage && !finished && previewHash && !previewFailed ? <IssueTimelineForm projectId={id} reference={project.reference} hasIssued={plans.length > 0} previewHash={previewHash} /> : null}
       >
         {!isClient ? (
           <Muted>Client timelines are for client projects. This is an internal project, so there is nothing to issue.</Muted>
@@ -140,13 +155,23 @@ export default async function DocumentsPage({ params }: { params: Promise<{ id: 
                 ) : (
                   <ClientTimelinePicker projectId={id} rows={pickRows} canEdit={!finished} />
                 )}
+                <div id="choose-client-tasks" className="mt-5" data-testid="ct-choose-tasks">
+                  <h4 className="mb-2 text-sm font-semibold">Individual tasks (optional)</h4>
+                  {tasksFailed ? (
+                    <Alert variant="warning" role="alert" data-testid="ct-tasks-load-error">The tasks could not be loaded, so they cannot be chosen right now. Reload the page to try again. Tasks already chosen stay on the preview below.</Alert>
+                  ) : taskRows.length === 0 ? (
+                    <Muted>This project has no tasks to choose from.</Muted>
+                  ) : (
+                    <ClientTimelineTaskPicker projectId={id} rows={taskRows} canEdit={!finished} />
+                  )}
+                </div>
               </div>
             ) : null}
 
             {view.canManage ? (
               <div id="issue-preview" data-testid="ct-preview">
-                <h3 className="mb-2 text-sm font-semibold">2. Preview: what would be issued now<InfoHint label="what would be issued" className="ml-1">This is the live preview of the next version, built from the ticks above plus any client-facing dependencies (marked on the Delivery timeline page). Nothing is sent until a version is issued and a person records it as sent.</InfoHint></h3>
-                {preview ? <PlanTable payload={preview} /> : <Muted>The preview is not available.</Muted>}
+                <h3 className="mb-2 text-sm font-semibold">2. Preview: what would be issued now<InfoHint label="what would be issued" className="ml-1">This is the live preview of the next version, built from the ticks above plus any client-facing dependencies (marked on the Delivery timeline page). It is exactly what the client would receive: issuing freezes this preview and nothing else. Nothing is sent until a version is issued and a person records it as sent.</InfoHint></h3>
+                {previewFailed ? <Alert variant="warning" role="alert" data-testid="ct-preview-load-error">The preview could not be loaded, so a new version cannot be issued right now. Reload the page to try again.</Alert> : <PlanTable payload={preview!} />}
               </div>
             ) : null}
 

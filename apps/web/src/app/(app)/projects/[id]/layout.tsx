@@ -18,6 +18,7 @@ import { handoverHref } from "@/lib/projects/handover-list";
 import { manageItems, projectTabs } from "@/lib/projects/workspace-nav";
 import { createClient } from "@/lib/supabase/server";
 import { BackLink } from "@/components/workspace/list-memory";
+import { BackToCalendar } from "@/components/projects/calendar/back-to-calendar";
 import { LoadError } from "@/components/workspace/states";
 
 /**
@@ -82,7 +83,11 @@ export default async function ProjectLayout({ children, params }: { children: Re
 
   return (
     <div className="space-y-4">
-      <BackLink section="projects" fallback="/projects">All projects</BackLink>
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-1">
+        <BackLink section="projects" fallback="/projects">All projects</BackLink>
+        {/* Shown only on a record opened from a calendar entry: returns to that calendar with its date, view and filters. */}
+        <BackToCalendar projectId={id} />
+      </div>
       <OsHero
         eyebrow={project.reference}
         title={project.name}

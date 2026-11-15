@@ -27,6 +27,8 @@ export interface BoardProject {
   next: { text: string; detail: string | null; href: string | null; needsAction: boolean } | null;
   /** Set when the team has no leads, or no members besides the Project Manager: the words and where to put it right. */
   team: { label: string; manageHref: string } | null;
+  /** Set only on a project that has work packages: the compact count, its full wording and where it opens. */
+  workPackages?: { short: string; long: string; attention: boolean; href: string } | null;
 }
 
 const LANES = DIRECTORY_LANES.map((l) => ({ id: l, label: projectStatusLabel(l) }));
@@ -60,6 +62,7 @@ export function ProjectBoard({ projects }: { projects: BoardProject[] }) {
               {p.next.detail ? <span className="block break-words text-[13px] text-muted-foreground">{p.next.detail}</span> : null}
             </div>
           ) : null}
+          {p.workPackages ? <p className="text-[13px]"><Link href={p.workPackages.href} title={p.workPackages.long} aria-label={p.workPackages.long} className={p.workPackages.attention ? "text-[hsl(var(--os-amber))] underline-offset-2 hover:underline" : "text-muted-foreground underline-offset-2 hover:underline"}>{p.workPackages.short}{p.workPackages.attention ? " · review" : ""}</Link></p> : null}
           {p.team ? <p className="text-sm"><span className="text-[hsl(var(--os-amber))]">⚠ {p.team.label}</span> <Link href={p.team.manageHref} className="font-medium underline underline-offset-2">Manage team</Link></p> : null}
           <KindBadge kind={p.kind} ongoing={p.isOngoing} />
         </div>

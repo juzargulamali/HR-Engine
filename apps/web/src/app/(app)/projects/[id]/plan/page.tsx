@@ -21,7 +21,8 @@ import { bookablePeople, canBookPerson, sortPlanItems } from "../timeline/timeli
 import { PlanSwitch } from "./_controls";
 import { InfoHint } from "@/components/ui/info-hint";
 import { SiteSchedulePanel, SiteTimelineStrip } from "@/components/projects/site/site-views";
-import type { SiteBriefing } from "@/lib/projects/phase2/model";
+import type { SiteActivityRead, SiteBriefing } from "@/lib/projects/phase2/model";
+import { RememberList } from "@/components/workspace/list-memory";
 import { loadSiteSchedule } from "@/lib/projects/phase2/data";
 import { memberOptions } from "@/lib/projects/data";
 import { BookingCard, ConflictList, DependencyRow, PlanSection } from "./_sections";
@@ -73,8 +74,14 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
     const cal = parseCalendarParams(sp, today, planKinds.map((k) => k.id));
     const range = fetchRange(cal.view, cal.date);
     const supabase = await createClient();
-    const { data, error } = await supabase.rpc("proj_project_calendar", { p_project_id: id, p_from: range.from, p_to: range.to, p_view_tz: cal.tz });
-    const inPlan = mapProjectRows(data ?? [], id, project.reference, project.name).filter((e) => planKinds.some((k) => k.id === e.kind));
+    // Site activities are worded from the database phase by the shared state function (the same read and the same words as the Site schedule, Work and Operations): one bounded read.
+    const [{ data, error }, phaseRes] = await Promise.all([
+      supabase.rpc("proj_project_calendar", { p_project_id: id, p_from: range.from, p_to: range.to, p_view_tz: cal.tz }),
+      plan === "site" ? supabase.rpc("proj_site_activities_read", { p_company_id: project.company_id, p_project_id: id, p_limit: 300 }) : Promise.resolve({ data: null, error: null }),
+    ]);
+    const phasesFailed = plan === "site" && (Boolean(phaseRes.error) || !Array.isArray(phaseRes.data));
+    const sitePhases = plan !== "site" ? undefined : phasesFailed ? null : Object.fromEntries((phaseRes.data as unknown as SiteActivityRead[]).filter((r) => r?.id && r.phase).map((r) => [r.id, r.phase]));
+    const inPlan = mapProjectRows(data ?? [], id, project.reference, project.name, sitePhases).filter((e) => planKinds.some((k) => k.id === e.kind));
     const entries = filterKinds(inPlan, cal.kinds);
     return (
       <div className="space-y-4">
@@ -82,10 +89,14 @@ export default async function PlanPage({ params, searchParams }: { params: Promi
         {error ? (
           <LoadError what="the calendar" retryHref={planHref(id, sp, {})} />
         ) : (
+          <>
+          <RememberList section={`plan-calendar-${id}`} />
+          {phasesFailed ? <Alert variant="warning" role="alert" data-testid="calendar-phase-error">The state of the site activities could not be loaded, so each one says its state is not available. Reload the page to try again.</Alert> : null}
           <CalendarShell
             basePath={`/projects/${id}/plan`} params={cal} keep={{ plan, mode: "calendar" }} today={today} entries={entries} kindOptions={planKinds} timeZoneSelect
             emptyText={plan === "site" ? "Nothing is dated on site in this period: no site timeline items, bookings or dependencies." : "Nothing is dated in this period: no milestones, deliverables, task deadlines or delivery timeline items."}
           />
+          </>
         )}
       </div>
     );

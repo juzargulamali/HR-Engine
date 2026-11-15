@@ -98,7 +98,7 @@ export function EntryLine({ e, viewTz, showProject, compact = false }: { e: Disp
         <span className="text-muted-foreground">{e.kindLabel}: </span>
         <Link href={e.href} className="font-medium underline-offset-2 hover:underline">{e.title}</Link>
       </p>
-      <p className="break-words text-muted-foreground">
+      <p className="break-words text-muted-foreground" data-testid="calendar-entry-state" data-entry={e.id} data-state={e.status ?? undefined}>
         {[showProject && e.projectRef ? `${e.projectRef}${e.projectName ? ` ${e.projectName}` : ""}` : null, e.statusLabel, e.detail].filter(Boolean).join(" · ")}
       </p>
       {when ? (

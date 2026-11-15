@@ -25,7 +25,7 @@ import { firstParam, nextSort, parseRecordId, parseSort, parseView, sortToParam,
 import { ViewSwitch } from "@/components/workspace/view-switch";
 import { getProjectsContext } from "@/lib/projects/context";
 import { loadDirectoryResult, loadProjectEditions } from "@/lib/projects/data";
-import { buildActivityPreviews, noCommitmentText, pickNextCommitment, teamStanding, type ActivityPreview, type Commitment } from "@/lib/projects/list-extras";
+import { buildActivityPreviews, countWorkPackages, noCommitmentText, pickNextCommitment, teamStanding, workPackageText, type ActivityPreview, type Commitment, type WorkPackageCount } from "@/lib/projects/list-extras";
 import type { SiteActivityRead } from "@/lib/projects/phase2/model";
 import { canChangeStatus, canSeeProjectDetails, DEFAULT_DIRECTORY_SORT, DIRECTORY_SORT_KEYS, editionChoices, filterByEdition, milestoneProjectIds, nextMilestones, sortDirectory, type ProjectEdition } from "@/lib/projects/directory";
 import { dateRangeText, formatDate, todayIso } from "@/lib/projects/format";
@@ -94,6 +94,9 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   let teamError = false;
   let previews = new Map<string, ActivityPreview>();
   let activityError = false;
+  // Work packages: counted from one read for the whole page (the same pattern as the team standing), shown only on a project that has some.
+  let workPackages = new Map<string, WorkPackageCount>();
+  let workPackageError = false;
   // Milestones are asked for in the table only; the board and the commitment column use the same read, so the board asks too.
   if (wantsExtras && view === "board") {
     const { data, error: mErr } = await supabase.from("proj_milestones").select("project_id, title, due_date, status").in("project_id", detailIds).in("status", ["planned", "in_progress", "ready_for_acceptance"]).not("due_date", "is", null);
@@ -102,12 +105,15 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
   }
   if (wantsExtras) {
     const companyIdsInList = [...new Set(rows.filter((r) => detailIds.includes(r.id)).map((r) => r.company_id))];
-    const [siteReads, teamsRes, membersRes, logRes] = await Promise.all([
+    const [siteReads, teamsRes, membersRes, logRes, packagesRes] = await Promise.all([
       Promise.all(companyIdsInList.map((cid) => supabase.rpc("proj_site_activities_read", { p_company_id: cid, p_limit: 300 }))),
       supabase.from("proj_teams").select("project_id, head_user_id").in("project_id", detailIds).is("removed_at", null),
       supabase.from("proj_project_members").select("project_id").in("project_id", detailIds).is("removed_at", null),
       supabase.from("proj_change_log").select("id, project_id, entity_type, entity_id, field, from_value, to_value, note, actor_id").in("project_id", detailIds).order("id", { ascending: false }).limit(60),
+      supabase.from("proj_deliverables").select("project_id, status").in("project_id", detailIds).neq("status", "cancelled").limit(2000),
     ]);
+    if (packagesRes.error) workPackageError = true;
+    else workPackages = countWorkPackages(packagesRes.data ?? []);
     for (const r of siteReads) {
       if (r.error) { if (!/does not exist|schema cache|42883|PGRST202/i.test(`${r.error.code} ${r.error.message}`)) siteError = true; continue; }
       if (Array.isArray(r.data)) siteActivities.push(...(r.data as unknown as SiteActivityRead[]));
@@ -168,6 +174,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
       href: detailsHref(p.id, details), panel: !details, canMove: canChangeStatus(p, ctx.userId, ctx.grants), unread: unreadBy.get(p.id) ?? 0,
       next: !details ? null : { text: c?.text ?? none.text, detail: c?.detail ?? (siteError || milestoneError ? "Not available just now" : none.detail), href: c?.href ?? null, needsAction: c?.needsAction ?? false },
       team: team && team.label ? { label: team.label, manageHref: `/projects/${p.id}/people` } : null,
+      workPackages: details && workPackages.get(p.id) ? { ...workPackageText(workPackages.get(p.id)!), href: `/projects/${p.id}/work#work-packages` } : null,
     };
   });
 
@@ -254,6 +261,17 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
                           <Link href={`/projects/${p.id}/people`} className="whitespace-nowrap font-medium underline underline-offset-2" data-testid={`project-manage-team-${p.id}`}>Manage team</Link>
                         </div>
                       ) : details ? <div className="mt-0.5 text-sm"><Link href={`/projects/${p.id}/people`} className="text-muted-foreground underline underline-offset-2 hover:text-foreground" data-testid={`project-manage-team-${p.id}`}>Manage team</Link></div> : null}
+                      {details && workPackages.get(p.id) ? (() => {
+                        const w = workPackageText(workPackages.get(p.id)!);
+                        return (
+                          <div className="mt-0.5 text-sm" data-testid={`project-wp-${p.id}`}>
+                            <Link href={`/projects/${p.id}/work#work-packages`} title={w.long} aria-label={w.long}
+                              className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-[13px] underline-offset-2 hover:underline", w.attention ? "border-[hsl(var(--os-amber)/0.5)] text-[hsl(var(--os-amber))]" : "border-border text-muted-foreground")}>
+                              {w.short}{w.attention ? <span aria-hidden> · review</span> : null}
+                            </Link>
+                          </div>
+                        );
+                      })() : null}
                       {details && previews.get(p.id) ? (
                         <div className="mt-1 space-y-0.5 text-[13px] text-muted-foreground" data-testid={`project-activity-${p.id}`}>
                           {previews.get(p.id)!.lines.map((l) => <p key={l.key} className="break-words">{l.text}</p>)}
@@ -294,6 +312,7 @@ export default async function ProjectsDirectoryPage({ searchParams }: { searchPa
           {milestoneError ? <Muted>Next milestones could not be loaded just now; everything else is shown.</Muted> : null}
           {siteError ? <Muted>Site dates could not be loaded just now, so the next commitment shows milestones only. Everything else is shown.</Muted> : null}
           {teamError ? <Muted>Team standing could not be loaded just now, so no project shows a team warning. Manage team is still on every row.</Muted> : null}
+          {workPackageError ? <Muted data-testid="project-wp-error">Work packages could not be loaded just now, so no project shows its work package count. Each project&apos;s Work page has them.</Muted> : null}
           {activityError ? <Muted>Recent activity could not be loaded just now. History on each project has the full record.</Muted> : null}
           {unreadError ? <Muted>Unread chat counts could not be loaded just now, so no project shows one. The Chat button still lists your groups.</Muted> : null}
         </>
