@@ -143,6 +143,7 @@ Legend: **F** full for the scope stated, **R** read, **O** own records only, **A
 | Holidays | R | R | F only with an HR Admin grant not limited to one company (company-only: read) | R | R | R |
 | Assets | O | R (team) | F | R | - | - |
 | Alerts bell and page | - | - | R | - | R | - |
+| Mark an HR queue item as seen (`acknowledge_hr_queue_item`) | - | - | F (own company) | - | - | - |
 | HR audit log (`audit_log`, 11 tables with a company, timesheets added by `20261005000000_audit_timesheets.sql`) | - | - | R, own company | - | - | R only `companies` and `user_roles` rows |
 | AI Suggestions queue | - | - | F (any scope) | - | - | R |
 | Accounts, HR roles, companies | - | - | - | - | - | F (invite, deactivate, reset, roles, companies) |

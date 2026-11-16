@@ -473,3 +473,16 @@ Salary, bank details, identity numbers and identity or employee document files a
 1. **Explain a record's next step**: "What is left for this employee?" from the setup checklist the viewer can already open, as counts and step names only (no pay or document detail).
 2. **Draft, never save**: an Add employee form prefilled from a pasted offer note for review in the form, which the HR Admin confirms there.
 3. **No proposal** for: pay, identity details, documents, scheduling or applying a change, opening balances, invitations or access. These stay in their screens.
+
+## 19. JARVIS and the People & HR work queue (2026-11-16; People & HR Phase 2 on branch `feat/people-hr-phase2`: draft PR, not merged, hosted migration `20270116000100` not applied)
+
+Nothing in sections 0 to 18 changes. The HR queue adds **no capability, no read and no action** for JARVIS:
+
+| Capability | State |
+|---|---|
+| **Read** the queue (an item, an employee, a document, an expiry or probation date, an attendance exception, an acknowledgement, an AI suggestion) | **No.** No action reads it, and nothing in the queue (names, dates, identity numbers, notes) is sent to the provider or written to a log. A request is answered with the unsupported text and a link to Alerts |
+| **Act** (Mark as seen, renew a document, correct a day, verify a window) | **No.** `acknowledgeQueueItem` is documented in `people-hr-action-catalogue.md` section 4 and is **not** an approved tool; no grant passes for it |
+| **Explain** how to use the queue | **Yes**, from published guidance only: two topics added, `people-hr-alerts-queue` (screen `/alerts`) and `people-attendance-review` (screens `/attendance`, `/employees/[id]`). Nothing is read from People & HR to answer. The published set is 112 topics (`node scripts/build-jarvis-knowledge.mjs --check` passes) |
+
+The sensitive-data boundary of section 18 is unchanged: salary, identity numbers, document files and bank details never enter an answer. The queue itself keeps identity numbers and AI suggestion content out of its own rows, so a future approved read could not leak them from there either.
+

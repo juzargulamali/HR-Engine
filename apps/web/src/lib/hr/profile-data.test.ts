@@ -35,6 +35,22 @@ describe("countOrNull / documentExpiryCounts", () => {
   });
 });
 
+describe("documentExpiryCounts uses the shared current-version rule", () => {
+  const row = (id: string, type: string, expiry: string | null, created: string, status?: string) => ({ id, document_type: type, expiry_date: expiry, created_at: created, ...(status ? { status } : {}) });
+  it("a newer document with a shorter expiry decides, in either arrival order", () => {
+    const rows = [row("old", "visa", "2028-01-01", "2026-01-01T00:00:00Z"), row("newer", "visa", "2026-01-01", "2026-06-01T00:00:00Z")];
+    expect(documentExpiryCounts(rows, "2026-11-16")).toEqual({ expired: 1, expiring: 0 });
+    expect(documentExpiryCounts([...rows].reverse(), "2026-11-16")).toEqual({ expired: 1, expiring: 0 });
+  });
+  it("a newer document with no expiry clears an earlier expired version; an earlier version is never counted once renewed", () => {
+    expect(documentExpiryCounts([row("old", "visa", "2026-01-01", "2026-01-01T00:00:00Z"), row("newer", "visa", null, "2026-06-01T00:00:00Z")], "2026-11-16")).toEqual({ expired: 0, expiring: 0 });
+    expect(documentExpiryCounts([row("old", "visa", "2026-01-01", "2026-01-01T00:00:00Z"), row("newer", "visa", "2028-01-01", "2026-06-01T00:00:00Z")], "2026-11-16")).toEqual({ expired: 0, expiring: 0 });
+  });
+  it("different types are separate histories", () => {
+    expect(documentExpiryCounts([row("v", "visa", "2026-01-01", "2026-01-01T00:00:00Z"), row("c", "certificate", "2026-12-01", "2026-01-01T00:00:00Z")], "2026-11-16")).toEqual({ expired: 1, expiring: 1 });
+  });
+});
+
 describe("loadProfileSetup", () => {
   it("reads employee-scoped records only and derives every step as to do for a fresh employee", async () => {
     const calls: { table: string; filters: string[] }[] = [];

@@ -2,6 +2,7 @@
 
 import { Fragment, useState } from "react";
 import { formatHoursMinutes, reviewFlagLabel, workModeLabel, CLASSIFICATION_LABELS, RECOVERY_SUMMARY_LABELS } from "@/lib/recovery/labels";
+import { attendanceDayLabel, DAY_LABEL_TONE } from "@/lib/hr/attendance-status";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,13 +10,6 @@ import { ClockStatus } from "@/components/attendance/clock-status";
 import { AddMissingAttendanceForm, CorrectSessionForm } from "./edit-panels";
 import type { Colleague, RegisterDetail, RegisterRowView } from "./register-types";
 
-const ATTENDANCE_LABELS: Record<string, string> = {
-  not_recorded: "Not recorded",
-  present: "Present",
-  absent: "Absent",
-  leave: "Leave",
-  partial_day: "Partial day",
-};
 
 function fmtTime(iso: string | null, timeZone: string): string {
   if (!iso) return "—";
@@ -38,18 +32,26 @@ export function RegisterTable({
   colleagues,
   workDate,
   canEdit,
+  isRestDay = false,
+  focusEmployeeId = null,
 }: {
   rows: RegisterRowView[];
   details: Record<string, RegisterDetail>;
   colleagues: Colleague[];
   workDate: string;
   canEdit: boolean;
+  /** The date is a weekly rest day or public holiday for this company's country: a day with nothing recorded then says "Rest day", not "No record". */
+  isRestDay?: boolean;
+  /** The employee a link (the HR queue, the profile) asked for: their row is open and marked when the page loads. */
+  focusEmployeeId?: string | null;
 }) {
-  const [open, setOpen] = useState<string | null>(null);
+  const [open, setOpen] = useState<string | null>(focusEmployeeId);
   const [editing, setEditing] = useState<string | null>(null);
 
+  const dayLabel = (r: RegisterRowView) => attendanceDayLabel({ status: r.attendanceStatus, onLeave: r.onLeave, hasClockEvidence: r.sessionCount > 0, isRestDay });
+
   return (
-    <Table>
+    <Table stack>
       <TableHeader>
         <TableRow>
           <TableHead>Employee</TableHead>
@@ -70,7 +72,7 @@ export function RegisterTable({
           const hasEvidence = r.sessionCount > 0 || (detail?.windows.length ?? 0) > 0;
           return (
             <Fragment key={r.employeeId}>
-              <TableRow data-employee-id={r.employeeId}>
+              <TableRow data-employee-id={r.employeeId} id={`row-${r.employeeId}`} className={r.employeeId === focusEmployeeId ? "bg-primary/5 ring-1 ring-primary/40" : undefined} aria-current={r.employeeId === focusEmployeeId ? "true" : undefined}>
                 <TableCell className="font-medium">
                   <button
                     type="button"
@@ -90,26 +92,19 @@ export function RegisterTable({
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  {r.attendanceStatus === "not_recorded" && r.clockStatus === "not_started" ? (
-                    <span className="text-muted-foreground">Not started / Not recorded</span>
-                  ) : (
-                    <span>{ATTENDANCE_LABELS[r.attendanceStatus] ?? r.attendanceStatus}</span>
-                  )}
-                  {r.onLeave ? (
-                    <Badge variant="secondary" className="ml-2">
-                      On leave
-                    </Badge>
-                  ) : null}
-                  {r.attendanceSource && r.attendanceSource !== "self_clock" ? (
-                    <div className="text-sm text-muted-foreground">
-                      Manual entry{r.manualHours != null ? ` · ${r.manualHours} h` : ""}
-                    </div>
-                  ) : null}
-                  {r.presenceConflict ? (
-                    <div className="text-sm text-warning" title={r.presenceConflict}>
-                      Manual and clock records differ — review
-                    </div>
-                  ) : null}
+                  <div className="flex min-w-0 flex-col items-start gap-1 max-md:items-end">
+                    <Badge variant={DAY_LABEL_TONE[dayLabel(r)]} data-testid="day-label">{dayLabel(r)}</Badge>
+                    {r.attendanceSource && r.attendanceSource !== "self_clock" ? (
+                      <div className="text-sm text-muted-foreground">
+                        Manual entry{r.manualHours != null ? ` · ${r.manualHours} h` : ""}
+                      </div>
+                    ) : null}
+                    {r.presenceConflict ? (
+                      <div className="text-sm text-warning" title={r.presenceConflict}>
+                        Manual and clock records differ, review
+                      </div>
+                    ) : null}
+                  </div>
                 </TableCell>
                 <TableCell>{r.workModes.length > 0 ? r.workModes.map(workModeLabel).join(", ") : "—"}</TableCell>
                 <TableCell>{fmtTime(r.firstClockIn, r.timeZone)}</TableCell>

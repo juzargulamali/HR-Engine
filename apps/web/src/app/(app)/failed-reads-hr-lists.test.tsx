@@ -127,7 +127,7 @@ describe("Employee profile tabs", () => {
   });
   it("Attendance", async () => {
     const { AttendanceSection } = await import("./employees/[id]/attendance-section");
-    const html = await rendered(AttendanceSection({ employeeId: "e9", canManage: true }));
+    const html = await rendered(AttendanceSection({ employeeId: "e9", canManage: true, companyId: "c9", countryCode: "AE" }));
     expect(html).toContain("Could not load the attendance records");
     expect(html).not.toContain("No attendance recorded yet");
   });

@@ -514,7 +514,7 @@ export default async function ApprovalsPage() {
                   const request = requestById.get(a.entity_id)!;
                   const insufficientBalance = hasInsufficientBalance(request);
                   return (
-                    <TableRow key={a.id}>
+                    <TableRow key={a.id} id={`request-${request.id}`}>
                       <TableCell>{employeeName(request.employee_id)}</TableCell>
                       <TableCell className="capitalize">{request.leave_type_code.replace(/_/g, " ")}</TableCell>
                       <TableCell>
@@ -850,7 +850,7 @@ export default async function ApprovalsPage() {
                         }
                       : null;
                   return (
-                    <TableRow key={a.id}>
+                    <TableRow key={a.id} id={`request-${recoveryRequest.id}`}>
                       <TableCell>{employeeName(recoveryRequest.employee_id)}</TableCell>
                       <TableCell>{EVENT_TYPE_CELL[recoveryRequest.event_type] ?? recoveryRequest.event_type}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">

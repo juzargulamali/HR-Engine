@@ -40,7 +40,8 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 | `/employees` | Directory: search by name or employee number, Company and Status filters, the number on each row, **Needs attention** flags (setup left, expired or expiring documents, scheduled changes) for HR Admins, **Add employee** always visible to HR Admins, search and filters restored on return from a profile (a plain employee sees only self; managers their reports) | RLS `employees_select`; flags only for an HR Admin of the row's company |
 | `/employees/[id]` | Profile: Overview (Next actions, Setup checklist, At a glance, Account and access card, core details), Employment (current terms, scheduled changes, one change form, contracts, history), Compensation, Leave (and opening balances), Attendance, Documents (one list, one Add document form), Insurance & Loans, Assets, Performance. Address parameters `tab`, `step`, `add`, `renew`, `docId`, `change`, `created`, `notice` | RLS `employees_select`; each tab by its own permission; an unreachable tab falls back to Overview; other id 404. `modules/people-hr.md` |
 | `/employees/new` | Add employee, company first (its country and currency used), contract, pay and opening balances optional, then opens the profile | Page `hr_admin` of the chosen company (`canCreateEmployee`) |
-| `/alerts` | HR alerts (contracts, probation, documents, identity) | Page `canViewHrAlerts` (HR, CEO, CTO) |
+| `/alerts` | The HR work queue: Needs action, Due soon, Acknowledged (contracts, probation, documents, attendance exceptions, Recovery Leave alerts, AI suggestions); Company, Type and name filters; each row opens its exact record | Page `canViewHrAlerts` (HR, CEO, CTO); Mark as seen: HR Admin of the company |
+| `/admin/background-processing` | Recovery Leave processor health and the database fingerprint (moved off the Alerts page) | Administration layout (System Administrator) |
 | `/payroll`, `/payroll/[id]` | Payroll runs | Page: HR Admin, Finance, CEO, CTO |
 | `/assets` | Asset register | Page: HR Admin, Finance |
 | `/ai-suggestions`, `/audit-log` | Reviewed drafts; audit trail | Page: HR Admin or System Administrator |
@@ -194,7 +195,7 @@ Whatever the page shows, the database is the enforcement (`docs/03-permission-ma
 | `sales-approvals` | Commercial approvals waiting | enquiry `?tab=commercial` |
 | `budgets`, `budget-projects` | Budget decisions and returned budgets of own projects | from `lib/budget/my-day.ts` |
 | `notes` | Dispatch and return notes waiting acknowledgement | project notes link |
-| `hr` | Contracts, probation, documents, identity (counts) | `/alerts` |
+| `hr` | One row per group (contracts, probation, documents, attendance, recovery, AI): the items Alerts lists as Needs action or Due soon; an acknowledged item is not counted | `/alerts?type=<group>` |
 | `operations` (new) | "Sales answered the Operations question: decide the planning", for 7 days after the answer, for the Operations Managers of that company (the read gives the asker's name, not their id). Key `opp:<id>`, so it merges with any other row about that enquiry | `/operations/upcoming?company=<id>&q=<reference>` |
 | `project-equipment` (new) | "Review equipment booking" on projects where the viewer is the Project Manager, one item per project (`proj_equipment_reviews`, under row-level security) | `/projects/<id>/equipment` |
 

@@ -10,6 +10,7 @@ import { LoadError } from "@/components/workspace/states";
 import { cn } from "@/lib/utils";
 import { loadProfileSetup, type HrReadClient, type ProfileViewer } from "@/lib/hr/profile-data";
 import { peopleAccessHref } from "@/lib/hr/setup";
+import type { QueueItem } from "@/lib/hr/queue";
 import { EditEmployeeForm } from "./edit-employee-form";
 import { SetupChecklist } from "./setup-checklist";
 import { NextActions } from "./next-actions";
@@ -47,6 +48,8 @@ export async function OverviewSection({
   isSelf,
   viewer,
   focusStep,
+  queue,
+  queueFailed = [],
 }: {
   employee: OverviewEmployee;
   companyName: string;
@@ -57,6 +60,10 @@ export async function OverviewSection({
   viewer: ProfileViewer;
   /** The setup step the person came from (`?step=`): its row is highlighted and, for the account step, the link form is highlighted. */
   focusStep?: string;
+  /** This person's items from the HR queue, for a viewer who may see the queue (HR Admin, CEO, CTO); null otherwise. */
+  queue?: readonly QueueItem[] | null;
+  /** Which parts of the queue could not be read; said, never shown as "nothing to do". */
+  queueFailed?: readonly string[];
 }) {
   const supabase = await createClient();
   const [{ data: linkedProfile, error: profileError }, { data: managers, error: managersError }, { data: managerName, error: managerNameError }] = await Promise.all([
@@ -101,7 +108,7 @@ export async function OverviewSection({
     executiveCheckFailed ? "whether this person is a C-level executive" : null,
   ].filter((x): x is string => x !== null);
 
-  const setup = await loadProfileSetup(supabase as unknown as HrReadClient, employee, viewer, { managerNotExpected: isExecutive || executiveCheckFailed || managerNameError !== null });
+  const setup = await loadProfileSetup(supabase as unknown as HrReadClient, employee, viewer, { managerNotExpected: isExecutive || executiveCheckFailed || managerNameError !== null, queue: queueFailed.length === 0 ? queue : null });
   const employeeName = `${employee.first_name} ${employee.last_name}`;
   const accessTab = viewer.canInvite ? "account" : "job";
 
@@ -109,6 +116,7 @@ export async function OverviewSection({
     <div className="space-y-4">
       {unreadable.length > 0 ? <LoadError what={unreadable.join(", ")} retryHref={`/employees/${employee.id}`} note="Nothing here is missing: those parts could not be read, and editing is withheld until they load." /> : null}
       <SetupChecklist steps={setup.steps} employeeName={employeeName} companyName={companyName} focusStep={focusStep} />
+      {queueFailed.length > 0 ? <LoadError what={`part of this person's HR alerts (${queueFailed.join(", ")})`} retryHref={`/employees/${employee.id}`} /> : null}
       <NextActions exceptions={setup.exceptions} />
 
       <Card data-testid="employee-facts">

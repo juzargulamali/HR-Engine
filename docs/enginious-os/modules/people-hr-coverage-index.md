@@ -82,6 +82,27 @@
 | Destination | Phase |
 |---|---|
 | Profile tabs Attendance and Assets | exist, unchanged |
-| HR work queue (Alerts, what waits on HR) | Phase 2, planned |
-| Letters, Payroll, Assets register, Companies, Audit Log, AI Suggestions | Phase 3, planned |
+| HR work queue (Alerts, what waits on HR) | **Phase 2** (section 7 below) |
+| Letters, Payroll, Assets register, Companies, Audit Log, AI Suggestions | Phase 3, planned (Phase 2 adds only Administration, Background processing) |
 | My Leave, My Attendance, My Reimbursements, My Performance | exist, unchanged |
+
+## 7. Phase 2: the HR work queue
+
+**Status.** People & HR Phase 2 on branch `feat/people-hr-phase2`: a draft pull request, **not merged**, migration `20270116000100` **not applied anywhere**. `R` = [`people-hr.md`](./people-hr.md) section 14. `Walk` = `apps/web/os-shell-checks/people-hr-phase2-walkthrough.mjs` (seed `seed/people-hr-phase2.sh`), driven signed in at 390 px on the isolated stack with fictional people; `DB` = `packages/rls-tests/test/people-hr-phase2.rls.test.ts`; `Unit` = `lib/hr/queue.test.ts`, `attendance-status.test.ts`, the alerts page test, the register-table test.
+
+| # | Screen or part | Route | Who reaches it | Reference | Catalogue | Evidence |
+|---|---|---|---|---|---|---|
+| HR-40 | Alerts: Needs action / Due soon / Acknowledged, Company, Type and name filters, view tabs with counts | `/alerts` | HR Admin (all kinds); CEO, CTO (the kinds whose source tables they can read: contracts, probation, Recovery Leave) | R 14.1 | none | `Walk`; `Unit` (alerts page) |
+| HR-41 | A queue row: employee, company, issue, date, status, who acts next, one action | `/alerts` | as HR-40 | R 14.1 | none | `Walk`; `Unit` |
+| HR-42 | Mark as seen (an acknowledgement; the issue stays open) | `/alerts` | HR Admin of the item's company | R 14.2 | `people.queue.acknowledge` | `Walk`; `DB` |
+| HR-43 | Document expiry opens the renewal form for that document; contract and probation open the Employment tab | `/employees/[id]` | HR Admin of the company | R 14.1 | none (Phase 1 actions) | `Walk` |
+| HR-44 | Attendance register leads with Needs review; day words No record / Rest day / Absent / On leave / Present; a link opens one person's row | `/attendance` | HR Admin of the company | R 14.1, 14.4 | none | `Walk`; `Unit` (register table, day wording) |
+| HR-45 | Profile Attendance tab leads with Needs review and the days concerned | `/employees/[id]?tab=attendance` | who may see attendance; exceptions HR Admin only | R 14.1 | none | `Walk` |
+| HR-46 | Profile Leave tab: balances, Pending requests with a link to the exact Approvals row | `/employees/[id]?tab=leave` | who may see leave; the link only for HR Admin or the manager | R 14.1 | none | `Unit` (code); not driven in `Walk` |
+| HR-47 | Profile Overview: Next actions use the queue's words and links | `/employees/[id]` | HR Admin, CEO, CTO | R 14.1 | none | `Walk` (before and after renewing) |
+| HR-48 | My Day HR rows count what Alerts lists as waiting (an acknowledged item is not counted) | `/` | HR Admin, CEO, CTO | R 14.1 | none | `Walk`; `Unit` (attention) |
+| HR-49 | A failed read of any part is named with Try again; "Nothing needs attention" only after a successful read | `/alerts` | as HR-40 | R 14.1 | none | `Unit` |
+| HR-50 | Background processing and the database fingerprint (moved out of the queue) | `/admin/background-processing` | System Administrator | R 14.7 | none | `Unit` (nav); the page itself is not driven |
+| HR-52 | An acknowledgement and its note are readable only with the source record: a CEO does not read document, identity-document or attendance-day ones | database | HR Admin, CEO, CTO of the company | R 14.3, 14.5 | none | `DB` |
+| HR-53 | The current version of a document type (newest, including no expiry) decides expiry, in the queue and on the profile | `/alerts`, `/employees/[id]` | HR Admin | R 14.1 | none | `Unit` (queue, profile-data, alerts page) |
+| HR-51 | Another company's items and records are not listed or openable; the database refuses the acknowledgement | `/alerts`, `/employees/[id]`, `/attendance` | HR Admin of another company | R 14.3 | none | `Walk`; `DB` |

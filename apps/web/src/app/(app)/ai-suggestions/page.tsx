@@ -54,7 +54,7 @@ export default async function AiSuggestionsPage() {
             </TableHeader>
             <TableBody>
               {(drafts ?? []).map((d) => (
-                <TableRow key={d.id}>
+                <TableRow key={d.id} id={`draft-${d.id}`}>
                   <TableCell className="font-mono text-sm">{d.created_by_agent}</TableCell>
                   <TableCell>
                     <span className="font-medium">{d.proposed_action}</span> on {d.entity_type}

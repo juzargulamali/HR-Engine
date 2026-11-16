@@ -1,4 +1,5 @@
 import { BackLink } from "@/components/workspace/list-memory";
+import { loadHrQueue } from "@/lib/hr/queue-data";
 import { EmploymentStatusBadge } from "@/components/hr/status";
 import { notFound } from "next/navigation";
 import { parseFocus } from "@/lib/hr/focus";
@@ -17,6 +18,9 @@ import {
   canRateGoal,
   canRecordCareerEvent,
   canViewAssetAssignments,
+  canViewHrAlerts,
+  getBusinessDateString,
+  resolveCountryTimeZone,
   canViewAttendance,
   canViewCareerEvents,
   canViewCompensation,
@@ -159,6 +163,11 @@ export default async function EmployeeDetailPage({
   // asks for it directly — falls back to the always-visible Overview tab.
   const activeTab = tabs.some((t) => t.value === requestedTab) ? requestedTab! : "overview";
 
+  // The same queue the Alerts page reads, narrowed to this person, for the viewers who may see it (HR Admin, CEO, CTO). Fixing a record here removes it from both on the next load.
+  const queueData = activeTab === "overview" && canViewHrAlerts(session.grants)
+    ? await loadHrQueue({ grants: session.grants, today: getBusinessDateString(resolveCountryTimeZone(employee.country_code)), employeeId: employee.id })
+    : null;
+
   return (
     <div className="space-y-6">
       {employee.deleted_at ? (
@@ -168,7 +177,7 @@ export default async function EmployeeDetailPage({
         </Alert>
       ) : null}
 
-      {!isSelf ? <BackLink section="employees" fallback="/employees">Employees</BackLink> : null}
+      {!isSelf ? (sp.from === "alerts" ? <BackLink section="alerts" fallback="/alerts">Alerts</BackLink> : <BackLink section="employees" fallback="/employees">Employees</BackLink>) : null}
 
       {justCreated ? (
         <Alert variant={createdNotice ? "warning" : "success"} data-testid="employee-created-notice">
@@ -211,6 +220,8 @@ export default async function EmployeeDetailPage({
           isSelf={isSelf}
           viewer={viewer}
           focusStep={focus.step}
+          queue={queueData?.items ?? null}
+          queueFailed={queueData?.failed ?? []}
         />
       ) : null}
 
@@ -246,11 +257,12 @@ export default async function EmployeeDetailPage({
         <LeaveSection
           employeeId={employee.id}
           canRecordOvernightRecovery={canEditCore || isManager}
+          canDecide={canEditCore || isManager}
           openingBalances={canEditCore ? { employeeName: `${employee.first_name} ${employee.last_name}`, companyName, open: focus.step === "opening-balances" } : undefined}
         />
       ) : null}
 
-      {activeTab === "attendance" ? <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} /> : null}
+      {activeTab === "attendance" ? <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} companyId={employee.company_id} countryCode={employee.country_code} /> : null}
 
       {activeTab === "documents" ? (
         <DocumentsTab

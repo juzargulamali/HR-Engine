@@ -126,6 +126,18 @@ Evidence: `Flow` (card text, link target, the Sales, Projects, Operations, Inven
 
 On the profile, **Remove** or **Restore** (HR Admin of the company). Removed records appear in the directory only under **Show deleted** and every setup step reads Not applicable. Removal is made on the profile, not from a row of the list.
 
+## 10a. Work through the HR queue (Phase 2)
+
+1. **Open Alerts** (`/alerts`). The queue has Needs action, Due soon and Acknowledged. Narrow it by company, type or name; the filters are in the address.
+2. **Press the one button on a row.** It opens the exact record with the person and company already chosen: the renewal form for that document (number prefilled), the Employment tab for a contract or probation, the register on that company and date with the person's row open for an attendance exception, the review screen for an AI suggestion.
+3. **Fix the original record there.** Renew the document; record the contract change; correct the attendance day with Edit in the register, or verify the recovery window. Nothing is edited in the queue.
+4. **Go back** with the Alerts link at the top of the record: the same company, type and view are restored. A fixed item is gone from Alerts, the profile's Next actions and My Day on the next load.
+5. **If it cannot be fixed yet**, an HR Admin presses **Mark as seen** (optional note). The item moves to Acknowledged and stays, with its link and a line saying it is still open, until the record is fixed. A renewal that changes the date makes it a new item.
+6. **If someone else must act**, the row says who ("HR Admin of <company>"); a CEO or CTO sees the row and has no Mark as seen.
+7. **If a part could not be read**, the page names it and offers Try again. It never says nothing needs attention after a failed read.
+
+**Attendance register.** Open `/attendance`. It leads with Needs review. A day with nothing recorded says No record on a working day and Rest day on a rest day or public holiday; Absent only when recorded as absent; live clock status is its own column. **Profile tabs.** Leave leads with balances and Pending requests (each linking to its row in Approvals for someone who can decide); Attendance leads with Needs review and the days concerned.
+
 ## 11. Staff guidance written for these workflows
 
 Five published topics in [`../staff-guidance/people.md`](../staff-guidance/people.md): add an employee; finish a new employee's remaining steps; change someone's job title or pay; add or renew a document; find someone's account and module access. They use the screens' own words and carry no record data.

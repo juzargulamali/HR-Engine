@@ -1023,6 +1023,77 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "people-hr-alerts-queue",
+    "area": "people",
+    "title": "Work through the HR Alerts queue",
+    "keywords": [
+      "alerts",
+      "hr alerts",
+      "hr queue",
+      "needs action",
+      "due soon",
+      "acknowledged",
+      "mark as seen",
+      "probation due",
+      "contract ending",
+      "document expiring",
+      "document expired",
+      "expiry",
+      "renew passport",
+      "attendance exception"
+    ],
+    "summary": "Alerts is the HR work queue: contracts ending, probation reviews, document expiries, attendance exceptions, Recovery Leave alerts and AI suggestions waiting for a decision, in three groups: Needs action, Due soon and Acknowledged. Each row names the employee and company, what is wrong, its date and who acts next, with one button that opens the exact record. Mark as seen only records that you looked; the item stays until the record itself is fixed.",
+    "steps": [
+      "Open Alerts and narrow it by company or type if you need to.",
+      "Press the button on a row. It opens the exact record: the renewal form, the Employment tab, or the register on that day.",
+      "Fix the record there (renew the document, record the contract change, correct the attendance day), then use the link at the top of the page to return to the same company and filters.",
+      "If it cannot be fixed yet, an HR Admin presses Mark as seen. The item moves to Acknowledged and stays listed, with its link, until the record is fixed."
+    ],
+    "links": [
+      {
+        "label": "Alerts",
+        "href": "/alerts"
+      }
+    ],
+    "screens": [
+      "/alerts"
+    ]
+  },
+  {
+    "id": "people-attendance-review",
+    "area": "people",
+    "title": "Review an attendance day that needs review",
+    "keywords": [
+      "attendance register",
+      "needs review",
+      "no record",
+      "rest day",
+      "absent",
+      "attendance exception",
+      "recovery window",
+      "verify recovery window",
+      "clock records differ",
+      "manual entry differs"
+    ],
+    "summary": "The attendance register leads with Needs review: days where a manual entry and the clock records differ, a recovery window waits for HR to verify it, or an HR alert is open. A day with nothing recorded says No record on a working day and Rest day on a weekly rest day or public holiday. It says Absent only when the day was recorded as absent. Clock status (Clocked in, Clocked out, Not started) is a separate fact.",
+    "steps": [
+      "Open the Attendance register, or the Attendance tab on the person's profile.",
+      "Choose Open this day on a Needs review row. The register opens on that company and date with the person's row open.",
+      "Read the sessions behind the day and use Edit to correct the original record.",
+      "Reload the page. A corrected day leaves Needs review, and leaves Alerts too."
+    ],
+    "links": [
+      {
+        "label": "Attendance register",
+        "href": "/attendance"
+      }
+    ],
+    "screens": [
+      "/attendance",
+      "/employees/[id]"
+    ]
+  },
+  {
     "id": "projects-where",
     "area": "projects",
     "title": "Projects and tasks",

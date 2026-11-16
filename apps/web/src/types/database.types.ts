@@ -1233,6 +1233,22 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      hr_queue_acknowledgements: {
+        Row: {
+          id: string;
+          company_id: string;
+          employee_id: string;
+          kind: "contract_end" | "probation" | "employee_document" | "identity_document" | "attendance";
+          source_id: string;
+          source_date: string;
+          note: string | null;
+          acknowledged_by: string;
+          acknowledged_at: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       recovery_alerts: {
         Row: {
           id: string;
@@ -2296,6 +2312,10 @@ export interface Database {
       };
       hr_acknowledge_recovery_reduction: {
         Args: { p_request_id: string; p_note: string };
+        Returns: undefined;
+      };
+      acknowledge_hr_queue_item: {
+        Args: { p_kind: string; p_source_id: string; p_source_date: string; p_note?: string | null };
         Returns: undefined;
       };
       acknowledge_recovery_alert: {

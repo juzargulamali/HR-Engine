@@ -173,3 +173,15 @@ Nothing in sections 2 to 7 changes. Stated for People & HR so it does not have t
 | Explain how to do something in People & HR | **Approved**, from the published guidance only (the five Phase 1 topics in `staff-guidance/people.md` and the existing ones), for a single how-to question or "What can I do here?" on an employee screen. Nothing is read from People & HR and nothing about an employee is sent to the provider beyond the question itself under the existing data policy |
 | People & HR Phase 1 | Adds five guidance topics. **No capability, no read, no action** |
 | Future People & HR capabilities | Proposals only, listed in `jarvis.md` section 18.4; each needs the owner's decision |
+
+## 11. People & HR work queue (2026-11-16; People & HR Phase 2, branch `feat/people-hr-phase2`: draft PR, not merged; migration not applied)
+
+Nothing in sections 2 to 10 changes. Stated so it does not have to be inferred:
+
+| Rule | State |
+|---|---|
+| Read the HR queue (Alerts items, expiry and probation dates, attendance exceptions, acknowledgements, AI suggestions) | **Not approved.** No action exists. A request is answered with the unsupported text and a link to Alerts |
+| Mark an item as seen, or fix what an item points to | **Not approved.** `people.queue.acknowledge` is documented, not a tool |
+| Explain how to use Alerts and the attendance review | **Approved**, from the two published topics only (`people-hr-alerts-queue`, `people-attendance-review`) |
+| Identity numbers, salary and AI suggestion content | **Never** read into an answer, sent to the provider or logged (unchanged) |
+
