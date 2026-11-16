@@ -8,6 +8,22 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | People & HR: guided onboarding, signed uploads, Correct pay record (added to draft PR #108, branch `feat/employee-number-uniqueness`; **not merged; hosted migrations `20270118000200` and `20270118000300` not applied; uploads need no migration**)
+
+**What changed for people.**
+
+* **Onboarding is one resumable page** (`/employees/[id]/onboarding`): Add employee, Complete profile, Invite, HR roles, Module access, Review, for the same employee, company and account. Each step shows done, blocked, who can finish it and the next action. The final review lists the exact companies, HR roles and module rights; applying needs a confirmation tick, applies only what the person is already allowed to apply, and a retry reuses everything already created. Add employee now opens this page.
+* **Uploads of 1 MB to 10 MB now work.** Employee documents, insurance attachments and reimbursement receipts go from the browser straight to the private bucket (PDF, JPEG, PNG or WebP, up to 10 MB), authorised before the link is signed and rechecked before the file is linked. Pressing the button again never makes a second record. Previously Next's 1 MB server-action body limit stopped them (reproduced with a synthetic PDF; Production logs not available).
+* **Attach file** on an identity document that says No file attached, on that same row, keeping its number and dates.
+* **Correct pay record** on the compensation history: change the amount, allowances or effective date of a mistaken entry, with a reason; the original stays in the audit trail; affected approved payroll runs and final settlements are flagged, not changed. Update pay is unchanged.
+* **Saeed's access, traced.** Invitation and HR-role assignment need an unrestricted System Administrator grant; module access needs a founder or access manager of that module; none of these follow from HR Admin or a company-limited System Administrator grant. A read-only diagnostic confirms his exact roles on the hosted data. Two narrow widenings are proposed for approval and not implemented.
+
+**Migrations.** `20270118000200_people_hr_pay_correction.sql` (`compensation_corrections`, `correct_pay_record`), `20270118000300_people_hr_onboarding.sql` (`employee_onboarding_plans`, `onboarding_access_snapshot`). Also in this PR, amended before it is applied: `20270117000100` (the allocator waits for a pool number locked by another hire rather than treating the pool as exhausted).
+
+**Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (sections 16 to 18), `people-hr-workflows.md` (10b to 10d), `staff-guidance/people.md`, this log, `05-data-tests-and-release-ledger.md`.
+
+**Tests.** `people-hr-pay-correction.rls.test.ts`, `onboarding-plan.rls.test.ts`, `onboarding-delegation.rls.test.ts`, `people-hr-uploads.rls.test.ts`, `employee-number-allocator.rls.test.ts`; `lib/hr/onboarding.test.ts`, `lib/actions/onboarding.test.ts`, `payCorrection.test.ts`, `hrUploads.test.ts`, `employeeDocuments.test.ts`, `upload-rules.test.ts`, the onboarding page, document, insurance, receipt, Attach file and pay dialog component tests.
+
 ### 2026-11-16 | Employee numbers: one shared series across the companies, permanently reserved (branch `feat/employee-number-uniqueness` from `main` `713f6dd`; **a draft pull request; not merged; hosted migration `20270117000100` not applied; the audit has not been run on the hosted database**)
 
 **What changed for people.**

@@ -322,3 +322,44 @@ Letters, Payroll, Assets and a broader Administration redesign stay in Phase 3. 
 **Decisions taken by the owner.** Deleted, terminated and deactivated records at rollout are ignored (test accounts), and every number not held by an active or invited employee is available; from rollout, a number stays with its employee when they resign, are terminated or removed. **Assumptions to confirm.** The three-digit minimum (E002, E010); "deactivated" read as terminated, or a login whose account status is deactivated; the pool takes **E-series numbers only** (E plus digits), so a test account's `L-001` is not in it and is simply available by hand; the pool is **one list for all companies**, built from the ignored records in any company; a claimed pool number is reserved for the employee even if their hire is later removed (a hire that fails inside the same transaction gives its number back).
 
 **Install order.** Audit, resolve any class A group with the owner, preflight, migration `20270117000100_people_hr_employee_number_unique.sql`, verify, then deploy the app (the new app sends no number: it needs the migration first; the previous app keeps working on the migrated schema, it sends a number which is saved canonically). Rollback `people_hr_employee_number_90_rollback.sql`: deploy the previous app first; it keeps the reservation, pool and build-record tables on purpose (so reserved numbers stay reserved and the pool is not rebuilt).
+
+## 16. Onboarding: one guided, resumable flow (draft PR #108)
+
+**Screen.** `/employees/[id]/onboarding`. Add employee now lands here. Six steps for one employee, one company and one account: Add employee, Complete profile, Invite, HR roles, Module access, Review. Each step shows done, blocked or waiting, **who can finish it** and the **next action**. Status is derived from the real records (employee, profile setup, account link, `user_roles`, the four module grant tables); nothing is stored as "step done", so a retry reuses the employee, the invitation and every grant already made.
+
+**What is stored.** `employee_onboarding_plans` (one row per employee: intended HR roles and module rights, who and when). A plan **grants nothing**. HR Admins of the company read and write plans for their own company only; it is audited. `onboarding_access_snapshot(employee_id)` (security definer) lets an HR Admin of the employee's company see what that employee already holds, for that company only, so the review is accurate.
+
+**Applying.** Review lists the exact companies, HR roles and module rights; applying needs a confirmation tick. Each item is applied by someone already allowed to apply it, through the existing route; nothing new is granted to HR Admin:
+
+| Action | Who the database and the server action accept | Where checked |
+|---|---|---|
+| Add employee, edit profile | HR Admin of the employee's company | `employees_insert_hr`, `employees_update_hr` |
+| Invite a login | an **unrestricted** System Administrator (grant with no company) | server action `isSysAdmin(grants)` with no scope; Admin API with the service role |
+| Link an existing account | HR Admin of the company | server action |
+| Assign an HR role | an **unrestricted** System Administrator | `user_roles_insert_sysadmin` (`has_role('sys_admin')` with no company) |
+| Give module access | founder of that module for that company, or an access manager (`manage_access`) for routine rights | each module's grant function (`crm_grant_access` etc.) |
+
+Apply only adds rights, re-reads what is held first, and returns per-item results (applied, already held, blocked, failed). Existing accounts for the address are linked, never invited twice.
+
+**Saeed's access (traced on isolated accounts; `packages/rls-tests/test/onboarding-delegation.rls.test.ts`).** Having HR Admin plus System Administrator does not let him invite, assign roles or give module access when the System Administrator grant carries a company (the grant form allows choosing one) or when no module founder or access-management right exists:
+* **Add employee, edit profile:** allowed for any HR Admin of the company (database `employees_insert_hr`/`employees_update_hr`).
+* **Invite:** blocked by the app check, which needs an unrestricted System Administrator. A company-limited grant is refused.
+* **Assign HR role:** blocked by the database policy for HR Admin and for a company-limited System Administrator; only an unrestricted one passes.
+* **Module access:** blocked for HR Admin and for every System Administrator (even unrestricted); only a module founder, or an access manager for routine rights in that company, passes. An access manager cannot grant founder or access-management rights, or another company's rights.
+* **Existing delegation that already works:** a Sales (or Projects, Inventory, Phone) access manager for the company can give routine module access for that company. Appointing Saeed access manager of each module for his companies (a founder does this in People & Access) removes the module-access hand-back with no code change (proved on isolated accounts for Sales; the other modules use the same grant rules).
+* **Proposed, not implemented, for approval:** (1) allow an HR Admin of the employee's company to send the invitation (the server action only; Admin API stays service-role); (2) a narrow function letting an HR Admin assign only `employee` and `line_manager` for their own company. Each is a deliberate widening and needs the owner's decision.
+* **Hosted confirmation:** run `supabase/manual-sql/people_access_onboarding_diagnostic_readonly.sql` (read-only; replace one email) to list his live roles with scope, module rights, and a verdict per action. The test `onboarding-delegation` runs the same file against fictional accounts.
+
+**Owner packs.** `people_hr_onboarding_00_preflight_readonly.sql`, migration `20270118000300_people_hr_onboarding.sql`, `..._20_verify_readonly.sql`, `..._90_rollback.sql`.
+
+## 17. Uploads: signed browser-to-private-storage (draft PR #108)
+
+**What was wrong.** Employee documents, insurance attachments and reimbursement receipts posted the file inside a server action. Next's default 1 MB server-action body limit (and Vercel's 4.5 MB request cap) stopped anything bigger, although the screens said "up to 10 MB". A 2 MB Emirates ID PDF therefore could not reach the action. Reproduced with a synthetic PDF in a scratch Next app: 500 kB ran, 2 MiB gave HTTP 500 with the server's "Body exceeded 1 MB limit". Not confirmed: Production logs for `1955996324@E394`; why the identity row was saved with no file is inferred (a retry without the optional scan).
+
+**What changed.** Prepare (server action: authorise the employee or claim from the database, validate name, type and size, return a one-time signed upload link for the existing private bucket) → the browser uploads directly → finalize (existing action: re-authorise, read the object back, check real size and leading bytes, then save the row; delete the object on any failure). Rules in `lib/upload-rules.ts`: PDF, JPEG, PNG or WebP, up to 10 MB; same name rules as Sales. A form submission id in the path makes retries reuse the row. **Attach file** appears on identity rows with No file attached (HR Admin of the company) and updates only that row's `file_path` where it is empty.
+
+**No migration.** The four private buckets and their policies already exist; this is a code-only deploy. Not done (needs a migration, not requested): quarantine bucket, abandoned-upload sweeper, unique submission keys.
+
+## 18. Correct pay record (draft PR #108)
+
+**Screen.** Compensation tab → history → **Correct pay record**. Update pay stays for raises, promotions and scheduled changes. **Who.** HR Admin or Finance of the employee's company (same as `record_employment_change`). **What.** `correct_pay_record` changes one `compensation_details` row in place (amount, allowances, effective date; currency and bank details never), under the employee lock, and writes an append-only `compensation_corrections` row (previous and new values, reason of 5 to 500 characters, who, when, impact). The original stays in the audit trail. **Checks.** Date not before hire and not after today; strictly between neighbouring records; scheduled changes based on the record block an amount correction until cancelled; held changes are listed only. **Impact flagged, never rewritten:** approved payroll runs that carry the person's basic or allowance lines and overlap the old or new period; a final settlement when the employee is terminated. Same request key returns the stored correction. **Packs.** `people_hr_pay_correction_00_preflight_readonly.sql`, migration `20270118000200_people_hr_pay_correction.sql`, `..._20_verify_readonly.sql`, `..._90_rollback.sql` (stops while corrections exist).

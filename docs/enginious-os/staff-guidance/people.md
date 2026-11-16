@@ -97,7 +97,7 @@ An HR Admin adds an employee from the Employees list. Choose the company first: 
 1. Open Employees and press Add employee.
 2. Choose the company, then fill in the name and hire date. Do not look for an employee number field: it is assigned when you save.
 3. Add the job, department, manager, contract and salary if you have them; leave the rest for later.
-4. Press the button at the bottom. The new profile opens and lists what is still to do.
+4. Press the button at the bottom. The Onboarding page for that person opens (see Finish onboarding a new employee below).
 
 ## Finish a new employee's remaining steps
 - id: people-employee-remaining-steps
@@ -128,7 +128,8 @@ A job title and pay change is made in one form on the person's Employment tab, a
 2. Enter the new job title and/or the new pay, and the date it takes effect.
 3. Read the line beside the button, which says what will happen on save, then save.
 4. Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.
-5. If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator.
+5. If the pay you entered was a mistake (the wrong amount, or the joining date used for a current salary), do not record a raise: use Correct pay record (see Correct a mistaken pay record below).
+6. If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator.
 
 ## Add or renew a document
 - id: people-renew-document
@@ -142,8 +143,10 @@ All documents are added in one form on the person's Documents tab. The type you 
 
 1. Open the person and go to the Documents tab.
 2. Press Add document (or Renew beside an existing one) and choose the type.
-3. Fill in what the type asks for and attach the file if it is required.
+3. Fill in what the type asks for and attach the file if it is required. A file can be a PDF, JPEG, PNG or WebP of up to 10 MB; the form refuses another type or a bigger file beside the field before anything is sent.
 4. Save. Identity documents are visible only to the person and their HR Admin.
+5. If an identity document shows No file attached, an HR Admin presses Attach file on that row and chooses the scan. It is added to the same document; the number and dates do not change, and a document that already has a file cannot be replaced this way.
+6. If saving fails, read the message under the file field and press the button again. Pressing again never creates a second document.
 
 ## Find someone's account and module access
 - id: people-find-access-record
@@ -188,3 +191,35 @@ The attendance register leads with Needs review: days where a manual entry and t
 2. Choose Open this day on a Needs review row. The register opens on that company and date with the person's row open.
 3. Read the sessions behind the day and use Edit to correct the original record.
 4. Reload the page. A corrected day leaves Needs review, and leaves Alerts too.
+
+## Finish onboarding a new employee
+- id: people-onboarding
+- area: people
+- status: published
+- keywords: onboarding; invite employee; send invitation; give access; hr role; assign role; module access; review access; resume onboarding; new hire access; who can finish; employee login
+- links: Employees -> /employees
+- screens: /employees/[id]/onboarding; /employees/[id]
+
+Onboarding is one page for one person, opened when you add an employee and from the profile's setup card. It lists six steps in order: Add employee, Complete profile, Invite, HR roles, Module access and Review. Each step says if it is done, blocked or waiting, who can finish it and what to do next. You can leave and come back: the page reads the real records, so nothing is repeated.
+
+1. Open the employee's Onboarding page. Read the next action at the top.
+2. Complete the profile steps. Then the invitation step: an unrestricted System Administrator sends the invitation; an HR Admin links an account that already exists.
+3. Choose the HR roles and module access this person should have, and save the plan. Saving a plan gives no access by itself.
+4. Open Review. It lists the exact companies, HR roles and module rights. Tick the confirmation and apply what you are allowed to apply; items for someone else are shown with who must apply them.
+5. Come back any time. Pressing a step again reuses the employee, the invitation and the access already created.
+
+## Correct a mistaken pay record
+- id: people-correct-pay
+- area: people
+- status: published
+- keywords: correct pay record; wrong salary; salary entered by mistake; joining date salary; fix opening salary; correct effective date; pay history correction; mistaken pay
+- links: Employees -> /employees
+- screens: /employees/[id]
+
+Use Correct pay record on the Compensation tab's history when an entry was wrong, for example the current salary entered with the joining date. Use Update pay for real raises, promotions and scheduled changes. The correction changes that entry in place; the original values stay in the audit trail with your reason and the date. HR Admin or Finance of the employee's company can correct a record.
+
+1. Open the person's Compensation tab and find the entry in the history.
+2. Press Correct pay record on that entry and change the amount, the allowances or the effective date.
+3. Read the old and new values, the pay in force today before and after, and any warnings, then enter the reason (5 to 500 characters).
+4. Save. If a scheduled pay change is based on the entry, cancel it first; the page says so.
+5. If the page says an approved payroll run or a final settlement is affected, tell Finance: nothing in payroll was changed and it needs a review.

@@ -866,7 +866,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open Employees and press Add employee.",
       "Choose the company, then fill in the name and hire date. Do not look for an employee number field: it is assigned when you save.",
       "Add the job, department, manager, contract and salary if you have them; leave the rest for later.",
-      "Press the button at the bottom. The new profile opens and lists what is still to do."
+      "Press the button at the bottom. The Onboarding page for that person opens (see Finish onboarding a new employee below)."
     ],
     "links": [
       {
@@ -940,6 +940,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Enter the new job title and/or the new pay, and the date it takes effect.",
       "Read the line beside the button, which says what will happen on save, then save.",
       "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.",
+      "If the pay you entered was a mistake (the wrong amount, or the joining date used for a current salary), do not record a raise: use Correct pay record (see Correct a mistaken pay record below).",
       "If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator."
     ],
     "links": [
@@ -974,8 +975,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open the person and go to the Documents tab.",
       "Press Add document (or Renew beside an existing one) and choose the type.",
-      "Fill in what the type asks for and attach the file if it is required.",
-      "Save. Identity documents are visible only to the person and their HR Admin."
+      "Fill in what the type asks for and attach the file if it is required. A file can be a PDF, JPEG, PNG or WebP of up to 10 MB; the form refuses another type or a bigger file beside the field before anything is sent.",
+      "Save. Identity documents are visible only to the person and their HR Admin.",
+      "If an identity document shows No file attached, an HR Admin presses Attach file on that row and chooses the scan. It is added to the same document; the number and dates do not change, and a document that already has a file cannot be replaced this way.",
+      "If saving fails, read the message under the file field and press the button again. Pressing again never creates a second document."
     ],
     "links": [
       {
@@ -1090,6 +1093,75 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/attendance",
+      "/employees/[id]"
+    ]
+  },
+  {
+    "id": "people-onboarding",
+    "area": "people",
+    "title": "Finish onboarding a new employee",
+    "keywords": [
+      "onboarding",
+      "invite employee",
+      "send invitation",
+      "give access",
+      "hr role",
+      "assign role",
+      "module access",
+      "review access",
+      "resume onboarding",
+      "new hire access",
+      "who can finish",
+      "employee login"
+    ],
+    "summary": "Onboarding is one page for one person, opened when you add an employee and from the profile's setup card. It lists six steps in order: Add employee, Complete profile, Invite, HR roles, Module access and Review. Each step says if it is done, blocked or waiting, who can finish it and what to do next. You can leave and come back: the page reads the real records, so nothing is repeated.",
+    "steps": [
+      "Open the employee's Onboarding page. Read the next action at the top.",
+      "Complete the profile steps. Then the invitation step: an unrestricted System Administrator sends the invitation; an HR Admin links an account that already exists.",
+      "Choose the HR roles and module access this person should have, and save the plan. Saving a plan gives no access by itself.",
+      "Open Review. It lists the exact companies, HR roles and module rights. Tick the confirmation and apply what you are allowed to apply; items for someone else are shown with who must apply them.",
+      "Come back any time. Pressing a step again reuses the employee, the invitation and the access already created."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
+      "/employees/[id]/onboarding",
+      "/employees/[id]"
+    ]
+  },
+  {
+    "id": "people-correct-pay",
+    "area": "people",
+    "title": "Correct a mistaken pay record",
+    "keywords": [
+      "correct pay record",
+      "wrong salary",
+      "salary entered by mistake",
+      "joining date salary",
+      "fix opening salary",
+      "correct effective date",
+      "pay history correction",
+      "mistaken pay"
+    ],
+    "summary": "Use Correct pay record on the Compensation tab's history when an entry was wrong, for example the current salary entered with the joining date. Use Update pay for real raises, promotions and scheduled changes. The correction changes that entry in place; the original values stay in the audit trail with your reason and the date. HR Admin or Finance of the employee's company can correct a record.",
+    "steps": [
+      "Open the person's Compensation tab and find the entry in the history.",
+      "Press Correct pay record on that entry and change the amount, the allowances or the effective date.",
+      "Read the old and new values, the pay in force today before and after, and any warnings, then enter the reason (5 to 500 characters).",
+      "Save. If a scheduled pay change is based on the entry, cancel it first; the page says so.",
+      "If the page says an approved payroll run or a final settlement is affected, tell Finance: nothing in payroll was changed and it needs a review."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
       "/employees/[id]"
     ]
   },

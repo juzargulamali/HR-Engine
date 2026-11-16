@@ -139,6 +139,23 @@ On the profile, **Remove** or **Restore** (HR Admin of the company). Removed rec
 
 **Attendance register.** Open `/attendance`. It leads with Needs review. A day with nothing recorded says No record on a working day and Rest day on a rest day or public holiday; Absent only when recorded as absent; live clock status is its own column. **Profile tabs.** Leave leads with balances and Pending requests (each linking to its row in Approvals for someone who can decide); Attendance leads with Needs review and the days concerned.
 
+## 10b. Onboarding a new employee end to end (draft PR #108)
+
+1. **Add employee** (HR Admin of the company). You land on `/employees/<id>/onboarding`.
+2. **Complete profile**, then **Invite**: an unrestricted System Administrator invites; an HR Admin links an existing account.
+3. **HR roles** and **Module access**: record the plan (it grants nothing). Review shows exact companies, HR roles and module rights.
+4. **Apply**: tick the confirmation. Each item is applied by someone allowed to; the rest show who must. Retry any time: the employee, invitation and grants already made are reused.
+
+Evidence: `onboarding.test.ts`, `onboarding-plan.rls.test.ts`, `onboarding-delegation.rls.test.ts`, `employees/[id]/onboarding/page.test.tsx`.
+
+## 10c. Attach a file, and upload sizes
+
+Document, insurance and receipt files go from the browser straight to private storage: PDF, JPEG, PNG or WebP, up to 10 MB. An identity document saved without a scan shows **Attach file**; the scan is added to the same row. Evidence: `hrUploads.test.ts`, `employeeDocuments.test.ts`, `attach-identity-file.test.tsx`, `people-hr-uploads.rls.test.ts`.
+
+## 10d. Correct a mistaken pay record
+
+Compensation tab → history → **Correct pay record** → old and new values, reason → save. Original kept in audit; impacted approved payroll runs or final settlements are flagged, never changed. Update pay is unchanged. Evidence: `people-hr-pay-correction.rls.test.ts`, `payCorrection.test.ts`.
+
 ## 11. Staff guidance written for these workflows
 
 Five published topics in [`../staff-guidance/people.md`](../staff-guidance/people.md): add an employee; finish a new employee's remaining steps; change someone's job title or pay; add or renew a document; find someone's account and module access. They use the screens' own words and carry no record data.
