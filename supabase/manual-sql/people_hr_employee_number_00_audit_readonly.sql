@@ -53,8 +53,8 @@ series as (select coalesce(max(substring(k from '^E([0-9]+)$')::bigint), 0) as t
 ign as (select * from e where standing like 'ignored:%' and k <> ''),
 pool as (
   select k, substring(k from '^E([0-9]+)$')::bigint as v,
-         string_agg(distinct employee_number, ', ' order by employee_number) as recorded,
-         string_agg(distinct (employee || ' (' || standing || ')'), '; ' order by (employee || ' (' || standing || ')')) as sources,
+         string_agg(distinct employee_number collate "C", ', ' order by employee_number collate "C") as recorded,
+         string_agg(distinct (employee || ' (' || standing || ')') collate "C", '; ' order by (employee || ' (' || standing || ')') collate "C") as sources,
          count(*) as records
   from ign
   where k ~ '^E[0-9]{1,15}$' and not exists (select 1 from live l where l.k = ign.k)
@@ -63,8 +63,8 @@ pool as (
 pool_ord as (select pool.*, row_number() over (order by v) as pos, count(*) over () as total from pool),
 left_out as (
   select k, case when exists (select 1 from live l where l.k = ign.k) then 'held by an active or invited employee' else 'not in the E series' end as why,
-         string_agg(distinct employee_number, ', ' order by employee_number) as recorded,
-         string_agg(distinct (employee || ' (' || standing || ')'), '; ' order by (employee || ' (' || standing || ')')) as sources
+         string_agg(distinct employee_number collate "C", ', ' order by employee_number collate "C") as recorded,
+         string_agg(distinct (employee || ' (' || standing || ')') collate "C", '; ' order by (employee || ' (' || standing || ')') collate "C") as sources
   from ign
   where exists (select 1 from live l where l.k = ign.k) or k !~ '^E[0-9]{1,15}$'
   group by k, case when exists (select 1 from live l where l.k = ign.k) then 'held by an active or invited employee' else 'not in the E series' end
