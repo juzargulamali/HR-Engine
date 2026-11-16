@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/server";
 import type { ActionState } from "./companies";
 import { resolveInitialApprover } from "./approvals";
 import { addNumberedClaimLine } from "@enginious-hr/domain";
-import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
+import { discardHrUpload, readBackHrUpload, signHrUpload } from "@/lib/hr-upload-server";
+import { sanitizeForStoragePath, UPLOAD_PAGE_OUT_OF_DATE, validateUploadMeta, type PrepareUploadResult } from "@/lib/upload-rules";
 
 async function currentEmployee(supabase: Awaited<ReturnType<typeof createClient>>) {
   const {
@@ -52,26 +53,69 @@ const addLineSchema = z.object({
   description: z.string().optional(),
 });
 
+/** `<company>/<employee>/receipts/<submission>-<name>`: the receipts bucket's convention, with the one-time submission id as the retry key. */
+const receiptPath = (companyId: string, employeeId: string, submission: string, name: string) => `${companyId}/${employeeId}/receipts/${submission}-${sanitizeForStoragePath(name)}`;
+
+/** The signed-in employee and the claim, which must be their own and still a draft (the same rule the database enforces on the lines). */
+async function ownDraftClaim(supabase: Awaited<ReturnType<typeof createClient>>, claimId: string) {
+  const employee = await currentEmployee(supabase);
+  if (!employee) return { error: "No employee record is linked to your account." } as const;
+  const { data: claim } = await supabase.from("reimbursement_claims").select("id, employee_id, status").eq("id", claimId).maybeSingle();
+  if (!claim || claim.employee_id !== employee.id) return { error: "That claim was not found." } as const;
+  if (claim.status !== "draft") return { error: "Receipts and lines can only be added while the claim is a draft." } as const;
+  return { error: null, employee } as const;
+}
+
+/**
+ * Step 1 of adding a claim line WITH a receipt (see addClaimLine). Authorises the employee for THIS claim from the database (their own, still a draft), checks the declared file
+ * against the displayed limits (PDF, JPEG, PNG or WebP, up to 10 MB) and returns the one-time upload link for the private receipts bucket. Nothing is recorded.
+ */
+export async function prepareReceiptUpload(input: { claimId: string; submissionId: string; name: string; size: number; type: string }): Promise<PrepareUploadResult> {
+  const claimId = z.string().uuid().safeParse(input.claimId);
+  const submission = z.string().uuid().safeParse(input.submissionId);
+  if (!claimId.success) return { error: "That claim was not found." };
+  if (!submission.success) return { error: UPLOAD_PAGE_OUT_OF_DATE };
+  const metaError = validateUploadMeta(input);
+  if (metaError) return { error: metaError };
+  const supabase = await createClient();
+  const own = await ownDraftClaim(supabase, claimId.data);
+  if (own.error) return { error: own.error };
+  return signHrUpload("receipts", receiptPath(own.employee.company_id, own.employee.id, submission.data, input.name));
+}
+
+/**
+ * The receipt does not pass through this action (a server action accepts 1 MB by default and a Vercel function 4.5 MB): the browser sends it straight to the private bucket
+ * after prepareReceiptUpload, and this action reads it back (real size and leading bytes) before the line links it. The form posts only the declared `receiptName`,
+ * `receiptType` and `receiptSize`. Retry-safe for a line with a receipt: the stored path comes from the form's one-time `submissionId`, so a repeat returns the line already
+ * saved instead of numbering a second one. A receipt that fails a check, or a line that cannot be saved, deletes the file again.
+ */
 export async function addClaimLine(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = addLineSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   const d = parsed.data;
+  const legacy = formData.get("receipt");
+  if (legacy instanceof File && legacy.size > 0) return { error: UPLOAD_PAGE_OUT_OF_DATE };
 
   const supabase = await createClient();
-  const employee = await currentEmployee(supabase);
-  if (!employee) return { error: "No employee record is linked to your account." };
+  const own = await ownDraftClaim(supabase, d.claimId);
+  if (own.error) return { error: own.error };
+  const employee = own.employee;
 
   let receiptFilePath: string | null = null;
-  const file = formData.get("receipt");
-  if (file instanceof File && file.size > 0) {
-    const validationError = validateUploadFile(file);
+  const receiptName = String(formData.get("receiptName") ?? "");
+  if (receiptName) {
+    const declared = { name: receiptName, type: String(formData.get("receiptType") ?? ""), size: Number(formData.get("receiptSize") ?? 0) };
+    const validationError = validateUploadMeta(declared);
     if (validationError) return { error: validationError };
+    const submission = z.string().uuid().safeParse(String(formData.get("submissionId") ?? ""));
+    if (!submission.success) return { error: UPLOAD_PAGE_OUT_OF_DATE };
+    receiptFilePath = receiptPath(employee.company_id, employee.id, submission.data, receiptName);
 
-    receiptFilePath = `${employee.company_id}/${employee.id}/receipts/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
-    const { error: uploadError } = await supabase.storage
-      .from("receipts")
-      .upload(receiptFilePath, file, { contentType: file.type });
-    if (uploadError) return { error: `Receipt upload failed: ${uploadError.message}` };
+    // A repeat of a submission that was already saved is a success that adds nothing.
+    const { data: again } = await supabase.from("reimbursement_claim_lines").select("id").eq("claim_id", d.claimId).eq("receipt_file_path", receiptFilePath).maybeSingle();
+    if (again) return { error: null };
+    const checked = await readBackHrUpload("receipts", receiptFilePath, declared);
+    if (checked.error) return { error: checked.error };
   }
 
   // Next number = highest existing + 1, retried when a simultaneous add takes it (unique (claim_id, line_no)).
@@ -100,10 +144,13 @@ export async function addClaimLine(_prevState: ActionState, formData: FormData):
     },
   });
   if (!result.ok) {
-    // The receipt (if any) was already uploaded to Storage above — without
-    // this, a failed line insert leaves it orphaned there with nothing
-    // ever pointing at it.
-    if (receiptFilePath) await supabase.storage.from("receipts").remove([receiptFilePath]);
+    if (receiptFilePath) {
+      // A simultaneous retry may have saved the line a moment earlier: then the receipt is in use and stays.
+      const { data: raced } = await supabase.from("reimbursement_claim_lines").select("id").eq("claim_id", d.claimId).eq("receipt_file_path", receiptFilePath).maybeSingle();
+      if (raced) return { error: null };
+      // Without this, a failed line insert leaves the receipt orphaned in storage with nothing ever pointing at it.
+      await discardHrUpload("receipts", receiptFilePath);
+    }
     return { error: result.reason === "error" ? `Could not add the line: ${result.message}` : result.message };
   }
 
