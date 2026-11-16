@@ -1,6 +1,6 @@
 # Inventory: action catalogue
 
-**Status (2026-11-16).** Written for **Inventory Phase 2** on branch `claude/inventory-phase-2`: **not merged, no pull request opened by Claude, required CI not yet run on this head, no SQL in this phase, Production not deployed from this branch.** Every Inventory action that changes data, moves a workflow or changes custody: the function behind it, who is permitted and where that is enforced, the starting state, what changes, whether a retry is safe, and when to stop and ask.
+**Status (2026-11-16).** Written for **Inventory Phase 2** on branch `claude/inventory-phase-2`: **merged as PR #103, merge `6526049`, pinned to head `1026308`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; no SQL in this phase (nothing to apply to the hosted database); real-phone Preview checks passed (owner-confirmed 2026-11-16, not run by Claude); Production `Unverified` (not confirmed by the owner or by Claude for `6526049`).** Every Inventory action that changes data, moves a workflow or changes custody: the function behind it, who is permitted and where that is enforced, the starting state, what changes, whether a retry is safe, and when to stop and ask.
 
 **A documented function is not an approved tool.** JARVIS cannot read or change Inventory (see [`jarvis.md`](./jarvis.md) section 17 and [`jarvis-rulebook.md`](./jarvis-rulebook.md)); nothing here grants it anything.
 
