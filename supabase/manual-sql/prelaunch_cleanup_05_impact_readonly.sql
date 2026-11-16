@@ -1,27 +1,25 @@
--- READ ONLY. PRE-LAUNCH CLEANUP, STEP 2 OF 4: THE IMPACT. Run after step 1 (prelaunch_cleanup_00_audit_readonly.sql), in the Supabase SQL editor of the same database. Creates, changes and deletes nothing.
+-- READ ONLY. PRE-LAUNCH CLEANUP, STEP 2 OF 4: THE IMPACT (INFORMATION ONLY). Run after step 1 (prelaunch_cleanup_00_audit_readonly.sql), in the Supabase SQL editor of the same database. Creates, changes and deletes nothing.
 --
--- WHAT THIS IS FOR. A pending request has moved nothing, so clearing it is harmless. An APPROVED request may already have moved a leave balance (leave_ledger), a comp-off / Recovery Leave
--- credit (comp_day_ledger), be tied to an attendance record, or sit in a payroll period that was already exported. This file lists exactly which in-scope requests did, shows the exact ledger rows,
--- and shows the entries the write step WOULD write if (and only if) you list the request's id in its "approved reversals" list. NOTHING is reversed by default.
+-- WHAT THIS IS FOR. A pending request has moved nothing, so cancelling it is harmless. An APPROVED request may already have moved a leave balance (leave_ledger), a comp-off / Recovery Leave credit
+-- (comp_day_ledger), be tied to an attendance record, or sit in a payroll period that was already exported. This file lists exactly which in-scope requests did, with the exact ledger rows, so you can see what
+-- the cleanup is NOT touching. THE CLEANUP NEVER CHANGES AN APPROVED REQUEST, A LEDGER ROW, AN ATTENDANCE RECORD OR A PAYROLL ROW, whatever their dates. There is nothing to approve or reverse here.
+-- It also checks the other direction: an OUTSTANDING request must not have posted a ledger row. If one did, cancelling it without a reversal would leave a balance wrong, so the write step REFUSES to run
+-- while any exists (section 3 below, and section G of step 1): you decide what to do with it first, outside this pack, and run this file again.
 --
 -- SET THE CUTOFF. Edit the ONE marked line in the `params` block below: the SAME go-live moment you used in step 1 (see that file for exactly what "in scope" means: submission / trigger time before
 -- the cutoff, never the leave dates). While it is still the placeholder (the year 2000) no row is in scope and this file lists nothing but the snapshot.
 --
 -- HOW TO READ THE RESULT. One table: section, company, employee, item_type, item_id, status, summary, detail (detail is JSON text).
 --   1. REQUEST WITH AN EFFECT        one row per in-scope request that moved something. detail: leave_ledger / comp_day_ledger row counts and net days, attendance links, payroll references.
---                                    Flags in summary:  LEAVE-LEDGER, COMP-LEDGER, ATTENDANCE, PAYROLL-LINE (a payroll export line points at one of its ledger rows: a hard stop for reversal),
---                                    PAYROLL-PERIOD (the leave or work dates fall in a payroll period that is approved or already sent, and the employee has lines in it: to be reviewed, not a stop).
---                                    "the write step: ..." says what step 3 does with it by default.
---   2. LEDGER ROW                    the exact ledger rows of those requests (ledger, id, entry type, amount, date, whether already reversed).
---   3. PROPOSED REVERSAL             for each APPROVED in-scope request with a ledger row not yet reversed: the exact row the write step would INSERT if you list the request id (a new
---                                    reversing row that points at the original; the original row is never edited or deleted). A "blocked" note means the write step would refuse that id.
---   3b. APPROVED, NO LEDGER EFFECT   approved in-scope requests that moved nothing: listing one only cancels it.
---   4. BALANCE EFFECT                per employee and ledger: the balance now, the change if every unblocked proposal were applied, and the balance after.
---   5. SNAPSHOT                      counts and sums of the source records the write step must never change (attendance, ledgers, payroll). Step 4 prints the same numbers.
--- To reverse an approved request: copy its item_id from section 3 into the "approved reversals" list at the top of prelaunch_cleanup_10_cleanup.sql, deliberately, one id at a time.
+--                                    Flags in summary:  LEAVE-LEDGER, COMP-LEDGER, ATTENDANCE, PAYROLL-LINE (a payroll export line points at one of its ledger rows),
+--                                    PAYROLL-PERIOD (the leave or work dates fall in a payroll period that is approved or already sent, and the employee has lines in it).
+--                                    "the write step: ..." says what step 3 does with it: an approved request is LEFT UNTOUCHED, an outstanding one is cancelled.
+--   2. LEDGER ROW                    the exact ledger rows of those requests (ledger, id, entry type, amount, date, whether already reversed). Information only: none is ever written, changed or deleted.
+--   3. OUTSTANDING REQUEST THAT ALREADY POSTED A LEDGER ROW   EXPECTED: NONE. A row here means the write step will REFUSE until it is resolved by the owner outside this pack.
+--   4. SNAPSHOT                      counts and sums of the source records the write step must never change (attendance, ledgers, payroll). Step 4 prints the same numbers.
 --
--- WHAT HAPPENS TO WHAT (the write step's default, for every in-scope request): submitted / pending_approval -> cancelled (no ledger effect exists, none is written); approved -> LEFT IN PLACE and
--- reported; rejected, cancelled, draft -> untouched. Attendance records, clock sessions and segments are NEVER changed. Payroll tables are NEVER changed.
+-- WHAT HAPPENS TO WHAT (the write step, for every in-scope request): draft / submitted / pending_approval leave and submitted / pending_approval Recovery Leave or comp-off requests -> cancelled, and their
+-- pending approval steps closed; approved -> LEFT UNTOUCHED; rejected, cancelled -> untouched. Attendance records, clock sessions and segments, ledgers and payroll tables are NEVER changed.
 -- WHAT IS AND IS NOT CHANGED. Nothing is changed by this file. RE-RUNNABLE any number of times.
 
 with params as (
@@ -67,11 +65,45 @@ classified as (
   select i.*, c.legal_name as company, (i.stamp < p.cutoff) as in_scope,
          case
            when i.status in ('submitted', 'pending_approval', 'open', 'needs_action') then 'a_pending'
+           when i.status = 'draft' and i.item_type = 'leave_request' then 'a_pending'   -- an unsubmitted leave draft is outstanding too (it is cancelled)
            when i.status = 'approved' and coalesce(i.date_to, date '0001-01-01') >= current_date then 'b_approved_future'
            when i.status = 'draft' then 'd_draft'
            else 'c_historical'
          end as category
   from items i join companies c on c.id = i.company_id cross join params p
+),
+-- OUTSTANDING requests that have ALREADY posted a ledger row (an unreversed row in leave_ledger or comp_day_ledger). A pending request should never have posted anything; cancelling one WITHOUT a
+-- reversal would leave a balance wrong, and this pack never writes a ledger row, so the write step REFUSES to run while any exists (the owner decides first, outside this pack).
+blocked as (
+  select c.*
+  from classified c
+  where c.in_scope
+    and ((c.item_type = 'leave_request' and c.status in ('draft', 'submitted', 'pending_approval'))
+         or ((c.item_type like 'comp_off_request:%' or c.item_type like 'recovery_leave_request:%') and c.status in ('submitted', 'pending_approval')))
+    and (
+      exists (select 1 from leave_ledger l where c.item_type = 'leave_request' and l.reference_type = 'leave_request' and l.reference_id = c.item_id
+                and l.entry_type <> 'reversal' and not exists (select 1 from leave_ledger y where y.reversal_of_id = l.id))
+      or exists (select 1 from comp_day_ledger l where c.item_type = 'leave_request' and l.reference_type = 'leave_request' and l.reference_id = c.item_id
+                and l.entry_type <> 'reversal' and not exists (select 1 from comp_day_ledger y where y.reversal_of_id = l.id))
+      or exists (select 1 from recovery_credit_requests r join comp_day_ledger l
+                   on (l.reference_type = 'recovery_credit_request' and l.reference_id = r.id)
+                   or (r.attendance_record_id is not null and l.reference_type = 'attendance_record' and l.reference_id = r.attendance_record_id)
+                   or l.id = r.comp_day_ledger_id
+                 where c.item_type <> 'leave_request' and r.id = c.item_id
+                   and l.entry_type <> 'reversal' and not exists (select 1 from comp_day_ledger y where y.reversal_of_id = l.id))
+    )
+),
+-- ORPHAN approval steps: still pending although the in-scope request is already cancelled, rejected or removed (never a step of an approved request).
+orphans as (
+  select 'leave_request'::text as entity_type, a.id as step_id, co.legal_name as company
+  from approvals a join leave_requests lr on a.entity_type = 'leave_request' and a.entity_id = lr.id
+  join employees e on e.id = lr.employee_id join companies co on co.id = e.company_id cross join params p
+  where a.decision = 'pending' and lr.submitted_at < p.cutoff and (lr.status in ('cancelled', 'rejected') or (lr.deleted_at is not null and lr.status <> 'approved'))
+  union all
+  select 'recovery_credit', a.id, co.legal_name
+  from approvals a join recovery_credit_requests rq on a.entity_type = 'recovery_credit' and a.entity_id = rq.id
+  join employees e on e.id = rq.employee_id join companies co on co.id = e.company_id cross join params p
+  where a.decision = 'pending' and rq.submitted_at < p.cutoff and rq.status in ('cancelled', 'rejected')
 ),
 reqs as (
   select c.*, e.first_name || ' ' || e.last_name as employee
@@ -114,23 +146,6 @@ eff as (
              and make_date(pr.period_year, pr.period_month, 1) <= rq.date_to and (make_date(pr.period_year, pr.period_month, 1) + interval '1 month')::date > rq.date_from
              and exists (select 1 from payroll_export_lines pl where pl.run_id = pr.id and pl.employee_id = rq.employee_id)) as payroll_periods
   from reqs rq
-),
-proposal as (
-  select x.*, rq.company, rq.employee, rq.item_type, rq.status as request_status, rq.date_from,
-         case when rq.item_type = 'leave_request' and rq.date_from <= current_date then 'the leave has already started (the app refuses this too: use a manual adjustment)'
-              when rq.item_type like '%:window_reduction' then 'a reduction request cannot be reversed by this pack'
-              when exists (select 1 from payroll_export_lines pl where pl.source_reference_type = 'leave_ledger' and pl.source_reference_id = x.ledger_id) then 'a payroll export line already references this ledger row'
-              else null end as blocked
-  from ledger_rows x join reqs rq on rq.item_id = x.item_id
-  where rq.status = 'approved' and x.entry_type <> 'reversal' and not x.reversed
-),
-balances as (
-  select p.employee_id, p.ledger, p.bucket, p.company, p.employee,
-         case p.ledger when 'leave_ledger' then (select coalesce(sum(l.amount_days), 0) from leave_ledger l where l.employee_id = p.employee_id and l.leave_type_code = p.bucket)
-                       else (select coalesce(sum(c.days), 0) from comp_day_ledger c where c.employee_id = p.employee_id) end as balance_now,
-         coalesce(sum(-p.amount) filter (where p.blocked is null), 0) as change_if_applied,
-         count(*) filter (where p.blocked is not null) as blocked_rows
-  from proposal p group by p.employee_id, p.ledger, p.bucket, p.company, p.employee
 )
 select section, company, employee, item_type, item_id, status, summary, detail
 from (
@@ -141,8 +156,9 @@ from (
   select 1, '1. REQUEST WITH AN EFFECT', rq.company, rq.employee, rq.item_type, rq.item_id, rq.status,
          concat_ws(' ', case when f.leave_rows > 0 then 'LEAVE-LEDGER' end, case when f.comp_rows > 0 then 'COMP-LEDGER' end, case when f.att_records + f.att_segments > 0 then 'ATTENDANCE' end,
                    case when f.payroll_refs > 0 then 'PAYROLL-LINE' end, case when f.payroll_periods > 0 then 'PAYROLL-PERIOD' end)
-         || '; the write step: ' || case when rq.status in ('submitted', 'pending_approval') then 'cancels the request (nothing was posted, nothing is reversed)'
-                                         when rq.status = 'approved' then 'LEAVES IT IN PLACE unless you list its id as an approved reversal'
+         || '; the write step: ' || case when exists (select 1 from blocked b where b.item_id = rq.item_id) then 'REFUSES TO RUN: this outstanding request has already posted a ledger row (see section 3)'
+                                         when rq.status in ('draft', 'submitted', 'pending_approval') then 'cancels the request (nothing was posted)'
+                                         when rq.status = 'approved' then 'LEAVES IT UNTOUCHED (an approved request is never changed by this pack, nor its balance rows)'
                                          else 'does not touch it (already ' || rq.status || ')' end,
          jsonb_build_object('category', rq.category, 'dates', rq.date_from || ' to ' || rq.date_to, 'submitted_or_triggered_at', rq.stamp, 'leave_ledger_rows', f.leave_rows, 'leave_ledger_net_days', f.leave_net,
                             'comp_ledger_rows', f.comp_rows, 'comp_ledger_net_days', f.comp_net, 'attendance_records_linked', f.att_records, 'clock_segments_as_evidence', f.att_segments,
@@ -155,23 +171,12 @@ from (
                             'reference_type', x.reference_type, 'reference_id', x.reference_id, 'reversal_of_id', x.reversal_of_id, 'already_reversed', x.reversed)::text
   from ledger_rows x join reqs rq on rq.item_id = x.item_id
   union all
-  select 3, '3. PROPOSED REVERSAL (written only if the request id is listed in the cleanup file)', p.company, p.employee, p.item_type, p.item_id, p.request_status,
-         case when p.blocked is null then 'would insert a ' || p.ledger || ' reversal of ' || (-p.amount) else 'BLOCKED: ' || p.blocked end,
-         jsonb_build_object('table', p.ledger, 'entry_type', 'reversal', 'employee_id', p.employee_id, 'bucket', p.bucket, 'txn_date', current_date, 'amount', -p.amount, 'reversal_of_id', p.ledger_id,
-                            'reference_type', p.reference_type, 'reference_id', p.reference_id, 'reverses_row', jsonb_build_object('entry_type', p.entry_type, 'amount', p.amount, 'txn_date', p.txn_date),
-                            'blocked', p.blocked)::text
-  from proposal p
+  select 3, '3. OUTSTANDING REQUEST THAT ALREADY POSTED A LEDGER ROW: THE WRITE STEP WILL REFUSE (expected: none)', b.company, e.first_name || ' ' || e.last_name, b.item_type, b.item_id, b.status,
+         'LOUD: this outstanding request has an unreversed ledger row. Cancelling it without a reversal would leave a balance wrong, and this pack never writes a ledger row. Resolve it first.',
+         jsonb_build_object('dates', b.date_from || ' to ' || b.date_to, 'category', b.category)::text
+  from blocked b join employees e on e.id = b.employee_id
   union all
-  select 4, '3b. APPROVED, NO LEDGER EFFECT (listing the id only cancels the request)', rq.company, rq.employee, rq.item_type, rq.item_id, rq.status, 'approved request with no ledger row to reverse',
-         jsonb_build_object('dates', rq.date_from || ' to ' || rq.date_to, 'already_started', rq.date_from <= current_date)::text
-  from reqs rq join eff f on f.item_id = rq.item_id where rq.status = 'approved' and f.leave_rows + f.comp_rows = 0
-  union all
-  select 5, '4. BALANCE EFFECT (if every unblocked proposal were applied)', b.company, b.employee, b.ledger || ':' || b.bucket, null, null,
-         'balance now ' || b.balance_now || ', change ' || b.change_if_applied || ', after ' || (b.balance_now + b.change_if_applied) || case when b.blocked_rows > 0 then ' (' || b.blocked_rows || ' blocked row(s) excluded)' else '' end,
-         jsonb_build_object('balance_now', b.balance_now, 'change', b.change_if_applied, 'balance_after', b.balance_now + b.change_if_applied, 'blocked_rows', b.blocked_rows)::text
-  from balances b
-  union all
-  select 6, '5. SNAPSHOT (the write step must leave these exactly as they are, apart from the reversal rows you approve)', null, null, 'snapshot', null, null, m.name, m.val
+  select 6, '4. SNAPSHOT (the write step must leave every one of these exactly as it is)', null, null, 'snapshot', null, null, m.name, m.val
   from (
     select 'attendance_records (rows)' as name, count(*)::text as val from attendance_records
     union all select 'attendance_records with presence_conflict', count(*)::text from attendance_records where presence_conflict is not null
@@ -183,4 +188,4 @@ from (
     union all select 'approvals of other types, pending', count(*)::text from approvals where decision = 'pending' and entity_type::text not in ('leave_request', 'recovery_credit')
   ) m
 ) q
-order by ord, company nulls first, employee nulls first, item_type, item_id nulls first, summary;
+order by ord, company collate "C" nulls first, employee collate "C" nulls first, item_type collate "C", item_id nulls first, summary collate "C";

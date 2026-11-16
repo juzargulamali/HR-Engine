@@ -8,7 +8,8 @@ import { RlsTestDatabase } from "../src/harness";
 import { COMPANY_AE, COMPANY_OTHER, COMPANY_SA, H, createRecoveryFixtures, plusSeconds, type Person } from "../src/recoveryFixtures";
 import { attendanceItems, countByState, makeViewer, recoveryAlertItems, type QueueItem } from "../../../apps/web/src/lib/hr/queue";
 
-// One-time, owner-run, PRODUCTION PRE-LAUNCH CLEANUP of requests and alerts (supabase/manual-sql/prelaunch_cleanup_*.sql).
+// One-time, owner-run, PRODUCTION PRE-LAUNCH CLEANUP of requests and alerts (supabase/manual-sql/prelaunch_cleanup_*.sql). It cancels OUTSTANDING requests and clears their alerts; approved requests,
+// ledgers, attendance and payroll are never touched.
 // The four SQL files are run exactly as written, by string substitution of their marked edit lines only, on an isolated database built from every migration, with
 // fictional companies, people and requests. They run as the database owner (like the Supabase SQL editor); what a signed-in person can then SEE is asserted with
 // asUser(), using SQL equivalents of the app's own queue queries and the app's own pure queue builders (apps/web/src/lib/hr/queue.ts).
@@ -42,7 +43,7 @@ function withCutoff(sql: string, cutoff: string | null): string {
 }
 
 /** The write file has three marked lines. Replace exactly those. */
-function cleanupSql(o: { cutoff?: string; reversals?: string[]; actor?: string }): string {
+function cleanupSql(o: { cutoff?: string; expected?: number; actor?: string }): string {
   let sql = CLEANUP_SQL;
   const swap = (marker: string, line: string) => {
     const hits = sql.match(new RegExp(`^.*${marker}.*$`, "gm")) ?? [];
@@ -50,7 +51,7 @@ function cleanupSql(o: { cutoff?: string; reversals?: string[]; actor?: string }
     sql = sql.replace(new RegExp(`^.*${marker}.*$`, "m"), () => line);
   };
   if (o.cutoff) swap("<<< EDIT 1 of 3", `  timestamptz '${o.cutoff}' as cutoff,`);
-  if (o.reversals) swap("<<< EDIT 2 of 3", `  array[${o.reversals.map((i) => `'${i}'::uuid`).join(", ")}]::uuid[] as approved_reversals,`);
+  if (o.expected !== undefined) swap("<<< EDIT 2 of 3", `  ${o.expected}::int as expected_total,`);
   if (o.actor) swap("<<< EDIT 3 of 3", `  uuid '${o.actor}' as actor_user_id;`);
   return sql;
 }
@@ -224,6 +225,8 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
     // L_orphan: cancelled before the cutoff but its approval step was never closed (the state older versions left behind): shows on the approver's page for nothing.
     await leave({ key: "L_orphan", person: eA6, approver: mgrAe, from: "current_date + 80", to: "current_date + 80", days: 1, status: "cancelled", stamp: PRE });
     await db.seed(`update approvals set decision = 'pending' where entity_id = '${ids.L_orphan}'`);
+    // L_draft: an unsubmitted leave DRAFT from before the cutoff (outstanding too: the cleanup cancels it).
+    await leave({ key: "L_draft", person: eA5, from: "current_date + 110", to: "current_date + 111", days: 2, status: "draft", stamp: PRE, withApproval: false });
     // Riyadh Co: one pending, one approved (future, with ledger)
     await leave({ key: "L_pend_sa", person: eS1, approver: mgrSa, from: "current_date + 25", to: "current_date + 25", days: 1, stamp: PRE });
     await leave({ key: "L_appr_sa", person: eS2, approver: mgrSa, from: "current_date + 35", to: "current_date + 36", days: 2, stamp: PRE });
@@ -344,7 +347,7 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
   const postCutoffHash = async () => {
     const w4 = W.W4!;
     const r = await one(`
-      select md5(string_agg(t, '|' order by t)) as h from (
+      select md5(string_agg(t, '|' order by t collate "C")) as h from (
         select to_jsonb(x)::text as t from leave_requests x where id = '${ids.L_post}'
         union all select to_jsonb(x)::text from approvals x where entity_id = '${ids.L_post}'
         union all select to_jsonb(x)::text from recovery_credit_requests x where employee_id = '${w4.employeeId}'
@@ -362,7 +365,15 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
   const ackCount = async (kind = "attendance") => Number((await one(`select count(*)::int as n from hr_queue_acknowledgements where kind = '${kind}'`)).n);
   const verify = async (cutoff = CUTOFF) => runScript(withCutoff(VERIFY_SQL, cutoff), true);
   const verifyProblems = (rows: Row[]) => rows.filter((r) => String(r.result).startsWith("FAIL")).map((r) => `${r.ord}: ${r.item} -> ${r.result}`);
-  const runCleanup = (o: { cutoff?: string; reversals?: string[]; actor?: string } = {}) => runScript(cleanupSql({ cutoff: CUTOFF, actor: hrAe.userId, ...o }));
+  /** The number the owner carries from the read-only audit to the write step: the audit's single "E. TOTAL THE WRITE STEP WOULD CHANGE" row. */
+  const auditTotal = async (cutoff = CUTOFF) => {
+    const rows = (await runScript(withCutoff(AUDIT_SQL, cutoff), true)).filter((r) => r.item_type === "TOTAL");
+    expect(rows).toHaveLength(1);
+    expect(String(rows[0]!.section)).toMatch(/^E\. TOTAL THE WRITE STEP WOULD CHANGE/);
+    return Number(rows[0]!.count);
+  };
+  const runCleanup = async (o: { cutoff?: string; expected?: number; actor?: string } = {}) =>
+    runScript(cleanupSql({ cutoff: o.cutoff ?? CUTOFF, actor: o.actor ?? hrAe.userId, expected: o.expected ?? (await auditTotal(o.cutoff ?? CUTOFF)) }));
   const change = (rows: Row[], f: { company?: string; item_type: string; result?: string; action?: string }) =>
     rows.filter((r) => String(r.section).startsWith("1.") && r.item_type === f.item_type && (f.company === undefined || r.company === f.company)
       && (f.result === undefined || r.result === f.result) && (f.action === undefined || r.action === f.action)).reduce((n, r) => n + Number(r.count), 0);
@@ -436,6 +447,7 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       // (a) PENDING: a leave application submitted BEFORE the cutoff for a FUTURE date is in scope; one submitted after is not
       expect(cell(rows, { section: "A.", company: "Dubai Co", item_type: "leave_request", status: "submitted", scope: IN })).toBe(1);
       expect(cell(rows, { section: "A.", company: "Dubai Co", item_type: "leave_request", status: "submitted", scope: AFTER })).toBe(1);
+      expect(cell(rows, { section: "A.", company: "Dubai Co", item_type: "leave_request", status: "draft", scope: IN })).toBe(1); // an unsubmitted draft is outstanding too
       expect(cell(rows, { section: "A.", company: "Riyadh Co", item_type: "leave_request", status: "submitted", scope: IN })).toBe(1);
       expect(cell(rows, { section: "A.", company: "Dubai Co", item_type: "recovery_leave_request:window", status: "submitted", scope: IN })).toBe(4);
       expect(cell(rows, { section: "A.", company: "Dubai Co", item_type: "recovery_leave_request:window", status: "pending_approval", scope: IN })).toBe(1);
@@ -459,10 +471,23 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       // E: what the write step would change; the look-back keeps old exceptions out
       expect(cell(rows, { section: "E.", company: "Dubai Co", item_type: "attendance_alert:presence_conflict" })).toBe(2);
       expect(cell(rows, { section: "E.", company: "Dubai Co", item_type: "attendance_alert:window_needs_hr_verification" })).toBe(2);
-      expect(cell(rows, { section: "E.", company: "Dubai Co", item_type: "leave_request" })).toBe(1);
+      expect(cell(rows, { section: "E.", company: "Dubai Co", item_type: "leave_request" })).toBe(2); // the pending one and the draft
       // F: approval steps, including the orphan, and another type that is only counted
       expect(cell(rows, { section: "F.", company: "Dubai Co", item_type: "approval_step:leave_request", status: "pending (ORPHAN: request already cancelled, rejected or removed)", scope: IN })).toBe(1);
       expect(rows.filter((r) => String(r.item_type).startsWith("approval_step:reimbursement_claim")).map((r) => Number(r.count))).toEqual([1]);
+    });
+
+    it("says that approved requests are never changed, and ends section E with ONE labelled TOTAL that equals the sum of what it lists as to be changed", async () => {
+      const rows = await runScript(withCutoff(AUDIT_SQL, CUTOFF), true);
+      expect(rows.some((r) => String(r.section) === "0. NOTE" && /APPROVED requests .* NEVER changed by this pack/.test(String(r.status)))).toBe(true);
+      expect(rows.some((r) => String(r.section).startsWith("B.") && /LEFT IN PLACE, NOT TOUCHED/.test(String(r.section)))).toBe(true);
+      expect(rows.some((r) => String(r.section).startsWith("C.") && /approved and past: LEFT IN PLACE, NOT TOUCHED/.test(String(r.section)))).toBe(true);
+      const total = rows.filter((r) => r.item_type === "TOTAL");
+      expect(total).toHaveLength(1);
+      const listed = rows.filter((r) => String(r.section).startsWith("E.") && r.item_type !== "TOTAL").reduce((n, r) => n + Number(r.count), 0);
+      expect(Number(total[0]!.count)).toBe(listed);
+      expect(Number(total[0]!.count)).toBe(19); // 3 leave (pending, draft, Riyadh) + 7 Recovery Leave / comp-off requests + 4 alerts + 4 attendance exceptions + 1 orphan step: the number the cleanup changes
+      expect(rows.filter((r) => String(r.section).startsWith("G."))).toEqual([]); // no outstanding request has posted a ledger row
     });
   });
 
@@ -470,21 +495,20 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
   describe("step 2: the impact (read-only)", () => {
     let rows: Row[];
     const flagged = (id: string) => rows.find((r) => String(r.section).startsWith("1.") && r.item_id === id);
-    const proposal = (id: string) => rows.filter((r) => String(r.section).startsWith("3. ") && r.item_id === id);
-    const detail = (r: Row | undefined) => JSON.parse(String(r?.detail ?? "{}")) as Row;
+        const detail = (r: Row | undefined) => JSON.parse(String(r?.detail ?? "{}")) as Row;
     beforeAll(async () => {
       rows = await runScript(withCutoff(IMPACT_SQL, CUTOFF), true);
     });
 
     it("flags exactly the requests that moved a leave balance, a comp-off credit, an attendance record or a payroll export", async () => {
       expect(String(flagged(ids.L_appr!)?.summary)).toMatch(/^LEAVE-LEDGER;/);
-      expect(String(flagged(ids.L_appr!)?.summary)).toContain("LEAVES IT IN PLACE unless you list its id as an approved reversal");
+      expect(String(flagged(ids.L_appr!)?.summary)).toContain("LEAVES IT UNTOUCHED");
       expect(String(flagged(ids.L_pay!)?.summary)).toMatch(/LEAVE-LEDGER PAYROLL-LINE PAYROLL-PERIOD/);
       expect(String(flagged(ids.L_past!)?.summary)).toMatch(/^LEAVE-LEDGER;/);
       expect(String(flagged(ids.LG3_req!)?.summary)).toMatch(/COMP-LEDGER ATTENDANCE/);
       expect(String(flagged(ids.W6_req!)?.summary)).toMatch(/COMP-LEDGER ATTENDANCE/); // clock segments are its evidence
       // a pending window request was born from clock segments, nothing posted; a pending leave request moved nothing
-      expect(String(flagged(ids.W7_req!)?.summary)).toBe("ATTENDANCE; the write step: cancels the request (nothing was posted, nothing is reversed)");
+      expect(String(flagged(ids.W7_req!)?.summary)).toBe("ATTENDANCE; the write step: cancels the request (nothing was posted)");
       expect(flagged(ids.L_pend!)).toBeUndefined();
       expect(flagged(ids.L_post!)).toBeUndefined(); // at or after the cutoff: not in scope, not listed
       expect(detail(flagged(ids.L_appr!))).toMatchObject({ leave_ledger_rows: 1, leave_ledger_net_days: -2, payroll_lines_referencing_its_ledger_rows: 0 });
@@ -492,38 +516,23 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       expect(detail(flagged(ids.LG3_req!))).toMatchObject({ comp_ledger_rows: 1, comp_ledger_net_days: 1, attendance_records_linked: 1 });
     });
 
-    it("lists the exact ledger rows and the PROPOSED REVERSAL entries (a new reversing row; nothing is written)", async () => {
+    it("lists the exact ledger rows as INFORMATION; there is no proposal, no reversal and no balance-after anywhere in the output", async () => {
       const led = await one(`select id::text as id from leave_ledger where reference_type = 'leave_request' and reference_id = '${ids.L_appr}'`);
       const ledgerRows = rows.filter((r) => String(r.section).startsWith("2.") && r.item_id === ids.L_appr);
       expect(ledgerRows).toHaveLength(1);
       expect(detail(ledgerRows[0])).toMatchObject({ ledger: "leave_ledger", ledger_row_id: led.id, entry_type: "deduction", amount: -2, already_reversed: false });
-      const p = proposal(ids.L_appr!);
-      expect(p).toHaveLength(1);
-      expect(String(p[0]!.summary)).toBe("would insert a leave_ledger reversal of 2.00");
-      expect(detail(p[0])).toMatchObject({ table: "leave_ledger", entry_type: "reversal", amount: 2, reversal_of_id: led.id, reference_type: "leave_request", reference_id: ids.L_appr, blocked: null });
-      expect(detail(p[0]).txn_date).toBe((await one("select current_date::text as d")).d);
-      // comp-off: the daily credit (reference = the attendance record) and the window credit (reference = the request)
-      expect(detail(proposal(ids.LG3_req!)[0])).toMatchObject({ table: "comp_day_ledger", amount: -1, reversal_of_id: ids.LG3_led, reference_type: "attendance_record", reference_id: ids.LG3_rec });
-      expect(detail(proposal(ids.W6_req!)[0])).toMatchObject({ table: "comp_day_ledger", amount: -0.5, reference_type: "recovery_credit_request", reference_id: ids.W6_req });
-      // blocked proposals say why: a payroll line points at it; the leave has already started
-      expect(String(proposal(ids.L_pay!)[0]!.summary)).toMatch(/^BLOCKED: a payroll export line already references this ledger row/);
-      expect(String(proposal(ids.L_past!)[0]!.summary)).toMatch(/^BLOCKED: the leave has already started/);
-      // nothing is proposed for an item that is not approved or not in scope
-      expect(proposal(ids.L_pend!)).toEqual([]);
-      expect(proposal(ids.L_post!)).toEqual([]);
-    });
-
-    it("shows the balance now, the change and the balance after, per employee", async () => {
-      const balance = async (p: Person) => {
-        const emp = await one(`select first_name || ' ' || last_name as n from employees where id = '${p.employeeId}'`);
-        return detail(rows.find((r) => String(r.section).startsWith("4.") && r.employee === emp.n && r.item_type === "leave_ledger:annual"));
-      };
-      expect(await balance(eA2)).toMatchObject({ balance_now: 18, change: 2, balance_after: 20, blocked_rows: 0 });
-      expect(await balance(eA3)).toMatchObject({ balance_now: 18, change: 0, balance_after: 18, blocked_rows: 1 }); // payroll-referenced: excluded
+      expect(detail(rows.filter((r) => String(r.section).startsWith("2.") && r.item_id === ids.LG3_req)[0])).toMatchObject({ ledger: "comp_day_ledger", entry_type: "earned", amount: 1, reference_type: "attendance_record", reference_id: ids.LG3_rec });
+      expect(detail(rows.filter((r) => String(r.section).startsWith("2.") && r.item_id === ids.W6_req)[0])).toMatchObject({ ledger: "comp_day_ledger", entry_type: "earned", amount: 0.5, reference_type: "recovery_credit_request" });
+      expect(rows.map((r) => String(r.section)).filter((x) => /PROPOSED|REVERSAL|BALANCE|3b/i.test(x))).toEqual([]);
+      expect(rows.some((r) => /would insert|BLOCKED:|balance now|balance_after|would_write/.test(`${r.summary} ${r.detail}`))).toBe(false);
+      // an approved request is stated to be left untouched, whatever it moved
+      for (const k of ["L_appr", "L_pay", "L_past", "LG3_req", "W6_req"]) expect(String(flagged(ids[k]!)?.summary)).toContain("LEAVES IT UNTOUCHED");
+      // and with nothing outstanding that posted a ledger row, section 3 is empty
+      expect(rows.filter((r) => String(r.section).startsWith("3."))).toEqual([]);
     });
 
     it("prints a snapshot of the source records the write step must never change", async () => {
-      const snap = Object.fromEntries(rows.filter((r) => String(r.section).startsWith("5.")).map((r) => [r.summary as string, r.detail as string]));
+      const snap = Object.fromEntries(rows.filter((r) => String(r.section).startsWith("4.")).map((r) => [r.summary as string, r.detail as string]));
       expect(snap["attendance_records (rows)"]).toBe((await one("select count(*)::text as n from attendance_records")).n);
       expect(snap["payroll_export_lines (rows / net amount)"]).toBe("1 / 50.00");
       expect(snap["approvals of other types, pending"]).toBe("1");
@@ -548,9 +557,10 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
     });
 
     it("REFUSES a cutoff in the future, and an actor that is not a real sign-in account", async () => {
-      await expect(runScript(cleanupSql({ cutoff: iso(NOW + DAY), actor: hrAe.userId }))).rejects.toThrow(/cutoff .* is in the future/);
-      await expect(runScript(cleanupSql({ cutoff: CUTOFF }))).rejects.toThrow(/EDIT 3 \(actor_user_id\) is not the id of a real sign-in account/);
-      await expect(runScript(cleanupSql({ cutoff: CUTOFF, actor: randomUUID() }))).rejects.toThrow(/EDIT 3 \(actor_user_id\)/);
+      await expect(runScript(cleanupSql({ cutoff: iso(NOW + DAY), expected: 0, actor: hrAe.userId }))).rejects.toThrow(/cutoff .* is in the future/);
+      const expected = await auditTotal();
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, expected }))).rejects.toThrow(/EDIT 3 \(actor_user_id\) is not the id of a real sign-in account/);
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, expected, actor: randomUUID() }))).rejects.toThrow(/EDIT 3 \(actor_user_id\)/);
       await untouched();
     });
 
@@ -568,13 +578,68 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       const problems = verifyProblems(await verify());
       expect(problems.map((p) => p.split(":")[0])).toEqual(["2", "3", "4", "5", "6", "11"]);
     });
+
+    it("EXPECTED TOTAL guard: REFUSES while it is still the placeholder, and when it differs from what the database would change (either way), changing nothing", async () => {
+      const total = await auditTotal();
+      expect(total).toBe(19);
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, actor: hrAe.userId }))).rejects.toThrow(/EXPECTED TOTAL \(EDIT 2\) is still the placeholder/);
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, actor: hrAe.userId, expected: total + 1 }))).rejects.toThrow(/EXPECTED TOTAL \(EDIT 2\) is 20, but the database would change 19 row\(s\)/);
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, actor: hrAe.userId, expected: total - 1 }))).rejects.toThrow(/EXPECTED TOTAL \(EDIT 2\) is 18, but the database would change 19 row\(s\)/);
+      await expect(runScript(cleanupSql({ cutoff: CUTOFF, actor: hrAe.userId, expected: 0 }))).rejects.toThrow(/but the database would change 19/);
+      await untouched();
+    });
+
+    it("an OUTSTANDING request that has already posted a ledger row BLOCKS the cleanup (audit section G, impact section 3, verify FAIL), even with a matching EXPECTED TOTAL; nothing is written", async () => {
+      const leaveRow = randomUUID();
+      const compRow = randomUUID();
+      const w1 = (await winReq("W1"))[0]!;
+      await db.seed(`
+        insert into leave_ledger (id, employee_id, leave_type_code, txn_date, entry_type, amount_days, reference_type, reference_id, created_by)
+          values ('${leaveRow}', '${eA1.employeeId}', 'annual', current_date, 'deduction', -3, 'leave_request', '${ids.L_pend}', '${hrAe.userId}');
+        insert into comp_day_ledger (id, employee_id, txn_date, entry_type, days, source, reference_type, reference_id, created_by)
+          values ('${compRow}', '${W.W1!.employeeId}', current_date, 'earned', 0.5, 'recovery_window', 'recovery_credit_request', '${w1.id}', '${hrAe.userId}');`);
+      try {
+        const base = { fp: await fingerprint(), st: await states() };
+        const audit = await runScript(withCutoff(AUDIT_SQL, CUTOFF), true);
+        expect(cell(audit, { section: "G.", company: "Dubai Co", item_type: "leave_request", status: "submitted" })).toBe(1);
+        expect(cell(audit, { section: "G.", company: "Dubai Co", item_type: "recovery_leave_request:window", status: "submitted" })).toBe(1);
+        const impact = await runScript(withCutoff(IMPACT_SQL, CUTOFF), true);
+        const loud = impact.filter((r) => String(r.section).startsWith("3."));
+        expect(loud.map((r) => r.item_id).sort()).toEqual([ids.L_pend, w1.id].sort());
+        expect(loud.every((r) => String(r.summary).startsWith("LOUD: this outstanding request has an unreversed ledger row"))).toBe(true);
+        expect(String(impact.find((r) => String(r.section).startsWith("1.") && r.item_id === ids.L_pend)!.summary)).toContain("REFUSES TO RUN");
+        expect(verifyProblems(await verify()).some((p) => p.includes("no outstanding in-scope request has posted a ledger row"))).toBe(true);
+        for (const expected of [await auditTotal(), 0, 99]) await expect(runCleanup({ expected })).rejects.toThrow(/REFUSING TO RUN: 2 outstanding request\(s\) have already posted a ledger row/);
+        expect(await fingerprint()).toEqual(base.fp);
+        expect(await states()).toEqual(base.st);
+        expect(await statusOf("leave_requests", ids.L_pend!)).toBe("submitted");
+        expect(await statusOf("recovery_credit_requests", w1.id)).toBe("submitted");
+      } finally {
+        await db.seed(`delete from leave_ledger where id = '${leaveRow}'; delete from comp_day_ledger where id = '${compRow}';`); // test housekeeping only (the fixture's own rows)
+      }
+      st0 = await states(); // the two inserted rows left their (system) audit entries behind: a fresh baseline
+      await untouched();
+    });
   });
 
-  // ------------------------------------------------------------------ 3. CLEANUP: the run with an EMPTY approved-reversal list
-  describe("step 3: the cleanup with an EMPTY approved-reversal list", () => {
+  // ------------------------------------------------------------------ 3. CLEANUP: the run
+  describe("step 3: the cleanup (the EXPECTED TOTAL from the audit; approved requests and ledgers are never touched)", () => {
     let result: Row[];
     let post0: string;
     let auditBefore: number;
+    let approved0: string;
+    let expectedTotal: number;
+
+    /** Every approved leave / Recovery Leave / comp-off request, its approval steps, and BOTH ledgers: they must come out of the cleanup byte for byte. */
+    const approvedHash = async () => (await one(`
+      select md5(string_agg(t, '|' order by t collate "C")) as h from (
+        select 'lr:' || to_jsonb(x)::text as t from leave_requests x where status = 'approved'
+        union all select 'rq:' || to_jsonb(x)::text from recovery_credit_requests x where status = 'approved'
+        union all select 'ap:' || to_jsonb(a)::text from approvals a where (a.entity_type = 'leave_request' and a.entity_id in (select id from leave_requests where status = 'approved'))
+                                                                           or (a.entity_type = 'recovery_credit' and a.entity_id in (select id from recovery_credit_requests where status = 'approved'))
+        union all select 'll:' || to_jsonb(x)::text from leave_ledger x
+        union all select 'cl:' || to_jsonb(x)::text from comp_day_ledger x
+      ) y`)).h as string;
 
     beforeAll(async () => {
       fpBefore = await fingerprint();
@@ -587,13 +652,16 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
         eA1Pending: Number((await as(eA1, "select count(*)::int as n from leave_requests where employee_id = $1 and status in ('submitted', 'pending_approval')", [eA1.employeeId]))[0]!.n),
         counts: await states(),
       };
-      result = await runCleanup();
+      approved0 = await approvedHash();
+      expectedTotal = await auditTotal();
+      result = await runCleanup({ expected: expectedTotal }); // the EXPECTED TOTAL matches: it proceeds
     });
 
     it("prints the cutoff it used, then what it changed by company, type and status", async () => {
       expect(String(result[0]!.section)).toMatch(/^0\./);
       expect(String(result[0]!.result)).toContain(CUTOFF.slice(0, 16).replace("T", " "));
       expect(change(result, { company: "Dubai Co", item_type: "leave_request", result: "cancelled (was submitted)" })).toBe(1);
+      expect(change(result, { company: "Dubai Co", item_type: "leave_request", result: "cancelled (was draft)" })).toBe(1);
       expect(change(result, { company: "Riyadh Co", item_type: "leave_request", result: "cancelled (was submitted)" })).toBe(1);
       expect(change(result, { company: "Dubai Co", item_type: "approval_step:leave_request (orphan)" })).toBe(1);
       expect(change(result, { company: "Dubai Co", item_type: "recovery_leave_request:window", result: "cancelled (was submitted)" })).toBe(4);
@@ -604,12 +672,15 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       expect(change(result, { company: "Dubai Co", item_type: "attendance_alert:presence_conflict", action: "acknowledged" })).toBe(2); // AX1, AX4: AX3 is older than the look-back
       expect(change(result, { company: "Dubai Co", item_type: "attendance_alert:window_needs_hr_verification", action: "acknowledged" })).toBe(2);
       const total = result.find((r) => r.action === "TOTAL")!;
-      expect(Number(total.count)).toBe(1 + 1 + 1 + 4 + 1 + 2 + 3 + 1 + 2 + 2);
-      expect(total.result).toBe("rows changed or written");
-      expect(result.some((r) => String(r.section).startsWith("1.") && String(r.action).includes("ledger"))).toBe(false); // no ledger row is written with an empty list
+      expect(Number(total.count)).toBe(1 + 1 + 1 + 1 + 4 + 1 + 2 + 3 + 1 + 2 + 2);
+      expect(Number(total.count)).toBe(expectedTotal); // the audit's TOTAL, the number typed, and what the run changed are one number
+      expect(total.result).toBe("rows changed");
+      expect(result.some((r) => String(r.section).startsWith("1.") && /ledger|revers/i.test(`${r.action} ${r.item_type} ${r.result}`))).toBe(false); // no ledger row is written, ever
     });
 
-    it("reports the approved items it LEFT IN PLACE (including the ones that moved a ledger) and writes no ledger row", async () => {
+    it("reports the approved items it LEFT IN PLACE (including the ones that moved a ledger); approved requests, their steps and every ledger row are byte for byte unchanged", async () => {
+      expect(await approvedHash()).toBe(approved0);
+      expect((await one("select count(*)::int as n from audit_log where origin = 'prelaunch_cleanup' and table_name in ('leave_ledger', 'comp_day_ledger')")).n).toBe(0);
       expect(left(result, { company: "Dubai Co", item_type: "leave_request" })).toBe(3); // L_appr, L_pay, L_past
       expect(left(result, { company: "Riyadh Co", item_type: "leave_request" })).toBe(1);
       expect(left(result, { company: "Dubai Co", item_type: "recovery_leave_request:window" })).toBe(1);
@@ -622,6 +693,7 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
     it("cancelled every in-scope outstanding request through the app's own statuses, closing its approval steps with the marker", async () => {
       expect(await statusOf("leave_requests", ids.L_pend!)).toBe("cancelled");
       expect(await statusOf("leave_requests", ids.L_pend_sa!)).toBe("cancelled");
+      expect(await statusOf("leave_requests", ids.L_draft!)).toBe("cancelled");
       expect((await decisionsOf(ids.L_pend!))[0]).toEqual({ d: "cancelled", comments: MARKER });
       expect((await decisionsOf(ids.L_orphan!))[0]).toEqual({ d: "cancelled", comments: MARKER }); // the orphan step is closed
       for (const k of ["W1", "W2", "W3", "W5", "W7"]) {
@@ -652,7 +724,7 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       expect(map).toEqual({
         "approvals/update": 3 + 5 + 2, // L_pend, SA, orphan; W1, W2, W3, W5 step 1 and W7 step 2; the two Doha steps
         "hr_queue_acknowledgements/insert": 4,
-        "leave_requests/update": 2,
+        "leave_requests/update": 3,
         "recovery_alerts/update": 4,
         "recovery_credit_requests/update": 7,
       });
@@ -693,8 +765,7 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
       expect(verifyProblems(rows)).toEqual([]);
       const info = (label: string) => rows.find((r) => String(r.item).startsWith(label))!.result;
       expect(info("information: attendance_records")).toBe(`${(await one("select count(*)::int as n from attendance_records")).n} / 4 / ${(await one("select count(*)::int as n from attendance_sessions")).n}`);
-      expect(info("information: reversal rows written by the cleanup")).toBe("0 / 0");
-      expect(info("information: in-scope APPROVED requests still approved")).toBe("6 / 6"); // 4 leave (Dubai 3, Riyadh 1), the window credit, the daily comp-off: all moved a ledger
+      expect(info("information: in-scope APPROVED requests")).toBe("6 / 6"); // 4 leave (Dubai 3, Riyadh 1), the window credit, the daily comp-off: all moved a ledger
     });
   });
 
@@ -868,136 +939,39 @@ describe("Pre-launch cleanup of requests and alerts (owner-run SQL pack)", () =>
     });
   });
 
-  // ------------------------------------------------------------------ 8. APPROVED REVERSALS: only the ids the owner lists, as new reversing rows
-  describe("step 3 again: the approved-reversal list (explicit ids only; reversals are new rows, never edits or deletes)", () => {
-    let fp: Record<string, string>;
-    const untouched2 = async (label: string) => {
-      expect(await fingerprint(), label).toEqual(fp);
-    };
-
-    beforeAll(async () => {
-      fp = await fingerprint();
-    });
-
-    it("REFUSES a listed id that is not found, is after the cutoff, is not approved, has already started, or has a payroll line pointing at its ledger row", async () => {
-      await expect(runCleanup({ reversals: [randomUUID()] })).rejects.toThrow(/is not a leave request or a Recovery Leave \/ comp-off request/);
-      await expect(runCleanup({ reversals: [ids.L_post!] })).rejects.toThrow(/submitted at or after the cutoff/);
-      await expect(runCleanup({ reversals: [ids.L_rej!] })).rejects.toThrow(/is rejected, not approved/);
-      await expect(runCleanup({ reversals: [ids.L_past!] })).rejects.toThrow(/has already started/);
-      await expect(runCleanup({ reversals: [ids.L_pay!] })).rejects.toThrow(/payroll export line already references/);
-      await untouched2("refusals");
-      expect(await statusOf("leave_requests", ids.L_pay!)).toBe("approved");
-    });
-
-    it("REFUSES a window credit whose window still has another live request (a top-up) that is not in the list, and changes nothing", async () => {
-      const sibling = randomUUID();
-      await db.seed(`insert into recovery_credit_requests (id, employee_id, segment_id, work_date, event_type, proposed_days, status, created_by, recovery_window_id, window_revision_no, adjusts_request_id, applicant_route)
-                     select '${sibling}', employee_id, segment_id, work_date, 'window_top_up', 0.5, 'submitted', '${hrAe.userId}', recovery_window_id, window_revision_no, id, applicant_route
-                     from recovery_credit_requests where id = '${ids.W6_req}'`);
-      const fpSibling = await fingerprint();
-      await expect(runCleanup({ reversals: [ids.W6_req!] })).rejects.toThrow(/still has another live request/);
-      expect(await fingerprint()).toEqual(fpSibling);
-      expect(await statusOf("recovery_credit_requests", ids.W6_req!)).toBe("approved");
-      await db.seed(`delete from recovery_credit_requests where id = '${sibling}'`); // test housekeeping only (the fixture's own row)
-    });
-
-    it("REFUSES a reversal that would take a comp-off balance below zero (days already used) and changes nothing", async () => {
-      const used = randomUUID();
-      await db.seed(`insert into comp_day_ledger (id, employee_id, txn_date, entry_type, days, reference_type, reference_id, created_by)
-                     values ('${used}', '${eQ3.employeeId}', current_date, 'redeemed', -1, 'leave_request', '${randomUUID()}', '${hrQa.userId}')`);
-      const fpUsed = await fingerprint();
-      await expect(runCleanup({ reversals: [ids.LG3_req!] })).rejects.toThrow(/comp-off balance of employee .* \(days already used\)/);
-      expect(await fingerprint()).toEqual(fpUsed);
-      expect(await statusOf("recovery_credit_requests", ids.LG3_req!)).toBe("approved");
-      await db.seed(`delete from comp_day_ledger where id = '${used}'`); // test housekeeping only (the fixture's own row)
-      fp = await fingerprint();
-    });
-
-    it("with ids listed: cancels them and WRITES NEW reversing ledger rows (same employee, opposite amount, reversal_of_id, today), leaving every original row byte for byte", async () => {
-      const list = [ids.L_appr!, ids.L_appr_sa!, ids.LG3_req!, ids.W6_req!];
-      const orig = await q(`select 'leave' as t, id::text as id, to_jsonb(l)::text as j from leave_ledger l union all select 'comp', id::text, to_jsonb(c)::text from comp_day_ledger c order by 2`);
+  // ------------------------------------------------------------------ 8. APPROVED requests and balances stay exactly as they were, through everything that happened afterwards
+  describe("approved requests and every credited or deducted balance are untouched (future-dated and historical)", () => {
+    it("approved leave (future-dated and already taken) and approved Recovery Leave / comp-off requests are still approved, with their ledger rows, balances and approval steps unchanged", async () => {
+      for (const k of ["L_appr", "L_pay", "L_appr_sa", "L_past"]) expect(await statusOf("leave_requests", ids[k]!)).toBe("approved");
+      for (const k of ["W6_req", "LG3_req"]) expect(await statusOf("recovery_credit_requests", ids[k]!)).toBe("approved");
+      // future-dated approved leave and its deduction
+      expect((await one(`select count(*)::int as n from leave_requests where id in ('${ids.L_appr}', '${ids.L_pay}', '${ids.L_appr_sa}') and start_date > current_date and status = 'approved'`)).n).toBe(3);
       const bal = async (sql: string) => Number((await one(sql)).b);
-      const leaveBal = (p: Person) => bal(`select coalesce(sum(amount_days), 0)::float8 as b from leave_ledger where employee_id = '${p.employeeId}' and leave_type_code = 'annual'`);
-      const compBal = (p: Person) => bal(`select coalesce(sum(days), 0)::float8 as b from comp_day_ledger where employee_id = '${p.employeeId}'`);
-      expect([await leaveBal(eA2), await leaveBal(eS2), await compBal(eQ3), await compBal(W.W6!)]).toEqual([18, 18, 1, 0.5]);
-
-      const res = await runCleanup({ reversals: list });
-      expect(change(res, { company: "Dubai Co", item_type: "leave_ledger", action: "ledger reversal written" })).toBe(1);
-      expect(change(res, { company: "Riyadh Co", item_type: "leave_ledger", action: "ledger reversal written" })).toBe(1);
-      expect(change(res, { company: "Doha Legacy Co", item_type: "comp_day_ledger", action: "ledger reversal written" })).toBe(1);
-      expect(change(res, { company: "Dubai Co", item_type: "comp_day_ledger", action: "ledger reversal written" })).toBe(1);
-      expect(change(res, { item_type: "leave_request", result: "cancelled (was approved; ledger rows reversed)" })).toBe(2);
-      expect(change(res, { item_type: "recovery_leave_request:window", result: "cancelled (was approved; ledger rows reversed)" })).toBe(1);
-      expect(change(res, { item_type: "comp_off_request:standard", result: "cancelled (was approved; ledger rows reversed)" })).toBe(1);
-
-      // the requests are cancelled with the marker; the others (payroll-referenced, past, post-cutoff) are exactly as they were
-      for (const id of [ids.L_appr!, ids.L_appr_sa!]) expect(await statusOf("leave_requests", id)).toBe("cancelled");
-      for (const id of [ids.LG3_req!, ids.W6_req!]) expect(await statusOf("recovery_credit_requests", id)).toBe("cancelled");
-      expect(await statusOf("leave_requests", ids.L_pay!)).toBe("approved");
-      expect(await statusOf("leave_requests", ids.L_past!)).toBe("approved");
-
-      // balances come back through NEW rows
-      expect([await leaveBal(eA2), await leaveBal(eS2), await compBal(eQ3), await compBal(W.W6!)]).toEqual([20, 20, 0, 0]);
-      const rev = await q(`select 'leave' as t, x.employee_id::text, x.amount_days::float8 as amt, x.txn_date::text as d, x.reference_type, x.reference_id::text, x.reversal_of_id::text, x.entry_type::text, x.note, x.created_by::text as by, o.amount_days::float8 as orig_amt, o.employee_id::text as orig_emp
-                           from leave_ledger x join leave_ledger o on o.id = x.reversal_of_id where x.entry_type = 'reversal' and x.reference_id in ('${ids.L_appr}', '${ids.L_appr_sa}')`);
-      expect(rev).toHaveLength(2);
-      for (const r of rev) {
-        expect(r.orig_amt).toBe(-r.amt);
-        expect(r.orig_emp).toBe(r.employee_id);
-        expect(r.d).toBe((await one("select current_date::text as d")).d);
-        expect(r.reference_type).toBe("leave_request");
-        expect(String(r.note)).toContain(MARKER);
-        expect(r.by).toBe(hrAe.userId);
-      }
-      const compRev = await q(`select x.days::float8 as days, o.days::float8 as orig, x.reference_type, x.source, x.reversal_of_id::text as of from comp_day_ledger x join comp_day_ledger o on o.id = x.reversal_of_id where x.entry_type = 'reversal'`);
-      expect(compRev.map((r) => `${r.reference_type}:${r.orig}:${r.days}`).sort()).toEqual(["attendance_record:1:-1", "recovery_credit_request:0.5:-0.5"]);
-      // EVERY original ledger row is byte for byte unchanged (nothing edited, nothing deleted); the only new rows are the four reversals
-      const after = await q(`select 'leave' as t, id::text as id, to_jsonb(l)::text as j from leave_ledger l union all select 'comp', id::text, to_jsonb(c)::text from comp_day_ledger c order by 2`);
-      const origIds = new Set(orig.map((r) => r.id));
-      expect(after.filter((r) => origIds.has(r.id))).toEqual(orig);
-      expect(after.length).toBe(orig.length + 4);
-      // attendance, clock evidence, windows, periods, payroll: unchanged
-      const now = await fingerprint();
-      for (const t of ["attendance_records", "attendance_sessions", "attendance_segments", "recovery_windows", "recovery_periods", "recovery_window_allocations", "payroll_export_runs", "payroll_export_lines"]) expect(now[t]).toBe(fp[t]);
-      // audit: each ledger insert and each cancellation fired the audit trigger with the cleanup origin
-      const aud = await q("select table_name, action, count(*)::int as n from audit_log where origin = 'prelaunch_cleanup' and table_name in ('leave_ledger', 'comp_day_ledger') group by 1, 2 order by 1");
-      expect(aud).toEqual([{ table_name: "comp_day_ledger", action: "insert", n: 2 }, { table_name: "leave_ledger", action: "insert", n: 2 }]);
+      expect(await bal(`select sum(amount_days)::float8 as b from leave_ledger where employee_id = '${eA2.employeeId}' and leave_type_code = 'annual'`)).toBe(18); // 20 accrued, 2 deducted, nothing reversed
+      expect(await bal(`select sum(amount_days)::float8 as b from leave_ledger where employee_id = '${eS2.employeeId}' and leave_type_code = 'annual'`)).toBe(18);
+      expect(await bal(`select sum(days)::float8 as b from comp_day_ledger where employee_id = '${eQ3.employeeId}'`)).toBe(1);
+      expect(await bal(`select sum(days)::float8 as b from comp_day_ledger where employee_id = '${W.W6!.employeeId}'`)).toBe(0.5);
+      expect((await one("select count(*)::int as n from leave_ledger where entry_type = 'reversal'")).n).toBe(0);
+      expect((await one("select count(*)::int as n from comp_day_ledger where entry_type = 'reversal'")).n).toBe(0);
+      expect((await decisionsOf(ids.L_appr!)).map((d) => d.d)).toEqual(["approved"]);
+      expect((await one(`select count(*)::int as n from payroll_export_lines`)).n).toBe(1);
     });
 
-    it("the reversal rows have exactly the shape the app's own cancel_leave_request() writes for an approved future leave", async () => {
-      await leave({ key: "L_E", person: eA6, approver: mgrAe, from: "current_date + 100", to: "current_date + 101", days: 2, stamp: PRE });
-      await approveLeave("L_E", mgrAe);
-      await db.asUserCommit(eA6.userId, async (query) => query("select cancel_leave_request($1::uuid)", [ids.L_E]));
-      const shape = async (reqId: string) => (await one(`select x.entry_type::text as entry_type, x.reference_type, x.reference_id::text = '${reqId}' as ref_ok, x.txn_date = current_date as dated_today, x.amount_days = -o.amount_days as opposite,
-                                                                x.leave_type_code = o.leave_type_code as same_type, x.employee_id = o.employee_id as same_employee
-                                                         from leave_ledger x join leave_ledger o on o.id = x.reversal_of_id where x.reference_id = '${reqId}' and x.entry_type = 'reversal'`));
-      expect(await shape(ids.L_E!)).toEqual({ entry_type: "reversal", reference_type: "leave_request", ref_ok: true, dated_today: true, opposite: true, same_type: true, same_employee: true });
-      expect(await shape(ids.L_appr!)).toEqual(await shape(ids.L_E!).then((s) => ({ ...s })));
-      expect(await statusOf("leave_requests", ids.L_E!)).toBe("cancelled"); // the app's status for the same thing
-      fp = await fingerprint();
-    });
-
-    it("is RE-RUNNABLE with the same list: nothing more is written", async () => {
+    it("the write step run again (EXPECTED TOTAL 0) and the verify pack, after the engine ran and new items appeared: nothing more changes and every row is OK", async () => {
       const s1 = await states();
-      const res = await runCleanup({ reversals: [ids.L_appr!, ids.L_appr_sa!, ids.LG3_req!, ids.W6_req!] });
-      expect(Number(res.find((r) => r.action === "TOTAL")!.count)).toBe(0);
-      expect(res.filter((r) => String(r.section).startsWith("2.") && String(r.result).startsWith("listed id already cancelled")).reduce((n, r) => n + Number(r.count), 0)).toBe(0); // reported with a zero count
+      const fp = await fingerprint();
+      const again = await runCleanup({ expected: 0 });
+      expect(Number(again.find((r) => r.action === "TOTAL")!.count)).toBe(0);
       expect(await states()).toEqual(s1);
-      await untouched2("rerun");
-    });
-
-    it("a reversed window credit does not come back when the engine runs again, and verify still passes with the reversal rows counted", async () => {
-      const before = await q(`select id, status::text as status from recovery_credit_requests where employee_id = '${W.W6!.employeeId}'`);
+      expect(await fingerprint()).toEqual(fp);
+      expect(verifyProblems(await verify())).toEqual([]);
+      // a window credit approved before the cutoff does not come back or change when the engine runs again
+      const w6 = await q(`select id::text as id, status::text as status from recovery_credit_requests where employee_id = '${W.W6!.employeeId}'`);
       await setClock(cutoffClock);
       await recalc(W.W6!);
       await recalc(W.W6!);
-      expect(await q(`select id, status::text as status from recovery_credit_requests where employee_id = '${W.W6!.employeeId}'`)).toEqual(before);
-      expect(before.map((r) => r.status)).toEqual(["cancelled"]);
-      const rows = await verify();
-      expect(verifyProblems(rows)).toEqual([]);
-      expect(rows.find((r) => String(r.item).startsWith("information: reversal rows written"))!.result).toBe("2 / 2");
-      expect(rows.find((r) => String(r.item).startsWith("information: requests the cleanup cancelled after"))!.result).toBe("4");
-      expect(rows.find((r) => String(r.item).startsWith("information: in-scope APPROVED requests still approved"))!.result).toBe("2 / 2"); // the payroll-linked and the already-taken leave
+      expect(await q(`select id::text as id, status::text as status from recovery_credit_requests where employee_id = '${W.W6!.employeeId}'`)).toEqual(w6);
+      expect(w6.map((r) => r.status)).toEqual(["approved"]);
     });
   });
 

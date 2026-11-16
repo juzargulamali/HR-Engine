@@ -4,18 +4,20 @@
 --
 -- HOW TO READ THE RESULT. One table: ord, item, result. Every row must say OK except the rows marked "information", which are numbers to read. A FAIL row says what to look at; it never changes anything.
 --   1      the cutoff is a real value.
---   2 - 6  the live queues hold no in-scope outstanding item: no pending leave application, no pending Recovery Leave / comp-off request, no open Recovery Leave alert, no attendance exception still
---          needing action inside the 60-day look-back, no pending approval step of an in-scope request that is not approved.
+--   2 - 6  the live queues hold no in-scope outstanding item: no pending (draft, submitted, pending_approval) leave application, no pending Recovery Leave / comp-off request, no open Recovery Leave alert,
+--          no attendance exception still needing action inside the 60-day look-back, no pending approval step of an in-scope request that is not approved.
 --   7      anything at or after the cutoff was NOT touched by the cleanup (no audit row with origin 'prelaunch_cleanup' for it, no cleanup marker on it).
 --   8      audit rows exist for everything the cleanup cleared (every item carrying the marker "Pre-launch cleanup (go-live)" has an audit_log row whose origin is 'prelaunch_cleanup').
---   9      source records and ledgers: every ledger row the cleanup wrote is a reversal of an existing row for the same employee with the opposite amount (nothing edited, nothing deleted); every item the
---          cleanup acknowledged still has its source record (attendance day or recovery window); the snapshot numbers (information) are the ones step 2 printed, plus the reversal rows.
+--   9      APPROVED requests were not changed: every cleanup audit row on a leave application or Recovery Leave / comp-off request went from an outstanding status to cancelled (none from approved), and no
+--          approval step of an approved request carries the marker. NO LEDGER ROW was written, changed or deleted by the cleanup (no cleanup audit row on leave_ledger or comp_day_ledger, no ledger
+--          note carries the marker). No outstanding in-scope request has posted a ledger row. Every item the cleanup acknowledged still has its source record. Snapshot numbers (information) are the
+--          ones step 2 printed: the cleanup changes none of them.
 --   10     approvals of other types were not touched.
 --   11     a re-run of the write step would change nothing (the same selectors, counted now).
---   12     information: approved in-scope requests left in place (still approved) and how many of them moved a ledger; requests the cleanup reversed.
+--   12     information: approved in-scope requests left in place (still approved) and how many of them moved a ledger.
 --   13     information: everything the cleanup wrote to the audit log, by table and action.
--- The checks that need a before-and-after comparison (attendance, clock and payroll tables byte for byte; existing ledger rows unchanged) are made INSIDE the write step before it commits: it raises and rolls
--- back if any of them fails, so a committed run has already passed them. Here they can only be shown as numbers and as the reversal-row checks above.
+-- The byte-for-byte checks (attendance, clock, window and payroll tables; both ledgers; every approved request) are made INSIDE the write step before it commits: it raises and rolls back if any of them fails,
+-- so a committed run has already passed them. Here they can only be shown through the audit trail and the numbers.
 -- WHAT IS AND IS NOT CHANGED. Nothing is changed by this file. RE-RUNNABLE any number of times.
 
 with params as (
@@ -61,11 +63,45 @@ classified as (
   select i.*, c.legal_name as company, (i.stamp < p.cutoff) as in_scope,
          case
            when i.status in ('submitted', 'pending_approval', 'open', 'needs_action') then 'a_pending'
+           when i.status = 'draft' and i.item_type = 'leave_request' then 'a_pending'   -- an unsubmitted leave draft is outstanding too (it is cancelled)
            when i.status = 'approved' and coalesce(i.date_to, date '0001-01-01') >= current_date then 'b_approved_future'
            when i.status = 'draft' then 'd_draft'
            else 'c_historical'
          end as category
   from items i join companies c on c.id = i.company_id cross join params p
+),
+-- OUTSTANDING requests that have ALREADY posted a ledger row (an unreversed row in leave_ledger or comp_day_ledger). A pending request should never have posted anything; cancelling one WITHOUT a
+-- reversal would leave a balance wrong, and this pack never writes a ledger row, so the write step REFUSES to run while any exists (the owner decides first, outside this pack).
+blocked as (
+  select c.*
+  from classified c
+  where c.in_scope
+    and ((c.item_type = 'leave_request' and c.status in ('draft', 'submitted', 'pending_approval'))
+         or ((c.item_type like 'comp_off_request:%' or c.item_type like 'recovery_leave_request:%') and c.status in ('submitted', 'pending_approval')))
+    and (
+      exists (select 1 from leave_ledger l where c.item_type = 'leave_request' and l.reference_type = 'leave_request' and l.reference_id = c.item_id
+                and l.entry_type <> 'reversal' and not exists (select 1 from leave_ledger y where y.reversal_of_id = l.id))
+      or exists (select 1 from comp_day_ledger l where c.item_type = 'leave_request' and l.reference_type = 'leave_request' and l.reference_id = c.item_id
+                and l.entry_type <> 'reversal' and not exists (select 1 from comp_day_ledger y where y.reversal_of_id = l.id))
+      or exists (select 1 from recovery_credit_requests r join comp_day_ledger l
+                   on (l.reference_type = 'recovery_credit_request' and l.reference_id = r.id)
+                   or (r.attendance_record_id is not null and l.reference_type = 'attendance_record' and l.reference_id = r.attendance_record_id)
+                   or l.id = r.comp_day_ledger_id
+                 where c.item_type <> 'leave_request' and r.id = c.item_id
+                   and l.entry_type <> 'reversal' and not exists (select 1 from comp_day_ledger y where y.reversal_of_id = l.id))
+    )
+),
+-- ORPHAN approval steps: still pending although the in-scope request is already cancelled, rejected or removed (never a step of an approved request).
+orphans as (
+  select 'leave_request'::text as entity_type, a.id as step_id, co.legal_name as company
+  from approvals a join leave_requests lr on a.entity_type = 'leave_request' and a.entity_id = lr.id
+  join employees e on e.id = lr.employee_id join companies co on co.id = e.company_id cross join params p
+  where a.decision = 'pending' and lr.submitted_at < p.cutoff and (lr.status in ('cancelled', 'rejected') or (lr.deleted_at is not null and lr.status <> 'approved'))
+  union all
+  select 'recovery_credit', a.id, co.legal_name
+  from approvals a join recovery_credit_requests rq on a.entity_type = 'recovery_credit' and a.entity_id = rq.id
+  join employees e on e.id = rq.employee_id join companies co on co.id = e.company_id cross join params p
+  where a.decision = 'pending' and rq.submitted_at < p.cutoff and rq.status in ('cancelled', 'rejected')
 ),
 marker as (select 'Pre-launch cleanup (go-live)'::text as m)
 select ord, item, result
@@ -73,9 +109,9 @@ from (
   select 1 as ord, 'the cutoff is a real value (not the placeholder)' as item,
          case when p.cutoff < timestamptz '2020-01-01 00:00:00+00' then 'FAIL - edit the cutoff line to the go-live moment, then run this again' else 'OK - ' || p.cutoff::text end as result
   from params p
-  union all select 2, 'no pending leave application submitted before the cutoff remains',
-         case when (select count(*) from classified c where c.in_scope and c.item_type = 'leave_request' and c.status in ('submitted', 'pending_approval')) = 0 then 'OK'
-              else 'FAIL - ' || (select count(*) from classified c where c.in_scope and c.item_type = 'leave_request' and c.status in ('submitted', 'pending_approval')) || ' remain: run the write step' end
+  union all select 2, 'no outstanding (draft, submitted, pending_approval) leave application submitted before the cutoff remains',
+         case when (select count(*) from classified c where c.in_scope and c.item_type = 'leave_request' and c.status in ('draft', 'submitted', 'pending_approval')) = 0 then 'OK'
+              else 'FAIL - ' || (select count(*) from classified c where c.in_scope and c.item_type = 'leave_request' and c.status in ('draft', 'submitted', 'pending_approval')) || ' remain: run the write step' end
   union all select 3, 'no pending Recovery Leave / comp-off request submitted before the cutoff remains',
          case when (select count(*) from classified c where c.in_scope and (c.item_type like 'comp_off_request:%' or c.item_type like 'recovery_leave_request:%') and c.status in ('submitted', 'pending_approval')) = 0 then 'OK'
               else 'FAIL - ' || (select count(*) from classified c where c.in_scope and (c.item_type like 'comp_off_request:%' or c.item_type like 'recovery_leave_request:%') and c.status in ('submitted', 'pending_approval')) || ' remain: run the write step' end
@@ -114,16 +150,21 @@ from (
                                  and (s.after_data ->> 'entity_id')::uuid = lr.id and lr.decided_at = s.occurred_at
                                 where not exists (select 1 from audit_log a where a.table_name = 'leave_requests' and a.record_id = lr.id and a.origin = 'prelaunch_cleanup'))
               then 'OK' else 'FAIL - an item carrying the marker has no cleanup audit row (was the audit trigger disabled?)' end
-  union all select 9, 'every ledger row the cleanup wrote is a reversal of an existing row for the same employee with the opposite amount; nothing was edited or deleted',
-         case when not exists (
-                select 1 from audit_log a
-                where a.origin = 'prelaunch_cleanup' and a.table_name in ('leave_ledger', 'comp_day_ledger') and a.action = 'insert'
-                  and not (
-                    (a.table_name = 'leave_ledger' and exists (select 1 from leave_ledger x join leave_ledger o on o.id = x.reversal_of_id where x.id = a.record_id and x.entry_type = 'reversal' and o.employee_id = x.employee_id and o.amount_days = -x.amount_days))
-                    or (a.table_name = 'comp_day_ledger' and exists (select 1 from comp_day_ledger x join comp_day_ledger o on o.id = x.reversal_of_id where x.id = a.record_id and x.entry_type = 'reversal' and o.employee_id = x.employee_id and o.days = -x.days))
-                  )
-              ) and not exists (select 1 from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name in ('leave_ledger', 'comp_day_ledger') and a.action <> 'insert')
-              then 'OK' else 'FAIL - a cleanup ledger entry is not a plain reversal, or a ledger row was updated or deleted' end
+  union all select 9, 'no APPROVED leave application or Recovery Leave / comp-off request was changed by the cleanup (every cleanup audit row on a request goes from outstanding to cancelled)',
+         case when not exists (select 1 from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name in ('leave_requests', 'recovery_credit_requests')
+                                and not (a.action = 'update' and a.before_data ->> 'status' in ('draft', 'submitted', 'pending_approval') and a.after_data ->> 'status' = 'cancelled'))
+               and not exists (select 1 from approvals r cross join marker m join leave_requests lr on r.entity_type = 'leave_request' and lr.id = r.entity_id
+                                where lr.status = 'approved' and position(m.m in coalesce(r.comments, '')) > 0)
+               and not exists (select 1 from approvals r cross join marker m join recovery_credit_requests q on r.entity_type = 'recovery_credit' and q.id = r.entity_id
+                                where q.status = 'approved' and position(m.m in coalesce(r.comments, '')) > 0)
+               and not exists (select 1 from recovery_credit_requests q cross join marker m where q.status = 'approved' and position(m.m in coalesce(q.correction_reason, '')) > 0)
+              then 'OK' else 'FAIL - an approved request carries the cleanup marker or was changed by the cleanup' end
+  union all select 9, 'NO LEDGER ROW carries the cleanup: no cleanup audit row on leave_ledger or comp_day_ledger (nothing inserted, changed or deleted), no ledger note with the marker',
+         case when not exists (select 1 from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name in ('leave_ledger', 'comp_day_ledger'))
+               and not exists (select 1 from leave_ledger l cross join marker m where position(m.m in coalesce(l.note, '')) > 0)
+              then 'OK' else 'FAIL - a ledger row was written or changed under the cleanup' end
+  union all select 9, 'no outstanding in-scope request has posted a ledger row',
+         case when not exists (select 1 from blocked) then 'OK' else 'FAIL - ' || (select count(*) from blocked) || ' outstanding request(s) have an unreversed ledger row: the write step refuses until the owner resolves them' end
   union all select 9, 'every item the cleanup acknowledged still has its source record (attendance day or recovery window), and every cleared request still exists',
          case when not exists (select 1 from hr_queue_acknowledgements k cross join marker m where k.note = m.m and k.kind = 'attendance'
                                 and not exists (select 1 from attendance_records ar where ar.id = k.source_id) and not exists (select 1 from recovery_windows w where w.id = k.source_id))
@@ -132,12 +173,10 @@ from (
               then 'OK' else 'FAIL - a source record or a cleared request is missing' end
   union all select 9, 'information: attendance_records (rows / with presence_conflict / sessions) - the same numbers step 2 printed (the cleanup never changes them)',
          (select count(*) from attendance_records) || ' / ' || (select count(*) from attendance_records where presence_conflict is not null) || ' / ' || (select count(*) from attendance_sessions)
-  union all select 9, 'information: leave_ledger (rows / net days) - step 2 numbers plus the reversal rows below',
+  union all select 9, 'information: leave_ledger (rows / net days) - the step 2 numbers (the cleanup never changes a ledger)',
          (select count(*) from leave_ledger) || ' / ' || (select coalesce(sum(amount_days), 0) from leave_ledger)
-  union all select 9, 'information: comp_day_ledger (rows / net days) - step 2 numbers plus the reversal rows below',
+  union all select 9, 'information: comp_day_ledger (rows / net days) - the step 2 numbers (the cleanup never changes a ledger)',
          (select count(*) from comp_day_ledger) || ' / ' || (select coalesce(sum(days), 0) from comp_day_ledger)
-  union all select 9, 'information: reversal rows written by the cleanup (leave_ledger / comp_day_ledger)',
-         (select count(*) from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name = 'leave_ledger' and a.action = 'insert') || ' / ' || (select count(*) from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name = 'comp_day_ledger' and a.action = 'insert')
   union all select 9, 'information: payroll_export_runs (rows) / payroll_export_lines (rows / net amount) - never changed by the cleanup',
          (select count(*) from payroll_export_runs) || ' / ' || (select count(*) from payroll_export_lines) || ' / ' || (select coalesce(sum(amount), 0) from payroll_export_lines)
   union all select 10, 'approvals of other types were not touched (no cleanup audit row, no marker)',
@@ -145,21 +184,16 @@ from (
                and not exists (select 1 from approvals r cross join marker m where r.entity_type::text not in ('leave_request', 'recovery_credit') and position(m.m in coalesce(r.comments, '')) > 0)
               then 'OK' else 'FAIL - an approval of another type carries the marker or a cleanup audit row' end
   union all select 11, 'a re-run of the write step would change nothing (outstanding in-scope items counted again: requests, alerts, exceptions in the look-back, orphan steps)',
-         case when (select count(*) from classified c where c.in_scope and c.category = 'a_pending' and c.live_queue = 'yes') = 0
-               and (select count(*) from approvals a join leave_requests lr on a.entity_type = 'leave_request' and a.entity_id = lr.id cross join params p where a.decision = 'pending' and lr.submitted_at < p.cutoff and lr.status <> 'approved') = 0
-               and (select count(*) from approvals a join recovery_credit_requests rq on a.entity_type = 'recovery_credit' and a.entity_id = rq.id cross join params p where a.decision = 'pending' and rq.submitted_at < p.cutoff and rq.status <> 'approved') = 0
-              then 'OK' else 'FAIL - the write step would still change something' end
-  union all select 12, 'information: in-scope APPROVED requests still approved (left in place) / of those, how many moved a ledger',
+         case when (select count(*) from classified c where c.in_scope and c.category = 'a_pending' and c.live_queue = 'yes') + (select count(*) from orphans) = 0
+              then 'OK' else 'FAIL - the write step would still change ' || ((select count(*) from classified c where c.in_scope and c.category = 'a_pending' and c.live_queue = 'yes') + (select count(*) from orphans)) || ' row(s)' end
+  union all select 12, 'information: in-scope APPROVED requests (left in place, never changed by this pack) / of those, how many moved a ledger',
          (select count(*) from classified c where c.in_scope and c.status = 'approved' and (c.item_type = 'leave_request' or c.item_type like 'comp_off_request:%' or c.item_type like 'recovery_leave_request:%'))
          || ' / ' || (select count(*) from classified c where c.in_scope and c.status = 'approved'
                         and ((c.item_type = 'leave_request' and (exists (select 1 from leave_ledger l where l.reference_type = 'leave_request' and l.reference_id = c.item_id) or exists (select 1 from comp_day_ledger l where l.reference_type = 'leave_request' and l.reference_id = c.item_id)))
                           or (c.item_type <> 'leave_request' and exists (select 1 from recovery_credit_requests r join comp_day_ledger l
                                 on (l.reference_type = 'recovery_credit_request' and l.reference_id = r.id) or (r.attendance_record_id is not null and l.reference_type = 'attendance_record' and l.reference_id = r.attendance_record_id) or l.id = r.comp_day_ledger_id
                                 where r.id = c.item_id))))
-  union all select 12, 'information: requests the cleanup cancelled after they had been approved (their ledger rows were reversed)',
-         ((select count(distinct a.record_id) from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name = 'leave_requests' and a.before_data ->> 'status' = 'approved')
-         + (select count(distinct a.record_id) from audit_log a where a.origin = 'prelaunch_cleanup' and a.table_name = 'recovery_credit_requests' and a.before_data ->> 'status' = 'approved'))::text
   union all select 13, 'information: cleanup audit rows by table / action: ' || coalesce(a.table_name, '-') || ' / ' || coalesce(a.action, '-'), count(*)::text
   from audit_log a where a.origin = 'prelaunch_cleanup' group by a.table_name, a.action
 ) x
-order by ord, item;
+order by ord, item collate "C";
