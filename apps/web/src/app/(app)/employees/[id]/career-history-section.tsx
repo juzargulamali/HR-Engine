@@ -57,7 +57,13 @@ export function ChangeHistory({ events }: { events: CareerEventRow[] }) {
         {events.map((e) => (
           <TableRow key={e.id}>
             <TableCell>{e.effective_date}</TableCell>
-            <TableCell><Badge variant={EVENT_VARIANT[e.event_type] ?? "outline"}>{EVENT_LABEL[e.event_type] ?? e.event_type}</Badge>{e.dismissed_at ? <Badge variant="outline" className="ml-1">Cancelled, never applied</Badge> : null}</TableCell>
+            <TableCell>
+              {/* One group, so on a phone the badges wrap onto their own line instead of widening the stacked row past its card. */}
+              <span className="flex min-w-0 flex-wrap items-center justify-end gap-1 md:justify-start">
+                <Badge variant={EVENT_VARIANT[e.event_type] ?? "outline"}>{EVENT_LABEL[e.event_type] ?? e.event_type}</Badge>
+                {e.dismissed_at ? <Badge variant="outline">Cancelled, never applied</Badge> : null}
+              </span>
+            </TableCell>
             <TableCell className="text-sm">{e.new_job_title ? <>{e.previous_job_title ?? "—"} → <span className="font-medium">{e.new_job_title}</span></> : "—"}</TableCell>
             <TableCell className="text-sm">{e.new_base_salary != null ? <>{e.previous_base_salary ?? "—"} → <span className="font-medium">{e.new_base_salary}</span> {e.currency}</> : "—"}</TableCell>
             <TableCell className="text-muted-foreground">{e.note ?? "—"}</TableCell>

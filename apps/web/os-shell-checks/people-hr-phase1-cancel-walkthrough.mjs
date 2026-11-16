@@ -22,10 +22,26 @@ const step = async (name, fn) => {
 const one = (q) => sql(q).split("\n")[0];
 const until = async (fn, ms = 20000) => { const t = Date.now(); for (;;) { if (await fn()) return; if (Date.now() - t > ms) throw new Error(`condition not met: ${String(fn).slice(0, 110)}`); await new Promise((r) => setTimeout(r, 250)); } };
 const body = async () => (await page.locator("body").innerText()).replace(/\s+/g, " ");
+/** Nothing scrolls sideways: not the page, and not any table inside its card (a stacked table has its own overflow-x wrapper that a page-level check does not see). */
+const noInnerScroll = async (what) => {
+  const wide = await page.evaluate(() => [...document.querySelectorAll(".os-table-wrap")].map((w) => w.scrollWidth - w.clientWidth).filter((d) => d > 1));
+  if (wide.length) throw new Error(`${what}: a table scrolls sideways inside its card (by ${wide.join(", ")} px)`);
+};
+/** Every badge with exactly these words is fully inside its card and none of its words are cut off. */
+const badgesFullyVisible = async (words, what) => {
+  const badges = await page.locator(".os-badge").filter({ hasText: new RegExp(`^\\s*${words}\\s*$`) }).all();
+  if (!badges.length) throw new Error(`${what}: no "${words}" badge found`);
+  for (const badge of badges) {
+    const box = await badge.boundingBox(); const card = await badge.locator("xpath=ancestor::div[contains(@class,'os-table-wrap')]").boundingBox();
+    if (!box || !card) throw new Error(`${what}: "${words}" has no box`);
+    if (box.x < card.x - 0.5 || box.x + box.width > card.x + card.width + 0.5) throw new Error(`${what}: "${words}" sticks out of its card (badge ${Math.round(box.x)}-${Math.round(box.x + box.width)}, card ${Math.round(card.x)}-${Math.round(card.x + card.width)})`);
+    if (await badge.evaluate((el) => el.scrollWidth > el.clientWidth + 1)) throw new Error(`${what}: the words "${words}" are cut off`);
+  }
+};
 const noHScroll = async (what) => { const o = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth })); if (o.sw > o.cw + 1) throw new Error(`${what}: horizontal overflow ${o.sw} > ${o.cw}`); };
 const go = async (path) => { await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" }); };
 const plus = (n) => one(`select (current_date + ${n})::text`);
-const FIRST = "Nadia"; const LAST = "Cancelcheck"; const EMPNO = "ZZ-901";
+const FIRST = "Nadia"; const LAST = "Cancelcheck"; const EMPNO = process.env.EMPNO ?? `ZZ-${String(Date.now()).slice(-6)}`;   // unique per run, so a rerun needs no reseed
 let EMP = ""; let PAY_BEFORE = "";
 const paySnapshot = () => one(`select count(*) || ' version(s); current ' || coalesce(string_agg(id::text || ' ' || base_salary::text || ' ' || allowances::text || ' ' || currency, ';') filter (where is_current), 'none') from compensation_details where employee_id = '${EMP}'`);
 
@@ -132,6 +148,9 @@ await step("after cancelling: current pay is exactly as before (same pay version
   if (!/Cancelled, never applied/.test(t)) throw new Error("History does not show the cancelled change");
   if (!new RegExp(plus(30)).test(t)) throw new Error("History does not show the change's date");
   await noHScroll("the Employment tab after cancelling");
+  await noInnerScroll("History after cancelling");
+  await badgesFullyVisible("Salary change", "History");
+  await badgesFullyVisible("Cancelled, never applied", "History");
   await page.screenshot({ path: `${SHOTS}/4-cancelled-in-history-phone.png`, fullPage: true });
 });
 
