@@ -183,7 +183,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "transfer",
       "my equipment",
       "book equipment",
-      "return equipment"
+      "return equipment",
+      "book inventory",
+      "find equipment requests",
+      "equipment requests",
+      "stock levels"
     ],
     "summary": "Inventory is where equipment is requested, sent out and received back. On Today a request reads ready to send in part while any line is still to reserve, buy or rent; those lines are counted apart and never as reserved. The equipment assigned to you is under My equipment. JARVIS cannot read or change inventory: use the screens.",
     "steps": [
@@ -210,6 +214,119 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "/inventory/requests",
       "/inventory/mine",
       "/inventory/stock"
+    ]
+  },
+  {
+    "id": "inventory-today-jobs",
+    "area": "inventory",
+    "title": "Today in the warehouse: Do now, Coming up, Waiting on someone else",
+    "keywords": [
+      "warehouse today",
+      "do now",
+      "coming up",
+      "waiting on someone else",
+      "what do I do next",
+      "shortage",
+      "how many are missing",
+      "who acts",
+      "choose company",
+      "choose warehouse",
+      "all companies",
+      "held for checking",
+      "sales check"
+    ],
+    "summary": "Today shows the company and the warehouse you are working in, then three lists. Do now is work this warehouse can act on today. Coming up is the same work with a date that has not come. Waiting on someone else is work the warehouse cannot move on by itself: each row says how many are missing and who has to act. Each row is one job, and its button opens the next step.",
+    "steps": [
+      "Check the company and the warehouse at the top. With more than one company, choose the company first, then its warehouse. All companies only changes what you see.",
+      "Under Do now press the button on a job: Prepare equipment, Pick items, Send equipment, Receive return, Check availability or Check it.",
+      "Read Waiting on someone else for shortages: the line says how many are missing, whether it is to buy or to rent, and who acts.",
+      "Use Scan a label to look a unit up. Scanning never changes stock."
+    ],
+    "links": [
+      {
+        "label": "Today",
+        "href": "/inventory"
+      }
+    ],
+    "screens": [
+      "/inventory"
+    ]
+  },
+  {
+    "id": "inventory-job-pick-send",
+    "area": "inventory",
+    "title": "Prepare, pick and send a job",
+    "keywords": [
+      "pick items",
+      "picking",
+      "send equipment",
+      "dispatch",
+      "reserve",
+      "short",
+      "partly reserved",
+      "bin",
+      "scan a code",
+      "wrong item",
+      "already scanned",
+      "requested reserved picked sent",
+      "partial dispatch",
+      "check whether it went through"
+    ],
+    "summary": "The same job is open at every step: Prepare, Pick, Send, Receive. Each item shows Requested, Reserved, Picked and Sent. Reserving holds equipment for the dates; picking records that it was taken off the shelf and moves no stock; sending is what makes it leave. A line that is not fully reserved stays short and is never counted as done.",
+    "steps": [
+      "Prepare: press Reserve on each line. If not everything is free, choose Need to buy or Need to rent for the rest.",
+      "Pick: scan or type each code, or tick the units, using the bin shown; count the picked quantity of counted items. Press Pick items.",
+      "A wrong or repeated code is said beside the scan box and is not added. Take a wrong code off the list to continue.",
+      "Send: what was picked is already ticked. Correct it if needed, press Send equipment, check the list and confirm.",
+      "If a save does not finish in time, press Check whether it went through before trying again. Your list is kept."
+    ],
+    "links": [
+      {
+        "label": "Today",
+        "href": "/inventory"
+      }
+    ],
+    "screens": [
+      "/inventory/requests/[id]"
+    ]
+  },
+  {
+    "id": "inventory-job-receive",
+    "area": "inventory",
+    "title": "Receive a return and inspect it",
+    "keywords": [
+      "receive return",
+      "return equipment",
+      "partial return",
+      "damaged",
+      "held for inspection",
+      "still out",
+      "condition",
+      "available again",
+      "inspect",
+      "clear a damaged unit",
+      "check condition"
+    ],
+    "summary": "Receive starts from what was sent and is still out, so nothing is typed again. You record what came back and its condition; what you leave unticked stays out. Good equipment is available again at once. Damaged equipment, or equipment needing a check, is held and cannot be reserved until warehouse staff at that warehouse inspect it and record the check.",
+    "steps": [
+      "Open the job from Today with Receive return, or open the job and choose Receive.",
+      "Tick each unit that is back and choose its condition; type how many counted items came back.",
+      "Read the line beside the button, for example 2 returned, 1 available, 1 held for inspection, 1 still out.",
+      "Press Receive return, check the list and confirm.",
+      "To clear a held unit, open it from Today under Do now with Check it, and record its condition after inspecting it."
+    ],
+    "links": [
+      {
+        "label": "Today",
+        "href": "/inventory"
+      },
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      }
+    ],
+    "screens": [
+      "/inventory/requests/[id]"
     ]
   },
   {
@@ -1285,12 +1402,12 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "substitute",
       "still out"
     ],
-    "summary": "The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Each request has a Readiness line: Reserved, Partly ready, Short, Dispatched and so on. Others can read the tab but not change it.",
+    "summary": "The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Send to Warehouse; sending sets nothing aside; the warehouse does that next. Availability check from Sales shows what the warehouse found before the job was won, and says when the project has changed since. Equipment by site run shows each run with its request.",
     "steps": [
       "Open the project, then Equipment. Open the draft, or press New equipment request and Create draft.",
-      "Under Planning dates set at least a start and an end, then press Save the dates.",
+      "Tick the site runs the request serves. Press Use these dates to take the suggested Leaves warehouse and Due back, or type them, then press Save the dates and site runs.",
       "Use Add an item or Add from a technology template; change a line under More.",
-      "Press Submit to the warehouse. If something is missing, the page says what.",
+      "Press Send to Warehouse. If something is missing, the page says what.",
       "Afterwards watch Reserved and Not covered yet; use Accept or decline for a proposed substitute, and Need to buy or rent for a shortage."
     ],
     "links": [
@@ -1370,7 +1487,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Sales: confirm the enquiry as won, then prepare and submit the handover.",
       "Founder or Operations Manager: open Handovers and press Assign Project Manager.",
       "Project Manager: press Accept handover (it opens the Project Plan, where you press Bring in accepted technologies), add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.",
-      "Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.",
+      "Project Manager: on Equipment, check the draft, tick its site runs and press Send to Warehouse; acknowledge the dispatch note when it comes.",
       "Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list."
     ],
     "links": [
@@ -1455,11 +1572,11 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "summary": "Release gives the work to the teams: each work requirement becomes one task for its owner, and each hardware line matched to Inventory goes on the project's draft equipment request. Releasing again, or at the same time, never creates anything twice.",
     "steps": [
-      "Hardware: choose the stock item from Inventory. If it is not there, save it as a manual line: it stays in the plan as Needs stock match or Specification pending while everything else is released.",
+      "Hardware: choose how it is supplied: From stock, Buy, Rent or Client supplied. For From stock choose the stock item. If it is not there yet, save the line: it stays in the plan as Needs stock match or Specification pending while everything else is released.",
       "Bought, rented or client-supplied hardware is followed in the plan with its owner and expected date and is never sent to the warehouse.",
       "Project Manager: press Release plan. Read what it will create first, then confirm.",
       "Press Review and send to Warehouse on a hardware line to open the draft request, and submit it on the Equipment tab.",
-      "Later, match a manual line to a stock item and release again: it is added once."
+      "Later, press Match to stock on that line, choose the stock item and release again: it is added once, and its description and quantity are not typed again."
     ],
     "links": [
       {
@@ -1637,7 +1754,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "equipment lines ready",
       "team pressure"
     ],
-    "summary": "The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues and project health. Operations changes no task, booking or stock.",
+    "summary": "The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues, equipment by site run and project health. Operations changes no task, booking or stock.",
     "steps": [
       "Open Operations, then Overview. Choose the company if you have more than one.",
       "Press a card at the top to jump to its list.",
@@ -2869,7 +2986,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "steps": [
       "Open the enquiry.",
       "Open More at the top and choose Edit details, or use Edit details on the Scope & dates tab.",
-      "Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated.",
+      "Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated. A recorded check reads Availability checked, stock not reserved, with the warehouse and the dates it covered.",
       "Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too."
     ],
     "links": [

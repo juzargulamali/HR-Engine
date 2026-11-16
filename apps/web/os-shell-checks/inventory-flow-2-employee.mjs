@@ -106,7 +106,7 @@ await step("department head adds a laptop and submits (a draft reserves nothing;
   await d.getByLabel("Quantity", { exact: true }).fill("1");
   await d.getByRole("button", { name: "Add line" }).click();
   await until(() => s1(`select count(*) from inv_request_lines where request_id='${REQ}'`) === "1");
-  await R.panel().getByRole("button", { name: "Submit to the warehouse" }).click();
+  await R.panel().getByRole("button", { name: "Send to Warehouse" }).click();
   await until(() => s1(`select status from inv_requests where id='${REQ}'`) === "submitted");
   await R.shot("flow2-request-submitted");
   await noPrivate("lead: employee request panel");
@@ -210,7 +210,7 @@ await step("project manager asks for all 3 laptops for Showroom refresh and subm
   await d.getByLabel("Quantity", { exact: true }).fill("3");
   await d.getByRole("button", { name: "Add line" }).click();
   await until(() => s1(`select count(*) from inv_request_lines where request_id='${REQ2}'`) === "1");
-  await R.page.getByRole("button", { name: "Submit to the warehouse" }).click();
+  await R.page.getByRole("button", { name: "Send to Warehouse" }).click();
   await until(() => s1(`select status from inv_requests where id='${REQ2}'`) === "submitted");
 });
 await step("the laptop with Eve is not offered for the project: 2 are free, the assigned one cannot be chosen, and only 2 are reserved", async () => {

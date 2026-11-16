@@ -38,10 +38,13 @@ describe("one request, as the panel and the project page show it", () => {
     expect(screen.getByText("UAE-R-00007")).toBeTruthy();
     expect(screen.getByText("Draft")).toBeTruthy();
     expect(screen.getByText(/30 Mar 2030, 12:00 to 3 Apr 2030, 10:00 \(Asia\/Dubai\)/)).toBeTruthy();
-    expect(screen.getByLabelText("Dispatch and transport")).toBeTruthy();
-    expect((screen.getByLabelText("Dispatch and transport") as HTMLInputElement).value).toBe("2030-03-30T12:00");
+    expect(screen.getByLabelText("Leaves warehouse")).toBeTruthy();
+    expect((screen.getByLabelText("Leaves warehouse") as HTMLInputElement).value).toBe("2030-03-30T12:00");
+    // the two dates the warehouse works to are in the main form; the other six are under More dates
+    expect(screen.getByLabelText("Due back")).toBeTruthy();
+    expect(screen.getByText("More dates")).toBeTruthy();
     expect(screen.getByLabelText("Time zone of these dates")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Submit to the warehouse" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send to Warehouse" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Save the dates" })).toBeTruthy();
     expect(screen.getByText("Add an item")).toBeTruthy();
     expect(screen.getByText("Add from a technology template")).toBeTruthy();
@@ -49,8 +52,8 @@ describe("one request, as the panel and the project page show it", () => {
 
   it("tells a draft without lines or dates what is missing instead of offering Submit", () => {
     render(<RequestEditor model={model(request({ needed_from: null, needed_until: null, plan: {} }), [])} can={can()} locations={locations} technologies={[]} />);
-    expect(screen.getByText(/To submit: add at least one item/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Submit to the warehouse" })).toBeNull();
+    expect(screen.getByText(/Before you can send this to the warehouse: add at least one item/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Send to Warehouse" })).toBeNull();
   });
 
   it("gives warehouse people the request workspace for a project request and the date change for a submitted one", () => {
@@ -71,7 +74,7 @@ describe("one request, as the panel and the project page show it", () => {
     render(<RequestEditor model={model(request({ status: "submitted" }))} can={can({ edit: false, decide: false })} locations={locations} technologies={[]} />);
     expect(screen.queryByRole("button", { name: "Change the dates" })).toBeNull();
     expect(screen.queryByText("Add an item")).toBeNull();
-    expect(screen.getByText("Dispatch and transport")).toBeTruthy();
+    expect(screen.getByText("Leaves warehouse")).toBeTruthy();
     expect(screen.getByText(/The warehouse reserves and dispatches/)).toBeTruthy();
   });
 

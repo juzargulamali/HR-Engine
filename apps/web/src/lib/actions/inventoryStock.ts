@@ -8,6 +8,7 @@ import {
   checkbox, fail, firstIssue, friendlyInventoryError, movementKey, ok, optionalText, optionalUuid, refreshInventory, uuid, type InvActionState,
 } from "@/lib/inventory/action-utils";
 import { loadHeld, resolveCode, searchCandidates } from "@/lib/inventory/stock";
+import { pickDoneMessage, type PickInput } from "@/lib/inventory/workspace";
 import type { Candidate, ScanResolution } from "@/lib/inventory/stock-candidates";
 import {
   KIND_CONFIG, sanitizeLines, statusMessage, successMessage, toRpcCall, validateInput, type MovementInput, type MovementKind,
@@ -87,6 +88,37 @@ export async function recordMovement(raw: MovementInput): Promise<MovementOutcom
     }
     refreshInventory(["/projects", "/hr/assets"]);
     return { error: null, result: data, message: successMessage(input.kind, data) };
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return uncertainText(message) ? { error: friendlyInventoryError("TimeoutError"), uncertain: true } : { error: friendlyInventoryError(message) };
+  }
+}
+
+const pickSchema = z.object({
+  companyId: uuid, locationId: uuid, requestId: uuid, key: movementKey,
+  lines: z.array(z.object({ unit_id: uuid.optional(), picked: z.boolean().optional(), item_id: uuid.optional(), qty: z.number().min(0).max(1_000_000_000).optional() })
+    .refine((l) => (!!l.unit_id) !== (!!l.item_id && l.qty !== undefined), "Each line names a unit, or an item and a quantity")).min(1, "Tick what was picked, or count the quantity, first.").max(500),
+});
+
+/**
+ * Records what was picked for a request (Inventory Phase 1). A thin wrapper over inv_pick_for_request: the database decides who may pick at that warehouse, whether
+ * each unit and quantity is reserved for the request and on the shelf, and whether the key was used before. No stock moves. Same honest-saving rules as a movement.
+ */
+export async function recordPick(raw: PickInput): Promise<MovementOutcome> {
+  const parsed = pickSchema.safeParse(raw);
+  if (!parsed.success) return { error: firstIssue(parsed.error) };
+  const d = parsed.data;
+  const db = (await createClient()) as unknown as Rpc;
+  try {
+    const { data, error } = await db.rpc("inv_pick_for_request", { p_company_id: d.companyId, p_location_id: d.locationId, p_request_id: d.requestId, p_key: d.key, p_lines: d.lines })
+      .abortSignal(AbortSignal.timeout(RPC_BUDGET_MS));
+    if (error) {
+      if (uncertainText(error.message)) return { error: friendlyInventoryError("TimeoutError"), uncertain: true };
+      if (/PGRST202|could not find the function|schema cache/i.test(`${error.code ?? ""} ${error.message}`)) return { error: "The pick step is not available in this environment yet: its database update has not been applied. Nothing was recorded. You can still send the equipment from the Send step." };
+      return { error: friendlyInventoryError(error.message) };
+    }
+    refreshInventory(["/projects"]);
+    return { error: null, result: data, message: pickDoneMessage(data) };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     return uncertainText(message) ? { error: friendlyInventoryError("TimeoutError"), uncertain: true } : { error: friendlyInventoryError(message) };

@@ -3,6 +3,7 @@ import { cookies } from "next/headers";
 import { Alert } from "@/components/ui/alert";
 import { buttonVariants } from "@/components/ui/button";
 import { RequestLines, requestCapabilities } from "@/components/inventory/planning/request-view";
+import { PickStep } from "@/components/inventory/workspace/pick-step";
 import { ReceiveStep } from "@/components/inventory/workspace/receive-step";
 import { SendStep } from "@/components/inventory/workspace/send-step";
 import { WorkspaceHeader } from "@/components/inventory/workspace/workspace-header";
@@ -10,25 +11,27 @@ import { BackLink } from "@/components/workspace/list-memory";
 import { LoadError } from "@/components/workspace/states";
 import { firstParam, parseRecordId } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
-import { formatInZone, isRequestEditable } from "@/lib/inventory/planning";
+import { formatInZone, formatLocalPlan, isRequestEditable } from "@/lib/inventory/planning";
 import { canManageProjectEquipment, loadRequestModels, loadTechnologies, loadVisibleLocations, type RequestModel } from "@/lib/inventory/planning-data";
 import { loadFormContext, loadHeld } from "@/lib/inventory/stock";
 import type { Candidate, FormContext } from "@/lib/inventory/stock-candidates";
 import { WAREHOUSE_COOKIE, ALL_WAREHOUSES } from "@/lib/inventory/working-location";
-import { heldTotals, requestItemTotals, sendItemsOf, sentCodesOf, unitHolder, type HolderOf } from "@/lib/inventory/workspace";
+import { heldTotals, jobItemsOf, requestItemTotals, sendItemsOf, sentCodesOf, unitHolder, type HolderOf } from "@/lib/inventory/workspace";
+import { loadDispatchesOf, loadPickBins, loadRunCover } from "@/lib/inventory/job-data";
+import { RunEquipmentList } from "@/components/inventory/job-panels";
 import { EquipmentReviewPanel } from "@/components/projects/equipment-readiness";
 import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
 import { cn } from "@/lib/utils";
 
 export const metadata = { title: "Project equipment" };
 
-const STEPS = [{ id: "prepare", label: "1  Prepare" }, { id: "send", label: "2  Send out" }, { id: "back", label: "3  Receive back" }] as const;
-type Step = (typeof STEPS)[number]["id"];
+const ALL_STEPS = [{ id: "prepare", label: "Prepare" }, { id: "pick", label: "Pick" }, { id: "send", label: "Send" }, { id: "back", label: "Receive" }] as const;
+type Step = (typeof ALL_STEPS)[number]["id"];
 
 /**
- * One request's equipment in one place: Prepare (reserve), Send out, Receive back. These are working views of the SAME request, reservations and
- * movements the rest of Inventory already uses: no second workflow, no new status, no approval. Reserving never sends anything; sending and
- * receiving each go through the existing movement flow, and the database makes every real decision.
+ * One request's equipment in one place, opened at every step of the job: Prepare (reserve), Pick, Send, Receive. These are working views of the SAME request,
+ * reservations and movements the rest of Inventory already uses: no second workflow, no new status, no approval. Reserving never sends anything; picking records
+ * what was taken off the shelf and moves no stock; sending and receiving each go through the existing movement flow, and the database makes every real decision.
  */
 export default async function RequestWorkspacePage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const { id: rawId } = await params;
@@ -62,11 +65,18 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
   // A committed project date that changed while this request is with the warehouse: the warehouse sees it HERE, on the request, where the booking is changed.
   const reviews = r.kind === "project" && r.project_id ? await loadEquipmentReadiness(r.project_id) : ({ state: "none" } as const);
   const live = r.status === "submitted" || r.status === "in_progress";
+  const runCover = r.kind === "project" && r.project_id ? await loadRunCover(r.project_id) : null;
+  const ownRuns = runCover && runCover.state === "ok" ? runCover.value.filter((c) => c.requestId === r.id) : [];
   const project = r.kind === "project" && !!r.project_id;
   const wanted = firstParam(sp, "step");
   // Employee requests have no send/receive steps of their own (the existing Give equipment form does that); a project request opens where asked.
-  const step: Step = project && (wanted === "send" || wanted === "back") ? wanted : "prepare";
+  const pickInstalled = model.pickInstalled !== false;
+  // On a database without the pick step the job has three steps, as before, and a link to "pick" opens Send.
+  const STEPS = ALL_STEPS.filter((s) => s.id !== "pick" || pickInstalled);
+  const asked: Step | null = wanted === "pick" ? (pickInstalled ? "pick" : "send") : wanted === "send" || wanted === "back" ? wanted : null;
+  const step: Step = project && asked ? asked : "prepare";
   const here = (s: Step) => `/inventory/requests/${id}?step=${s}`;
+  const companyName = ctx.companyName(r.company_id);
 
   // Where the person sends from and receives into: the request's pickup warehouse, else the one they work in, else their first.
   const operable = locations.filter((l) => l.company_id === r.company_id && can.operableLocationIds.includes(l.id)).map((l) => ({ id: l.id, name: l.name }));
@@ -75,11 +85,11 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
   const pickupName = locations.find((l) => l.id === r.pickup_location_id)?.name ?? null;
 
   const tabs = project ? (
-    <nav aria-label="Project equipment steps" className="grid grid-cols-3 gap-1 rounded-lg border border-border bg-card p-1">
-      {STEPS.map((s) => (
+    <nav aria-label="Project equipment steps" className={cn("grid gap-1 rounded-lg border border-border bg-card p-1", STEPS.length === 4 ? "grid-cols-4" : "grid-cols-3")}>
+      {STEPS.map((s, n) => (
         <Link key={s.id} href={here(s.id)} scroll={false} aria-current={step === s.id ? "step" : undefined}
           className={cn("flex h-11 items-center justify-center rounded-md px-2 text-center text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", step === s.id ? "brand-gradient font-semibold text-primary-foreground" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground")}>
-          {s.label}
+          <span className="mr-1 tabular-nums opacity-70" aria-hidden>{n + 1}</span>{s.label}
         </Link>
       ))}
     </nav>
@@ -101,6 +111,19 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
     content = null;
   } else if (!can.warehouse) {
     content = <Alert role="status">The warehouse sends equipment and receives it back. You will see reserved, sent and returned numbers on this request as they happen.</Alert>;
+  } else if (step === "pick") {
+    const items = jobItemsOf(model);
+    let bins: Awaited<ReturnType<typeof loadPickBins>> = { unitBins: {}, itemBins: {} };
+    try { bins = await loadPickBins(items, defaultLocationId || null); } catch (e) { console.error("[inventory] workspace bins failed", e); }
+    const blocked = live ? undefined : `This request is ${r.status === "draft" ? "not submitted yet" : r.status}, so nothing can be picked for it.`;
+    content = (
+      <PickStep
+        requestId={r.id} requestCode={r.code} projectName={model.forLabel} companyId={r.company_id} items={items} sentCodes={sentCodesOf(model)}
+        locations={operable} defaultLocationId={defaultLocationId} unitBins={bins.unitBins} itemBins={bins.itemBins}
+        leavesLabel={typeof r.plan?.dispatch === "string" && r.plan.dispatch ? formatLocalPlan(r.plan.dispatch) : r.needed_from ? formatInZone(r.needed_from, r.timezone) : "not set"}
+        sendHref={here("send")} prepareHref={here("prepare")} blockedMessage={blocked}
+      />
+    );
   } else if (step === "send") {
     // The step stays mounted when the request stops being live (a dispatch that sends everything makes it "fulfilled"), so the "Recorded" panel and the note's PDF links are not torn down by the refresh.
     let formContext: FormContext | null = null;
@@ -113,6 +136,7 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
         requestId={r.id} requestCode={r.code} projectId={r.project_id!} projectName={model.forLabel} companyId={r.company_id}
         items={sendItemsOf(model)} sentCodes={sentCodesOf(model)} locations={operable} defaultLocationId={defaultLocationId}
         expectedReturnLabel={r.expected_return_at ? formatInZone(r.expected_return_at, r.timezone) : "the request's date"} formContext={formContext} blockedMessage={blocked}
+        pickInstalled={pickInstalled} pickHref={here("pick")}
       />
     );
   } else {
@@ -124,10 +148,13 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
     const totals = requestItemTotals(model, projectModels, heldError ? null : heldTotals(held));
     const holders: Record<string, HolderOf> = {};
     for (const c of held) if (c.unitId) holders[c.unitId] = unitHolder(c.unitId, model, projectModels);
+    // The original dispatches of this request: the list starts from them. If they cannot be read the list still shows what the project holds.
+    let sent: Awaited<ReturnType<typeof loadDispatchesOf>> = { sentIn: {}, dispatches: [] };
+    try { sent = await loadDispatchesOf(r.id, r.timezone); } catch (e) { console.error("[inventory] workspace dispatches failed", e); }
     content = (
       <ReceiveStep
         companyId={r.company_id} projectId={r.project_id!} projectName={model.forLabel} requestCode={r.code} locations={operable} defaultLocationId={defaultLocationId}
-        held={held} heldError={heldError} totals={totals} holders={holders}
+        held={held} heldError={heldError} totals={totals} holders={holders} sentIn={sent.sentIn} dispatches={sent.dispatches}
       />
     );
   }
@@ -137,9 +164,20 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
       {back}
       <div>
         <h1 className="text-2xl font-semibold">{r.title ?? `Request ${r.code}`}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">{project ? "One place for this project's equipment: prepare it, send it out, receive it back." : "Prepare the equipment, then give it to the employee."}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{project ? "One place for this project's equipment: prepare it, pick it, send it, receive it back." : "Prepare the equipment, then give it to the employee."}</p>
       </div>
-      <WorkspaceHeader model={model} pickupName={pickupName} />
+      <WorkspaceHeader model={model} pickupName={pickupName} companyName={companyName} workingName={operable.find((o) => o.id === defaultLocationId)?.name ?? null} />
+      {r.kind === "project" && r.project_id && runCover && runCover.state !== "not_installed" && runCover.state !== "none" ? (
+        <details open={step === "prepare"} aria-label="Site runs this request serves" className="rounded-lg border border-border bg-card p-4" data-testid="job-runs">
+          {/* Open while preparing; one line while picking, sending and receiving, so the step's own list and action stay near the top of a phone. */}
+          <summary className="cursor-pointer select-none text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Site runs this request serves{ownRuns.length > 0 ? ` (${ownRuns.length})` : ""}</summary>
+          <div className="mt-2">
+          {runCover.state === "error" ? <Alert role="status">The site runs this request serves could not be loaded. Reload to check.</Alert>
+            : ownRuns.length === 0 ? <p className="text-sm text-muted-foreground">No site run is linked to this request. The Project Manager ticks them on the request&apos;s dates.</p>
+            : <><RunEquipmentList rows={ownRuns} projectId={r.project_id} timezone={r.timezone} />{ownRuns.length > 1 ? <p className="mt-2 text-sm text-muted-foreground">The same equipment stays out between these runs: it is sent once and received back once.</p> : null}</>}
+          </div>
+        </details>
+      ) : null}
       {reviews.state === "ok" ? <EquipmentReviewPanel reviews={reviews.readiness.reviews.filter((v) => v.requestId === id)} projectId={r.project_id!} canReview={can.operableLocationIds.length > 0 || manage} />
         : reviews.state === "error" ? <Alert role="status">Whether a project date changed for this request could not be loaded. Reload to check before changing the booking.</Alert> : null}
       {tabs}

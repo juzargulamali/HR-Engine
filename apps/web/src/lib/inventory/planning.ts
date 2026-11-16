@@ -26,12 +26,12 @@ export const formatQtyPlain = (n: number): string => formatQty(n);
 /** The named phases of a request, in the order a job happens. The keys are exactly what inv_plan_window accepts. */
 export const PLAN_FIELDS = [
   { key: "prep_start", label: "Preparation and picking starts" },
-  { key: "dispatch", label: "Dispatch and transport" },
+  { key: "dispatch", label: "Leaves warehouse" },
   { key: "install_start", label: "Installation starts" },
   { key: "show_start", label: "Show or event starts" },
   { key: "show_end", label: "Show or event ends" },
   { key: "dismantle_end", label: "Dismantling finished" },
-  { key: "return_due", label: "Equipment due back" },
+  { key: "return_due", label: "Due back" },
   { key: "inspect_until", label: "Inspection finished by" },
 ] as const;
 export type PlanKey = (typeof PLAN_FIELDS)[number]["key"];
@@ -175,6 +175,8 @@ export interface ReservationLite {
   unit_code?: string | null;
   serial_number?: string | null;
   released_reason?: string | null;
+  /** How much of this reservation was taken off the shelf (picked), sent or not. Undefined when the database has no pick step yet (see planning-data.ts). */
+  picked_qty?: number | string | null;
 }
 
 /** `["2030-03-30 08:00:00+00","2030-04-02 20:00:00+00")` to two ISO instants. */
@@ -203,13 +205,15 @@ export interface LineProgress {
   /** What is still to reserve for this line (what inv_reserve would take). */
   toReserve: number;
   shortage: number;
+  /** Picked off the shelf and waiting to be sent (never more than what is reserved and unsent). 0 when the database has no pick step yet. */
+  pickedWaiting?: number;
 }
 
 export function lineProgress(line: LineLite, request: RequestLite, reservations: readonly ReservationLite[]): LineProgress {
   const qty = num(line.qty);
   const from = request.needed_from ? new Date(request.needed_from).getTime() : null;
   const until = request.needed_until ? new Date(request.needed_until).getTime() : null;
-  let reserved = 0, window = 0, dispatched = 0, returned = 0;
+  let reserved = 0, window = 0, dispatched = 0, returned = 0, pickedWaiting = 0;
   for (const r of reservations) {
     if (r.request_line_id !== line.id || (r.status !== "active" && r.status !== "completed")) continue;
     const range = r.from !== undefined || r.until !== undefined ? { from: r.from ?? null, until: r.until ?? null } : parseRange(r.reserved_during);
@@ -218,10 +222,11 @@ export function lineProgress(line: LineLite, request: RequestLite, reservations:
     reserved += num(r.qty);
     dispatched += num(r.dispatched_qty);
     returned += num(r.returned_qty);
+    if (r.status === "active") pickedWaiting += Math.max(0, Math.min(num(r.qty), num(r.picked_qty ?? 0)) - num(r.dispatched_qty));
     if (from !== null && until !== null && hi !== null && lo !== null && ((num(r.dispatched_qty) > 0 && hi >= until) || (lo <= from && hi >= until))) window += num(r.qty);
   }
   const live = line.status === "open" && (request.status === "submitted" || request.status === "in_progress");
-  return { reserved, reservedForWindow: window, dispatched, returned, outstanding: Math.max(0, dispatched - returned), toReserve: Math.max(0, qty - reserved), shortage: live ? Math.max(0, qty - window) : 0 };
+  return { reserved, reservedForWindow: window, dispatched, returned, outstanding: Math.max(0, dispatched - returned), toReserve: Math.max(0, qty - reserved), shortage: live ? Math.max(0, qty - window) : 0, pickedWaiting };
 }
 
 /** The database's own progress numbers for a line (inv_project_equipment), where a page has them: they take the place of the local sum. */
@@ -480,6 +485,25 @@ export interface SalesCheckView {
   live: SalesLiveView | null;
   /** Technologies whose recorded result the stock no longer supports; null when nothing got worse (or the check is out of date, which says so itself). */
   stockChanged: { technologies: string[]; overall: boolean } | null;
+  /** The proposed date range the recorded check covered, in words ("8 Sep 2031 to 12 Sep 2031"); null before a check, or when the enquiry had no dates. */
+  coversRange: string | null;
+}
+
+/** Said beside every recorded check, wherever it is shown: a check is a dated statement about stock, never a reservation. */
+export const CHECK_NOT_RESERVED = "Availability checked · stock not reserved.";
+
+const CHECK_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const checkDay = (d: string | null): string | null => {
+  const m = d ? /^(\d{4})-(\d{2})-(\d{2})/.exec(d) : null;
+  return m ? `${Number(m[3])} ${CHECK_MONTHS[Number(m[2]) - 1]} ${m[1]}` : null;
+};
+/** The date range a check covered: from the earliest to the latest of the installation start, event start and event end it recorded. */
+export function checkCoversRange(covers: unknown): string | null {
+  const c = asRecord(covers);
+  const days = [str(c.install_start), str(c.event_start), str(c.event_end)].filter((x): x is string => !!x).sort();
+  if (days.length === 0) return null;
+  const from = checkDay(days[0]!), to = checkDay(days[days.length - 1]!);
+  return from && to ? (from === to ? from : `${from} to ${to}`) : null;
 }
 export interface SalesLiveView { headline: string; tone: Tone; rows: SalesSummaryRow[]; warehouseCheckRequired: boolean }
 
@@ -563,7 +587,60 @@ export function salesCheckView(data: unknown): SalesCheckView | null {
   return {
     state, headline, tone, outOfDate, checkedBy: str(latest.checked_by), checkedAt: str(latest.checked_at), locationName: str(latest.location_name), note: str(latest.note),
     pendingBy: str(pending.requested_by), pendingAt: str(pending.requested_at), rows, warehouseCheckRequired: state === "none" || result === "check_required" || anyUnchecked,
-    live, stockChanged,
+    live, stockChanged, coversRange: state === "checked" ? checkCoversRange(latest.covers) : null,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------------------------
+// Projects: the enquiry's availability check, for the people who run the project (inv_project_sales_check)
+// ---------------------------------------------------------------------------------------------------------------
+export interface ProjectCheckView {
+  state: "no_enquiry" | "none" | "pending" | "checked";
+  enquiryReference: string | null;
+  headline: string;
+  tone: Tone;
+  checkedBy: string | null;
+  checkedAt: string | null;
+  locationName: string | null;
+  note: string | null;
+  coversRange: string | null;
+  rows: SalesSummaryRow[];
+  /** What changed since the check was recorded, each in a sentence. Empty when the check still describes the project. */
+  review: string[];
+}
+
+const REVIEW_DATE: Record<string, string> = { install_start: "The installation start", event_start: "The event start", event_end: "The event end" };
+const techWords = (v: unknown): string => {
+  const list = asArray(v).map(asRecord).map((t) => `${str(t.name) ?? "Technology"} × ${formatQty(num(t.qty ?? 1))}`);
+  return list.length > 0 ? list.join(", ") : "nothing";
+};
+
+/** Turns one "review" entry of inv_project_sales_check into a sentence: what the check covered, and what the project says now. */
+export function reviewSentence(entry: unknown): string | null {
+  const e = asRecord(entry);
+  const field = str(e.field);
+  if (!field) return null;
+  if (field in REVIEW_DATE) return `${REVIEW_DATE[field]} was ${checkDay(str(e.checked)) ?? "not set"} when the check was made and is now ${checkDay(str(e.now)) ?? "not set"}.`;
+  if (field === "quantities") return `The equipment or its quantities changed: the check covered ${techWords(e.checked)}; the project now has ${techWords(e.now)}.`;
+  if (field === "warehouse") return `The check was made against ${str(e.checked) ?? "another warehouse"}, but request ${str(e.request_code) ?? ""} asks ${str(e.now) ?? "a different warehouse"}.`.replace("request  asks", "a request asks");
+  return null;
+}
+
+export function projectCheckView(data: unknown): ProjectCheckView | null {
+  const d = asRecord(data);
+  const state = d.state === "no_enquiry" || d.state === "none" || d.state === "pending" || d.state === "checked" ? d.state : null;
+  if (!state) return null;
+  const latest = asRecord(d.latest);
+  const rows = summaryRows(latest.summary);
+  const result = str(latest.result);
+  const review = asArray(d.review).map(reviewSentence).filter((x): x is string => !!x);
+  const anyUnchecked = rows.some((r) => r.status === "Warehouse check required");
+  return {
+    state, enquiryReference: str(d.enquiry_reference),
+    headline: state === "checked" ? (AVAILABILITY_RESULT_WORDS[result ?? "check_required"] ?? "Warehouse check required") : state === "pending" ? "Warehouse check asked for" : "No check recorded",
+    tone: state === "checked" && result === "available" && review.length === 0 && !anyUnchecked ? "good" : result === "short" ? "bad" : "warn",
+    checkedBy: str(latest.checked_by), checkedAt: str(latest.checked_at), locationName: str(latest.location_name), note: str(latest.note),
+    coversRange: state === "checked" ? checkCoversRange(latest.covers) : null, rows, review,
   };
 }
 

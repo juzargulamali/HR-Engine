@@ -87,8 +87,9 @@ function toRequestInput(m: RequestModel): RequestInput {
     id: r.id, code: r.code, kind: r.kind, forLabel: m.forLabel, timezone: r.timezone, plan: r.plan, neededFrom: r.needed_from,
     lines: m.lines.map((l) => ({
       status: l.status, reserved: l.progress.reserved, dispatched: l.progress.dispatched, toReserve: l.progress.toReserve,
-      shortageAction: l.shortageAction, itemName: l.itemName, qty: l.qty, rentalReference: l.rentalReference,
+      shortageAction: l.shortageAction, itemName: l.itemName, qty: l.qty, rentalReference: l.rentalReference, pickedWaiting: l.progress.pickedWaiting ?? 0,
     })),
+    pickInstalled: m.pickInstalled !== false,
   };
 }
 

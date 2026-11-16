@@ -135,7 +135,7 @@ The enquiry's owner, or a Sales founder, can edit its details while it is open. 
 
 1. Open the enquiry.
 2. Open More at the top and choose Edit details, or use Edit details on the Scope & dates tab.
-3. Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated.
+3. Change what you need and save. If someone else changed it first you will be asked to reload. Changing the dates, technologies or quantities means the equipment availability check must be repeated. A recorded check reads Availability checked, stock not reserved, with the warehouse and the dates it covered.
 4. Choosing a different Event / Exhibition fills a show date that is empty; a date already on the enquiry is kept, and Use edition dates replaces it if you want. A date you empty on purpose stays empty. Create event or edition is under that field here too.
 
 ## Change an enquiry's stage

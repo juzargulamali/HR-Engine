@@ -8,7 +8,7 @@ import type { RequestModel, TechnologyOption } from "@/lib/inventory/planning-da
 import type { InvLocationRow } from "@/types/inventory";
 import { AddLineForm, TechnologyForm } from "./add-forms";
 import { LinesEditor, type EditorCan } from "./lines-editor";
-import { PlanForm } from "./plan-form";
+import { PlanForm, type RunChoice } from "./plan-form";
 import { RequestMoreMenu, SubmitRequest } from "./request-actions";
 import { RequestStatusBadge } from "./status";
 import { SentReturned } from "../workspace/sent-returned";
@@ -43,8 +43,10 @@ export function requestCapabilities(model: RequestModel, ctx: InventoryContext, 
  * One equipment request: header and status, the planning dates, the lines with their progress, and everything that can be done with
  * them. Used beside the Requests list (a side panel) and inside a project's Equipment page, so both behave the same.
  */
-export function RequestEditor({ model, can, locations, technologies, hideHeading = false, returns }: {
+export function RequestEditor({ model, can, locations, technologies, hideHeading = false, returns, runs }: {
   model: RequestModel; can: EditorCan; locations: readonly InvLocationRow[]; technologies: TechnologyOption[]; hideHeading?: boolean;
+  /** The project's site runs and the ones this request serves (Inventory Phase 1). Absent for an employee request, and on a database without the run links. */
+  runs?: RunChoice | null;
   /** Sent / Returned / Still out at the level the data supports (see lib/inventory/workspace.ts), for a project request. Absent for an employee request. */
   returns?: ItemTotals[];
 }) {
@@ -55,7 +57,7 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
   const hasActiveReservations = model.lines.some((l) => l.reservations.some((x) => x.status === "active"));
   const pickup = locations.find((l) => l.id === r.pickup_location_id);
   const projectId = r.project_id;
-  const missing = openLines.length === 0 ? "add at least one item" : !r.needed_from || !r.needed_until ? "set the planning dates (at least a start and an end)" : null;
+  const missing = openLines.length === 0 ? "add at least one item" : !r.needed_from || !r.needed_until ? "set Leaves warehouse and Due back and save the dates" : null;
   const done = model.lines.filter((l) => l.status !== "cancelled");
   return (
     <div className="space-y-6">
@@ -88,7 +90,6 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       {model.lines.some((l) => l.progress.shortage > 0) ? <Alert variant="warning" role="status">Some lines are not covered yet for the request dates. Open the line to see what is short and what is planned (buy or rent).</Alert> : null}
 
       <div className="flex flex-wrap items-center gap-2">
-        {r.status === "draft" && can.edit ? <div className="min-w-0 flex-1"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
         {can.warehouse && live && r.kind === "project" && r.project_id ? <Link href={`/inventory/requests/${r.id}?step=send`} className={buttonVariants({ size: "sm" })}>Open the workspace</Link> : null}
         {can.warehouse && live && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?action=issue&request=${r.id}&employee=${r.employee_id}`} className={buttonVariants({ size: "sm" })}>Issue to the employee</Link> : null}
         {can.warehouse && r.kind === "employee" && r.employee_id ? <Link href={`/inventory/stock?view=people&employee=${r.employee_id}`} className={buttonVariants({ size: "sm", variant: "outline" })}>What this employee holds</Link> : null}
@@ -97,15 +98,17 @@ export function RequestEditor({ model, can, locations, technologies, hideHeading
       {live && !can.warehouse ? <p className="text-sm text-muted-foreground">The warehouse reserves and dispatches. You will see reserved, dispatched and returned numbers here as they happen.</p> : null}
 
       {r.status === "draft" ? (
-        <Section title="Planning dates" description={`Each date is local time in ${r.timezone}.`}>
-          <PlanForm requestId={r.id} version={r.version} status={r.status} timezone={r.timezone} plan={r.plan} projectId={projectId} editable={can.edit && editable} hasReservations={hasActiveReservations} />
+        <Section title={r.kind === "project" ? "Send to Warehouse: dates and site runs" : "Planning dates"} description={`Each date is local time in ${r.timezone}. The project, the equipment and the dates below are carried to the warehouse as they are.`}>
+          <PlanForm requestId={r.id} version={r.version} status={r.status} timezone={r.timezone} plan={r.plan} projectId={projectId} editable={can.edit && editable} hasReservations={hasActiveReservations} runs={runs} />
+          {/* The one action of this step sits under the dates it sends: save the dates and site runs first, then send. */}
+          {can.edit ? <div className="rounded-md border border-border bg-secondary/30 p-3" data-testid="send-to-warehouse-action"><SubmitRequest requestId={r.id} version={r.version} projectId={projectId} missing={missing} /></div> : null}
         </Section>
       ) : (
         // Once the request is with the warehouse the lines are what people work with; the eight dates stay one click away.
         <details className="rounded-md border border-border" aria-label="Planning dates">
-          <summary className="cursor-pointer select-none rounded-md px-3 py-2 text-sm font-medium hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Planning dates <span className="font-normal text-muted-foreground">(local time in {r.timezone})</span></summary>
+          <summary className="cursor-pointer select-none rounded-md px-3 py-2 text-sm font-medium hover:bg-secondary/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Dates and site runs <span className="font-normal text-muted-foreground">(local time in {r.timezone})</span></summary>
           <div className="border-t border-border p-3">
-            <PlanForm requestId={r.id} version={r.version} status={r.status} timezone={r.timezone} plan={r.plan} projectId={projectId} editable={can.edit && editable} hasReservations={hasActiveReservations} />
+            <PlanForm requestId={r.id} version={r.version} status={r.status} timezone={r.timezone} plan={r.plan} projectId={projectId} editable={can.edit && editable} hasReservations={hasActiveReservations} runs={runs} />
           </div>
         </details>
       )}

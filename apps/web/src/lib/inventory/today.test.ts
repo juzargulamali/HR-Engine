@@ -2,7 +2,7 @@ import { eventRow, noteRow, noteView, statusRow } from "@/test/note-fixtures";
 import { describe, expect, it } from "vitest";
 import {
   bucketOf, daysFromToday, filterCounts, filterRows, fmtDay, groupRows, differenceRows, heldRows, isQueueEmpty, parseShow, requestRow, requestRows, waitingRow, returnRows, salesCheckInScope, salesRows,
-  settleSources, transferRows, type HeldEntry, type QueueRow, type RequestInput, type RequestLineInput, type SalesInput, type SourceKey,
+  settleSources, transferRows, type HeldEntry, type QueueRow, type RequestInput, type RequestLineInput, type SalesInput, type SourceKey, GROUP_LABEL, sectionOf
 } from "./today";
 
 const DXB = "Asia/Dubai";
@@ -57,7 +57,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     expect(r.actionLabel).toBe("Send equipment");
     expect(r.href).toBe("/inventory/requests/r1?step=send");
     expect(r.operates).toBe(true);
-    expect(r.whenLabel).toBe("Dispatch today, 14:00");
+    expect(r.whenLabel).toBe("Leaves warehouse today, 14:00");
     // the unfinished reserving is said on the same row, not as a second row
     expect(r.facts.map((f) => f.text)).toEqual(["1 line has reserved stock to send", "1 line still to reserve"]);
   });
@@ -66,7 +66,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     const r = requestRow(request({ plan: { dispatch: "2026-10-16T08:00" }, lines: [line({ reserved: 2, dispatched: 0 })] }), ctx)!;
     expect(r.kind).toBe("send");
     expect(r.late).toBe(true);
-    expect(r.whenLabel).toBe("Dispatch was Fri 16 Oct, 08:00 · 3 days late");
+    expect(r.whenLabel).toBe("Was due to leave Fri 16 Oct, 08:00 · 3 days late");
     expect(bucketOf(r.when, r.zone, NOW)).toBe("late");
   });
 
@@ -76,7 +76,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     expect(r.actionLabel).toBe("Prepare equipment");
     expect(r.href).toBe("/inventory/requests/r1?step=prepare");
     expect(r.operates).toBe(false);
-    expect(r.whenLabel).toBe("Dispatch Thu 22 Oct, 08:00");
+    expect(r.whenLabel).toBe("Leaves warehouse Thu 22 Oct, 08:00");
     expect(r.title).toBe("Gulf Bank Summit needs its equipment prepared");
   });
 
@@ -106,7 +106,7 @@ describe("one row per request, and the Send / Prepare rule", () => {
     expect(withFallback.when).toBe("2026-10-21T04:00:00Z");
     const none = requestRow(request({ plan: null, neededFrom: null, lines: [line({ reserved: 3 })] }), ctx)!;
     expect(none.when).toBeNull();
-    expect(none.whenLabel).toBe("No dispatch date set");
+    expect(none.whenLabel).toBe("No dates set");
     expect(bucketOf(none.when, none.zone, NOW)).toBe("none");
     expect(none.kind).toBe("send"); // without a date it cannot be "due", so the unsent equipment is sent ahead of any date
   });
@@ -223,11 +223,11 @@ describe("Sales checks", () => {
     checkId: "c1", opportunityId: "o1", companyId: "co1", reference: "ENQ-0188", requestedAt: "2026-10-17T11:20:00+04:00", locationId: "l1", locationName: "Dubai: Al Quoz",
     installStart: "2026-11-10", eventStart: "2026-11-12", eventEnd: "2026-11-14", technologies: [{ name: "LED wall panel", qty: 24 }, { name: "Line array speaker", qty: "8" }], zone: DXB,
   };
-  it("never gets a date, so it always waits under 'no date set'", () => {
+  it("never gets a date, and waits under Do now until the warehouse answers it", () => {
     const [row] = salesRows([sales], ctx);
     expect(row!.when).toBeNull();
     expect(row!.late).toBe(false);
-    expect(groupRows([row!], NOW).map((g) => g.bucket)).toEqual(["none"]);
+    expect(groupRows([row!], NOW).map((g) => g.bucket)).toEqual(["now"]);
     expect(row!.title).toBe("Sales asks whether equipment is free for enquiry ENQ-0188");
     expect(row!.whenLabel).toContain("Asked Sat 17 Oct");
     expect(row!.whenLabel).toContain("Event 12 Nov 2026 to 14 Nov 2026");
@@ -285,7 +285,7 @@ describe("sources that fail", () => {
 
   it("all sources answered: counts are numbers and Everything is the total", () => {
     const counts = filterCounts([prepare, send, returns], []);
-    expect(counts).toEqual({ all: 3, prepare: 1, send: 1, returns: 1, transfer: 0, sales: 0, waiting: 0, held: 0, difference: 0 });
+    expect(counts).toEqual({ all: 3, prepare: 1, pick: 0, send: 1, returns: 1, transfer: 0, sales: 0, waiting: 0, held: 0, difference: 0 });
   });
 
   it("an empty queue is 'nothing waiting' only when every source answered", () => {
@@ -300,11 +300,20 @@ describe("sources that fail", () => {
 });
 
 describe("groups and filters", () => {
-  it("orders groups Late, Today, Next 7 days, Later, no date, and rows by their own date", () => {
+  it("has three sections: Do now (late and today), Coming up (later dates and undated sends), Waiting on someone else; rows by their own date", () => {
     const mk = (id: string, when: string | null): QueueRow => ({ id, kind: "send", title: id, forWhom: "", when, zone: DXB, whenLabel: "", late: false, facts: [], href: "/x", actionLabel: "Go", operates: true });
     const groups = groupRows([mk("none", null), mk("later", "2026-12-01T09:00:00+04:00"), mk("wk2", "2026-10-22T09:00:00+04:00"), mk("wk1", "2026-10-20T09:00:00+04:00"), mk("today", "2026-10-19T15:00:00+04:00"), mk("late", "2026-10-10T09:00:00+04:00")], NOW);
-    expect(groups.map((g) => g.bucket)).toEqual(["late", "today", "week", "later", "none"]);
-    expect(groups.find((g) => g.bucket === "week")!.rows.map((r) => r.id)).toEqual(["wk1", "wk2"]);
+    expect(groups.map((g) => g.bucket)).toEqual(["now", "soon"]);
+    expect(groups.find((g) => g.bucket === "now")!.rows.map((r) => r.id)).toEqual(["late", "today"]);
+    expect(groups.find((g) => g.bucket === "soon")!.rows.map((r) => r.id)).toEqual(["wk1", "wk2", "later", "none"]);
+    const waiting: QueueRow = { ...mk("w", "2026-10-10T09:00:00+04:00"), kind: "waiting" };
+    const undatedRequest: QueueRow = { ...mk("pm", null), kind: "prepare", waitingOn: "the Project Manager" };
+    const prepareAhead: QueueRow = { ...mk("prep", "2026-12-01T09:00:00+04:00"), kind: "prepare" };
+    const pickTomorrow: QueueRow = { ...mk("pick1", "2026-10-20T09:00:00+04:00"), kind: "pick" };
+    const pickLater: QueueRow = { ...mk("pick2", "2026-10-22T09:00:00+04:00"), kind: "pick" };
+    const three = groupRows([waiting, undatedRequest, prepareAhead, pickTomorrow, pickLater], NOW);
+    expect(three.map((g) => [g.bucket, g.rows.map((r) => r.id)])).toEqual([["now", ["pick1", "prep"]], ["soon", ["pick2"]], ["waiting", ["w", "pm"]]]);
+    expect(GROUP_LABEL).toEqual({ now: "Do now", soon: "Coming up", waiting: "Waiting on someone else" });
   });
 
   it("filters by kind and ignores a show value it does not know", () => {
@@ -327,8 +336,11 @@ describe("Waiting / Shortages: unresolved shortages stay visible, with who acts 
     expect(requestRow(req, ctx)).toBeNull(); // nothing the warehouse can finish by preparing
     const w = waitingRow(req, ctx)!;
     expect(w.kind).toBe("waiting");
-    expect(w.title).toBe("2 lines of Gulf Bank Summit are waiting for stock to be bought or rented");
-    expect(w.facts.map((f) => f.text)).toEqual(["Truss 3 m × 2: to buy", "LED wall panel × 4: to rent (rental RNT-9)"]);
+    expect(w.title).toBe("2 lines of Gulf Bank Summit are short: waiting for stock to be bought or rented");
+    // how many are missing, of how many, and what happens to them
+    expect(w.facts.map((f) => f.text)).toEqual(["Truss 3 m: 2 missing of 2 · to buy", "LED wall panel: 4 missing of 4 · to rent (rental RNT-9)"]);
+    expect(w.waitingOn).toBe("the buyer and whoever arranges the rental");
+    expect(sectionOf(w, NOW)).toBe("waiting");
     expect(w.responsible).toMatch(/To buy: the buyer .* To rent: whoever arranges the rental/);
     expect(w.next).toMatch(/Receive the stock when it arrives/);
     expect(w.href).toBe("/inventory/requests/r1?step=prepare");
@@ -365,7 +377,7 @@ describe("Waiting / Shortages: unresolved shortages stay visible, with who acts 
       const prep = requestRow(req, ctx)!;
       expect(prep.kind).toBe("prepare");
       expect(prep.facts[0]!.text).toBe("2 of 5 lines fully reserved · 1 still to reserve · 2 to buy or rent");
-      expect(waitingRow(req, ctx)!.title).toBe("2 lines of Gulf Bank Summit are waiting for stock to be bought or rented");
+      expect(waitingRow(req, ctx)!.title).toBe("2 lines of Gulf Bank Summit are short: waiting for stock to be bought or rented");
     });
     it("mixed and due today: sent in part, with both kinds of shortage said", () => {
       const send = requestRow(request({ plan: { dispatch: "2026-10-19T14:00" }, lines: [line({ reserved: 5 }), line({ toReserve: 3 }), buy] }), ctx)!;
@@ -415,7 +427,7 @@ describe("units held for checking", () => {
     expect(r!.responsible).toMatch(/warehouse checks it/);
     expect(r!.next).toBe("Open the unit and record the check.");
     expect(r!.href).toBe("/inventory/stock?unit=u1");
-    expect(groupRows([r!], NOW).map((g) => g.bucket)).toEqual(["held"]);
+    expect(groupRows([r!], NOW).map((g) => g.bucket)).toEqual(["now"]);
   });
   it("flags a unit that became held while a live request still holds a reservation on it", () => {
     const [r] = heldRows([{ id: "u1", code: "UAE-E-00012", itemName: "Projector", condition: "needs_inspection", locationName: null, reservedFor: [{ requestId: "r2", code: "REQ-0051" }] }]);
@@ -446,10 +458,10 @@ describe("differences the Project Manager reported on a dispatch note or return 
     expect(r!.difference!.lines.map((l) => l.n)).toEqual([2]);
   });
 
-  it("sits in its own group, first, whatever the date, and has its own filter", () => {
+  it("comes first under Do now, whatever the date, and has its own filter", () => {
     const [d] = differenceRows([open()], { now: NOW });
     const send: QueueRow = { id: "s", kind: "send", title: "s", forWhom: "", when: "2026-10-10T09:00:00+04:00", zone: DXB, whenLabel: "", late: true, facts: [], href: "/x", actionLabel: "Go", operates: true };
-    expect(groupRows([send, d!], NOW).map((g) => g.bucket)).toEqual(["difference", "late"]);
+    expect(groupRows([send, d!], NOW).map((g) => [g.bucket, g.rows.map((r) => r.id)])).toEqual([["now", ["difference:n1", "s"]]]);
     expect(filterRows([send, d!], "difference").map((r) => r.id)).toEqual(["difference:n1"]);
     expect(parseShow("difference")).toBe("difference");
   });
@@ -459,5 +471,38 @@ describe("differences the Project Manager reported on a dispatch note or return 
     expect(r.failed).toEqual(["differences"]);
     expect(filterCounts([], ["differences"]).difference).toBeNull();
     expect(isQueueEmpty(r.rows, r.failed)).toBe(false);
+  });
+});
+
+describe("Inventory Phase 1: the pick step, quantities and who acts", () => {
+  const NOW1 = new Date("2026-10-19T08:00:00Z");
+  const base = { id: "r9", code: "UAE-R-00009", kind: "project" as const, forLabel: "Fictional Roadshow", timezone: "Asia/Dubai", neededFrom: "2026-10-19T06:00:00Z", pickInstalled: true };
+  const l = (o: Partial<Parameters<typeof requestRow>[0]["lines"][number]>) => ({ status: "open" as const, reserved: 0, dispatched: 0, toReserve: 0, ...o });
+  it("goes to Pick items while reserved equipment is still on the shelf, then to Send equipment, and names what and how many", () => {
+    const plan = { dispatch: "2026-10-19T10:00" };
+    const toPick = requestRow({ ...base, plan, lines: [l({ reserved: 3, itemName: "LED panel", qty: 4, toReserve: 1, shortageAction: "need_to_rent" }), l({ reserved: 8, pickedWaiting: 5, itemName: "Power cable", qty: 8 })] }, { now: NOW1 })!;
+    expect(toPick).toMatchObject({ kind: "pick", actionLabel: "Pick items", href: "/inventory/requests/r9?step=pick", operates: true, title: "Fictional Roadshow has equipment to pick" });
+    expect(toPick.facts.map((f) => f.text)).toEqual(["2 lines to pick", "LED panel × 3", "Power cable × 3", "1 line to buy or rent"]);
+    expect(sectionOf(toPick, NOW1)).toBe("now");
+    const picked = requestRow({ ...base, plan, lines: [l({ reserved: 3, pickedWaiting: 3, itemName: "LED panel", qty: 3 })] }, { now: NOW1 })!;
+    expect(picked).toMatchObject({ kind: "send", actionLabel: "Send equipment", href: "/inventory/requests/r9?step=send" });
+    expect(picked.facts.map((f) => f.text)).toEqual(["1 line has reserved stock to send", "LED panel × 3"]);
+  });
+  it("on a database without the pick step a request goes from reserved straight to Send equipment, as before", () => {
+    const row = requestRow({ ...base, pickInstalled: false, plan: { dispatch: "2026-10-19T10:00" }, lines: [l({ reserved: 3, itemName: "LED panel", qty: 3 })] }, { now: NOW1 })!;
+    expect(row.kind).toBe("send");
+  });
+  it("says how many are not reserved yet on a job to prepare, and a short line is never counted as reserved", () => {
+    const row = requestRow({ ...base, plan: { dispatch: "2026-10-25T10:00" }, lines: [l({ reserved: 3, toReserve: 1, itemName: "LED panel", qty: 4 }), l({ reserved: 8, itemName: "Power cable", qty: 8 })] }, { now: NOW1 })!;
+    expect(row.kind).toBe("prepare");
+    expect(row.facts.map((f) => f.text)).toEqual(["1 of 2 lines fully reserved · 1 still to reserve", "LED panel: 1 of 4 not reserved yet"]);
+    // reserving early is the point: a job to prepare is under Do now even when it leaves next week
+    expect(sectionOf(row, NOW1)).toBe("now");
+  });
+  it("a request without dates waits on the Project Manager, and says so", () => {
+    const row = requestRow({ ...base, neededFrom: null, plan: {}, lines: [l({ toReserve: 2, itemName: "LED panel", qty: 2 })] }, { now: NOW1 })!;
+    expect(row).toMatchObject({ kind: "prepare", waitingOn: "the Project Manager", whenLabel: "No dates set" });
+    expect(row.responsible).toMatch(/Project Manager sets Leaves warehouse and Due back/);
+    expect(sectionOf(row, NOW1)).toBe("waiting");
   });
 });

@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { fail, firstIssue, ok, optionalText, optionalUuid, qtyField, refreshInventory, uuid, type InvActionState } from "@/lib/inventory/action-utils";
+import { fail, firstIssue, friendlyInventoryError, ok, optionalText, optionalUuid, qtyField, refreshInventory, uuid, type InvActionState } from "@/lib/inventory/action-utils";
 import {
   asArray, asRecord, cancelMessage, expandMessage, parsePlanInput, reserveMessage, windowChangeMessages, zonedLocalToUtcIso, str, num,
 } from "@/lib/inventory/planning";
@@ -80,6 +80,15 @@ const planSchema = z.object({ requestId: uuid, expectedVersion: version, timezon
 export async function saveRequestPlan(_prev: S, fd: FormData): Promise<S> {
   const p = planSchema.safeParse(fields(fd));
   if (!p.success) return { error: firstIssue(p.error) };
+  // The site runs the request serves travel with the dates (Inventory Phase 1). They are saved after the dates, and a failure there is said, never hidden.
+  const runIds = fd.get("runsIncluded") === "1" ? fd.getAll("runIds").filter((x): x is string => typeof x === "string" && uuid.safeParse(x).success) : null;
+  const saveRuns = async (db: Awaited<ReturnType<typeof createClient>>): Promise<string | null> => {
+    if (runIds === null) return null;
+    const { error } = await (db as unknown as { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ error: { code?: string; message: string } | null }> }).rpc("inv_set_request_runs", { p_request_id: p.data.requestId, p_plan_item_ids: runIds });
+    if (!error) return null;
+    if (/PGRST202|could not find the function|schema cache/i.test(`${error.code ?? ""} ${error.message}`)) return "The site runs were not saved: this environment does not have that database update yet.";
+    return `The site runs were not saved: ${friendlyInventoryError(error.message)}`;
+  };
   const plan = parsePlanInput(fields(fd));
   if (plan.error) return { error: plan.error };
   const db = await createClient();
@@ -90,14 +99,18 @@ export async function saveRequestPlan(_prev: S, fd: FormData): Promise<S> {
   if (req.status === "draft") {
     const { error } = await db.rpc("inv_save_request_plan", { p_request_id: p.data.requestId, p_plan: plan.plan, p_timezone: tz, p_expected_version: p.data.expectedVersion ?? null });
     if (error) return fail(error.message);
+    const runProblem = await saveRuns(db);
     refresh(p.data.projectId);
-    return ok({ warning: "The dates are saved." });
+    if (runProblem) return ok({ warning: `The dates are saved. ${runProblem}`, detail: { conflicts: [runProblem] } });
+    return ok({ warning: runIds === null ? "The dates are saved." : `The dates are saved. ${runIds.length === 0 ? "No site run is linked to this request." : `${runIds.length === 1 ? "1 site run is" : `${runIds.length} site runs are`} linked to this request.`}` });
   }
   const { data, error } = await db.rpc("inv_change_request_window", { p_request_id: p.data.requestId, p_plan: plan.plan, p_timezone: tz, p_expected_version: p.data.expectedVersion ?? null });
   if (error) return fail(error.message);
   refresh(p.data.projectId);
   const words = windowChangeMessages(data, tz);
-  return ok({ warning: words.summary, detail: { conflicts: words.conflicts } });
+  const runProblem = await saveRuns(db);
+  refresh(p.data.projectId);
+  return ok({ warning: words.summary, detail: { conflicts: runProblem ? [...words.conflicts, runProblem] : words.conflicts } });
 }
 
 export async function submitRequest(_prev: S, fd: FormData): Promise<S> {

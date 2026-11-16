@@ -229,7 +229,7 @@ Who can see: **Member** = actively enrolled in the project and still eligible (`
 | 182 | Not covered yet | panel | Equipment tab, when a line is short | Member | Shortages and their plan | H 2.2 | Documented |
 | 183 | Sales handover (import log, Import the handover equipment / Run the import again) | panel | Equipment tab, client project | Manager, Warehouse | Import the brief's equipment as a draft | H 2.2 | Unverified: failed import-log read is ignored |
 | 184 | Requests list and request row | panel | Equipment tab; `?request=<id>` | Member | One row per request | H 2.2 | Documented |
-| 185 | Request (facts, notices, Submit to the warehouse, Open the workspace) | panel | Open a request row | Member reads; Manager and Warehouse act | Prepare and submit | H 2.3 | Documented |
+| 185 | Request (facts, notices, Send to Warehouse, Open the workspace) | panel | Open a request row | Member reads; Manager and Warehouse act | Prepare and submit | H 2.3 | Documented |
 | 186 | Cancel this request | dialog | Request, More | Manager, Warehouse | Cancel a request | H 2.3 | Documented |
 | 187 | Planning dates (Save the dates / Change the dates) | form | Request | Manager, Warehouse | Eight dates and the time zone | H 2.3 | Documented |
 | 188 | Sent and returned | panel | Request, once something was dispatched | Member | Sent, Returned, Still out | H 2.3, 2.7 | Documented |

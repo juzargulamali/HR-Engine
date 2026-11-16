@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
  * works to (the booking window, the dispatch date, when it is due back). The full planning schedule is one click away under "More dates"; the booking
  * window is the earliest to the latest of those dates, so preparation and inspection time stay in the availability calculation.
  */
-export function WorkspaceHeader({ model, pickupName, now = new Date() }: { model: RequestModel; pickupName: string | null; now?: Date }) {
+export function WorkspaceHeader({ model, pickupName, companyName, workingName, now = new Date() }: { model: RequestModel; pickupName: string | null; companyName?: string | null; workingName?: string | null; now?: Date }) {
   const r = model.request;
   const plan = (r.plan ?? {}) as Record<string, string | null | undefined>;
   const late = !!r.expected_return_at && new Date(r.expected_return_at).getTime() < now.getTime() && r.status !== "closed" && r.status !== "cancelled";
@@ -22,11 +22,12 @@ export function WorkspaceHeader({ model, pickupName, now = new Date() }: { model
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2 text-sm"><RequestStatusBadge status={r.status} /><span className="font-mono text-muted-foreground">{r.code}</span></div>
           <p className="mt-1 break-words font-heading text-xl font-semibold">{model.forLabel}</p>
+          {companyName ? <p className="text-sm font-medium" data-testid="job-scope">{companyName} · {pickupName ?? workingName ?? "warehouse not chosen yet"}</p> : null}
           <p className="text-sm text-muted-foreground">{r.kind === "project" ? "Project" : "Employee"} request{pickupName ? ` · collected from ${pickupName}` : ""}{r.destination ? ` · to ${r.destination}` : ""}</p>
         </div>
         <dl className="grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-3">
           {fact("Booking window", r.needed_from ? `${formatInZone(r.needed_from, r.timezone)} to ${r.needed_until ? formatInZone(r.needed_until, r.timezone) : "no end yet"}` : "Dates not set")}
-          {fact("Dispatch", plan.dispatch ? formatLocalPlan(plan.dispatch) : "Not set")}
+          {fact("Leaves warehouse", plan.dispatch ? formatLocalPlan(plan.dispatch) : "Not set")}
           {fact("Due back", r.expected_return_at ? `${formatInZone(r.expected_return_at, r.timezone)}${late ? " · late" : ""}` : "Not set", late)}
         </dl>
       </div>

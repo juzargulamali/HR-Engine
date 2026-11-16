@@ -5,10 +5,14 @@ import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { isNotInstalled } from "@/lib/projects/errors";
 import type { InvLocationRow } from "@/types/inventory";
+import { companyDisplayNames, sortCompaniesForDisplay } from "@/lib/company-display";
 
 export interface InvCompanyInfo {
   id: string;
+  /** The short name shown in selectors and on the screens ("Enginious UAE"): see lib/company-display.ts. */
   name: string;
+  /** The legal name (`companies.legal_name`), for company settings and anything that names the legal entity. */
+  legalName: string;
   referenceCode: string | null;
   isEnabled: boolean;
 }
@@ -66,15 +70,17 @@ export const getInventoryContext = cache(async (): Promise<InventoryContext | nu
 
   const companyIds = grants.map((g) => g.companyId);
   const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: locationRows, error: locationError }, { data: assigned, error: assignedError }] = await Promise.all([
-    supabase.from("companies").select("id, legal_name").in("id", companyIds).order("legal_name"),
+    supabase.from("companies").select("id, legal_name, country_code").in("id", companyIds).order("legal_name"),
     supabase.from("inv_company_settings").select("company_id, reference_code, is_enabled").in("company_id", companyIds),
     supabase.from("inv_locations").select("*").in("company_id", companyIds).order("name"),
     supabase.from("inv_operator_locations").select("location_id").eq("user_id", session.userId).is("removed_at", null),
   ]);
   if (companyError || settingsError || locationError || assignedError) return base(true, { loadFailed: true });
   const settings = new Map((settingsRows ?? []).map((s) => [s.company_id, s]));
-  const companies: InvCompanyInfo[] = (companyRows ?? []).map((c) => ({
-    id: c.id, name: c.legal_name, referenceCode: settings.get(c.id)?.reference_code ?? null, isEnabled: settings.get(c.id)?.is_enabled ?? false,
+  const named = sortCompaniesForDisplay((companyRows ?? []).map((c) => ({ id: c.id, legalName: c.legal_name, countryCode: c.country_code })));
+  const display = companyDisplayNames(named);
+  const companies: InvCompanyInfo[] = named.map((c) => ({
+    id: c.id, name: display.get(c.id) ?? c.legalName, legalName: c.legalName, referenceCode: settings.get(c.id)?.reference_code ?? null, isEnabled: settings.get(c.id)?.is_enabled ?? false,
   }));
   const names = new Map(companies.map((c) => [c.id, c.name]));
   const locations = (locationRows ?? []) as InvLocationRow[];

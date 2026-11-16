@@ -120,8 +120,10 @@ function DetailInput({ k, label, hint, help, type = "text", defaultValue, option
  * Add or edit one requirement of a technology / activation. The fields shown depend on the section, so a simple job (hardware and installation) never meets the Content, Apps or
  * Engineering fields. A work line becomes one task at release; a hardware line becomes one line on the draft equipment request when it is matched to Inventory. Nothing is created here.
  */
-export function LineDialog({ projectId, itemId, line, sections, members, stock, stockFailed, milestones = [], others = [] }: {
+export function LineDialog({ projectId, itemId, line, sections, members, stock, stockFailed, milestones = [], others = [], triggerLabel }: {
   projectId: string; itemId: string; line?: LineValues; sections: DpSection[]; members: Option[]; stock: Option[]; stockFailed: boolean; milestones?: Option[]; others?: LineChoice[];
+  /** What the button that opens this form says for an existing line (default "Edit"): "Match to stock" on a From stock line that has no stock item yet. */
+  triggerLabel?: string;
 }) {
   const [section, setSection] = useState<DpSection>(line?.section ?? sections[0] ?? "hardware");
   const [route, setRoute] = useState<SupplyRoute>(line?.supply_route ?? "inventory");
@@ -131,7 +133,7 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
   const own = hardware && route !== "inventory";
   const kinds = KIND_CHOICES[section === "installation" || section === "testing" ? "site" : section === "programming" ? "apps" : section];
   return (
-    <FormDialog label={line ? "Edit" : "Add requirement"} title={line ? "Edit requirement" : "Add a requirement"}
+    <FormDialog label={line ? (triggerLabel ?? "Edit") : "Add requirement"} title={line ? "Edit requirement" : "Add a requirement"}
       description="Nothing exists until the Project Manager releases it."
       help="Enter each requirement once. A work requirement becomes one task at release; hardware matched to Inventory becomes one line on the draft equipment request.">
       {(done) => (
@@ -157,7 +159,8 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
                 <Field label="Needed by" htmlFor="dl-needed" help="Empty means the activation's ready-by date."><Input id="dl-needed" name="neededBy" type="date" defaultValue={line?.needed_by ?? ""} /></Field>
               </div>
               <Field label="Specification" htmlFor="dl-notes" help="Size, model, finish. Without one the line shows Specification pending."><Textarea id="dl-notes" name="notes" rows={2} maxLength={2000} defaultValue={line?.notes ?? ""} /></Field>
-              <Field label="How is it supplied?" htmlFor="dl-route" hint={locked ? "Released to Warehouse: changed on the Equipment tab." : undefined}>
+              <Field label="How is it supplied?" htmlFor="dl-route" hint={locked ? "Released to Warehouse: changed on the Equipment tab." : undefined}
+                help="From stock: the warehouse supplies it; choose the stock item below and it goes on the equipment request when you release. Buy or Rent: someone sources it; name the owner and the expected date. Client supplied: the client brings it; record when. Only From stock lines go to the warehouse.">
                 <Select id="dl-route" name="supplyRoute" value={route} disabled={locked} onChange={(e) => setRoute(e.target.value as SupplyRoute)}>
                   {SUPPLY_ROUTES.map((r) => <option key={r} value={r}>{SUPPLY_ROUTE_LABELS[r]}</option>)}
                 </Select>
@@ -165,9 +168,9 @@ export function LineDialog({ projectId, itemId, line, sections, members, stock, 
               {route === "inventory" ? (
                 <Field label="Stock item" htmlFor="dl-stock"
                   hint={stockFailed ? "⚠ Could not load the stock list. Save the line as it is and match it later; it waits, and the rest of the plan is not held up." : undefined}
-                  help="Search the catalogue. If it is not there, save it as a manual line: it stays visible as Needs stock match, and the rest is released. Match it later and release again to add it once.">
+                  help="Choose the catalogue item this requirement is. The description and the quantity above stay as they are: nothing is typed again. If it is not in the catalogue yet, save the line without one: it stays visible as Needs stock match, the rest of the plan is released, and it is added once when you match it and release again.">
                   <Select id="dl-stock" name="invItemId" defaultValue={line?.inv_item_id ?? ""}>
-                    <option value="">Not in Inventory yet: manual line</option>
+                    <option value="">Not matched yet: choose the stock item</option>
                     {stock.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </Select>
                 </Field>

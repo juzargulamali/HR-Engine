@@ -31,6 +31,8 @@ import { loadEquipmentReadiness } from "@/lib/projects/equipment-readiness";
 import { requestNextStep, shipmentsByRun } from "@/lib/projects/equipment-next-step";
 import { READINESS_LOAD_ERROR, requestHref, stillOutAfterDelivery } from "@/lib/projects/equipment-readiness-model";
 import { createClient } from "@/lib/supabase/server";
+import { ProjectAvailabilityCheck, RunEquipmentPanel } from "@/components/inventory/job-panels";
+import { loadProjectCheck, loadRunCover, loadSiteRunOptions } from "@/lib/inventory/job-data";
 
 export const metadata = { title: "Project equipment" };
 
@@ -163,6 +165,13 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
   // retries it, and no function re-runs the release for a project. The warehouse releases the lines by hand on each request, so the notice says exactly that and links there.
   const releaseRequests = (readiness?.requests ?? []).filter((q) => q.state !== "returned" && q.state !== "cancelled");
 
+  // Inventory Phase 1: the availability check recorded on the enquiry (for the people who run the project), and the equipment status of each site run. Both are
+  // derived by the database from the same records; a failed read says so, and a database without the update shows neither.
+  const [salesCheck, runCover] = await Promise.all([loadProjectCheck(id), loadRunCover(id)]);
+  const coverRows = runCover.state === "ok" ? runCover.value : [];
+  const runOptions = runCover.state === "ok" ? await loadSiteRunOptions(id, fallbackTz, coverRows).catch(() => []) : [];
+  const runsOf = (requestId: string) => (runCover.state === "ok" ? { options: runOptions, selected: coverRows.filter((c) => c.requestId === requestId).map((c) => c.runId) } : null);
+
   const quickScope = canEditList ? {
     companies: inv.companies.map((c) => ({ id: c.id, name: c.name, canEmployee: false })),
     projects: [{ id, name: project.name, reference: project.reference, companyId: project.company_id }],
@@ -186,6 +195,9 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
       {readinessRes.state === "error" ? <Alert variant="destructive" role="alert" data-testid="readiness-load-error">{READINESS_LOAD_ERROR}. Reload to try again; the requests below are still shown.</Alert> : null}
       {afterDelivery ? <StillOutNotice out={afterDelivery} /> : null}
       {readiness ? <EquipmentReviewPanel reviews={readiness.reviews} projectId={id} canReview={canReview} /> : null}
+
+      <ProjectAvailabilityCheck check={salesCheck} />
+      <RunEquipmentPanel cover={runCover} projectId={id} siteScheduleHref={`/projects/${id}/plan?plan=site&mode=list`} />
 
       {notesBlock}
 
@@ -312,7 +324,7 @@ export default async function ProjectEquipmentPage({ params, searchParams }: { p
                   {readinessOf.has(r.id) ? <span className="basis-full"><ReadinessLine request={readinessOf.get(r.id)!} /></span> : readinessRes.state === "error" && r.status !== "cancelled" ? <span className="basis-full text-destructive">{READINESS_LOAD_ERROR}</span> : null}
                 </summary>
                 <div className="border-t border-border p-4">
-                  <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading returns={returnsByRequest.get(r.id)} />
+                  <RequestEditor model={m} can={can} locations={locations} technologies={technologies} hideHeading returns={returnsByRequest.get(r.id)} runs={r.kind === "project" ? runsOf(r.id) : null} />
                 </div>
               </details>
             );

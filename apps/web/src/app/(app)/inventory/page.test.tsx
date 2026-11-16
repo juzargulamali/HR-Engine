@@ -69,10 +69,14 @@ describe("Today page", () => {
   it("renders one row per job, in groups by their own date, each with what, for whom, when and one button", async () => {
     const html = await render();
     expect(html).toContain("Work waiting at Dubai warehouse");
-    for (const g of ["Late", "Next 7 days", "Waiting, no date set"]) expect(html).toContain(g);
+    // three sections, each with its ⓘ; the company and the warehouse are both named
+    for (const g of ["Do now", "Coming up"]) expect(html).toContain(g);
+    expect(html).not.toContain('data-section="waiting"');
+    expect(html).toContain('data-testid="today-scope"');
+    expect(html).toContain("Enginious · Dubai warehouse");
     expect(html).toContain("Al Khail Roadshow still has equipment to send");
     expect(html).toContain("Project Al Khail Roadshow · request REQ-0049");
-    expect(html).toContain("Dispatch today, 14:00");
+    expect(html).toContain("Leaves warehouse today, 14:00");
     expect(html).toContain("1 line has reserved stock to send");
     expect(html).toContain("Gulf Bank Summit needs its equipment prepared");
     expect(html).toContain("1 of 2 lines fully reserved · 1 still to reserve");
@@ -80,7 +84,7 @@ describe("Today page", () => {
     expect(html).toContain("Transfer TRF-0112 is on its way here");
     expect(html).toContain("Sales asks whether equipment is free for enquiry ENQ-0188");
     expect(html).toContain("Nothing is reserved by a check");
-    for (const b of ["Send equipment", "Prepare equipment", "Receive returns", "Receive transfer", "Check availability"]) expect(html).toContain(b);
+    for (const b of ["Send equipment", "Prepare equipment", "Receive return", "Receive transfer", "Check availability"]) expect(html).toContain(b);
     expect(html).toContain('href="/inventory/requests/r1?step=send"');
     expect(html).toContain('href="/inventory/stock?action=transfer&amp;mode=receive&amp;transfer=t1"');
     // counts on the filters
@@ -94,18 +98,21 @@ describe("Today page", () => {
     const [held] = heldRows([{ id: "u9", code: "UAE-E-00031", itemName: "Projector", condition: "damaged", locationName: "Dubai warehouse", reservedFor: [{ requestId: "r2", code: "REQ-0047" }] }]);
     data = today([...allRows, waiting, held!]);
     const html = await render();
-    expect(html).toContain("Waiting / Shortages");
+    expect(html).toContain("Waiting on someone else");
     expect(html).toContain("Held for checking");
-    expect(html).toContain("1 line of Marina Launch is waiting for stock to be bought or rented");
-    expect(html).toContain("LED wall panel × 3: to rent");
+    expect(html).toContain("1 line of Marina Launch is short: waiting for stock to be bought or rented");
+    // how many are missing, and who acts
+    expect(html).toContain("LED wall panel: 3 missing of 3 · to rent");
     expect(html).toContain("Who acts:");
     expect(html).toContain("whoever arranges the rental");
     expect(html).toContain("Next:");
     expect(html).toContain("Projector UAE-E-00031 is held for checking");
     expect(html).toContain("it needs a replacement before it can be sent");
-    // the shortage group comes after the dated groups, and each has its own filter
-    expect(html.indexOf('id="today-waiting"')).toBeGreaterThan(html.indexOf('id="today-none"'));
-    expect(html.indexOf('id="today-held"')).toBeGreaterThan(html.indexOf('id="today-waiting"'));
+    // "Waiting on someone else" comes after "Do now" and "Coming up"; a held unit is work for the warehouse, so it is under Do now
+    expect(html.indexOf('id="today-now"')).toBeGreaterThan(-1);
+    expect(html.indexOf('id="today-waiting"')).toBeGreaterThan(html.indexOf('id="today-soon"'));
+    expect(html.indexOf('id="today-soon"')).toBeGreaterThan(html.indexOf('id="today-now"'));
+    expect(html.indexOf("Projector UAE-E-00031 is held for checking")).toBeLessThan(html.indexOf('id="today-soon"'));
     const only = await render({ show: "waiting" });
     expect(only).toContain("Marina Launch");
     expect(only).not.toContain("Al Khail Roadshow still has");
@@ -215,7 +222,7 @@ describe("Today page", () => {
   it("a person who may not operate stock gets links to the records, no Send / Receive buttons, and still Prepare and the Sales check", async () => {
     grants = [{ companyId: C1, capabilities: ["view_stock"] }];
     const html = await render();
-    for (const hidden of ["Send equipment", "Receive returns", "Receive transfer"]) expect(html.includes(hidden), hidden).toBe(false);
+    for (const hidden of ["Send equipment", "Receive return", "Receive transfer"]) expect(html.includes(hidden), hidden).toBe(false);
     // the rows are still reachable from their titles
     expect(html).toContain('href="/inventory/requests/r1?step=send"');
     expect(html).toContain("Al Khail Roadshow still has equipment to send");
@@ -227,7 +234,7 @@ describe("Today page", () => {
   it("a warehouse operator is offered the buttons that move stock", async () => {
     const html = await render();
     expect(html.match(/Send equipment/g)?.length).toBe(1);
-    expect(html).toContain("Receive returns");
+    expect(html).toContain("Receive return");
     expect(html).toContain("Receive transfer");
   });
 

@@ -261,7 +261,7 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
       {stockFailed ? <LoadError what="some of the stock figures in the checklist" retryHref={`/inventory/manage?company=${companyId}`} /> : null}
 
       <Panel id="settings" title="Company settings" description={company.name}>
-        <CompanySettings companyId={companyId} companyName={company.name} referenceCode={company.referenceCode} isEnabled={company.isEnabled} isFounder={founder} />
+        <CompanySettings companyId={companyId} companyName={company.legalName && company.legalName !== company.name ? `${company.legalName} (shown as ${company.name})` : company.name} referenceCode={company.referenceCode} isEnabled={company.isEnabled} isFounder={founder} />
       </Panel>
 
       <Panel id="locations" title="Locations and bins" description="Where equipment is kept.">

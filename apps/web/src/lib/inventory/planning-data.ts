@@ -125,6 +125,8 @@ export interface RequestModel {
   /** Equipment already dispatched and not yet back, over every non-cancelled line. */
   /** How many lines still have equipment out (a count of lines: the quantities are in different units and are never added together). */
   outstandingLines: number;
+  /** False on a database that does not have the pick step yet (Inventory Phase 1 SQL not applied): the screens then go from reserved straight to sent, as before. */
+  pickInstalled?: boolean;
 }
 export interface TechnologyOption { id: string; name: string; version: number; components: Pick<InvTechnologyComponentRow, "id" | "item_id" | "qty" | "alt_group" | "is_optional" | "sort_order">[]; itemNames: Record<string, string> }
 
@@ -176,6 +178,20 @@ export async function loadRequestModels(
   const resRows = lineRows.length === 0 ? [] : (await Promise.all(chunk(lineRows.map((l) => l.id), 100).map((ids) => selectAll<ReservationLite & { reserved_during: string }>((a, b) =>
     db.from("inv_reservations").select("id, request_line_id, unit_id, location_id, qty, dispatched_qty, returned_qty, status, reserved_during, released_reason").in("request_line_id", ids).order("made_at").range(a, b) as never)))).flat();
 
+  // The pick step (Inventory Phase 1, migration 20270114000100) is read on its own: on a database that does not have it yet the request still loads, and the
+  // screens say the pick step is not available there instead of failing.
+  let pickInstalled = true;
+  const picked = new Map<string, number>();
+  for (const part of chunk(resRows.map((r) => r.id), 100)) {
+    const { data, error: pe } = await (db.from("inv_reservations") as unknown as { select: (c: string) => { in: (c: string, v: string[]) => PromiseLike<{ data: { id: string; picked_qty: number | string | null }[] | null; error: { code?: string; message: string } | null }> } })
+      .select("id, picked_qty").in("id", part);
+    if (pe) {
+      if (pe.code === "42703" || /picked_qty/.test(pe.message)) { pickInstalled = false; break; }
+      throw new Error(pe.message);
+    }
+    for (const x of data ?? []) picked.set(x.id, num(x.picked_qty));
+  }
+
   const itemIds = new Set<string>();
   for (const l of lineRows) {
     itemIds.add(l.item_id);
@@ -225,7 +241,7 @@ export async function loadRequestModels(
       const reservations = resRows.filter((r) => r.request_line_id === l.id).map((r): ReservationLite => {
         const range = parseRange(r.reserved_during);
         const unit = r.unit_id ? units.get(r.unit_id) : undefined;
-        return { ...r, reserved_during: undefined, from: range.from, until: range.until, unit_code: unit?.code ?? null, serial_number: unit?.serial ?? null };
+        return { ...r, reserved_during: undefined, from: range.from, until: range.until, unit_code: unit?.code ?? null, serial_number: unit?.serial ?? null, picked_qty: pickInstalled ? (picked.get(r.id) ?? 0) : undefined };
       });
       return {
         id: l.id, itemId: l.item_id, itemName: info?.name ?? "Item", itemModel: info?.model ?? null, tracking: info?.tracking ?? "quantity", unit: info?.unit ?? "each",
@@ -239,7 +255,7 @@ export async function loadRequestModels(
       };
     });
     return {
-      request, lines,
+      request, lines, pickInstalled,
       forLabel: request.kind === "project" ? (projects.get(request.project_id ?? "") ?? "A project") : (employees.get(request.employee_id ?? "") ?? request.title ?? "An employee"),
       requestedByName: request.requested_by === userId ? "You" : (people.get(request.requested_by) ?? "—"),
       outstandingLines: lines.filter((l) => l.progress.outstanding > 0).length,

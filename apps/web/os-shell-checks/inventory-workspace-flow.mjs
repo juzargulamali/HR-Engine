@@ -1,5 +1,6 @@
 // WORKFLOW: the simplified warehouse day, in a real browser as the real people (LOCAL STACK ONLY).
-//   Today shows the work for the warehouse, one row per job; a request opens ONE workspace: Prepare (reserve) -> Send out -> Receive back.
+//   Today shows the work for the warehouse, one row per job; a request opens ONE workspace: Prepare (reserve) -> Pick -> Send -> Receive (Inventory Phase 1 added Pick;
+//   this check sends without picking, which stays allowed: reserved equipment that was not picked is never ticked for the person).
 //   Reserving never sends; sending is explicit, partial, flagged before confirmation and recorded against the request; a return needs a condition
 //   and is recorded against the project (counted stock is never attributed to a request line); owned/rented is chosen when receiving;
 //   old addresses redirect; plain employees, Project Managers and read-only people get what they should and nothing more.
@@ -45,7 +46,7 @@ await step("Today: the warehouse is named, the three sections are offered, and t
 await step("Today -> the workspace opens on Prepare with the booking window, dispatch and due-back dates visible", async () => {
   await rowOf(R.page).getByRole("link", { name: /Prepare equipment/ }).click();
   await R.page.waitForURL(/\/inventory\/requests\/[0-9a-f-]+\?step=prepare/);
-  await R.seen(/Booking window/); await R.expectText(/Dispatch/); await R.expectText(/Due back/);
+  await R.seen(/Booking window/); await R.expectText(/Leaves warehouse/); await R.expectText(/Due back/);
   await R.expectText(/Laptop 14 inch/); await R.expectText(/HDMI cable/);
   await R.expectNoText(/Dispatched/);               // Prepare leaves the sent / returned columns to the other steps
   check(!(await R.page.getByText("Installation starts").isVisible().catch(() => false)), "the full schedule is shown by default");
@@ -66,22 +67,21 @@ await step("Prepare: reserving the laptops and the cables holds them and sends n
   eq(movementCount("dispatch_project"), 0, "dispatch movements after reserving");
 });
 
-await step("Today: now the request is a Send row (still one row)", async () => {
+await step("Today: now the request is a Pick row (still one row): reserved equipment is picked before it is sent", async () => {
   await R.go("/inventory");
   const rows = rowOf(R.page);
   eq(await rows.count(), 1, "rows for the request");
-  check(await rows.first().getByRole("link", { name: /Send equipment/ }).isVisible(), "no Send equipment button");
+  check(await rows.first().getByRole("link", { name: /Pick items/ }).isVisible(), "no Pick items button");
 });
 
 await step("Send out: nothing is ticked, a code that is not reserved blocks, a partial dispatch warns", async () => {
-  await rowOf(R.page).getByRole("link", { name: /Send equipment/ }).click();
-  await R.page.waitForURL(/step=send/);
+  await R.go(`/inventory/requests/${A.request}?step=send`);
   await R.seen(/Sending from/); await R.expectText(/Showroom refresh/); await R.expectText(/expected back/);
   eq(await R.page.locator("input[type=checkbox]:checked").count(), 0, "ticked boxes");
   await R.page.getByLabel(/scan or type a code/i).fill("UAE-E-99999");
   await R.page.getByRole("button", { name: "Add", exact: true }).click();
   await R.expectText(/UAE-E-99999 is not reserved for this request/);
-  await R.page.getByRole("button", { name: /^Review/ }).click().catch(() => {});
+  await R.page.getByRole("button", { name: /^(Send equipment|Receive return)/ }).click().catch(() => {});
   await R.shot("send-blocked");
 });
 
@@ -93,7 +93,7 @@ await step("Send out: two of the three laptops and 5 of the 8 cables, reviewed a
   await boxes.nth(0).check(); await boxes.nth(1).check();
   await R.page.getByLabel(/counted quantity/i).fill("5");
   await R.expectText(/sending 2 of 3 reserved/); await R.expectText(/sending 5 of 8 reserved/);
-  await R.page.getByRole("button", { name: /^Review/ }).click();
+  await R.page.getByRole("button", { name: /^(Send equipment|Receive return)/ }).click();
   await R.page.getByText("Check before you confirm").waitFor();
   eq(movementCount("dispatch_project"), 0, "dispatch before confirming");
   await R.shot("send-review");
@@ -117,7 +117,7 @@ asDb(1, `select inv_dispatch_to_project('${AE}', (select id from inv_locations w
 
 await step("Receive back: totals at the level the data supports; counted stock is NOT attributed to a request line", async () => {
   await R.go(`/inventory/requests/${A.request}?step=back`);
-  await R.seen(/What is actually here now/);
+  await R.seen(/What came back/);
   await R.expectText(/Project level/);               // HDMI cable was sent for two requests of the same project... only once here, but the second request reserved it
   eq(await R.page.locator("input[type=checkbox]:checked").count(), 0, "ticked boxes");
   await R.shot("back");
@@ -127,7 +127,7 @@ await step("Receive back: a partial return needs a condition; good is available 
   const laptopBox = R.page.getByLabel(/Laptop 14 inch · /).first();
   await laptopBox.check();
   await R.page.getByLabel(/How many HDMI cable came back/).fill("2");
-  await R.page.getByRole("button", { name: /^Review/ }).click();
+  await R.page.getByRole("button", { name: /^(Send equipment|Receive return)/ }).click();
   await R.expectText(/Choose a condition/);
   // The helper starts empty and only touches ticked lines: Good for both ticked lines, then the exception is changed on its own line.
   const helper = R.page.getByRole("combobox", { name: /Set the condition for all ticked lines/ });
@@ -136,11 +136,11 @@ await step("Receive back: a partial return needs a condition; good is available 
   await R.page.getByRole("button", { name: /^Apply to 2 ticked lines$/ }).click();
   eq(await R.page.getByLabel(/^Condition of Laptop 14 inch/).inputValue(), "good", "helper set the ticked laptop");
   await R.page.getByLabel(/^Condition of HDMI cable/).selectOption("damaged");
-  await R.expectText(/Available again/); await R.expectText(/Held, not available/);
-  await R.page.getByRole("button", { name: /^Review/ }).click();
+  await R.expectText(/Available again/); await R.expectText(/Held for inspection/);
+  await R.page.getByRole("button", { name: /^(Send equipment|Receive return)/ }).click();
   await R.page.getByText("Check before you confirm").waitFor();
   await R.shot("back-review");
-  await R.page.getByRole("button", { name: /confirm: record returns/i }).click();
+  await R.page.getByRole("button", { name: /confirm: receive return/i }).click();
   await R.page.getByText("Recorded", { exact: true }).waitFor();
   await until(() => movementCount("return_project") === 1, 15000, "one return");
   eq(s1(`select count(*) from inv_units where item_id='${LAPTOP}' and custody_kind='project'`), 1, "laptops still on the project");
@@ -260,7 +260,7 @@ await step("A Project Manager: /inventory goes to Requests; the workspace shows 
   check(R.page.url().includes("/inventory/requests"), `PM landed on ${R.page.url()}`);
   await R.go(`/inventory/requests/${A.request}?step=send`);
   await R.expectText(/The warehouse sends equipment and receives it back/);
-  check((await R.page.getByRole("button", { name: /^Review/ }).count()) === 0, "PM sees a send button");
+  check((await R.page.getByRole("button", { name: /^(Send equipment|Receive return)/ }).count()) === 0, "PM sees a send button");
 });
 
 await R.as("emp");

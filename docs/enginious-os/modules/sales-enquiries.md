@@ -365,3 +365,7 @@ Source: `supabase/migrations/20270112000200_ops_question_notice.sql`; `apps/web/
 * A failed read says "Could not check whether Operations has asked you a question"; it never reads as "no questions".
 
 Coverage rows 104 and 105.
+
+## 11. Warehouse stock check card: Inventory Phase 1 (2026-11-16; Inventory Phase 1, branch `claude/inventory-phase-1`: **draft, not merged; required CI not yet run; hosted SQL not applied; Production not deployed**)
+
+`apps/web/src/components/inventory/planning/sales-card-view.tsx`, `sales-availability-card.tsx`. A recorded check now reads **"Availability checked · stock not reserved."** (with an ⓘ), then **Checked** (date and person), **Warehouse** and **Proposed dates checked** (the earliest to the latest of the installation start, event start and event end the check covered), followed by the unchanged list of technologies, quantities and results. **Ask the warehouse to check** offers the active warehouses of the enquiry's company by name through `inv_opportunity_check_locations` (the owner or a Sales founder only; names only); on a database without it the dialog says, as before, that the warehouse chooses. Out of date, Current availability, Ask again and Record the check now are unchanged. Driven signed in as the enquiry's owner on the isolated stack (`inventory-phase1-flow.mjs`).
