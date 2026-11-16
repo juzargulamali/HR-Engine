@@ -423,7 +423,7 @@ Verified in the code at the branch head. **Inventory Phase 2 grants JARVIS nothi
 | `inventory-setup` (new) | Setup's four parts |
 | `inventory-labels-scan` (new) | Labels and scanning |
 
-The published set is 105 topics (`npm run build:jarvis-knowledge`; `node scripts/build-jarvis-knowledge.mjs --check` passes). Titles of the new topics avoid the words the matcher treats as "equipment" so that a general question ("How do I book inventory?") still reaches `inventory-where` and is not answered with a list of look-alikes (`help-answer.test.ts`, the paraphrase and the no-guidance cases).
+The published set was 105 topics after Inventory Phase 2 and is 110 after People & HR Phase 1 (section 18; `npm run build:jarvis-knowledge`; `node scripts/build-jarvis-knowledge.mjs --check` passes). Titles of the new topics avoid the words the matcher treats as "equipment" so that a general question ("How do I book inventory?") still reaches `inventory-where` and is not answered with a list of look-alikes (`help-answer.test.ts`, the paraphrase and the no-guidance cases).
 
 ### 17.3 Where a person must open Inventory
 
@@ -440,3 +440,36 @@ Each would need the owner's decision, a registered action with its own permissio
 5. **Draft, never post:** a transfer or a return prefilled for review in the Inventory form, which the person confirms there. JARVIS would never record a movement itself.
 6. **No proposal** for: costs, another company's stock, employee custody outside the reader's right, counts, corrections, write-offs, sharing or access. These stay in their screens.
 
+## 18. JARVIS and People & HR (2026-11-16; People & HR Phase 1 on branch `feat/people-hr-phase1`: draft PR, not merged, hosted migration `20270115000100` not applied)
+
+Nothing in sections 0 to 17 changes. Stated for People & HR so it does not have to be inferred:
+
+### 18.1 What JARVIS can do with People & HR today
+
+| Capability | State | Source |
+|---|---|---|
+| **Read** an employee, a salary or pay history, an identity or employee document, a setup step, a scheduled change, an insurance policy, a loan or a goal | **No.** No action reads People & HR, and nothing about an employee is sent to the provider. A request is answered with the unsupported text and a link to the Employees page | `web/lib/jarvis/runtime.ts` (the module checker answers `false` for every module but Sales); `assistant.ts` |
+| **Act** (add an employee, change a job or pay, add or renew a document, record opening balances, invite or link an account) | **No.** No action is registered and no grant passes for a People & HR action. A documented action in [`people-hr-action-catalogue.md`](./people-hr-action-catalogue.md) is not a JARVIS tool | `runtime.ts` |
+| **Explain** how to do a thing | **Yes**, from the published staff guidance only, for a single how-to question or "What can I do here?" on an employee screen. Nothing is read from People & HR to answer it | `help/guidance.ts`, `help/screens.ts` |
+
+### 18.2 The People & HR guidance JARVIS answers from (five topics added in Phase 1, all `published`)
+
+| Topic id | For | Screens |
+|---|---|---|
+| `people-add-employee` | Add an employee: company first, what is prefilled, what can wait | `/employees/new` |
+| `people-employee-remaining-steps` | Finish or resume a new employee's remaining steps; Needs attention | `/employees/[id]` |
+| `people-change-job-or-pay` | One job-and-pay change; Change salary; scheduled changes | `/employees/[id]` |
+| `people-renew-document` | Add or renew a document; what each type needs | `/employees/[id]` |
+| `people-find-access-record` | Find a person's account and module access from the profile | `/people-access` |
+
+The published set is 110 topics (`node scripts/build-jarvis-knowledge.mjs --check` passes). The topics carry no record data and no permission internals (a test checks this), and they never quote a salary, a document number or an identity detail.
+
+### 18.3 Sensitive-data boundaries (unchanged, now stated for these screens)
+
+Salary, bank details, identity numbers and identity or employee document files are People & HR's most restricted data (the person and their HR Admin; pay also Finance). JARVIS reads none of it, sends none of it to the provider, and writes none of it to its logs. Any future capability here would need the owner's decision, a registered action with its own permission check and data policy, and its own tests.
+
+### 18.4 Future capabilities: proposals only, none built, none approved
+
+1. **Explain a record's next step**: "What is left for this employee?" from the setup checklist the viewer can already open, as counts and step names only (no pay or document detail).
+2. **Draft, never save**: an Add employee form prefilled from a pasted offer note for review in the form, which the HR Admin confirms there.
+3. **No proposal** for: pay, identity details, documents, scheduling or applying a change, opening balances, invitations or access. These stay in their screens.

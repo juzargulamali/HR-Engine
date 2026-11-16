@@ -161,3 +161,15 @@ Nothing in sections 2 to 7 changes. Stated for Inventory so it does not have to 
 | Inventory Phase 2 | Adds eight guidance topics and corrects two. **No capability, no read, no action** |
 | Future Inventory capabilities | Proposals only, listed in `jarvis.md` section 17.4; each needs the owner's decision |
 
+## 10. People & HR (2026-11-16; People & HR Phase 1, branch `feat/people-hr-phase1`: draft PR, not merged; migration not applied)
+
+Nothing in sections 2 to 7 changes. Stated for People & HR so it does not have to be inferred:
+
+| Rule | State |
+|---|---|
+| Read People & HR records (an employee, pay, a document, a setup step, a scheduled change, insurance, a loan, a goal) | **Not approved.** No action exists. A request is answered with the unsupported text and a link to Employees |
+| Change People & HR (any action in `people-hr-action-catalogue.md`) | **Not approved.** No action exists and no grant passes for a People & HR action |
+| Salary, identity numbers, document files and bank details | **Never** read into an answer, sent to the provider or written to a log; they stay in the permission-gated screens |
+| Explain how to do something in People & HR | **Approved**, from the published guidance only (the five Phase 1 topics in `staff-guidance/people.md` and the existing ones), for a single how-to question or "What can I do here?" on an employee screen. Nothing is read from People & HR and nothing about an employee is sent to the provider beyond the question itself under the existing data policy |
+| People & HR Phase 1 | Adds five guidance topics. **No capability, no read, no action** |
+| Future People & HR capabilities | Proposals only, listed in `jarvis.md` section 18.4; each needs the owner's decision |

@@ -11,10 +11,10 @@ import { displayMayReach, isDisplayUser, TV_PATH } from "@/lib/operations-tv/gat
 // form that sends that email in the first place, so it's public for the
 // same reason /login is.
 //
-// /api/cron/crm-reminders is called by the scheduler with no session cookie, so the sign-in redirect would swallow it.
-// It authenticates itself with CRON_SECRET (lib/cron/auth.ts) and returns 401 without it. Only this one route is
+// /api/cron/crm-reminders and /api/cron/employment-changes are called by the scheduler with no session cookie, so the sign-in redirect would swallow them.
+// Each authenticates itself with CRON_SECRET (lib/cron/auth.ts) and returns 401 without it. Only these two routes are
 // listed; the older /api/cron/* routes are deliberately left exactly as they were.
-const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password", "/api/cron/crm-reminders"];
+const PUBLIC_PATHS = ["/login", "/set-password", "/forgot-password", "/reset-password", "/api/cron/crm-reminders", "/api/cron/employment-changes"];
 
 export async function proxy(request: NextRequest) {
   // An environment without the Supabase settings (for example a Preview whose variables are not enabled) cannot authenticate

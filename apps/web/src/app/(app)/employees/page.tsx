@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
+import { InfoHint } from "@/components/ui/info-hint";
+import { loadDirectoryExceptions } from "@/lib/hr/directory-data";
 import { cn } from "@/lib/utils";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/workspace/states";
@@ -64,19 +66,17 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
 
   let query = supabase
     .from("employees")
-    .select("id, first_name, last_name, job_title, employment_status, company_id, deleted_at", { count: "exact" })
+    .select("id, first_name, last_name, employee_number, job_title, employment_status, company_id, country_code, manager_id, user_id, deleted_at", { count: "exact" })
     .order("first_name")
     .order("id"); // stable tie-breaker so paging never skips/repeats a row when names collide
   if (!showDeleted) query = query.is("deleted_at", null);
   if (company) query = query.eq("company_id", company);
   if (status) query = query.eq("employment_status", status);
-  if (q) {
-    // Two ilike columns via .or() — the search text itself is stripped of
-    // the characters PostgREST's filter mini-language treats specially
-    // (`,()`) first, so a name containing one can never be read as filter
-    // syntax instead of a literal value.
-    const safeQ = q.replace(/[,()]/g, "");
-    query = query.or(`first_name.ilike.%${safeQ}%,last_name.ilike.%${safeQ}%,personal_email.ilike.%${safeQ}%`);
+  // Search by name or employee number. Each typed word must match the first name, the last name or the number (so "riya rigger" and "E010" both work); the
+  // words are stripped of the characters PostgREST's filter mini-language treats specially (`,()`) first, so text can never be read as filter syntax.
+  // Personal e-mail is deliberately not searched: the list does not show it.
+  for (const word of q.split(/\s+/).map((w) => w.replace(/[,()*%\\]/g, "")).filter(Boolean).slice(0, 5)) {
+    query = query.or(`first_name.ilike.%${word}%,last_name.ilike.%${word}%,employee_number.ilike.%${word}%`);
   }
   query = query.range(offset, offset + PAGE_SIZE - 1);
 
@@ -84,6 +84,8 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   // A failed read is not "No employees match these filters".
   if (employeesError) return <LoadError what="the employees" retryHref="/employees" />;
   const totalPages = count ? Math.max(1, Math.ceil(count / PAGE_SIZE)) : 1;
+  // Actionable flags for the people on this page that the viewer manages (none for anyone else); a failed read only hides a flag.
+  const exceptions = await loadDirectoryExceptions(supabase, (employees ?? []).filter((e) => !e.deleted_at), session.grants);
 
   function pageHref(overrides: Partial<EmployeesSearchParams>) {
     const merged: EmployeesSearchParams = { deleted: params.deleted, q, company, status, page: String(page), ...overrides };
@@ -108,7 +110,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                 : "You and the people who report to you."}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {canManageAnyCompany ? (
             <Link href={pageHref({ deleted: showDeleted ? undefined : "1", page: "1" })} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
               {showDeleted ? "Hide deleted" : "Show deleted"}
@@ -120,15 +122,15 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
             </a>
           ) : null}
           {isHrAdminSomewhere ? (
-            <Link href="/employees/new" className={cn(buttonVariants({ size: "sm" }))}>
-              New employee
+            <Link href="/employees/new" className={cn(buttonVariants({ size: "sm" }))} data-testid="add-employee">
+              Add employee
             </Link>
           ) : null}
         </div>
       </div>
 
       <ListToolbar
-        search={{ value: q, placeholder: "Search by name or email", label: "Search employees" }}
+        search={{ value: q, placeholder: "Search by name or employee number", label: "Search employees" }}
         resetKeys={["page"]}
         clearHref={pageHref({ q: undefined, company: undefined, status: undefined, page: "1" })}
         filters={[
@@ -153,6 +155,12 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                 <TableHead>Job title</TableHead>
                 <TableHead>Company</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>
+                  <span className="inline-flex items-center gap-1">
+                    Needs attention
+                    <InfoHint label="Needs attention">Setup that is still to do, documents that have expired or are about to, and changes that are scheduled. Each one opens the form that completes it. You see these only for people you manage.</InfoHint>
+                  </span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -162,6 +170,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                     <Link href={`/employees/${e.id}`} className="hover:underline">
                       {e.first_name} {e.last_name}
                     </Link>
+                    <span className="ml-2 font-mono text-xs font-normal text-muted-foreground" data-testid="employee-number">{e.employee_number}</span>
                     {e.deleted_at ? (
                       <Badge variant="destructive" className="ml-2 text-xs">
                         deleted
@@ -173,11 +182,28 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                   <TableCell>
                     <EmploymentStatusBadge status={e.employment_status} />
                   </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1.5" data-testid="employee-exceptions">
+                      {(exceptions.get(e.id) ?? []).map((x) => (
+                        <Link
+                          key={x.key}
+                          href={x.href}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-xs font-medium hover:underline",
+                            x.tone === "attention" ? "border-warning/50 bg-warning/10 text-warning" : "border-border bg-secondary/60 text-muted-foreground",
+                          )}
+                        >
+                          {x.label}
+                        </Link>
+                      ))}
+                      {(exceptions.get(e.id) ?? []).length === 0 ? <span className="text-sm text-muted-foreground">—</span> : null}
+                    </div>
+                  </TableCell>
                 </ClickableRow>
               ))}
               {(employees ?? []).length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4}>
+                  <TableCell colSpan={5}>
                     <EmptyState
                       dense
                       title="No employees match these filters."

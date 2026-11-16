@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/workspace/states";
 import { OvernightRecoveryForm } from "./overnight-recovery-form";
+import { OpeningBalancesCard } from "./opening-balances-form";
 
 const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   submitted: "secondary",
@@ -22,9 +23,18 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
  * leaving the employee's profile. Reuses the exact same queries and badge
  * mapping as /leave/page.tsx rather than introducing a new pattern.
  */
-export async function LeaveSection({ employeeId, canRecordOvernightRecovery = false }: { employeeId: string; canRecordOvernightRecovery?: boolean }) {
+export async function LeaveSection({
+  employeeId,
+  canRecordOvernightRecovery = false,
+  openingBalances,
+}: {
+  employeeId: string;
+  canRecordOvernightRecovery?: boolean;
+  /** Present only for an HR Admin of the employee's company: the setup step "Opening balances" (recorded once). `open` expands it (the person came from the setup step). */
+  openingBalances?: { employeeName: string; companyName: string; open: boolean };
+}) {
   const supabase = await createClient();
-  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }, { data: recoveryCreditRequests, error: recoveryError }] = await Promise.all([
+  const [{ data: leaveBalances, error: balancesError }, { data: compBalance, error: compError }, { data: requests, error: requestsError }, { data: recoveryCreditRequests, error: recoveryError }, openingLeave, openingComp] = await Promise.all([
     supabase.from("leave_balances").select("leave_type_code, balance_days").eq("employee_id", employeeId),
     supabase.from("comp_day_balances").select("balance_days").eq("employee_id", employeeId).maybeSingle(),
     supabase
@@ -43,6 +53,13 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
       .eq("employee_id", employeeId)
       .order("work_date", { ascending: false })
       .limit(20),
+    // Whether each kind of opening balance is already on the ledger: a kind that is recorded is never offered again. Only asked for the HR Admin who can record one.
+    openingBalances
+      ? supabase.from("leave_ledger").select("id", { count: "exact", head: true }).eq("employee_id", employeeId).eq("reference_type", "opening_balance")
+      : Promise.resolve({ count: null as number | null, error: null }),
+    openingBalances
+      ? supabase.from("comp_day_ledger").select("id", { count: "exact", head: true }).eq("employee_id", employeeId).eq("source", "opening_balance")
+      : Promise.resolve({ count: null as number | null, error: null }),
   ]);
 
   // Each part stands alone: a failed read says so (never "0 days" or "No ... yet") and the other parts still show.
@@ -138,6 +155,21 @@ export async function LeaveSection({ employeeId, canRecordOvernightRecovery = fa
         </Table>
         )}
       </div>
+
+      {openingBalances ? (
+        openingLeave.error || openingComp.error ? (
+          <LoadError what="whether opening balances were recorded" retryHref={`${here}?tab=leave`} note="Recording is withheld until this loads, so a balance is never entered twice." />
+        ) : (
+          <OpeningBalancesCard
+            employeeId={employeeId}
+            employeeName={openingBalances.employeeName}
+            companyName={openingBalances.companyName}
+            leaveRecorded={(openingLeave.count ?? 0) > 0}
+            compRecorded={(openingComp.count ?? 0) > 0}
+            open={openingBalances.open}
+          />
+        )
+      ) : null}
 
       {canRecordOvernightRecovery ? <OvernightRecoveryForm employeeId={employeeId} /> : null}
     </div>

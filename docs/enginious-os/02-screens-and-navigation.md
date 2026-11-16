@@ -37,8 +37,9 @@ Verified at `551f615` (2026-11-04). Route list from `apps/web/src/app/(app)/**/p
 
 | Path | Shows | Reach / guard |
 |---|---|---|
-| `/employees`, `/employees/[id]` | Directory (a plain employee sees only self; managers their reports); profile tabs | RLS `employees_select`; other id 404 |
-| `/employees/new` | Add employee | Page `hr_admin` |
+| `/employees` | Directory: search by name or employee number, Company and Status filters, the number on each row, **Needs attention** flags (setup left, expired or expiring documents, scheduled changes) for HR Admins, **Add employee** always visible to HR Admins, search and filters restored on return from a profile (a plain employee sees only self; managers their reports) | RLS `employees_select`; flags only for an HR Admin of the row's company |
+| `/employees/[id]` | Profile: Overview (Next actions, Setup checklist, At a glance, Account and access card, core details), Employment (current terms, scheduled changes, one change form, contracts, history), Compensation, Leave (and opening balances), Attendance, Documents (one list, one Add document form), Insurance & Loans, Assets, Performance. Address parameters `tab`, `step`, `add`, `renew`, `docId`, `change`, `created`, `notice` | RLS `employees_select`; each tab by its own permission; an unreachable tab falls back to Overview; other id 404. `modules/people-hr.md` |
+| `/employees/new` | Add employee, company first (its country and currency used), contract, pay and opening balances optional, then opens the profile | Page `hr_admin` of the chosen company (`canCreateEmployee`) |
 | `/alerts` | HR alerts (contracts, probation, documents, identity) | Page `canViewHrAlerts` (HR, CEO, CTO) |
 | `/payroll`, `/payroll/[id]` | Payroll runs | Page: HR Admin, Finance, CEO, CTO |
 | `/assets` | Asset register | Page: HR Admin, Finance |

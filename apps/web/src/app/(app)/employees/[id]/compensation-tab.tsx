@@ -1,3 +1,4 @@
+import type { ProfileFocus } from "@/lib/hr/focus";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CompensationSection } from "./compensation-section";
 import { FinalSettlementSection } from "./final-settlement-section";
@@ -16,6 +17,9 @@ export function CompensationTab({
   countryCode,
   hireDate,
   terminationDate,
+  // `focus` and `companyName` arrive from the profile page for every tab; this tab has no form of its own to open (Change salary opens the Employment tab's form).
+  focus: _focus,
+  companyName: _companyName,
 }: {
   employeeId: string;
   canSeeComp: boolean;
@@ -25,6 +29,8 @@ export function CompensationTab({
   countryCode: string;
   hireDate: string;
   terminationDate: string | null;
+  focus?: ProfileFocus;
+  companyName?: string;
 }) {
   return (
     <div className="space-y-6">
@@ -34,7 +40,7 @@ export function CompensationTab({
             <CardTitle>Compensation</CardTitle>
           </CardHeader>
           <CardContent>
-            <CompensationSection employeeId={employeeId} canEdit={!isSelf && canSeeComp} isSelf={isSelf} />
+            <CompensationSection employeeId={employeeId} canEdit={!isSelf && canSeeComp} isSelf={isSelf} active={employmentStatus !== "terminated"} />
           </CardContent>
         </Card>
       ) : null}

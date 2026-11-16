@@ -1,7 +1,10 @@
 import { BackLink } from "@/components/workspace/list-memory";
 import { EmploymentStatusBadge } from "@/components/hr/status";
 import { notFound } from "next/navigation";
+import { parseFocus } from "@/lib/hr/focus";
+import type { ProfileViewer } from "@/lib/hr/profile-data";
 import {
+  hasRoleAnyScope,
   canDeleteOrRestoreEmployee,
   canEditEmployeeCore,
   canManageAssets,
@@ -51,10 +54,16 @@ export default async function EmployeeDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
-  const { tab: requestedTab } = await searchParams;
+  const sp = await searchParams;
+  const requestedTab = typeof sp.tab === "string" ? sp.tab : undefined;
+  // Which step or form a setup or renewal link asks to open (see lib/hr/focus.ts); passed to the tab that owns the form.
+  const focus = parseFocus(sp);
+  // `?created=1&notice=` is set once by the create flow: a short sentence about any part of a new employee that could not be saved. Shown as plain text, length-capped.
+  const justCreated = sp.created === "1";
+  const createdNotice = typeof sp.notice === "string" ? sp.notice.slice(0, 300) : "";
   const session = await getCurrentSession();
   if (!session) return null;
 
@@ -62,7 +71,7 @@ export default async function EmployeeDetailPage({
   const { data: employee, error: employeeError } = await supabase
     .from("employees")
     .select(
-      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id, recognised_prior_service_years, is_first_ever_employment",
+      "id, first_name, last_name, job_title, employment_status, company_id, country_code, manager_id, department_id, hire_date, date_of_birth, termination_date, deleted_at, personal_email, phone, user_id, recognised_prior_service_years, is_first_ever_employment",
     )
     .eq("id", id)
     .maybeSingle();
@@ -87,6 +96,12 @@ export default async function EmployeeDetailPage({
     .eq("id", employee.company_id)
     .single();
   if (companyError) return <LoadError what="this employee" retryHref={`/employees/${id}`} />;
+  const companyName = company?.legal_name ?? "";
+
+  // Department name for the header line: read only when one is set, and only what the viewer's own access returns (a failed or empty read just leaves it unnamed).
+  const { data: department } = employee.department_id
+    ? await supabase.from("departments").select("name").eq("id", employee.department_id).maybeSingle()
+    : { data: null };
 
   const canEditCore = canEditEmployeeCore(session.grants, employee.company_id);
   const canSeeContracts = canViewContracts(session.grants, employee.company_id, { isSelf, isManager });
@@ -111,6 +126,18 @@ export default async function EmployeeDetailPage({
   const canSeeGoals = canViewGoals(session.grants, employee.company_id, { isSelf, isManager });
   const canRateGoals = canRateGoal(session.grants, employee.company_id, isManager);
   const canSeeLeave = canViewEmployeeLeave(session.grants, employee.company_id, { isSelf, isManager });
+  // Who may open People & Access for this person, and who may invite (a System Administrator). The page there decides again; this only decides whether to offer the link.
+  const isSysAdminSomewhere = hasRoleAnyScope(session.grants, "sys_admin");
+  const viewer: ProfileViewer = {
+    canEditCore,
+    canSeeContracts,
+    canSeeComp,
+    canSeeIdentity,
+    canSeeDocuments,
+    canSeeCareerEvents,
+    canInvite: isSysAdminSomewhere,
+    canOpenAccess: !isSelf && (isSysAdminSomewhere || canEditCore),
+  };
 
   // Every tab a viewer is allowed to reach, in display order. Determined
   // entirely from the same permission checks the old always-rendered
@@ -143,13 +170,22 @@ export default async function EmployeeDetailPage({
 
       {!isSelf ? <BackLink section="employees" fallback="/employees">Employees</BackLink> : null}
 
+      {justCreated ? (
+        <Alert variant={createdNotice ? "warning" : "success"} data-testid="employee-created-notice">
+          Employee created. Finish setup below.{createdNotice ? ` ${createdNotice}` : ""}
+        </Alert>
+      ) : null}
+
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">
             {employee.first_name} {employee.last_name}
           </h1>
-          <p className="text-muted-foreground">
-            {employee.job_title ?? "No job title set"} · {company?.legal_name}
+          <p className="text-muted-foreground" data-testid="profile-subtitle">
+            {employee.job_title ?? "No job title set"} · {companyName}
+          </p>
+          <p className="text-sm text-muted-foreground" data-testid="profile-context">
+            {[department?.name ? `Department: ${department.name}` : null, `Status: ${employee.employment_status.replace(/_/g, " ")}`, `Hired ${employee.hire_date}`].filter(Boolean).join(" · ")}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -167,7 +203,15 @@ export default async function EmployeeDetailPage({
       <ProfileTabs tabs={tabs} active={activeTab} basePath={`/employees/${employee.id}`} />
 
       {activeTab === "overview" ? (
-        <OverviewSection employee={employee} canEditCore={canEditCore} isSelf={isSelf} />
+        <OverviewSection
+          employee={employee}
+          companyName={companyName}
+          departmentName={department?.name ?? null}
+          canEditCore={canEditCore}
+          isSelf={isSelf}
+          viewer={viewer}
+          focusStep={focus.step}
+        />
       ) : null}
 
       {activeTab === "employment" ? (
@@ -177,6 +221,9 @@ export default async function EmployeeDetailPage({
           canEditContracts={canEditContracts}
           canSeeCareerEvents={canSeeCareerEvents}
           canRecordCareer={canRecordCareer}
+          focus={focus}
+          companyName={companyName}
+          countryCode={employee.country_code}
         />
       ) : null}
 
@@ -190,11 +237,17 @@ export default async function EmployeeDetailPage({
           countryCode={employee.country_code}
           hireDate={employee.hire_date}
           terminationDate={employee.termination_date}
+          focus={focus}
+          companyName={companyName}
         />
       ) : null}
 
       {activeTab === "leave" ? (
-        <LeaveSection employeeId={employee.id} canRecordOvernightRecovery={canEditCore || isManager} />
+        <LeaveSection
+          employeeId={employee.id}
+          canRecordOvernightRecovery={canEditCore || isManager}
+          openingBalances={canEditCore ? { employeeName: `${employee.first_name} ${employee.last_name}`, companyName, open: focus.step === "opening-balances" } : undefined}
+        />
       ) : null}
 
       {activeTab === "attendance" ? <AttendanceSection employeeId={employee.id} canManage={canEditAttendance} /> : null}
@@ -206,6 +259,10 @@ export default async function EmployeeDetailPage({
           canEditDocuments={canEditDocuments}
           canSeeIdentity={canSeeIdentity}
           canEditIdentity={canEditIdentity}
+          focus={focus}
+          companyName={companyName}
+          countryCode={employee.country_code}
+          employeeName={`${employee.first_name} ${employee.last_name}`}
         />
       ) : null}
 
@@ -217,6 +274,9 @@ export default async function EmployeeDetailPage({
           canSeeLoans={canSeeLoans}
           canEditLoans={canEditLoans}
           defaultCurrency={company?.default_currency ?? "AED"}
+          employeeName={`${employee.first_name} ${employee.last_name}`}
+          companyName={companyName}
+          countryCode={employee.country_code}
         />
       ) : null}
 
@@ -227,7 +287,7 @@ export default async function EmployeeDetailPage({
       {activeTab === "assets" ? <EmployeeEquipmentLink employeeId={employee.id} companyId={employee.company_id} /> : null}
 
       {activeTab === "performance" ? (
-        <PerformanceSection employeeId={employee.id} companyId={employee.company_id} canManage={canRateGoals} />
+        <PerformanceSection employeeId={employee.id} companyId={employee.company_id} canManage={canRateGoals} managerId={employee.manager_id} />
       ) : null}
     </div>
   );

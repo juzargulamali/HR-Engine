@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { Alert } from "@/components/ui/alert";
+import { InfoHint } from "@/components/ui/info-hint";
 
 const initialState: ActionState = { error: null };
 
@@ -27,20 +28,20 @@ export function EditEmployeeForm({
   employee,
   linkedEmail,
   managers,
-  managerName,
   canEditCore,
   isSelf,
+  focusAccount = false,
+  focusJob = false,
 }: {
   employee: EmployeeCore;
   linkedEmail: string | null;
   managers: { id: string; first_name: string; last_name: string }[];
-  /** Resolved via the get_employee_manager_name RPC, not by looking `employee
-   * .manager_id` up in `managers` — that list is RLS-scoped to what the
-   * CURRENT VIEWER may see and never includes their own manager's row. See
-   * overview-section.tsx's doc comment. */
-  managerName: string | null;
   canEditCore: boolean;
   isSelf: boolean;
+  /** The person came from the Account setup step: the linked-login block is highlighted. */
+  focusAccount?: boolean;
+  /** The person came from a job/manager exception: the profile block is highlighted. */
+  focusJob?: boolean;
 }) {
   const [coreState, coreAction, corePending] = useActionState(updateEmployee, initialState);
   const [contactState, contactAction, contactPending] = useActionState(updateOwnContactInfo, initialState);
@@ -49,8 +50,6 @@ export function EditEmployeeForm({
   return (
     <div className="space-y-6">
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-sm">
-        <dt className="text-muted-foreground">Manager</dt>
-        <dd>{managerName ?? "—"}</dd>
         <dt className="text-muted-foreground">Personal email</dt>
         <dd>{employee.personal_email ?? "—"}</dd>
         <dt className="text-muted-foreground">Phone</dt>
@@ -81,9 +80,10 @@ export function EditEmployeeForm({
       ) : null}
 
       {canEditCore ? (
-        <form action={coreAction} className="space-y-3 border-t border-border pt-4">
+        <form action={coreAction} id="job" className={`space-y-3 border-t border-border pt-4 ${focusJob ? "rounded-md ring-2 ring-ring" : ""}`}>
           <input type="hidden" name="employeeId" value={employee.id} />
           <p className="text-sm font-medium">Edit profile (HR Admin)</p>
+          <p className="text-sm text-muted-foreground">Job title, manager and status take effect when you save. A job title or pay change with an effective date is recorded on the Employment tab.</p>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="jobTitle">Job title</Label>
@@ -99,9 +99,13 @@ export function EditEmployeeForm({
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="terminationDate">Termination date</Label>
+              <Label htmlFor="terminationDate">
+                Termination date
+                <InfoHint label="Termination date" className="ml-1">
+                  <p>Only used when setting status to Terminated. Terminating also forfeits unused internal Recovery Leave.</p>
+                </InfoHint>
+              </Label>
               <Input id="terminationDate" name="terminationDate" type="date" />
-              <p className="text-sm text-muted-foreground">Only used when setting status to Terminated — also forfeits unused internal Recovery Leave.</p>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="managerId">Manager</Label>
@@ -119,7 +123,12 @@ export function EditEmployeeForm({
               <Input id="dateOfBirth" name="dateOfBirth" type="date" defaultValue={employee.date_of_birth ?? ""} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="recognisedPriorServiceYears">Recognised prior service (years)</Label>
+              <Label htmlFor="recognisedPriorServiceYears">
+                Recognised prior service (years)
+                <InfoHint label="Recognised prior service" className="ml-1">
+                  <p>Poland only, optional HR reference data. Enginious grants every Poland employee a flat 26 working days of Annual Leave per calendar year as a company benefit; this field does not affect that calculation.</p>
+                </InfoHint>
+              </Label>
               <Input
                 id="recognisedPriorServiceYears"
                 name="recognisedPriorServiceYears"
@@ -128,14 +137,14 @@ export function EditEmployeeForm({
                 min="0"
                 defaultValue={employee.recognised_prior_service_years ?? ""}
               />
-              <p className="text-sm text-muted-foreground">
-                Poland only — optional HR reference data. Enginious grants every Poland employee a flat 26 working
-                days of Annual Leave per calendar year as a company benefit; this field does not affect that
-                calculation.
-              </p>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="isFirstEverEmployment">First-ever job?</Label>
+              <Label htmlFor="isFirstEverEmployment">
+                First-ever job?
+                <InfoHint label="First-ever job" className="ml-1">
+                  <p>Poland only, optional HR reference data. It does not gate or change Annual Leave accrual, which is a flat 26-day/year company benefit for every Poland employee regardless of this field.</p>
+                </InfoHint>
+              </Label>
               <Select
                 id="isFirstEverEmployment"
                 name="isFirstEverEmployment"
@@ -145,10 +154,6 @@ export function EditEmployeeForm({
                 <option value="true">Yes — this is their first job ever</option>
                 <option value="false">No — they have worked before</option>
               </Select>
-              <p className="text-sm text-muted-foreground">
-                Poland only — optional HR reference data. It does not gate or change Annual Leave accrual, which is
-                a flat 26-day/year company benefit for every Poland employee regardless of this field.
-              </p>
             </div>
           </div>
           {coreState.error ? <Alert variant="destructive">{coreState.error}</Alert> : null}
@@ -160,9 +165,9 @@ export function EditEmployeeForm({
       ) : null}
 
       {canEditCore ? (
-        <form action={linkAction} className="space-y-3 border-t border-border pt-4">
+        <form action={linkAction} id="account" className={`space-y-3 border-t border-border pt-4 ${focusAccount ? "rounded-md ring-2 ring-ring" : ""}`}>
           <input type="hidden" name="employeeId" value={employee.id} />
-          <p className="text-sm font-medium">Linked login</p>
+          <p className="text-sm font-medium">Linked login (account invitation)</p>
           <p className="text-sm text-muted-foreground">
             {linkedEmail
               ? "This record is linked to a login, so its owner sees their own profile, leave, and approvals."

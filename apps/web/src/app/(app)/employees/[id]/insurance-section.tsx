@@ -4,8 +4,34 @@ import { AddInsuranceForm } from "./add-insurance-form";
 import { DeleteInsurancePolicyButton } from "./delete-insurance-policy-button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { LoadError } from "@/components/workspace/states";
+import { expiryState } from "@/lib/hr/document-types";
 
-export async function InsuranceSection({ employeeId, canEdit }: { employeeId: string; canEdit: boolean }) {
+/** The review sentence for a policy: what its expiry date means and who acts next. Only what the record supports: policies have an expiry date, and an HR Admin manages them. */
+export function policyReview(expiry: string | null, today: string): { text: string; attention: boolean } {
+  const s = expiryState(expiry, today);
+  if (s === "none") return { text: "No expiry date recorded", attention: false };
+  if (s === "expired") return { text: "Expired. An HR Admin renews it", attention: true };
+  if (s === "expiring") {
+    const days = Math.round((Date.parse(`${expiry}T00:00:00Z`) - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+    return { text: `Expires in ${days} ${days === 1 ? "day" : "days"}. An HR Admin renews it`, attention: true };
+  }
+  return { text: "Active", attention: false };
+}
+
+export async function InsuranceSection({
+  employeeId,
+  canEdit,
+  employeeName,
+  companyName,
+  today = new Date().toISOString().slice(0, 10),
+}: {
+  employeeId: string;
+  canEdit: boolean;
+  employeeName?: string;
+  companyName?: string;
+  /** The employee's calendar day (their country); defaults to the UTC day when a caller does not pass one. */
+  today?: string;
+}) {
   const supabase = await createClient();
   const { data: policies, error } = await supabase
     .from("employee_insurance_policies")
@@ -18,7 +44,7 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
     return (
       <div className="space-y-4">
         <LoadError what="the insurance policies" retryHref={`/employees/${employeeId}?tab=insurance-loans`} />
-        {canEdit ? <AddInsuranceForm employeeId={employeeId} /> : null}
+        {canEdit ? <AddInsuranceForm employeeId={employeeId} employeeName={employeeName} companyName={companyName} /> : null}
       </div>
     );
   }
@@ -50,7 +76,12 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
             <TableRow key={p.id}>
               <TableCell>{p.insurance_name}</TableCell>
               <TableCell className="font-mono text-sm">{p.policy_number}</TableCell>
-              <TableCell>{p.expiry_date ?? "—"}</TableCell>
+              <TableCell>
+                <div>{p.expiry_date ?? "—"}</div>
+                <div className={policyReview(p.expiry_date, today).attention ? "text-sm font-medium text-warning" : "text-sm text-muted-foreground"} data-testid="policy-review">
+                  {policyReview(p.expiry_date, today).text}
+                </div>
+              </TableCell>
               <TableCell>
                 <div className="flex items-center gap-3">
                   {p.url ? (
@@ -77,7 +108,7 @@ export async function InsuranceSection({ employeeId, canEdit }: { employeeId: st
         </TableBody>
       </Table>
 
-      {canEdit ? <AddInsuranceForm employeeId={employeeId} /> : null}
+      {canEdit ? <AddInsuranceForm employeeId={employeeId} employeeName={employeeName} companyName={companyName} /> : null}
     </div>
   );
 }

@@ -10,13 +10,14 @@ import { Alert } from "@/components/ui/alert";
 
 const initialState: ActionState = { error: null };
 
-export function AddInsuranceForm({ employeeId }: { employeeId: string }) {
+export function AddInsuranceForm({ employeeId, employeeName, companyName }: { employeeId: string; employeeName?: string; companyName?: string }) {
   const [state, formAction, pending] = useActionState(addInsurancePolicy, initialState);
 
   return (
     <form action={formAction} className="space-y-3 border-t border-border pt-4">
       <input type="hidden" name="employeeId" value={employeeId} />
       <p className="text-sm font-medium">Add an insurance policy</p>
+      {employeeName ? <p className="text-sm text-muted-foreground" data-testid="form-context">For <span className="font-medium text-foreground">{employeeName}</span>{companyName ? ` · ${companyName}` : ""}</p> : null}
       <div className="grid gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="insuranceName">Insurance name</Label>

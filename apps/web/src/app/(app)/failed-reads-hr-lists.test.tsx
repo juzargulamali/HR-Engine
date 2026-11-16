@@ -59,31 +59,39 @@ async function settle(node: unknown): Promise<unknown> {
 const rendered = async (node: Promise<unknown> | unknown) => renderToStaticMarkup((await settle(await node)) as never);
 
 describe("Employee profile tabs", () => {
-  it("Employment: contract history and promotions each say could not load; the add-version form is withheld", async () => {
+  const EMP9 = { id: "e9", first_name: "Hana", last_name: "Rigger", job_title: "Rigger", hire_date: "2024-01-01", country_code: "AE", company_id: "c1", employment_status: "active", deleted_at: null };
+  it("Employment: contract history, scheduled changes, history and pay each say could not load; the change and add-version forms are withheld", async () => {
+    tables = { employees: row(EMP9), companies: row({ legal_name: "Co" }), __down__: down };
     const { EmploymentSection } = await import("./employees/[id]/employment-section");
     const html = await rendered(EmploymentSection({ employeeId: "e9", canSeeContracts: true, canEditContracts: true, canSeeCareerEvents: true, canRecordCareer: true }));
     expect(html).toContain("Could not load the contract history");
+    expect(html).toContain("Could not load the scheduled changes");
     expect(html).toContain("Could not load the promotions and salary history");
-    expect(html).not.toContain("No contract on record yet");
+    expect(html).toContain("Could not load the current pay");
+    expect(html).not.toContain("No contract on record yet.");
     expect(html).not.toContain("No promotions, title changes");
+    expect(html).not.toContain("No changes are scheduled");
     expect(html).not.toContain("Supersede with new version");
     expect(html).not.toContain("<form");
   });
-  it("Employment: genuinely empty still says so, and the add-version form is offered", async () => {
-    tables = { employment_contracts: rows([]), employee_career_events: rows([]), employees: row({ job_title: "Rigger" }), compensation_details: row(null) };
+  it("Employment: genuinely empty still says so, and the first-contract and first-salary forms are offered", async () => {
+    tables = { employment_contracts: rows([]), employee_career_events: rows([]), employees: row(EMP9), companies: row({ legal_name: "Co" }), compensation_details: row(null) };
     const { EmploymentSection } = await import("./employees/[id]/employment-section");
     const html = await rendered(EmploymentSection({ employeeId: "e9", canSeeContracts: true, canEditContracts: true, canSeeCareerEvents: true, canRecordCareer: false }));
     expect(html).toContain("No contract on record yet");
-    expect(html).toContain("Supersede with new version");
+    expect(html).toContain("No changes are scheduled");
+    expect(html).toContain("Add the first contract");
+    expect(html).toContain("Add salary");
     expect(html).not.toContain("Could not load");
   });
-  it("Career history: the history loads but the current title/salary does not, so the record form is withheld", async () => {
-    tables = { employee_career_events: rows([{ id: "ev1", event_type: "promotion", effective_date: "2026-01-01", previous_job_title: "A", new_job_title: "B", previous_base_salary: null, new_base_salary: null, currency: "AED", note: null }]), __down__: down };
-    const { CareerHistorySection } = await import("./employees/[id]/career-history-section");
-    const html = await rendered(CareerHistorySection({ employeeId: "e9", canView: true, canRecord: true }));
+  it("Employment: the history loads but the current pay does not, so the change form is withheld", async () => {
+    tables = { employees: row(EMP9), companies: row({ legal_name: "Co" }), employment_contracts: rows([]), compensation_details: failing(), employee_career_events: rows([{ id: "ev1", event_type: "promotion", effective_date: "2026-01-01", previous_job_title: "A", new_job_title: "B", previous_base_salary: null, new_base_salary: null, currency: "AED", note: null, applied_at: "2026-01-01T00:00:00Z" }]) };
+    const { EmploymentSection } = await import("./employees/[id]/employment-section");
+    const html = await rendered(EmploymentSection({ employeeId: "e9", canSeeContracts: false, canEditContracts: false, canSeeCareerEvents: true, canRecordCareer: true }));
     expect(html).toContain("Promotion");
-    expect(html).toContain("Could not load the current title and salary");
+    expect(html).toContain("Could not load the current pay");
     expect(html).not.toContain("Could not load the promotions");
+    expect(html).not.toContain("change-employment-form");
   });
   it("Compensation: not 'No compensation on record yet', and no change form", async () => {
     const { CompensationSection } = await import("./employees/[id]/compensation-section");
@@ -111,7 +119,7 @@ describe("Employee profile tabs", () => {
     tables = { __down__: down, profiles: failing(), employees: failing() };
     const { OverviewSection } = await import("./employees/[id]/overview-section");
     const employee = { id: "e9", first_name: "Ola", last_name: "Z", job_title: "Rigger", employment_status: "active", manager_id: "m1", user_id: "u9", company_id: "c1", hire_date: "2020-01-01", date_of_birth: null, personal_email: null, phone: null, country_code: "AE", recognised_prior_service_years: 0, is_first_ever_employment: false, termination_date: null };
-    const html = await rendered(OverviewSection({ employee: employee as never, canEditCore: true, isSelf: false }));
+    const html = await rendered(OverviewSection({ employee: employee as never, companyName: "Co", departmentName: null, canEditCore: true, isSelf: false, viewer: { canEditCore: true, canSeeContracts: true, canSeeComp: true, canSeeIdentity: true, canSeeDocuments: true, canSeeCareerEvents: true, canInvite: false, canOpenAccess: true } }));
     expect(html).toContain("Could not load the linked login");
     expect(html).toContain("the list of possible managers");
     expect(html).not.toContain("Linked login</p>");
@@ -123,17 +131,16 @@ describe("Employee profile tabs", () => {
     expect(html).toContain("Could not load the attendance records");
     expect(html).not.toContain("No attendance recorded yet");
   });
-  it("Documents, identity documents, insurance and loans keep their add forms but never say 'none on file'", async () => {
-    const [{ EmployeeDocumentsSection }, { IdentityDocumentsSection }, { InsuranceSection }, { LoansSection }] = await Promise.all([
-      import("./employees/[id]/employee-documents-section"), import("./employees/[id]/identity-documents-section"),
+  it("Documents (one list over both tables), insurance and loans keep their add forms but never say 'none on file'", async () => {
+    const [{ DocumentsTab }, { InsuranceSection }, { LoansSection }] = await Promise.all([
+      import("./employees/[id]/documents-tab"),
       import("./employees/[id]/insurance-section"), import("./employees/[id]/loans-section"),
     ]);
-    const docs = await rendered(EmployeeDocumentsSection({ employeeId: "e9", canEdit: true }));
+    const docs = await rendered(DocumentsTab({ employeeId: "e9", canSeeDocuments: true, canEditDocuments: true, canSeeIdentity: true, canEditIdentity: true, countryCode: "AE", companyName: "Co", employeeName: "Ola Z" }));
     expect(docs).toContain("Could not load the documents");
+    expect(docs).toContain("Could not load the identity documents");
     expect(docs).not.toContain("No documents on file");
-    const ids = await rendered(IdentityDocumentsSection({ employeeId: "e9", canEdit: true }));
-    expect(ids).toContain("Could not load the identity documents");
-    expect(ids).not.toContain("No identity documents on file");
+    expect(docs).toContain("Add document");
     const ins = await rendered(InsuranceSection({ employeeId: "e9", canEdit: true }));
     expect(ins).toContain("Could not load the insurance policies");
     expect(ins).not.toContain("No insurance policies on file");
