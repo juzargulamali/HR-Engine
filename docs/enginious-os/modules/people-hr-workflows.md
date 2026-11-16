@@ -1,6 +1,6 @@
 # People & HR: workflows
 
-**Status.** Written for **People & HR Phase 1** on branch `feat/people-hr-phase1`: a draft pull request, **not merged**, hosted migration `20270115000100` **not applied**, Production not deployed from this branch. Required CI: first run recorded on the pull request (not part of this file). Verified locally on the isolated stack only (20 of 20 steps passed (run before the migration was renamed and the cron route added to the proxy list; the rename changes no behaviour)); nothing hosted, no real phone.
+**Status.** Written for **People & HR Phase 1** on branch `feat/people-hr-phase1`: a draft pull request, **not merged**, hosted migration `20270115000100` **applied by the owner (owner-confirmed, not seen by Claude)**, Production not deployed from this branch. Required CI: first run recorded on the pull request (not part of this file). Verified locally on the isolated stack only (20 of 20 steps passed (run before the migration was renamed and the cron route added to the proxy list; the rename changes no behaviour)); nothing hosted, no real phone.
 
 The module's shared facts, roles, database and enforcement are in [`people-hr.md`](./people-hr.md). Every screen and part is in [`people-hr-coverage-index.md`](./people-hr-coverage-index.md), every data-changing action in [`people-hr-action-catalogue.md`](./people-hr-action-catalogue.md). This file is each workflow, step by step, with what the screen fills in so nothing is typed twice.
 

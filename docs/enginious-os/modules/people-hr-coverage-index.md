@@ -1,6 +1,6 @@
 # People & HR: coverage index (employee directory, profile and onboarding)
 
-**Status.** Written for **People & HR Phase 1** on branch `feat/people-hr-phase1`: a draft pull request, **not merged**, hosted migration `20270115000100` **not applied**, Production not deployed from this branch. Required CI: first run recorded on the pull request (not part of this file). Every reachable screen and part of the employee directory and profile, with who reaches it, where it is documented and what proves it. Other People & HR pages (My Leave, attendance, letters, payroll, assets, alerts, reports, companies, audit log) are outside Phase 1 and are listed in section 8 so they are not mistaken for covered.
+**Status.** Written for **People & HR Phase 1** on branch `feat/people-hr-phase1`: a draft pull request, **not merged**, hosted migration `20270115000100` **applied by the owner (owner-confirmed, not seen by Claude)**, Production not deployed from this branch. Required CI: first run recorded on the pull request (not part of this file). Every reachable screen and part of the employee directory and profile, with who reaches it, where it is documented and what proves it. Other People & HR pages (My Leave, attendance, letters, payroll, assets, alerts, reports, companies, audit log) are outside Phase 1 and are listed in section 8 so they are not mistaken for covered.
 
 **References.** `R` = [`people-hr.md`](./people-hr.md). `W` = [`people-hr-workflows.md`](./people-hr-workflows.md). `C` = [`people-hr-action-catalogue.md`](./people-hr-action-catalogue.md).
 
