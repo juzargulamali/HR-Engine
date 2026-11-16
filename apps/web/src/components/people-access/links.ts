@@ -1,6 +1,6 @@
 import type { PaTab } from "@/lib/people-access/data";
 
-export interface PaParams { q?: string; company?: string; person?: string; tab?: PaTab; view?: "company" }
+export interface PaParams { q?: string; company?: string; person?: string; tab?: PaTab; view?: "company"; inactive?: "1" }
 
 /** One place that writes the screen's addresses, so a search or filter survives choosing a person and back. */
 export function paHref(p: PaParams): string {
@@ -10,6 +10,7 @@ export function paHref(p: PaParams): string {
   if (p.person) sp.set("person", p.person);
   if (p.tab) sp.set("tab", p.tab);
   if (p.view) sp.set("view", p.view);
+  if (p.inactive) sp.set("inactive", p.inactive);
   const qs = sp.toString();
   return qs ? `/people-access?${qs}` : "/people-access";
 }

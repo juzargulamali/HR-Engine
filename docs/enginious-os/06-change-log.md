@@ -8,6 +8,14 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-17 | People & Access: deactivated people hidden from the list unless asked (branch `feat/people-access-hide-deactivated` from `main` `9053f86`; **no SQL, so nothing to apply to the hosted database**)
+
+* **What changed for people.** The People & Access list no longer shows deactivated accounts by default. A line under the search says how many are hidden ("3 deactivated people are hidden") with a **Show deactivated people** link; with them shown, the link reads **Hide deactivated people** and each is still marked Deactivated. The choice is in the address (`inactive=1`), so Back, refresh and a chosen person keep it. The person whose details are open stays listed even while others are hidden. Reactivation is unchanged and still reached the same way.
+* **Not changed.** Who may see the page, the people each viewer is entitled to, the account controls and every database rule. Invited accounts and employees with no login yet are still listed.
+* **Files updated in `docs/enginious-os/`.** `02-screens-and-navigation.md` (People & Access paragraph), this log.
+* **Tests.** `lib/people-access/data.test.ts` (hidden, counted, shown, opened person stays listed), `components/people-access/person-list.test.tsx` (toggle wording, link keeps the search, singular, none when nobody is deactivated).
+* **Hosted status.** Not applicable (no migration). Production deploys on merge.
+
 ### 2026-11-16 | People & HR: guided onboarding, signed uploads, Correct pay record (added to draft PR #108, branch `feat/employee-number-uniqueness`; **not merged; hosted migrations `20270118000200` and `20270118000300` not applied; uploads need no migration**)
 
 **What changed for people.**

@@ -1,4 +1,5 @@
 import { ACCESS_MODULE_LABELS, ROLE_LABELS } from "@enginious-hr/domain";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
@@ -8,8 +9,8 @@ import { paHref, type PaParams } from "./links";
 import { PersonLink } from "./unsaved-access-guard";
 
 /** The left column: search, a company filter, and everyone this viewer is entitled to see. A plain GET form, so it works before any script loads. */
-export function PersonList({ people, total, companies, params, companyNames, showRoles }: {
-  people: PaPerson[]; total: number; companies: PaCompany[]; params: PaParams; companyNames: Map<string, string>; showRoles: boolean;
+export function PersonList({ people, total, hiddenDeactivated, companies, params, companyNames, showRoles }: {
+  people: PaPerson[]; total: number; hiddenDeactivated: number; companies: PaCompany[]; params: PaParams; companyNames: Map<string, string>; showRoles: boolean;
 }) {
   return (
     <div className="space-y-3">
@@ -29,8 +30,17 @@ export function PersonList({ people, total, companies, params, companyNames, sho
           <Button type="submit" size="sm" variant="outline">Search</Button>
           <p className="text-sm text-muted-foreground" role="status">{people.length === total ? `${total} ${total === 1 ? "person" : "people"}` : `${people.length} of ${total}`}</p>
         </div>
+        {params.inactive ? <input type="hidden" name="inactive" value="1" /> : null}
       </form>
-      {people.length === 0 ? <p className="text-sm text-muted-foreground">No one matches. Try fewer words.</p> : (
+      {params.inactive || hiddenDeactivated > 0 ? (
+        <p className="text-sm text-muted-foreground" data-testid="pa-deactivated-toggle">
+          {params.inactive ? "Showing deactivated people. " : `${hiddenDeactivated} deactivated ${hiddenDeactivated === 1 ? "person is" : "people are"} hidden. `}
+          <Link href={paHref({ ...params, inactive: params.inactive ? undefined : "1" })} className="font-medium text-foreground underline underline-offset-2">
+            {params.inactive ? "Hide deactivated people" : "Show deactivated people"}
+          </Link>
+        </p>
+      ) : null}
+      {people.length === 0 ? <p className="text-sm text-muted-foreground">{hiddenDeactivated > 0 && !params.inactive ? "No one matches. Deactivated people are hidden: use Show deactivated people to include them." : "No one matches. Try fewer words."}</p> : (
         <ul className="divide-y divide-border rounded-md border border-border">
           {people.map((p) => {
             const selected = params.person === p.key;

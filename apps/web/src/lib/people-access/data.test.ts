@@ -128,6 +128,24 @@ describe("System Administrator (option A: accounts and HR roles, no module power
     expect((await ok({ person: "u:00000000-0000-4000-8000-000000000009" })).accountDetails).toEqual({ kind: "error" });
   });
 
+  it("hides deactivated accounts unless asked, counts them, and keeps the opened person listed", async () => {
+    const LENA = "00000000-0000-4000-8000-000000000009";
+    tables.profiles = [...tables.profiles!, { id: LENA, email: "lena@x.ae", full_name: "Lena", account_status: "deactivated", is_active: false }];
+    const hidden = await ok();
+    expect(hidden.people.map((p) => p.name)).not.toContain("Lena");
+    expect(hidden.hiddenDeactivated).toBe(1);
+    expect(hidden.totalPeople).toBe(hidden.people.length);
+    const shown = await ok({ showDeactivated: true });
+    expect(shown.people.map((p) => p.name)).toContain("Lena");
+    expect(shown.hiddenDeactivated).toBe(0);
+    expect(shown.totalPeople).toBe(shown.people.length);
+    // the person whose details are open stays in the list even while deactivated people are hidden
+    const opened = await ok({ person: `u:${LENA}` });
+    expect(opened.people.map((p) => p.name)).toContain("Lena");
+    expect(opened.hiddenDeactivated).toBe(0);
+    expect(opened.selected?.name).toBe("Lena");
+  });
+
   it("can read but not edit a job: only an HR Admin of the company can", async () => {
     const d = await ok({ person: `u:${AMINA}` });
     expect(d.employee?.jobTitle).toBe("HR lead");
