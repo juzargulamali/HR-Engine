@@ -108,15 +108,37 @@ describe("inviteAndLinkEmployee", () => {
     expect(invitations).toHaveLength(0);
     expect(writes.find((w) => w.table === "employees")).toMatchObject({ kind: "update", row: { user_id: USER } });
   });
-  it("refuses an HR Admin who is not a System Administrator when no account exists, and says the address stays in the plan", async () => {
+  it("an HR Admin of the employee's company sends the invitation once and links the new account, with no System Administrator involved", async () => {
+    let calls = 0;
+    selects.profiles = { get data() { calls += 1; return calls === 1 ? null : { id: USER }; }, error: null } as never;
     const r = await inviteAndLinkEmployee({ error: null }, fd({ employeeId: EMP }));
-    expect(r.error).toMatch(/Only a System Administrator can send the invitation/);
-    expect(invitations).toHaveLength(0);
+    expect(r.error).toBeNull();
+    expect(invitations).toEqual(["riya@example.test"]);   // the planned address, nothing the browser typed
+    expect(r.notice).toMatch(/Invitation sent to riya@example.test and linked/);
+    expect(writes.find((w) => w.table === "employees")).toMatchObject({ kind: "update", row: { user_id: USER } });
   });
-  it("a company-limited System Administrator is treated as NOT a System Administrator", async () => {
-    grants = [g("hr_admin", CO), g("sys_admin", CO)];
-    expect((await inviteAndLinkEmployee({ error: null }, fd({ employeeId: EMP }))).error).toMatch(/Only a System Administrator can send the invitation/);
+  it("Saeed's grant set (HR Admin, a company-limited System Administrator and Finance, all for his company) can invite and link for that company's employee", async () => {
+    grants = [g("hr_admin", CO), g("sys_admin", CO), g("finance", CO)];
+    let calls = 0;
+    selects.profiles = { get data() { calls += 1; return calls === 1 ? null : { id: USER }; }, error: null } as never;
+    const r = await inviteAndLinkEmployee({ error: null }, fd({ employeeId: EMP }));
+    expect(r.error).toBeNull();
+    expect(invitations).toHaveLength(1);
+    expect(writes.find((w) => w.table === "employees")).toMatchObject({ row: { user_id: USER } });
+  });
+  it("is refused, sending nothing and writing nothing, for an HR Admin of another company, for a company-limited System Administrator who is not HR Admin of it, and for anyone else", async () => {
+    for (const set of [[g("hr_admin", CO2)], [g("sys_admin", CO)], [g("finance", CO)], [g("employee", CO)], [g("line_manager", CO)]]) {
+      grants = set;
+      expect((await inviteAndLinkEmployee({ error: null }, fd({ employeeId: EMP }))).error, JSON.stringify(set)).toMatch(/Only an HR Admin of this employee's company or a System Administrator/);
+    }
     expect(invitations).toHaveLength(0);
+    expect(writes).toHaveLength(0);
+  });
+  it("does not send a second invitation when the address already has an account, and the invitation never carries a role", async () => {
+    selects.profiles = { data: { id: USER }, error: null };
+    await inviteAndLinkEmployee({ error: null }, fd({ employeeId: EMP }));
+    expect(invitations).toHaveLength(0);
+    expect(writes.filter((w) => w.table === "user_roles")).toHaveLength(0);
   });
   it("an unrestricted System Administrator who is also HR Admin sends the invitation once and links the new account", async () => {
     grants = [g("hr_admin", CO), g("sys_admin")];
@@ -150,19 +172,54 @@ describe("applyOnboardingAccess", () => {
     expect((await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }))).error).toMatch(/Link the employee's account first/);
     expect(writes).toHaveLength(0);
   });
-  it("an HR Admin alone applies NOTHING: the role and the module right are each reported with who can do them", async () => {
-    const r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
-    expect(r.results!.map((x) => x.outcome)).toEqual(["blocked", "blocked"]);
-    expect(r.results![0]!.message).toMatch(/unrestricted System Administrator/);
-    expect(r.results![1]!.message).toMatch(/founder or access manager/);
-    expect(writes.filter((w) => w.table === "user_roles")).toHaveLength(0);
-    expect(rpcCalls.filter((c) => c.name.endsWith("_grant_access"))).toHaveLength(0);
-  });
-  it("an unrestricted System Administrator applies the role; the module right still needs a founder or access manager", async () => {
-    grants = [g("hr_admin", CO), g("sys_admin")];
+  it("an HR Admin of the employee's company applies the Reporting Manager role (granted_by recorded); the module right is reported with who can do it", async () => {
     const r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
     expect(r.results!.map((x) => x.outcome)).toEqual(["applied", "blocked"]);
-    expect(writes.find((w) => w.table === "user_roles")).toMatchObject({ kind: "insert", row: { user_id: USER, role: "line_manager", company_id: CO } });
+    expect(r.results![1]!.message).toMatch(/founder or access manager/);
+    expect(writes.filter((w) => w.table === "user_roles")).toEqual([{ table: "user_roles", kind: "insert", row: { user_id: USER, role: "line_manager", company_id: CO, granted_by: "user-1" } }]);
+    expect(rpcCalls.filter((c) => c.name.endsWith("_grant_access"))).toHaveLength(0);
+  });
+  it("Saeed's grant set applies BOTH Employee and Reporting Manager from the same flow; every privileged role, and any other company, stays with an unrestricted System Administrator", async () => {
+    grants = [g("hr_admin", CO), g("sys_admin", CO), g("finance", CO)];
+    selects.employee_onboarding_plans = planRow({ hr_roles: [
+      { role: "employee", companyId: CO }, { role: "line_manager", companyId: CO },
+      { role: "hr_admin", companyId: CO }, { role: "finance", companyId: CO }, { role: "sys_admin", companyId: CO }, { role: "ceo", companyId: CO }, { role: "cto", companyId: CO },
+      { role: "line_manager", companyId: CO2 },
+    ], module_grants: [] });
+    const r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
+    const by = Object.fromEntries(r.results!.map((x) => [x.key, x]));
+    expect(by[`role:employee:${CO}`]!.outcome).toBe("applied");
+    expect(by[`role:line_manager:${CO}`]!.outcome).toBe("applied");
+    for (const role of ["hr_admin", "finance", "sys_admin", "ceo", "cto"]) {
+      expect(by[`role:${role}:${CO}`]!.outcome, role).toBe("blocked");
+      expect(by[`role:${role}:${CO}`]!.message).toMatch(/unrestricted System Administrator/);
+    }
+    expect(by[`role:line_manager:${CO2}`]!.outcome).toBe("blocked");
+    expect(by[`role:line_manager:${CO2}`]!.message).toMatch(/only for the employee's own company/);
+    expect(writes.filter((w) => w.table === "user_roles").map((w) => w.row.role).sort()).toEqual(["employee", "line_manager"]);
+  });
+  it("an unrestricted System Administrator applies any role; the module right still needs a founder or access manager", async () => {
+    grants = [g("hr_admin", CO), g("sys_admin")];
+    selects.employee_onboarding_plans = planRow({ hr_roles: [{ role: "line_manager", companyId: CO }, { role: "finance", companyId: CO }], module_grants: [{ module: "sales", companyId: CO, capabilities: ["assign_owner"], note: null }] });
+    const r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
+    expect(r.results!.map((x) => x.outcome)).toEqual(["applied", "applied", "blocked"]);
+    expect(writes.filter((w) => w.table === "user_roles").map((w) => w.row.role).sort()).toEqual(["finance", "line_manager"]);
+  });
+  it("an HR Admin of another company cannot work on this employee at all; an unrelated person is refused; nothing is written", async () => {
+    for (const set of [[g("hr_admin", CO2)], [g("sys_admin", CO)], [g("finance", CO)]]) {
+      grants = set;
+      expect((await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }))).error, JSON.stringify(set)).toMatch(/Only an HR Admin of this employee's company or a System Administrator/);
+    }
+    expect(writes).toHaveLength(0);
+  });
+  it("when the database refuses a role it says so plainly, and a role that was removed earlier is explained, not retried blindly", async () => {
+    writeResults.user_roles = { error: { message: 'new row violates row-level security policy for table "user_roles"' } };
+    let r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
+    expect(r.results![0]).toMatchObject({ outcome: "failed" });
+    expect(r.results![0]!.message).toMatch(/an HR Admin may give Employee or Reporting Manager for the employee's own company/);
+    writeResults.user_roles = { error: { code: "23505", message: "duplicate key value violates unique constraint" } };
+    r = await applyOnboardingAccess({ error: null }, fd({ employeeId: EMP, confirmReviewed: "on" }));
+    expect(r.results![0]!.message).toMatch(/given before and then removed/);
   });
   it("an access manager for that module and company applies the ordinary right, adding to what is held and never removing", async () => {
     moduleGrantRows.crm_company_grants = [{ company_id: CO, capabilities: ["manage_access"] }];

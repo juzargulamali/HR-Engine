@@ -11,13 +11,15 @@ import { friendlyCrmError } from "@/lib/crm/errors";
 import { friendlyInventoryError } from "@/lib/inventory/action-utils";
 import { friendlyProjectError } from "@/lib/projects/errors";
 import { ownModuleGrants } from "@/lib/people-access/data";
-import { EMPTY_PLAN, normalisePlan, planSchema, type AccessSnapshot, type OnboardingPlan } from "@/lib/hr/onboarding";
+import { EMPTY_PLAN, HR_ADMIN_ASSIGNABLE_ROLES, normalisePlan, planSchema, type AccessSnapshot, type OnboardingPlan } from "@/lib/hr/onboarding";
 import type { ActionState } from "./companies";
 
 /**
- * The guided onboarding's three actions. None of them widens anyone's authority: saving a plan is what an HR Admin of the company (or an unrestricted System Administrator) may already do to the employee's record;
- * the invitation is the System Administrator's existing Admin-API call; roles go through the same user_roles insert a System Administrator already makes (the database policy decides); module rights go through each
- * module's own grant function (founders and access managers only; the function decides). The company, the account and the employee always come from the database, never from the browser.
+ * The guided onboarding's three actions. Saving a plan is what an HR Admin of the company (or an unrestricted System Administrator) may already do to the employee's record. THE INVITATION is the Admin-API call a System
+ * Administrator has always made; an HR Admin of the EMPLOYEE'S OWN company may now send it too, for that employee and the planned address only (checked here from the database row, never from the browser; the invited login
+ * holds no role until one is given). ROLES go through the user_roles insert and the database policy decides: an unrestricted System Administrator may give any role; an HR Admin of the employee's company may give only Employee
+ * and Reporting Manager (user_roles_insert_hr_admin_employee: that company, a login linked to one of its active employees). Privileged roles (HR Admin, Finance, CEO, CTO, System Administrator) stay with an unrestricted System
+ * Administrator. Module rights go through each module's own grant function (founders and access managers only; the function decides). The company, the account and the employee always come from the database, never from the browser.
  * Retries are safe by construction: the plan is one row per employee; the invitation looks for an existing account first; every role and right is checked against what is already held and skipped when it is.
  */
 
@@ -83,7 +85,7 @@ export async function saveOnboardingPlan(_prev: OnboardingActionState, formData:
   return { error: null, notice: "Plan saved. Review it below, then apply what you are allowed to apply." };
 }
 
-/** Invite the planned address and link the account to THIS employee, reusing an account that already exists; a retry never sends a second invitation. */
+/** Invite the planned address and link the account to THIS employee, reusing an account that already exists; a retry never sends a second invitation. An HR Admin of the employee's company or a System Administrator may do it. */
 export async function inviteAndLinkEmployee(_prev: OnboardingActionState, formData: FormData): Promise<OnboardingActionState> {
   const ctx = await context(String(formData.get("employeeId") ?? ""));
   if (!ctx.ok) return { error: ctx.error };
@@ -97,7 +99,7 @@ export async function inviteAndLinkEmployee(_prev: OnboardingActionState, formDa
   let profile = await findAccount();
   let invited = false;
   if (!profile) {
-    if (!ctx.sysAdmin) return { error: `${email} has no account yet. Only a System Administrator can send the invitation. The address stays in the plan.` };
+    // context() already proved the viewer is an HR Admin of THIS employee's company or an unrestricted System Administrator, so the invitation is for this employee and the planned address only.
     const sent = await sendInvitation(email, `${ctx.employee.first_name} ${ctx.employee.last_name}`.trim());
     if (sent.error) return { error: `The invitation could not be sent: ${sent.error}` };
     invited = !sent.alreadyRegistered;
@@ -138,12 +140,19 @@ export async function applyOnboardingAccess(_prev: OnboardingActionState, formDa
     const key = `role:${r.role}:${r.companyId}`;
     const label = `${r.role.replace(/_/g, " ")} for ${name(r.companyId)}`;
     if (held.roles.some((x) => x.role === r.role && (x.companyId === r.companyId || x.companyId === null))) { results.push({ key, label, outcome: "already", message: "Already in place." }); continue; }
-    if (!ctx.sysAdmin) { results.push({ key, label, outcome: "blocked", message: "Only an unrestricted System Administrator can assign HR roles." }); continue; }
+    // Who may give this role: an unrestricted System Administrator any role; an HR Admin of the employee's own company only Employee and Reporting Manager, only for that company (the database policy says the same).
+    const delegable = (HR_ADMIN_ASSIGNABLE_ROLES as readonly string[]).includes(r.role) && r.companyId === ctx.employee.company_id && ctx.hrHere;
+    if (!ctx.sysAdmin && !delegable) {
+      results.push({ key, label, outcome: "blocked", message: (HR_ADMIN_ASSIGNABLE_ROLES as readonly string[]).includes(r.role) ? `An HR Admin can give this role only for the employee's own company (${name(ctx.employee.company_id)}).` : "Only an unrestricted System Administrator can give this role." });
+      continue;
+    }
     // Re-check just before writing: the unique key treats a missing country as different, so a double apply would otherwise add a second identical row.
     const { data: now } = await ctx.supabase.from("user_roles").select("id").eq("user_id", userId).eq("role", r.role).eq("company_id", r.companyId).is("revoked_at", null).limit(1);
     if (now && now.length > 0) { results.push({ key, label, outcome: "already", message: "Already in place." }); continue; }
-    const { error } = await ctx.supabase.from("user_roles").insert({ user_id: userId, role: r.role, company_id: r.companyId });
-    results.push(error ? { key, label, outcome: "failed", message: /row-level security/.test(error.message) ? "The database refused: assigning HR roles needs an unrestricted System Administrator grant." : "It could not be applied. Try again." } : { key, label, outcome: "applied", message: "Applied." });
+    const { error } = await ctx.supabase.from("user_roles").insert({ user_id: userId, role: r.role, company_id: r.companyId, granted_by: ctx.session.userId });
+    results.push(error
+      ? { key, label, outcome: "failed", message: /row-level security/.test(error.message) ? "The database refused this role for you: an HR Admin may give Employee or Reporting Manager for the employee's own company; other roles need an unrestricted System Administrator." : error.code === "23505" ? "This role was given before and then removed, so it cannot be given again from here. A System Administrator can restore it in People & Access." : "It could not be applied. Try again." }
+      : { key, label, outcome: "applied", message: "Applied." });
   }
 
   const own = await ownModuleGrants(ctx.supabase, ctx.session.userId);

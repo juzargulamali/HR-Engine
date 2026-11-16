@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 
 const initialState: OnboardingActionState = { error: null };
 
-/** One button for the invitation step: it links an account that already exists, or (System Administrator) sends the invitation and links the new account. A repeat never sends a second invitation. */
+/** One button for the invitation step: it links an account that already exists, or (an HR Admin of the company, or a System Administrator) sends the invitation and links the new account. A repeat never sends a second invitation. */
 export function InviteForm({ employeeId, label }: { employeeId: string; label: string }) {
   const [state, formAction, pending] = useActionState(inviteAndLinkEmployee, initialState);
   return (

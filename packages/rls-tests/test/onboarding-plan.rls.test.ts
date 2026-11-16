@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
@@ -70,11 +72,12 @@ describe("Onboarding plan and snapshot", () => {
     // 1. HR Admin of A prepares the plan (address, role, module right): it grants nothing
     expect(await attempt(U.hrA, `update employee_onboarding_plans set hr_roles = '[{"role":"line_manager","companyId":"${A}"}]'::jsonb, module_grants = '[{"module":"sales","companyId":"${A}","capabilities":["assign_owner"]}]'::jsonb, updated_by = '${U.hrA}', reviewed_at = null where employee_id = '${E.newbie}'`)).toBe("ok");
     expect((await snapshot(U.hrA)).roles).toEqual([]);
-    // 2. the HR Admin cannot assign the role; a company-limited System Administrator cannot either; an unrestricted one can
-    const roleInsert = (user: string) => attempt(user, `insert into user_roles (user_id, role, company_id) values ('${U.newbie}', 'line_manager', '${A}')`);
-    expect(await roleInsert(U.hrA)).toMatch(/row-level security/);
+    // 2. the HR Admin of A gives Reporting Manager for A (the person works for A); a privileged role is refused to them; a System Administrator limited to one company who is not HR Admin of A is refused too
+    const roleInsert = (user: string, role = "line_manager") => attempt(user, `insert into user_roles (user_id, role, company_id) values ('${U.newbie}', '${role}', '${A}')`);
     expect(await roleInsert(U.scopedSys)).toMatch(/row-level security/);
-    expect(await roleInsert(U.sys)).toBe("ok");
+    expect(await roleInsert(U.hrA, "finance")).toMatch(/row-level security/);
+    expect(await roleInsert(U.hrB)).toMatch(/row-level security/);            // HR Admin of another company
+    expect(await roleInsert(U.hrA)).toBe("ok");
     expect((await snapshot(U.hrA)).roles).toEqual([{ role: "line_manager", companyId: A }]);
     // 3. the Sales right: HR Admin and System Administrator cannot; the Sales access manager of A can; the snapshot shows it
     expect(await attempt(U.hrA, `select crm_grant_access('${U.newbie}', '${A}', '{assign_owner}', 'onboarding')`)).toMatch(/Only a founder, or someone a founder gave access management to/);
@@ -92,5 +95,28 @@ describe("Onboarding plan and snapshot", () => {
     // nothing in any of this created a second employee row or changed a number
     const employeesAfter = (await admin(`select count(*) n, string_agg(employee_number, ',' order by employee_number) numbers from employees`))[0]!;
     expect(employeesAfter).toEqual(employeesBefore);
+  });
+
+  it("THE OWNER'S PACKS: verify says OK for every row (including the HR Admin role policy); rollback STOPS while a plan exists, then removes the table, the function AND only the HR Admin's new role right (roles already given stay), and is safe to run twice", async () => {
+    const pack = (name: string) => readFileSync(resolve(__dirname, `../../../supabase/manual-sql/${name}`), "utf8");
+    // the harness re-grants blanket privileges after the migrations (as Supabase's defaults would for a new table); the migration's own revokes are what a real install keeps, so put them back for the privilege rows
+    await admin(`revoke all on employee_onboarding_plans from anon; revoke delete, truncate on employee_onboarding_plans from authenticated`);
+    const verify = await admin(pack("people_hr_onboarding_20_verify_readonly.sql"));
+    expect(verify).toHaveLength(5);
+    expect(verify.every((r) => r.result === "OK"), JSON.stringify(verify)).toBe(true);
+    // a plan exists (from the walk-through): the rollback refuses and changes nothing
+    await expect(admin(pack("people_hr_onboarding_90_rollback.sql"))).rejects.toThrow(/STOP: onboarding plans exist/);
+    expect((await admin(`select count(*) n from pg_policies where policyname = 'user_roles_insert_hr_admin_employee'`))[0]!.n).toBe("1");
+    const rolesBefore = Number((await admin(`select count(*) n from user_roles where revoked_at is null`))[0]!.n);
+    await admin(`delete from employee_onboarding_plans`);
+    await admin(pack("people_hr_onboarding_90_rollback.sql"));
+    await admin(pack("people_hr_onboarding_90_rollback.sql"));                       // twice
+    expect((await admin(`select to_regclass('public.employee_onboarding_plans') t, to_regprocedure('public.onboarding_access_snapshot(uuid)') f`))[0]).toEqual({ t: null, f: null });
+    expect((await admin(`select count(*) n from pg_policies where policyname = 'user_roles_insert_hr_admin_employee'`))[0]!.n).toBe("0");
+    expect((await admin(`select count(*) n from pg_policies where policyname = 'user_roles_insert_sysadmin'`))[0]!.n).toBe("1");   // the System Administrator's own right is untouched
+    expect(Number((await admin(`select count(*) n from user_roles where revoked_at is null`))[0]!.n)).toBe(rolesBefore);          // nothing was revoked
+    // with the policy gone an HR Admin can no longer give the role; an unrestricted System Administrator still can
+    expect(await attempt(U.hrA, `insert into user_roles (user_id, role, company_id) values ('${U.newbie}', 'employee', '${A}')`)).toMatch(/row-level security/);
+    expect(await attempt(U.sys, `insert into user_roles (user_id, role, company_id) values ('${U.newbie}', 'employee', '${A}')`)).toBe("ok");
   });
 });

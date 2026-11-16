@@ -44,22 +44,24 @@ const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(a
 beforeEach(() => { loaded = undefined; });
 
 describe("Onboarding page", () => {
-  it("an HR Admin: sees what is done, what is blocked, who can finish it and the next action; the review lists the exact companies, roles and rights, none applicable by them", async () => {
+  it("an HR Admin of the employee's company: can apply the Reporting Manager role themselves, sees the privileged role as someone else's (who), and the Sales right as a pending grant with who can apply it; the review lists the exact companies, roles and rights", async () => {
     loaded = make([g("hr_admin", CO)], []);
     const html = await render();
     expect(html).toContain("Onboarding: Riya Rigger");
     expect(html).toContain("Enginious UAE");
     expect(html).toContain('data-testid="onboarding-steps"');
-    expect(html).toMatch(/data-testid="onboarding-step-roles"[^>]*data-status="blocked"/);
+    expect(html).toMatch(/data-testid="onboarding-step-roles"[^>]*data-status="ready"/);
     expect(html).toMatch(/data-testid="onboarding-step-modules"[^>]*data-status="blocked"/);
-    expect(html).toContain("Who can finish it: A System Administrator");
-    expect(html).toContain("A Sales &amp; CRM founder or access manager for Enginious UAE");
+    expect(html).toContain("A Sales &amp; CRM founder or access manager for Enginious UAE");       // the exact grant pending and who can apply it
+    expect(html).toContain("the rest need: A System Administrator");                               // the privileged role and the other company's role
     // the exact list, before anything is applied
     expect(html).toContain("Reporting Manager for Enginious UAE");
+    expect(html).toContain("Needs: A System Administrator");
     expect(html).toContain("HR Admin for Enginious Europe");
     expect(html).toContain("wide access");
     expect(html).toContain("assign owner");
-    expect(html).toContain("Nothing in the list can be applied by you yet");
+    expect(html).toContain("You can apply this.");
+    expect(html).not.toContain("Nothing in the list can be applied by you yet");
     expect(html).toContain("Apply what I can");
   });
   it("an unrestricted System Administrator can apply the roles but not the Sales right; the list says so line by line", async () => {
@@ -70,20 +72,26 @@ describe("Onboarding page", () => {
     expect(html).toMatch(/data-testid="onboarding-step-modules"[^>]*data-status="blocked"/);
     expect(html).not.toContain("Nothing in the list can be applied by you yet");
   });
-  it("a Sales access manager of that company can apply the Sales right; the roles are someone else's", async () => {
+  it("a Sales access manager of that company can apply the Sales right too: then the review has nothing left that is only someone else's except the privileged role", async () => {
     const mods: ModuleGrantRef[] = [{ module: "sales", companyId: CO, capabilities: ["manage_access"] }];
     loaded = make([g("hr_admin", CO)], mods);
     const html = await render();
     expect(html).toMatch(/data-testid="onboarding-step-modules"[^>]*data-status="ready"/);
-    expect(html).toMatch(/data-testid="onboarding-step-roles"[^>]*data-status="blocked"/);
+    expect(html).toMatch(/data-testid="onboarding-step-roles"[^>]*data-status="ready"/);
   });
-  it("before the account exists the invitation is the next step, and the roles and rights wait for it", async () => {
+  it("before the account exists the HR Admin can send the invitation (Invite and link), and the roles and rights wait for it", async () => {
     loaded = make([g("hr_admin", CO)], [], { linked: false });
     const html = await render();
-    expect(html).toMatch(/data-testid="onboarding-step-account"[^>]*data-status="blocked"/);
+    expect(html).toMatch(/data-testid="onboarding-step-account"[^>]*data-status="ready"/);
+    expect(html).toContain("Invite and link");
     expect(html).toMatch(/data-testid="onboarding-step-roles"[^>]*data-status="waiting"/);
     expect(html).toMatch(/data-testid="onboarding-step-modules"[^>]*data-status="waiting"/);
-    expect(html).toContain("Only a System Administrator can send the invitation");
+  });
+  it("someone who is neither an HR Admin of the company nor an unrestricted System Administrator is told who can send the invitation, and the address stays in the plan", async () => {
+    loaded = make([g("sys_admin", CO)], [], { linked: false });
+    const html = await render();
+    expect(html).toMatch(/data-testid="onboarding-step-account"[^>]*data-status="blocked"/);
+    expect(html).toContain("Only an HR Admin of this company or a System Administrator can send the invitation");
   });
   it("the created notice appears once after Add employee; a failed read is named, not hidden", async () => {
     loaded = { ...make([g("hr_admin", CO)], []), failed: ["the account and access now on record"] };

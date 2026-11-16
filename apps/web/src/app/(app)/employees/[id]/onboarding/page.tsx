@@ -47,7 +47,7 @@ export default async function OnboardingPage({ params, searchParams }: { params:
           <InfoHint label="How onboarding works" testId="info-hint-onboarding">
             <p>One flow for one person: the employee, the company and the account stay the same in every step. Add employee, complete the profile, invite, HR roles, module access, then a review.</p>
             <p className="mt-2">What is done comes from the real records, so you can leave and come back, on any device, and nothing is applied twice. The plan only records what is intended: each line is applied by the person who is allowed to apply it.</p>
-            <p className="mt-2">Inviting a login and assigning HR roles belong to a System Administrator. Module access belongs to each module&apos;s founder or access manager. HR Admins add the employee, complete the profile and prepare the plan.</p>
+            <p className="mt-2">An HR Admin of the employee&apos;s company can invite the login and give the Employee and Reporting Manager roles. Giving HR Admin, Finance, CEO, CTO or System Administrator stays with a System Administrator. Module access belongs to each module&apos;s founder or access manager.</p>
           </InfoHint>
         </div>
         <p className="text-muted-foreground">{employee.companyName} · employee number {employee.employeeNumber}{employee.jobTitle ? ` · ${employee.jobTitle}` : ""}</p>

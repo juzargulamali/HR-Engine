@@ -88,7 +88,7 @@ export async function loadOnboarding(employeeId: string): Promise<OnboardingLoad
         canSeeContracts: canViewContracts(session.grants, e.company_id, { isSelf: false, isManager: false }),
         canSeeComp: canViewCompensation(session.grants, e.company_id, false),
         canSeeIdentity: true, canSeeDocuments: true, canSeeCareerEvents: true,
-        canInvite: canManageUsers(session.grants), canOpenAccess: true,
+        canInvite: true, canOpenAccess: true,
       }, { managerNotExpected: true })).steps
     : null;
 

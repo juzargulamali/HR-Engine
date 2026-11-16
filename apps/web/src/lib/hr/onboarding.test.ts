@@ -34,22 +34,27 @@ describe("plan", () => {
 });
 
 describe("onboarding steps: what is done, what is blocked, who can finish it, the next action", () => {
-  it("a new employee with an HR Admin viewer: the employee step is done, the profile is next, and the invitation needs a System Administrator", () => {
+  it("a new employee with an HR Admin viewer: the employee step is done, the profile is next, and the HR Admin can send the invitation", () => {
     const m = buildOnboarding(base({ setup: [{ key: "contract", label: "Contract", status: "todo", detail: "", href: "/x", actionLabel: "Add contract" }] }));
     expect(step(m, "employee").status).toBe("done");
     expect(step(m, "profile")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Add contract" });
-    expect(step(m, "account")).toMatchObject({ status: "blocked", viewerCan: false });
-    expect(step(m, "account").who).toMatch(/System Administrator/);
+    expect(step(m, "account")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Invite and link" });
+    expect(step(m, "account").who).toMatch(/HR Admin of the employee's company/);
     expect(m.next?.key).toBe("profile");
   });
-  it("an unrestricted System Administrator can invite; one whose grant is limited to a company cannot, and the screen says why", () => {
+  it("who can invite: an HR Admin of the employee's own company (alone, or with a company-limited System Administrator or Finance grant, as Saeed holds), or an unrestricted System Administrator; nobody else, and the screen says who", () => {
+    const FIN_A = g("finance", CO_A);
+    expect(step(buildOnboarding(base({ viewer: { grants: HR_A, moduleGrants: noMods } })), "account")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Invite and link" });
+    expect(step(buildOnboarding(base({ viewer: { grants: [...SYS_SCOPED, FIN_A], moduleGrants: noMods } })), "account")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Invite and link" });   // Saeed's set
     expect(step(buildOnboarding(base({ viewer: { grants: SYS_GLOBAL, moduleGrants: noMods } })), "account")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Invite and link" });
-    // a System Administrator who is not an HR Admin of the company sends the invitation; an HR Admin of the company links the account
+    // an unrestricted System Administrator who is not an HR Admin of the company sends the invitation; an HR Admin of the company links the account
     expect(step(buildOnboarding(base({ viewer: { grants: [g("sys_admin")], moduleGrants: noMods } })), "account")).toMatchObject({ status: "ready", viewerCan: true, nextAction: "Send the invitation" });
     expect(step(buildOnboarding(base({ accountExistsForEmail: true, viewer: { grants: [g("sys_admin")], moduleGrants: noMods } })), "account")).toMatchObject({ status: "blocked", viewerCan: false });
-    const scoped = step(buildOnboarding(base({ viewer: { grants: SYS_SCOPED, moduleGrants: noMods } })), "account");
-    expect(scoped).toMatchObject({ status: "blocked", viewerCan: false });
-    expect(scoped.who).toMatch(/limited to one company is not enough/);
+    // a System Administrator limited to one company who is NOT an HR Admin of it, and an HR Admin of ANOTHER company, cannot
+    const scopedOnly = step(buildOnboarding(base({ viewer: { grants: [g("sys_admin", CO_A)], moduleGrants: noMods } })), "account");
+    expect(scopedOnly).toMatchObject({ status: "blocked", viewerCan: false });
+    expect(scopedOnly.who).toMatch(/HR Admin of the employee's company, or a System Administrator/);
+    expect(step(buildOnboarding(base({ viewer: { grants: [g("hr_admin", CO_B)], moduleGrants: noMods } })), "account")).toMatchObject({ status: "blocked", viewerCan: false });
   });
   it("an account that already exists for the address is linked without a second invitation, by an HR Admin", () => {
     const s = step(buildOnboarding(base({ accountExistsForEmail: true })), "account");
@@ -63,19 +68,35 @@ describe("onboarding steps: what is done, what is blocked, who can finish it, th
     expect(step(buildOnboarding(base({ employee: linked, snapshot: snap({ account: { status: "active", active: true, email: null } }) })), "account").status).toBe("done");
     expect(step(buildOnboarding(base({ employee: linked, snapshot: snap({ account: { status: "deactivated", active: false, email: null } }) })), "account")).toMatchObject({ status: "blocked" });
   });
-  it("roles: waiting for the account; then blocked for an HR Admin (only a System Administrator assigns), ready for an unrestricted System Administrator; applied roles are done on a retry", () => {
+  it("roles: waiting for the account; then ready for an HR Admin of the company (Employee and Reporting Manager, that company only); privileged roles and other companies need an unrestricted System Administrator; applied roles are done on a retry", () => {
     const linked = { linkedUserId: "u1", fullName: "Riya Rigger", id: "e1", companyId: CO_A, removed: false, terminated: false };
-    const withRole = plan({ hrRoles: [{ role: "line_manager", companyId: CO_A }] });
-    expect(step(buildOnboarding(base({ plan: withRole })), "roles").status).toBe("waiting");
-    const hr = buildOnboarding(base({ employee: linked, plan: withRole, snapshot: snap() }));
-    expect(step(hr, "roles")).toMatchObject({ status: "blocked", viewerCan: false });
-    expect(hr.canApplyAny).toBe(false);
-    const sys = buildOnboarding(base({ employee: linked, plan: withRole, snapshot: snap(), viewer: { grants: SYS_GLOBAL, moduleGrants: noMods } }));
+    const both = plan({ hrRoles: [{ role: "employee", companyId: CO_A }, { role: "line_manager", companyId: CO_A }] });
+    expect(step(buildOnboarding(base({ plan: both })), "roles").status).toBe("waiting");
+    // HR Admin of A (also Saeed's set): both roles are theirs to apply
+    for (const grants of [HR_A, SYS_SCOPED, [...SYS_SCOPED, g("finance", CO_A)]]) {
+      const hr = buildOnboarding(base({ employee: linked, plan: both, snapshot: snap(), viewer: { grants, moduleGrants: noMods } }));
+      expect(step(hr, "roles")).toMatchObject({ status: "ready", viewerCan: true });
+      expect(hr.roles.every((r) => r.canApply)).toBe(true);
+      expect(hr.roles[0]!.who).toMatch(/An HR Admin of Enginious UAE/);
+      expect(hr.canApplyAny).toBe(true);
+    }
+    // a privileged role, and a role for another company, are an unrestricted System Administrator's: shown with who can apply them
+    const privileged = plan({ hrRoles: [{ role: "hr_admin", companyId: CO_A }, { role: "finance", companyId: CO_A }, { role: "line_manager", companyId: CO_B }] });
+    const hrOnly = buildOnboarding(base({ employee: linked, plan: privileged, snapshot: snap() }));
+    expect(hrOnly.roles.map((r) => r.canApply)).toEqual([false, false, false]);
+    expect(step(hrOnly, "roles")).toMatchObject({ status: "blocked", viewerCan: false });
+    expect(step(hrOnly, "roles").who).toMatch(/System Administrator/);
+    expect(hrOnly.canApplyAny).toBe(false);
+    const mixed = buildOnboarding(base({ employee: linked, plan: plan({ hrRoles: [{ role: "line_manager", companyId: CO_A }, { role: "finance", companyId: CO_A }] }), snapshot: snap() }));
+    expect(step(mixed, "roles")).toMatchObject({ status: "ready", viewerCan: true });
+    expect(step(mixed, "roles").detail).toMatch(/1 of 2 waiting roles you can apply; the rest need: A System Administrator/);
+    const sys = buildOnboarding(base({ employee: linked, plan: privileged, snapshot: snap(), viewer: { grants: SYS_GLOBAL, moduleGrants: noMods } }));
+    expect(sys.roles.every((r) => r.canApply)).toBe(true);
     expect(step(sys, "roles")).toMatchObject({ status: "ready", viewerCan: true });
-    expect(sys.canApplyAny).toBe(true);
-    const again = buildOnboarding(base({ employee: linked, plan: withRole, snapshot: snap({ roles: [{ role: "line_manager", companyId: CO_A }] }), viewer: { grants: SYS_GLOBAL, moduleGrants: noMods } }));
+    // a retry: what is held is done
+    const again = buildOnboarding(base({ employee: linked, plan: both, snapshot: snap({ roles: [{ role: "employee", companyId: CO_A }, { role: "line_manager", companyId: CO_A }] }) }));
     expect(step(again, "roles").status).toBe("done");
-    expect(again.roles[0]!.applied).toBe(true);
+    expect(again.roles.every((r) => r.applied)).toBe(true);
   });
   it("a privileged role is flagged in the review so it is read twice", () => {
     const m = buildOnboarding(base({ plan: plan({ hrRoles: [{ role: "hr_admin", companyId: CO_A }, { role: "employee", companyId: CO_A }] }) }));

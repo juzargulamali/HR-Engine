@@ -9,7 +9,7 @@ import { remainingSteps, type SetupStep } from "./setup";
  * One guided, resumable onboarding: Add employee -> complete profile -> invite -> HR roles -> module access -> review. The SAME employee, company and account run through every step.
  * Nothing about "what is done" is stored: it is derived from the real records (the employee, the linked login, user_roles, the module grants) so a retry, another device or another person sees the same
  * answer and nothing is applied twice. What IS stored is the PLAN (employee_onboarding_plans): the invitation address, the HR roles and the module rights somebody intends, so whoever can finish the next step sees
- * exactly what to apply. A plan grants nothing: each item is applied by a person who is allowed to, through the existing route (a System Administrator's role assignment; each module's own grant function).
+ * exactly what to apply. A plan grants nothing: each item is applied by a person who is allowed to, through the existing route (an HR Admin of the employee's company for the Employee and Reporting Manager roles; an unrestricted System Administrator for any other role; each module's own grant function).
  *
  * Pure functions: the loader passes in what the viewer may read; the screen renders the result.
  */
@@ -19,6 +19,8 @@ export type OnboardingStepKey = "employee" | "profile" | "account" | "roles" | "
 export type OnboardingStatus = "done" | "ready" | "blocked" | "waiting" | "optional";
 
 export const PRIVILEGED_ROLES: readonly AppRole[] = ["hr_admin", "finance", "ceo", "cto", "sys_admin"];
+/** The only roles an HR Admin of a company may give, and only for that company, to the login linked to one of its employees (the database policy user_roles_insert_hr_admin_employee says the same). Every other role is privileged. */
+export const HR_ADMIN_ASSIGNABLE_ROLES: readonly AppRole[] = ["employee", "line_manager"];
 
 const uuid = z.string().uuid();
 export const planSchema = z.object({
@@ -98,6 +100,8 @@ export interface OnboardingModel {
 }
 
 const SYS = "A System Administrator (an unrestricted one: a System Administrator grant limited to one company is not enough)";
+const hrWho = (company: string) => `An HR Admin of ${company}`;
+const INVITE_WHO = "An HR Admin of the employee's company, or a System Administrator";
 
 const moduleWho = (module: AccessModule, company: string) => `A ${ACCESS_MODULE_LABELS[module]} founder or access manager for ${company}`;
 
@@ -109,12 +113,15 @@ export function buildOnboarding(i: OnboardingInput): OnboardingModel {
   const hasUser = !!i.employee.linkedUserId;
   const inactive = i.employee.removed || i.employee.terminated;
 
-  // ---- HR roles (applied through a System Administrator's role assignment) --------------------------------------------------------------------------------
+  // ---- HR roles: Employee and Reporting Manager by an HR Admin of the employee's own company; every other role by an unrestricted System Administrator -----------------
   const heldRole = (role: AppRole, companyId: string) => !!i.snapshot?.roles.some((r) => r.role === role && (r.companyId === companyId || r.companyId === null));
-  const roles: RoleItemState[] = plan.hrRoles.map((r) => ({
-    key: `${r.role}:${r.companyId}`, role: r.role, companyId: r.companyId, companyName: companyName(r.companyId), label: `${ROLE_LABELS[r.role]} for ${companyName(r.companyId)}`,
-    applied: heldRole(r.role, r.companyId), privileged: PRIVILEGED_ROLES.includes(r.role), canApply: sysAdmin, who: SYS,
-  }));
+  const roles: RoleItemState[] = plan.hrRoles.map((r) => {
+    const delegable = HR_ADMIN_ASSIGNABLE_ROLES.includes(r.role) && r.companyId === i.employee.companyId;
+    return {
+      key: `${r.role}:${r.companyId}`, role: r.role, companyId: r.companyId, companyName: companyName(r.companyId), label: `${ROLE_LABELS[r.role]} for ${companyName(r.companyId)}`,
+      applied: heldRole(r.role, r.companyId), privileged: PRIVILEGED_ROLES.includes(r.role), canApply: sysAdmin || (delegable && hrHere), who: delegable ? hrWho(companyName(r.companyId)) : SYS,
+    };
+  });
 
   // ---- Module rights (applied through each module's own grant function; founders and access managers only) -------------------------------------------------------
   const modules: ModuleItemState[] = plan.modules.map((m) => {
@@ -151,26 +158,29 @@ export function buildOnboarding(i: OnboardingInput): OnboardingModel {
   } else if (hasUser && accountStatus === "deactivated") {
     steps.push({ key: "account", label: "Invite", status: "blocked", detail: "The linked account is deactivated, so the person cannot sign in. Reactivating it is a System Administrator's decision.", who: SYS, viewerCan: sysAdmin, nextAction: "Reactivate in People & Access" });
   } else if (hasUser) {
-    steps.push({ key: "account", label: "Invite", status: "done", detail: accountStatus === "invited" ? "Invited and linked. They have not set a password yet." : "A login is linked, so this person sees their own profile, leave and approvals.", who: SYS, viewerCan: sysAdmin, nextAction: null });
+    steps.push({ key: "account", label: "Invite", status: "done", detail: accountStatus === "invited" ? "Invited and linked. They have not set a password yet." : "A login is linked, so this person sees their own profile, leave and approvals.", who: INVITE_WHO, viewerCan: hrHere || sysAdmin, nextAction: null });
   } else if (!email) {
-    steps.push({ key: "account", label: "Invite", status: "waiting", detail: "Enter the work email address in the plan. The same address is used to find an existing account or to send the invitation.", who: "HR Admin of the company", viewerCan: hrHere || sysAdmin, nextAction: "Add the email address" });
+    steps.push({ key: "account", label: "Invite", status: "waiting", detail: "Enter the work email address in the plan. The same address is used to find an existing account or to send the invitation.", who: INVITE_WHO, viewerCan: hrHere || sysAdmin, nextAction: "Add the email address" });
   } else if (i.accountExistsForEmail) {
     steps.push({ key: "account", label: "Invite", status: hrHere ? "ready" : "blocked", detail: `${email} already has an account: it is linked to this employee, and no second invitation is sent.${hrHere ? "" : " Linking is done by an HR Admin of this company."}`, who: "HR Admin of the company", viewerCan: hrHere, nextAction: "Link the account" });
-  } else if (sysAdmin) {
-    steps.push({ key: "account", label: "Invite", status: "ready", detail: `Send the invitation to ${email}${hrHere ? " and link the new account to this employee" : "; an HR Admin of this company then links the new account"}.`, who: SYS, viewerCan: true, nextAction: hrHere ? "Invite and link" : "Send the invitation" });
+  } else if (hrHere || sysAdmin) {
+    steps.push({ key: "account", label: "Invite", status: "ready", detail: `Send the invitation to ${email}${hrHere ? " and link the new account to this employee" : "; an HR Admin of this company then links the new account"}.`, who: INVITE_WHO, viewerCan: true, nextAction: hrHere ? "Invite and link" : "Send the invitation" });
   } else {
-    steps.push({ key: "account", label: "Invite", status: "blocked", detail: `${email} has no account yet. Only a System Administrator can send the invitation; the address stays in the plan so nothing has to be retyped.`, who: SYS, viewerCan: false, nextAction: null });
+    steps.push({ key: "account", label: "Invite", status: "blocked", detail: `${email} has no account yet. Only an HR Admin of this company or a System Administrator can send the invitation; the address stays in the plan so nothing has to be retyped.`, who: INVITE_WHO, viewerCan: false, nextAction: null });
   }
   const accountDone = steps[steps.length - 1]!.status === "done";
 
   const rolesStep = (): OnboardingStep => {
-    if (roles.length === 0) return { key: "roles", label: "HR roles", status: "optional", detail: "No HR role chosen yet. Choose the roles this person needs (for example Employee or Reporting Manager).", who: SYS, viewerCan: hrHere || sysAdmin, nextAction: "Choose HR roles" };
+    const rolesWho = (items: readonly RoleItemState[]) => [...new Set(items.map((r) => r.who))].join("; ") || "-";
+    if (roles.length === 0) return { key: "roles", label: "HR roles", status: "optional", detail: "No HR role chosen yet. Choose the roles this person needs (for example Employee or Reporting Manager).", who: INVITE_WHO, viewerCan: hrHere || sysAdmin, nextAction: "Choose HR roles" };
     const pending = roles.filter((r) => !r.applied);
-    if (pending.length === 0) return { key: "roles", label: "HR roles", status: "done", detail: `${roles.length === 1 ? "The chosen role is" : `All ${roles.length} chosen roles are`} in place.`, who: SYS, viewerCan: sysAdmin, nextAction: null };
-    if (!accountDone) return { key: "roles", label: "HR roles", status: "waiting", detail: `${pending.length === 1 ? "1 role" : `${pending.length} roles`} chosen; they can be applied once the account is linked.`, who: SYS, viewerCan: sysAdmin, nextAction: null };
-    return sysAdmin
-      ? { key: "roles", label: "HR roles", status: "ready", detail: `${pending.length === 1 ? "1 role is" : `${pending.length} roles are`} waiting to be applied.`, who: SYS, viewerCan: true, nextAction: "Review and apply" }
-      : { key: "roles", label: "HR roles", status: "blocked", detail: `${pending.length === 1 ? "1 role is" : `${pending.length} roles are`} waiting for a System Administrator. Assigning HR roles is not something an HR Admin can do.`, who: SYS, viewerCan: false, nextAction: null };
+    if (pending.length === 0) return { key: "roles", label: "HR roles", status: "done", detail: `${roles.length === 1 ? "The chosen role is" : `All ${roles.length} chosen roles are`} in place.`, who: rolesWho(roles), viewerCan: roles.some((r) => r.canApply), nextAction: null };
+    if (!accountDone) return { key: "roles", label: "HR roles", status: "waiting", detail: `${pending.length === 1 ? "1 role" : `${pending.length} roles`} chosen; they can be applied once the account is linked.`, who: rolesWho(pending), viewerCan: pending.some((r) => r.canApply), nextAction: null };
+    const mine = pending.filter((r) => r.canApply);
+    const others = pending.filter((r) => !r.canApply);
+    return mine.length > 0
+      ? { key: "roles", label: "HR roles", status: "ready", detail: `${mine.length} of ${pending.length} waiting role${pending.length === 1 ? "" : "s"} you can apply${others.length ? `; the rest need: ${rolesWho(others)}` : ""}.`, who: others.length ? rolesWho(others) : "You", viewerCan: true, nextAction: "Review and apply" }
+      : { key: "roles", label: "HR roles", status: "blocked", detail: `${pending.length === 1 ? "1 role is" : `${pending.length} roles are`} waiting. ${rolesWho(pending)} must apply ${pending.length === 1 ? "it" : "them"}: only a System Administrator can give HR Admin, Finance, CEO, CTO or System Administrator, and only an HR Admin of the employee's own company can give Employee or Reporting Manager.`, who: rolesWho(pending), viewerCan: false, nextAction: null };
   };
   steps.push(rolesStep());
 

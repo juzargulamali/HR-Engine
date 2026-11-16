@@ -110,7 +110,7 @@ export async function loadProfileSetup(
           openingBalances: openingLeaveN === null || openingCompN === null ? null : openingLeaveN + openingCompN,
         },
         linkedUserId: employee.user_id,
-        viewerCanInvite: viewer.canInvite,
+        viewerCanInvite: viewer.canInvite || viewer.canEditCore,   // an HR Admin of the employee's company can send the invitation from onboarding
         viewerCanOpenAccess: viewer.canOpenAccess,
       })
     : [];

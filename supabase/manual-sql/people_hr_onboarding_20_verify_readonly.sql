@@ -17,4 +17,9 @@ select item, result from (
                    and has_function_privilege('authenticated', 'public.onboarding_access_snapshot(uuid)', 'execute')
                    and not has_function_privilege('anon', 'public.onboarding_access_snapshot(uuid)', 'execute')
               then 'OK' else 'FAIL - the function is missing or its privileges differ' end
+  union all select 5, 'the HR Admin role policy exists on user_roles, allows only the employee and line_manager roles for a company, and the System Administrator policy is still there',
+         case when exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_roles' and policyname = 'user_roles_insert_hr_admin_employee' and cmd = 'INSERT'
+                              and with_check like '%''employee''%' and with_check like '%''line_manager''%' and with_check not like '%''sys_admin''%' and with_check not like '%''finance''%' and with_check not like '%''ceo''%' and with_check not like '%''cto''%')
+                   and exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'user_roles' and policyname = 'user_roles_insert_sysadmin')
+              then 'OK' else 'FAIL - the HR Admin role policy is missing or wider than expected, or the System Administrator policy is gone' end
 ) x order by ord;

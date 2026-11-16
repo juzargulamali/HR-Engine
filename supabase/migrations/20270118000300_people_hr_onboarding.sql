@@ -1,10 +1,13 @@
 -- People & HR: guided onboarding (Add employee -> complete profile -> invite -> HR roles -> module access -> review), one resumable flow.
--- ADDITIVE: one new table, one read function, policies on the new table only. No existing table, policy, function or grant is changed, no existing row is rewritten, and NO ACCESS IS GRANTED by this file:
--- roles and module access are still given only through the existing routes (a System Administrator's user_roles insert; each module's own grant function with its founder / access-manager rules).
+-- ADDITIVE: one new table, one read function, policies on the new table, and ONE new insert policy on user_roles (below). No existing table, policy, function or grant is changed and no existing row is rewritten.
+-- The one new right (approved by the owner): an HR Admin of a company may give the roles EMPLOYEE and LINE_MANAGER, for THAT company only, to the login linked to an employee record of THAT company.
+-- Every other role (hr_admin, finance, ceo, cto, sys_admin) stays with an unscoped System Administrator, exactly as before (user_roles_insert_sysadmin is untouched). Module access is untouched: still each module's
+-- founder or access manager. Nothing else in this file grants anything; the plan table itself grants nothing.
 -- Install order: preflight (supabase/manual-sql/people_hr_onboarding_00_preflight_readonly.sql), this migration, verify (..._20_verify_readonly.sql), then deploy the app.
--- Rollback: ..._90_rollback.sql (it stops while any plan exists, because a plan is somebody's recorded intention).
+-- Rollback: ..._90_rollback.sql (it stops while any plan exists, because a plan is somebody's recorded intention; it also drops the new user_roles policy, which removes only the HR Admin's new right).
 --
--- WHY. Onboarding crosses four permission models: HR Admin adds the employee and completes the profile; only a System Administrator invites a login and assigns HR roles; module access belongs to each module's
+-- WHY. Onboarding crosses permission models: HR Admin adds the employee and completes the profile; an HR Admin of the company may now also invite a login (an application check) and give the Employee and Reporting Manager roles
+-- (the new policy below); privileged roles stay with an unscoped System Administrator; module access belongs to each module's
 -- founder or access manager. A person who can do the first part could not hand the rest over: they had to remember what to ask for. The PLAN records, against the employee, the invitation address, the HR roles and the
 -- module rights the HR Admin intends, so whoever can finish the next step sees the exact companies, roles and rights, and nothing has to be re-typed. A plan GRANTS NOTHING: each item is applied by the person who is
 -- allowed to apply it, through the existing route, and the screen derives what is done from the real records, not from the plan.
@@ -92,3 +95,28 @@ end;
 $$;
 revoke all on function onboarding_access_snapshot(uuid) from public, anon;
 grant execute on function onboarding_access_snapshot(uuid) to authenticated;
+
+-- -----------------------------------------------------------------------------------------------------------------------------------------------------------
+-- The one new right: an HR Admin of a company gives EMPLOYEE and LINE_MANAGER, for that company only, to the login linked to an active employee record of that company.
+-- Company scope is checked three ways inside the row: the role's company must be one the signer is HR Admin of (has_role('hr_admin', company), which also admits an unscoped HR Admin, as everywhere else); the employee
+-- record the login is linked to must be in that SAME company (so an HR Admin of A cannot give a role for A to someone who works for B, or any role to a person with no employee record); and the employee must be neither
+-- removed nor terminated. Only these two roles, only a company (never "all companies"), never a country scope, never an already-revoked row, and the grant is recorded against the signer. Privileged roles are not in the list.
+-- The existing policy user_roles_insert_sysadmin (unscoped System Administrator, any role) is not touched: policies are alternatives, so a System Administrator keeps everything they had.
+-- -----------------------------------------------------------------------------------------------------------------------------------------------------------
+drop policy if exists user_roles_insert_hr_admin_employee on user_roles;
+create policy user_roles_insert_hr_admin_employee on user_roles for insert
+  with check (
+    role in ('employee', 'line_manager')
+    and company_id is not null
+    and country_code is null
+    and revoked_at is null
+    and (granted_by is null or granted_by = auth.uid())
+    and has_role('hr_admin', company_id)
+    and exists (
+      select 1 from employees e
+      where e.user_id = user_roles.user_id
+        and e.company_id = user_roles.company_id
+        and e.deleted_at is null
+        and e.employment_status <> 'terminated'
+    )
+  );

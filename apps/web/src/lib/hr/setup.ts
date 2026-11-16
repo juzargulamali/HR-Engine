@@ -22,7 +22,7 @@ export interface SetupInput {
     openingBalances: number | null;
   };
   linkedUserId: string | null;
-  /** Whether the viewer may invite accounts (a System Administrator); an HR Admin can only link an account that already exists. */
+  /** Whether the viewer may invite accounts from onboarding: an HR Admin of the employee's company or a System Administrator. */
   viewerCanInvite: boolean;
   /** Whether the viewer can open People & Access for this person at all. */
   viewerCanOpenAccess: boolean;
@@ -80,7 +80,7 @@ export function computeSetup(i: SetupInput): SetupStep[] {
     ? { key: "account", label: "Account invitation", status: "done", detail: "A login is linked, so this person sees their own profile, leave and approvals.", href: i.viewerCanOpenAccess ? onboardingHref(i.employeeId) : null, actionLabel: i.viewerCanOpenAccess ? "Open onboarding" : null }
     : i.viewerCanInvite
       ? { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Onboarding invites them and links the account to this employee in one flow.", href: onboardingHref(i.employeeId), actionLabel: "Open onboarding" }
-      : { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Onboarding keeps the address and shows who can send the invitation (a System Administrator); once the account exists you link it there.", href: onboardingHref(i.employeeId), actionLabel: "Open onboarding" });
+      : { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Onboarding keeps the address and shows who can send the invitation (an HR Admin of the company or a System Administrator); once the account exists you link it there.", href: onboardingHref(i.employeeId), actionLabel: "Open onboarding" });
   return steps;
 }
 
