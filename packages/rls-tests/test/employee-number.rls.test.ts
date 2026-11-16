@@ -36,7 +36,7 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
     await db.seed(`insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date${cols}) values ('${empId}', ${number === null ? "null" : lit(number)}, '${company}', 'AE', 'Fictional', 'Person${++n}', '2024-01-01'${vals})`);
     return empId;
   };
-  const numberOf = async (empId: string) => (await admin<{ employee_number: string }>(`select employee_number from employees where id = '${empId}'`))[0]!.employee_number;
+  const numberOf = async (empId: string | undefined) => (await admin<{ employee_number: string }>(`select employee_number from employees where id = '${empId}'`))[0]!.employee_number;
   const auditSummary = async () => Object.fromEntries((await admin<Row>(manual("people_hr_employee_number_00_audit_readonly.sql"))).filter((r) => r.kind === "SUMMARY").map((r) => [r.group_key, r.number_as_recorded]));
   const state = async () => (await admin<Row>(`select to_regprocedure('public.employee_number_canonical(text)') is not null as fn, to_regclass('public.employee_number_seq') is not null as seq, to_regclass('public.employees_employee_number_canonical_unique') is not null as idx, to_regclass('public.employees_company_employee_number_unique') is not null as old`))[0];
   const ids: Record<string, string> = {};
