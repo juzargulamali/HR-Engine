@@ -430,6 +430,30 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["compensation_details"]["Insert"]>;
         Relationships: [];
       };
+      compensation_corrections: {
+        Row: {
+          id: string;
+          company_id: string;
+          employee_id: string;
+          compensation_id: string;
+          request_key: string;
+          previous_effective_from: string;
+          previous_base_salary: string;
+          previous_allowances: Record<string, unknown>;
+          new_effective_from: string;
+          new_base_salary: string;
+          new_allowances: Record<string, unknown>;
+          currency: string;
+          reason: string;
+          corrected_by: string;
+          corrected_at: string;
+          /** payroll_runs, final_settlement, pending_changes, in_force_today_before and in_force_today_after, as they were when the correction was saved. */
+          impact: Record<string, unknown>;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       employee_career_events: {
         Row: {
           id: string;
@@ -2148,6 +2172,7 @@ export interface Database {
       ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
       record_employment_change: { Args: { p_employee_id: string; p_effective_date: string; p_job_title: string | null; p_basic: number | null; p_other: number | null; p_note: string | null }; Returns: unknown };
       dismiss_employment_change: { Args: { p_event_id: string }; Returns: unknown };
+      correct_pay_record: { Args: { p_compensation_id: string; p_effective_from: string | null; p_basic: number | null; p_allowances: unknown; p_reason: string; p_request_key: string }; Returns: unknown };
       apply_due_employment_changes: { Args: { p_at?: string }; Returns: unknown };
       hr_business_today: { Args: { p_country_code: string }; Returns: string };
       ops_tv_board: { Args: { p_company_id: string }; Returns: unknown };

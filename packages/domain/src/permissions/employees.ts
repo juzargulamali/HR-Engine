@@ -20,6 +20,19 @@ export function canEditCompensation(grants: readonly RoleGrant[], companyId: str
   return isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
 }
 
+/**
+ * Mirrors correct_pay_record (supabase/migrations/20270118000200_people_hr_pay_correction.sql): correcting a mistaken pay record needs exactly the permission changing pay does
+ * (record_employment_change): HR Admin or Finance of the employee's company, nobody else, and no wider. The database decides again on save.
+ */
+export function canCorrectPayRecord(grants: readonly RoleGrant[], companyId: string): boolean {
+  return canEditCompensation(grants, companyId);
+}
+
+/** Who reads the corrections of pay records (compensation_corrections_select): HR Admin or Finance of the company. The employee reads their current pay, not the staff notes. */
+export function canViewPayCorrections(grants: readonly RoleGrant[], companyId: string): boolean {
+  return isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });
+}
+
 /** Mirrors career_events_select — same visibility tier as compensation. */
 export function canViewCareerEvents(grants: readonly RoleGrant[], companyId: string, isSelf: boolean): boolean {
   return isSelf || isHrAdmin(grants, { companyId }) || isFinance(grants, { companyId });

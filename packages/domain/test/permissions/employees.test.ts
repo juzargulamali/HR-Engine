@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  canCorrectPayRecord,
   canDeleteOrRestoreEmployee,
   canEditCompensation,
   canEditEmployeeCore,
@@ -15,6 +16,7 @@ import {
   canViewIdentityDocuments,
   canViewInsurance,
   canViewLoans,
+  canViewPayCorrections,
 } from "../../src/permissions/employees";
 import type { RoleGrant } from "../../src/types";
 
@@ -141,5 +143,35 @@ describe("soft delete permissions", () => {
     expect(canViewDeletedEmployees(hrAdminA, COMPANY_A)).toBe(true);
     expect(canViewDeletedEmployees(sysAdmin, COMPANY_A)).toBe(true);
     expect(canViewDeletedEmployees(financeA, COMPANY_A)).toBe(false);
+  });
+});
+
+describe("correcting a pay record", () => {
+  const allGrants: [string, RoleGrant[]][] = [["employee", employeeOnly], ["hr_admin A", hrAdminA], ["finance A", financeA], ["ceo A", ceoA], ["line manager A", managerA], ["sys admin", sysAdmin]];
+
+  it("is exactly the permission that changes pay: HR Admin or Finance of that company, for every role and both companies", () => {
+    for (const [, grants] of allGrants) {
+      for (const company of [COMPANY_A, COMPANY_B]) expect(canCorrectPayRecord(grants, company)).toBe(canEditCompensation(grants, company));
+    }
+    expect(canCorrectPayRecord(hrAdminA, COMPANY_A)).toBe(true);
+    expect(canCorrectPayRecord(financeA, COMPANY_A)).toBe(true);
+  });
+
+  it("is refused to another company's HR Admin or Finance, the CEO, a line manager, a Sys Admin and a plain employee", () => {
+    expect(canCorrectPayRecord(hrAdminA, COMPANY_B)).toBe(false);
+    expect(canCorrectPayRecord(financeA, COMPANY_B)).toBe(false);
+    expect(canCorrectPayRecord(ceoA, COMPANY_A)).toBe(false);
+    expect(canCorrectPayRecord(managerA, COMPANY_A)).toBe(false);
+    expect(canCorrectPayRecord(sysAdmin, COMPANY_A)).toBe(false);
+    expect(canCorrectPayRecord(employeeOnly, COMPANY_A)).toBe(false);
+    expect(canCorrectPayRecord([], COMPANY_A)).toBe(false);
+  });
+
+  it("the corrections are read by HR Admin and Finance of the company only, not by the employee", () => {
+    expect(canViewPayCorrections(hrAdminA, COMPANY_A)).toBe(true);
+    expect(canViewPayCorrections(financeA, COMPANY_A)).toBe(true);
+    expect(canViewPayCorrections(hrAdminA, COMPANY_B)).toBe(false);
+    expect(canViewPayCorrections(employeeOnly, COMPANY_A)).toBe(false);
+    expect(canViewPayCorrections(ceoA, COMPANY_A)).toBe(false);
   });
 });
