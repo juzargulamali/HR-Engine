@@ -11,7 +11,8 @@
 -- AN ACKNOWLEDGEMENT BELONGS TO ONE DATE. It is keyed by the source record AND the date it was about (the contract end date, the expiry date, the work date). When the date changes (a renewal
 -- with a new expiry, a probation extension) the old acknowledgement no longer matches and the item is new again; nothing has to be deleted.
 --
--- RE-RUNNABLE: `if not exists` / `create or replace` / drop policy if exists.
+-- RE-RUNNABLE: `if not exists` / `create or replace` / drop policy if exists. (Revised before it was applied anywhere: the read policy used to depend on the company role alone; running this file over
+-- that earlier version replaces the policy, so a project that did apply the first draft converges by applying this file again, then running the verify pack.)
 
 create table if not exists hr_queue_acknowledgements (
   id              uuid primary key default gen_random_uuid(),
@@ -30,10 +31,26 @@ create index if not exists idx_hr_queue_ack_employee on hr_queue_acknowledgement
 
 alter table hr_queue_acknowledgements enable row level security;
 
--- The same people who can see the alerts can see who acknowledged them: HR Admin, CEO and CTO of the employee's own company. Nobody writes the table directly.
+-- WHO CAN READ AN ACKNOWLEDGEMENT. An acknowledgement carries the source record's id and date (for a document: that an expiry date exists, and which) and HR's note about it, so it is exactly as
+-- visible as the record it is about, and no more. Two conditions, both required:
+--   1. the reader holds HR Admin, CEO or CTO for the employee's company (the people the alerts page is for: an employee, a manager or Finance who can read the source never read HR's note), and
+--   2. the reader can READ THE SOURCE RECORD itself, asked through that record's own row level security (these sub-selects run as the reader, not as the table owner).
+-- Today that means: HR Admin reads every kind; a CEO or CTO reads contract and probation acknowledgements and Recovery Leave window ones, but NOT employee-document, identity-document or attendance-day
+-- ones, because those source tables are not readable by them (identity-document metadata is HR Admin only). If a source table's policy changes later, this follows it without being edited again.
+-- A source that has been removed or no longer exists reads as not visible, so its acknowledgement is not shown to anyone but is kept.
 drop policy if exists hr_queue_ack_select on hr_queue_acknowledgements;
 create policy hr_queue_ack_select on hr_queue_acknowledgements for select
-  using (has_role('hr_admin', company_id) or has_role('ceo', company_id) or has_role('cto', company_id));
+  using (
+    (has_role('hr_admin', company_id) or has_role('ceo', company_id) or has_role('cto', company_id))
+    and case kind
+      when 'contract_end' then exists (select 1 from employment_contracts c where c.id = source_id)
+      when 'probation' then exists (select 1 from employment_contracts c where c.id = source_id)
+      when 'employee_document' then exists (select 1 from employee_documents d where d.id = source_id)
+      when 'identity_document' then exists (select 1 from identity_documents d where d.id = source_id)
+      when 'attendance' then exists (select 1 from attendance_records a where a.id = source_id) or exists (select 1 from recovery_windows w where w.id = source_id)
+      else false
+    end
+  );
 
 revoke all on hr_queue_acknowledgements from anon;
 revoke insert, update, delete, truncate on hr_queue_acknowledgements from authenticated;

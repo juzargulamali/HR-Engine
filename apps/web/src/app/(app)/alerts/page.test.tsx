@@ -59,7 +59,7 @@ describe("Alerts page: the HR work queue", () => {
   it("groups items into Needs action, Due soon and Acknowledged, each with employee, company, issue, date, who acts next and one direct action", async () => {
     tables = {
       ...tables,
-      employee_documents: rows([{ id: "d1", employee_id: "e2", document_type: "visa", expiry_date: day(-3) }]),
+      employee_documents: rows([{ id: "d1", employee_id: "e2", document_type: "visa", expiry_date: day(-3), created_at: "2026-01-01T00:00:00Z" }]),
       employment_contracts: rows([{ id: "k1", employee_id: "e2", contract_type: "probation", end_date: null, probation_end_date: day(10) }]),
       attendance_records: rows([{ id: "a1", employee_id: "e2", work_date: day(-1) }]),
       hr_queue_acknowledgements: rows([{ kind: "attendance", source_id: "a1", source_date: day(-1), acknowledged_at: new Date().toISOString(), note: "Checking with the line manager" }]),
@@ -82,18 +82,19 @@ describe("Alerts page: the HR work queue", () => {
     expect(html).toContain(`/attendance?companyId=c1&amp;date=${day(-1)}&amp;filter=needs_review&amp;employee=e2&amp;from=alerts`);
   });
 
-  it("acknowledging controls are offered to HR Admin of that company only; a CEO sees the items and who acts next, with no Mark as seen", async () => {
-    tables = { ...tables, employee_documents: rows([{ id: "d1", employee_id: "e2", document_type: "visa", expiry_date: day(-3) }]) };
+  it("acknowledging controls are offered to HR Admin of that company only; a CEO sees the items they can read (contracts) and who acts next, with no Mark as seen", async () => {
+    // A CEO's database read returns contracts (not employee or identity documents, and not attendance records); the fake returns what the test gives it, so a contract is used here.
+    tables = { ...tables, employment_contracts: rows([{ id: "k1", employee_id: "e2", contract_type: "fixed_term", end_date: day(10), probation_end_date: null }]) };
     expect(await render()).toContain('data-testid="ack-form"');
     grants = [{ role: "ceo", companyId: "c1", countryCode: null }];
     const html = await render();
-    expect(html).toContain("Visa expired");
+    expect(html).toContain("fixed term contract ends in 10 days");
     expect(html).toContain("Acts next: HR Admin of Aurora Trading");
     expect(html).not.toContain('data-testid="ack-form"');
   });
 
   it("an identity document's number never appears in the queue", async () => {
-    tables = { ...tables, identity_documents: rows([{ id: "i1", employee_id: "e2", document_type: "passport", expiry_date: day(-1), document_number: "X1234567" }]) };
+    tables = { ...tables, identity_documents: rows([{ id: "i1", employee_id: "e2", document_type: "passport", expiry_date: day(-1), created_at: "2026-01-01T00:00:00Z", document_number: "X1234567" }]) };
     const html = await render();
     expect(html).toContain("Passport expired");
     expect(html).not.toContain("X1234567");
@@ -101,15 +102,28 @@ describe("Alerts page: the HR work queue", () => {
 
   it("a renewed document (a newer row with a later date) is no longer in the queue", async () => {
     tables = { ...tables, employee_documents: rows([
-      { id: "old", employee_id: "e2", document_type: "visa", expiry_date: day(-30) },
-      { id: "new", employee_id: "e2", document_type: "visa", expiry_date: day(400) },
+      { id: "old", employee_id: "e2", document_type: "visa", expiry_date: day(-30), created_at: "2026-01-01T00:00:00Z" },
+      { id: "new", employee_id: "e2", document_type: "visa", expiry_date: day(400) , created_at: "2026-06-01T00:00:00Z"},
     ]) };
     expect(await render()).toContain("Nothing needs attention right now.");
   });
 
+  it("a newer document with no expiry date clears the type; a newer one with a shorter expiry is judged on its own date", async () => {
+    tables = { ...tables, employee_documents: rows([
+      { id: "old", employee_id: "e2", document_type: "visa", expiry_date: day(-30), created_at: "2026-01-01T00:00:00Z" },
+      { id: "undated", employee_id: "e2", document_type: "visa", expiry_date: null, created_at: "2026-06-01T00:00:00Z" },
+    ]) };
+    expect(await render()).toContain("Nothing needs attention right now.");
+    tables = { ...tables, employee_documents: rows([
+      { id: "long", employee_id: "e2", document_type: "visa", expiry_date: day(400), created_at: "2026-01-01T00:00:00Z" },
+      { id: "short", employee_id: "e2", document_type: "visa", expiry_date: day(-2), created_at: "2026-06-01T00:00:00Z" },
+    ]) };
+    expect(await render()).toContain("Visa expired");
+  });
+
   it("the company filter narrows the queue and the empty state of a filter says so", async () => {
     grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }, { role: "hr_admin", companyId: "c2", countryCode: null }];
-    tables = { ...tables, employee_documents: rows([{ id: "d1", employee_id: "e3", document_type: "visa", expiry_date: day(-3) }]) };
+    tables = { ...tables, employee_documents: rows([{ id: "d1", employee_id: "e3", document_type: "visa", expiry_date: day(-3), created_at: "2026-01-01T00:00:00Z" }]) };
     expect(await render({ company: "c2" })).toContain("Lena Nowak");
     const html = await render({ company: "c1" });
     expect(html).not.toContain("Lena Nowak");

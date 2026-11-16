@@ -1,4 +1,4 @@
-import { expiryState, EXPIRING_SOON_DAYS } from "./document-types";
+import { currentVersions, expiryState, EXPIRING_SOON_DAYS } from "./document-types";
 
 /**
  * The HR work queue's shared read model. The Alerts page, My Day and the employee profile all read their HR flags from here, so one issue has one status, one set of words and one
@@ -151,24 +151,19 @@ export function contractItems(rows: readonly ContractRow[], c: Ctx): QueueItem[]
   return out;
 }
 
-export interface DocRow { id: string; employee_id: string; document_type: string; expiry_date: string | null }
+export interface DocRow { id: string; employee_id: string; document_type: string; expiry_date: string | null; created_at: string; deleted_at?: string | null }
 
 const humanise = (t: string) => { const s = t.replace(/_/g, " "); return s.charAt(0).toUpperCase() + s.slice(1); };
 
 /**
- * Documents that are expired or expiring inside the look-ahead, judged from their dates (never from the status a daily job may not have written yet). Only the newest version of each type counts:
- * a renewal adds a newer row with a later date (or none), which clears the older one from the queue and from the profile alike. `labelFor` gives the type's label (the profile's rule names).
+ * Documents that are expired or expiring inside the look-ahead, judged from their dates (never from the status a daily job may not have written yet). The rows passed in are EVERY version,
+ * including ones with no expiry date: `currentVersions` (the profile's own rule) picks the current version of each type first, and only then is its expiry evaluated, so a renewal with a
+ * shorter date is judged on its own date and a renewal with no date clears the type. `labelFor` gives the type's label (the profile's rule names).
  */
 export function documentItems(kind: "employee_document" | "identity_document", rows: readonly DocRow[], c: Ctx, labelFor: (type: string) => string = humanise): QueueItem[] {
-  const latest = new Map<string, DocRow>();
-  for (const r of rows) {
-    const k = `${r.employee_id}:${r.document_type}`;
-    const cur = latest.get(k);
-    // A row with no expiry date never expires, so it is the "newest" answer for that type; otherwise the latest date wins.
-    if (!cur || (cur.expiry_date !== null && (r.expiry_date === null || r.expiry_date > cur.expiry_date))) latest.set(k, r);
-  }
+  const latest = currentVersions(rows);
   const out: QueueItem[] = [];
-  for (const r of latest.values()) {
+  for (const r of latest) {
     if (!r.expiry_date || !c.employees.has(r.employee_id)) continue;
     const state = expiryState(r.expiry_date, c.today, DOCUMENT_LOOKAHEAD_DAYS);
     if (state !== "expired" && state !== "expiring") continue;

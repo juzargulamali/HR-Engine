@@ -35,10 +35,10 @@ export async function loadHrQueue(opts: { grants: readonly RoleGrant[]; today: s
     employeeId ? employeesQuery.eq("id", employeeId) : employeesQuery,
     supabase.from("companies").select("id, legal_name"),
     scope(supabase.from("employment_contracts").select("id, employee_id, contract_type, end_date, probation_end_date").eq("is_current", true).or(`end_date.lte.${horizon},probation_end_date.lte.${horizon}`)),
-    // Every non-removed dated document up to the look-ahead, plus the newest of each type is picked in code, so a renewal (a newer row) clears the older one.
-    scope(supabase.from("employee_documents").select("id, employee_id, document_type, expiry_date").is("deleted_at", null).not("expiry_date", "is", null)),
+    // EVERY non-removed version, with or without an expiry date: the current version of each type is picked in code by the profile's own rule (the newest), and only then is its expiry judged.
+    scope(supabase.from("employee_documents").select("id, employee_id, document_type, expiry_date, created_at").is("deleted_at", null)),
     // Identity documents are read WITHOUT the number: a queue summary never carries it. RLS still withholds this table from CEO and CTO.
-    scope(supabase.from("identity_documents").select("id, employee_id, document_type, expiry_date").not("expiry_date", "is", null)),
+    scope(supabase.from("identity_documents").select("id, employee_id, document_type, expiry_date, created_at")),
     scope(supabase.from("attendance_records").select("id, employee_id, work_date").not("presence_conflict", "is", null).gte("work_date", lookback)),
     scope(supabase.from("recovery_windows").select("id, employee_id, starting_local_date").eq("hr_verification_required", true).is("hr_verified_at", null).gte("starting_local_date", lookback)),
     scope(supabase.from("recovery_alerts").select("id, company_id, employee_id, alert_type, triggered_at, status, acknowledged_at, acknowledgement_note").in("status", ["open", "acknowledged"]).order("triggered_at", { ascending: false }).limit(100)),

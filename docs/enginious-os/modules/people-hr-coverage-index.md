@@ -92,7 +92,7 @@
 
 | # | Screen or part | Route | Who reaches it | Reference | Catalogue | Evidence |
 |---|---|---|---|---|---|---|
-| HR-40 | Alerts: Needs action / Due soon / Acknowledged, Company, Type and name filters, view tabs with counts | `/alerts` | HR Admin, CEO, CTO (rows by RLS) | R 14.1 | none | `Walk`; `Unit` (alerts page) |
+| HR-40 | Alerts: Needs action / Due soon / Acknowledged, Company, Type and name filters, view tabs with counts | `/alerts` | HR Admin (all kinds); CEO, CTO (the kinds whose source tables they can read: contracts, probation, Recovery Leave) | R 14.1 | none | `Walk`; `Unit` (alerts page) |
 | HR-41 | A queue row: employee, company, issue, date, status, who acts next, one action | `/alerts` | as HR-40 | R 14.1 | none | `Walk`; `Unit` |
 | HR-42 | Mark as seen (an acknowledgement; the issue stays open) | `/alerts` | HR Admin of the item's company | R 14.2 | `people.queue.acknowledge` | `Walk`; `DB` |
 | HR-43 | Document expiry opens the renewal form for that document; contract and probation open the Employment tab | `/employees/[id]` | HR Admin of the company | R 14.1 | none (Phase 1 actions) | `Walk` |
@@ -103,4 +103,6 @@
 | HR-48 | My Day HR rows count what Alerts lists as waiting (an acknowledged item is not counted) | `/` | HR Admin, CEO, CTO | R 14.1 | none | `Walk`; `Unit` (attention) |
 | HR-49 | A failed read of any part is named with Try again; "Nothing needs attention" only after a successful read | `/alerts` | as HR-40 | R 14.1 | none | `Unit` |
 | HR-50 | Background processing and the database fingerprint (moved out of the queue) | `/admin/background-processing` | System Administrator | R 14.7 | none | `Unit` (nav); the page itself is not driven |
+| HR-52 | An acknowledgement and its note are readable only with the source record: a CEO does not read document, identity-document or attendance-day ones | database | HR Admin, CEO, CTO of the company | R 14.3, 14.5 | none | `DB` |
+| HR-53 | The current version of a document type (newest, including no expiry) decides expiry, in the queue and on the profile | `/alerts`, `/employees/[id]` | HR Admin | R 14.1 | none | `Unit` (queue, profile-data, alerts page) |
 | HR-51 | Another company's items and records are not listed or openable; the database refuses the acknowledgement | `/alerts`, `/employees/[id]`, `/attendance` | HR Admin of another company | R 14.3 | none | `Walk`; `DB` |

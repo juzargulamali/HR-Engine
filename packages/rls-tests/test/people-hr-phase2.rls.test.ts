@@ -127,10 +127,39 @@ describe("People & HR Phase 2: acknowledging an HR queue item", () => {
     expect(await rowsFor(ID.ident)).toEqual(before);
     const seen = async (u: string) => (await db.asUserCommit(u, async (query) => (await query(`select company_id from hr_queue_acknowledgements`)).rows as { company_id: string }[]));
     expect(new Set((await seen(U.hrA)).map((r) => r.company_id))).toEqual(new Set([CO.a]));
-    expect(new Set((await seen(U.ceoA)).map((r) => r.company_id))).toEqual(new Set([CO.a]));
     expect(new Set((await seen(U.hrB)).map((r) => r.company_id))).toEqual(new Set([CO.b]));
     expect(await seen(U.emp)).toEqual([]);
     expect(await seen(U.mgr)).toEqual([]);
+  });
+
+  it("an acknowledgement is readable only by someone who can read ITS SOURCE record: a CEO reads the contract and recovery-window ones, and NONE of the identity-document metadata, document, or attendance-day ones (or their notes)", async () => {
+    // acknowledge one of every kind in company A as HR Admin, each with a note
+    const tag = (n: string) => `note for ${n}`;
+    const doc = (await admin<{ id: string }>(`insert into employee_documents (employee_id, document_type, file_path, expiry_date) values ('${E.emp}', 'visa', 'a/b/p2v.pdf', '${day(-9)}') returning id`))[0]!.id;
+    const ident = (await admin<{ id: string }>(`insert into identity_documents (employee_id, document_type, document_number, expiry_date, created_by) values ('${E.emp}', 'iqama', 'FICTIONAL-0777', '${day(-9)}', '${U.hrA}') returning id`))[0]!.id;
+    const contract = (await admin<{ id: string }>(`insert into employment_contracts (employee_id, contract_type, start_date, end_date, is_current, version_no, created_by) values ('${E.emp}', 'fixed_term', '2025-01-01', '${day(9)}', true, 2, '${U.hrA}') returning id`))[0]!.id;
+    const att = (await admin<{ id: string }>(`insert into attendance_records (employee_id, work_date, status, source, presence_conflict) values ('${E.emp}', '${day(-6)}', 'present', 'manual', 'differs') returning id`))[0]!.id;
+    const kinds: [string, string, string, boolean][] = [
+      ["employee_document", doc, day(-9), false], ["identity_document", ident, day(-9), false], ["contract_end", contract, day(9), true], ["attendance", att, day(-6), false], ["attendance", ID.win, day(-2), true],
+    ];
+    for (const [kind, source, date] of kinds) { await db.seed(`delete from hr_queue_acknowledgements where source_id = '${source}'`); await ack(U.hrA, kind, source, date, tag(kind === "attendance" ? source.slice(0, 8) : kind)); }
+    const notesOf = async (u: string) => (await db.asUserCommit(u, async (query) => (await query(`select kind, source_id, note from hr_queue_acknowledgements where source_id in ('${doc}', '${ident}', '${contract}', '${att}', '${ID.win}')`)).rows as { kind: string; source_id: string; note: string }[]));
+    const hr = await notesOf(U.hrA);
+    expect(hr.map((r) => r.source_id).sort()).toEqual([doc, ident, contract, att, ID.win].sort());   // HR Admin reads every kind
+    const ceo = await notesOf(U.ceoA);
+    // the CEO can read contracts and recovery windows of the company, but not employee documents, identity documents or attendance records, so those acknowledgements (and HR's notes on them) are not theirs to read
+    expect(ceo.map((r) => r.source_id).sort()).toEqual([contract, ID.win].sort());
+    expect(JSON.stringify(ceo)).not.toMatch(/FICTIONAL-0777|visa|iqama/);
+    expect(await notesOf(U.emp)).toEqual([]);   // the employee can read their own documents and contract, but HR's note on them is not theirs
+    expect(await notesOf(U.mgr)).toEqual([]);
+    expect(await notesOf(U.hrB)).toEqual([]);   // another company's HR Admin reads none of company A
+    // it follows the source's own visibility: HR Admin still reads a REMOVED document (the profile lists it as Removed), so its acknowledgement stays readable; once the source row no longer exists
+    // nobody but the table owner can read the acknowledgement, and the row is kept
+    await admin(`update employee_documents set deleted_at = now() where id = '${doc}'`);
+    expect((await notesOf(U.hrA)).map((r) => r.source_id)).toContain(doc);
+    await admin(`delete from identity_documents where id = '${ident}'`);
+    expect((await notesOf(U.hrA)).map((r) => r.source_id)).not.toContain(ident);
+    expect(await rowsFor(ident)).toHaveLength(1);
   });
 
   it("each acknowledgement is audited", async () => {

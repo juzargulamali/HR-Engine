@@ -1,5 +1,5 @@
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
-import { expiryState } from "./document-types";
+import { currentVersions, expiryState } from "./document-types";
 import type { QueueItem } from "./queue";
 import { computeExceptions, computeSetup, type Exception, type SetupStep } from "./setup";
 
@@ -47,21 +47,16 @@ export interface ProfileEmployee {
 
 export interface DocumentExpiryCounts { expired: number; expiring: number }
 
-interface DocRow { expiry_date: string | null; status?: string | null; document_type?: string }
+interface DocRow { expiry_date: string | null; status?: string | null; document_type?: string; id?: string; created_at?: string }
 
 /** Counts documents that are expired or expiring soon from their dates (the same 60-day look-ahead everywhere). A document with no date is never flagged. */
 export function documentExpiryCounts(rows: readonly DocRow[], today: string): DocumentExpiryCounts {
-  // Only the newest version of each type counts, as in the HR queue: a renewal (a newer row with a later date, or none) clears the older one.
-  const latest = new Map<string, DocRow>();
-  const loose: DocRow[] = [];
-  for (const r of rows) {
-    if (!r.document_type) { loose.push(r); continue; }
-    const cur = latest.get(r.document_type);
-    if (!cur || (cur.expiry_date !== null && (r.expiry_date === null || r.expiry_date > cur.expiry_date))) latest.set(r.document_type, r);
-  }
+  // The current version of each type is chosen by the shared rule (the newest row, whatever its expiry date, including none) BEFORE expiry is judged: earlier versions are history.
+  const typed = rows.filter((r): r is DocRow & { document_type: string; id: string; created_at: string } => !!r.document_type && !!r.id && !!r.created_at);
+  const loose = rows.filter((r) => !(r.document_type && r.id && r.created_at));
   let expired = 0;
   let expiring = 0;
-  for (const r of [...latest.values(), ...loose]) {
+  for (const r of [...currentVersions(typed), ...loose]) {
     const s = expiryState(r.expiry_date, today);
     if (s === "expired" || r.status === "expired") expired++;
     else if (s === "expiring" || r.status === "expiring_soon") expiring++;
@@ -88,8 +83,8 @@ export async function loadProfileSetup(
   const [contracts, compensation, identity, docs, openingLeave, openingComp, scheduled] = await Promise.all([
     viewer.canSeeContracts ? supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("employee_id", e) : none,
     viewer.canSeeComp ? supabase.from("compensation_details").select("id", { count: "exact", head: true }).eq("employee_id", e) : none,
-    viewer.canSeeIdentity ? supabase.from("identity_documents").select("expiry_date, document_type", { count: "exact" }).eq("employee_id", e) : none,
-    viewer.canSeeDocuments ? supabase.from("employee_documents").select("expiry_date, status, document_type", { count: "exact" }).eq("employee_id", e).is("deleted_at", null) : none,
+    viewer.canSeeIdentity ? supabase.from("identity_documents").select("id, expiry_date, document_type, created_at", { count: "exact" }).eq("employee_id", e) : none,
+    viewer.canSeeDocuments ? supabase.from("employee_documents").select("id, expiry_date, status, document_type, created_at", { count: "exact" }).eq("employee_id", e).is("deleted_at", null) : none,
     viewer.canEditCore ? supabase.from("leave_ledger").select("id", { count: "exact", head: true }).eq("employee_id", e).eq("reference_type", "opening_balance") : none,
     viewer.canEditCore ? supabase.from("comp_day_ledger").select("id", { count: "exact", head: true }).eq("employee_id", e).eq("source", "opening_balance") : none,
     // `applied_at` is added with this phase's migration; until it is installed the read fails and the flag is simply not shown.

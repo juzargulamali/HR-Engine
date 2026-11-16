@@ -85,6 +85,26 @@ export function expiryState(expiryDate: string | null | undefined, today: string
   return days <= leadDays ? "expiring" : "valid";
 }
 
+/** What the current-version rule needs from a document row. Removed rows carry `deleted_at`; identity documents are never soft-removed (they have no such column). */
+export interface VersionRow { id: string; document_type: string; created_at: string; employee_id?: string; deleted_at?: string | null }
+
+/**
+ * THE current-document rule, used by the profile (Documents tab order, Next actions) and the HR queue alike. A person's documents of one type form a history: a renewal adds a NEWER row and
+ * leaves the earlier one in it. The current version of a type is the newest row that has not been removed (by when it was added; a tie goes to the later id), whatever its expiry date is,
+ * including none. Expiry is judged on that row only, so a newer document with a shorter date decides (it can expire sooner), and a newer document with no expiry date clears the type.
+ * Earlier versions are history and are never flagged. Rows of different employees are never mixed.
+ */
+export function currentVersions<T extends VersionRow>(rows: readonly T[]): T[] {
+  const newest = new Map<string, T>();
+  for (const r of rows) {
+    if (r.deleted_at) continue;
+    const k = `${r.employee_id ?? ""}:${r.document_type}`;
+    const cur = newest.get(k);
+    if (!cur || r.created_at > cur.created_at || (r.created_at === cur.created_at && r.id > cur.id)) newest.set(k, r);
+  }
+  return [...newest.values()];
+}
+
 /** Where the shared Add document form opens, with the type chosen; `renew` marks a renewal so the form says so and keeps the history of the earlier document, and `docId` names that earlier document (its number is prefilled, it is never changed). */
 export function documentFormHref(employeeId: string, store: DocumentStore, storedType: string, renew = false, docId?: string): string {
   const rule = ruleFor(store, storedType);

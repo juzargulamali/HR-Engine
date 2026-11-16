@@ -7,11 +7,14 @@ select item, result from (
                    and exists (select 1 from pg_constraint c where c.conrelid = 'public.hr_queue_acknowledgements'::regclass and c.contype = 'u'
                                  and (select array_agg(a.attname order by a.attname) from pg_attribute a where a.attrelid = c.conrelid and a.attnum = any (c.conkey)) = array['kind', 'source_date', 'source_id']::name[])
               then 'OK' else 'FAIL - a column or the unique constraint is missing' end as result
-  union all select 2, 'row level security is on, and the only policy is the read policy for HR Admin, CEO and CTO of the company',
+  union all select 2, 'row level security is on; the only policy is the read policy; it needs HR Admin, CEO or CTO of the company AND that the reader can read the source record itself (contract, employee document, identity document, attendance day or recovery window)',
          case when (select relrowsecurity from pg_class where oid = 'public.hr_queue_acknowledgements'::regclass)
                    and (select count(*) from pg_policies where schemaname = 'public' and tablename = 'hr_queue_acknowledgements') = 1
                    and exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'hr_queue_acknowledgements' and policyname = 'hr_queue_ack_select' and cmd = 'SELECT')
-              then 'OK' else 'FAIL - RLS is off or there is a policy that is not the read policy' end
+                   and (select bool_and(pg_get_expr(p.polqual, p.polrelid) like '%' || t || '%')
+                          from pg_policy p, unnest(array['employment_contracts', 'employee_documents', 'identity_documents', 'attendance_records', 'recovery_windows']) as t
+                         where p.polrelid = 'public.hr_queue_acknowledgements'::regclass and p.polname = 'hr_queue_ack_select')
+              then 'OK' else 'FAIL - RLS is off, there is another policy, or the read policy does not follow each source record (an earlier draft: apply the migration file again)' end
   union all select 3, 'no insert, update or delete policy exists, so every direct write by a signed-in user is refused by row level security (the function is the only way in), and anon has no policy to read through',
          case when (select relrowsecurity from pg_class where oid = 'public.hr_queue_acknowledgements'::regclass)
                    and not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'hr_queue_acknowledgements' and cmd <> 'SELECT')
