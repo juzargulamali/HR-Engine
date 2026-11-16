@@ -33,6 +33,8 @@ import { NextDispatch } from "@/components/my-day/next-dispatch";
 import { PeopleToday } from "@/components/my-day/people-today";
 import { ProjectHealth } from "@/components/my-day/project-health";
 import { SalesPipeline } from "@/components/my-day/sales-pipeline";
+import { loadHrQueue } from "@/lib/hr/queue-data";
+import type { QueueItem } from "@/lib/hr/queue";
 import { approvalCandidates, budgetCandidates, buildAttention, commercialApprovalCandidates, failed, handoverCandidates, opsQuestionCandidates, hrCandidates, noteCandidates, ok, projectDecisionCandidates, salesCandidates, taskCandidates, type AttentionSourceResult } from "@/lib/my-day/attention";
 import { dateText } from "@/lib/projects/format";
 import { loadEquipment, loadLiveClock } from "@/lib/my-day/loaders";
@@ -165,10 +167,8 @@ export default async function DashboardPage() {
   }
 
   let snapshots: Awaited<ReturnType<typeof getCompanySnapshot>>[] = [];
-  let contractsEndingCount = 0;
-  let probationDueCount = 0;
-  let docsExpiringCount = 0;
-  let identityExpiringCount = 0;
+  // The HR queue, read by the same loader as the Alerts page and the profile, so a count here is exactly what Alerts lists.
+  let hrQueueItems: QueueItem[] = [];
   let upcomingHolidays: { name: string; holiday_date: string; countryCode: string }[] = [];
   let onLeaveToday: { id: string; name: string; companyName: string }[] = [];
   // Set only if the block below throws outright (a real connection/rate-limit
@@ -189,23 +189,15 @@ export default async function DashboardPage() {
       horizonDate.setUTCDate(horizonDate.getUTCDate() + HORIZON_DAYS);
       const horizon = horizonDate.toISOString().slice(0, 10);
 
-      const [snapshotResults, contractResult, probationResult, docResult, identityResult] = await Promise.all([
+      const [snapshotResults, hrQueue] = await Promise.all([
         Promise.all(overviewCompanies.map((c) => getCompanySnapshot(supabase, c))),
-        supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("end_date", horizon),
-        supabase.from("employment_contracts").select("id", { count: "exact", head: true }).eq("is_current", true).lte("probation_end_date", horizon),
-        supabase.from("employee_documents").select("id", { count: "exact", head: true }).in("status", ["expiring_soon", "expired"]),
-        supabase.from("identity_documents").select("id", { count: "exact", head: true }).not("expiry_date", "is", null).lte("expiry_date", horizon),
+        loadHrQueue({ grants: session.grants, today }),
       ]);
-      if (contractResult.error) throw contractResult.error;
-      if (probationResult.error) throw probationResult.error;
-      if (docResult.error) throw docResult.error;
-      if (identityResult.error) throw identityResult.error;
+      // A queue that could not be read is a failed HR section, never "nothing needs attention".
+      if (hrQueue.failed.length > 0) throw new Error(`HR queue could not be read: ${hrQueue.failed.join(", ")}`);
 
       snapshots = snapshotResults;
-      contractsEndingCount = contractResult.count ?? 0;
-      probationDueCount = probationResult.count ?? 0;
-      docsExpiringCount = docResult.count ?? 0;
-      identityExpiringCount = identityResult.count ?? 0;
+      hrQueueItems = hrQueue.items;
 
       const countryCodes = [...new Set(overviewCompanies.map((c) => c.country_code))];
       const { data: holidays, error: holidaysError } =
@@ -244,10 +236,7 @@ export default async function DashboardPage() {
       logServerError({ route: ROUTE, operation: "load company-wide workforce data" }, error);
       hrSectionError = true;
       snapshots = [];
-      contractsEndingCount = 0;
-      probationDueCount = 0;
-      docsExpiringCount = 0;
-      identityExpiringCount = 0;
+      hrQueueItems = [];
       upcomingHolidays = [];
       onLeaveToday = [];
     }
@@ -374,7 +363,7 @@ export default async function DashboardPage() {
     ...(opsDay === "error" ? [failed("operations")] : opsDay ? [opsCandidatesFailed(opsDay) ? failed("operations") : ok("operations", [...opsAnswerCandidates(opsDay, now), ...opsReviewCandidates(opsDay, session.userId, now)])] : []),
     // "Review equipment booking" on the projects this person manages: the Project Manager's action.
     ...(bookingReviewsRead.status === "rejected" ? [failed("project-equipment")] : bookingReviewsRead.value ? [ok("project-equipment", equipmentReviewCandidates(bookingReviewsRead.value, now))] : []),
-    ...(showHrView ? [hrSectionError ? failed("hr") : ok("hr", hrCandidates({ contracts: contractsEndingCount, probation: probationDueCount, docs: docsExpiringCount, identity: identityExpiringCount }))] : []),
+    ...(showHrView ? [hrSectionError ? failed("hr") : ok("hr", hrCandidates(hrQueueItems))] : []),
   ];
   const attention = buildAttention(sources);
   const hrAlertRows: ActionItem[] = attention.items.filter((i) => i.sources.includes("hr")).map((i) => ({ key: i.key, icon: i.icon, label: i.title, count: i.records ?? 0, href: i.href }));

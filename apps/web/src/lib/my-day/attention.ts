@@ -2,6 +2,7 @@ import { handoverHref } from "@/lib/projects/handover-list";
 import type { LucideIcon } from "lucide-react";
 import { BadgeCheck, CalendarClock, ClipboardCheck, ClipboardList, FileCheck2, FileClock, FolderKanban, IdCard, Inbox, AlarmClock, ReceiptText, ShieldCheck } from "lucide-react";
 import { HANDOVER_KIND_LABEL } from "@/lib/crm/handover-attention";
+import { QUEUE_GROUPS, type QueueItem } from "@/lib/hr/queue";
 import type { HandoverCheck } from "@/lib/crm/handover-attention-data";
 import { OPS_QUESTION_WHAT, opsQuestionHref, type OpsQuestionCheck } from "@/lib/crm/ops-question";
 import { MessageCircleQuestion } from "lucide-react";
@@ -275,13 +276,16 @@ export function noteCandidates(load: Extract<WaitingNotesLoad, { status: "ok" }>
   }));
 }
 
-/** The HR alerts: one row per kind (a screen of records, handled together on Alerts), with how many records it stands for. Zero rows are left out. */
-export function hrCandidates(c: { contracts: number; probation: number; docs: number; identity: number }): AttentionCandidate[] {
-  const rows: [string, string, LucideIcon, number][] = [
-    ["hr:contracts", "Contracts ending soon", CalendarClock, c.contracts],
-    ["hr:probation", "Probation reviews due", ShieldCheck, c.probation],
-    ["hr:docs", "Documents expiring or expired", FileClock, c.docs],
-    ["hr:identity", "Identity documents expiring soon", IdCard, c.identity],
-  ];
-  return rows.filter(([, , , n]) => n > 0).map(([key, title, icon, n]) => ({ key, source: "hr", icon, title, what: "Review on the Alerts page", tier: 2, at: null, href: "/alerts", records: n }));
+/**
+ * The HR queue on My Day: one row per group (a screen of records, handled together on Alerts), counting the SAME items the Alerts page lists as Needs action or Due soon: an item somebody
+ * has acknowledged is still open but already seen, so it is not counted as waiting for attention. Zero rows are left out; each row opens the Alerts page on that group.
+ */
+export function hrCandidates(items: readonly QueueItem[]): AttentionCandidate[] {
+  const icons: Record<string, LucideIcon> = { contracts: CalendarClock, probation: ShieldCheck, documents: FileClock, attendance: ClipboardList, recovery: AlarmClock, ai: BadgeCheck };
+  return QUEUE_GROUPS.filter((g) => g.value !== "").flatMap((g) => {
+    const open = items.filter((i) => g.kinds.includes(i.kind) && i.state !== "acknowledged");
+    if (open.length === 0) return [];
+    const needs = open.filter((i) => i.state === "needs_action").length;
+    return [{ key: `hr:${g.value}`, source: "hr" as const, icon: icons[g.value] ?? FileClock, title: g.label, what: needs > 0 ? `${needs} need${needs === 1 ? "s" : ""} action on the Alerts page` : "Due soon on the Alerts page", tier: needs > 0 ? 1 as const : 2 as const, at: null, href: `/alerts?type=${g.value}`, records: open.length }];
+  });
 }

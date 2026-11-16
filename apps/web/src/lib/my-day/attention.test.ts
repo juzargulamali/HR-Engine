@@ -6,6 +6,8 @@ import {
 import { budgetDayFromInbox } from "@/lib/budget/my-day";
 import type { PbxInbox } from "@/types/budget";
 
+import type { QueueItem } from "@/lib/hr/queue";
+const qi = (kind: QueueItem["kind"], id: string, state: QueueItem["state"]) => ({ key: `${kind}:${id}`, kind, state }) as QueueItem;
 const now = new Date("2026-11-03T09:00:00Z");
 const today = "2026-11-03";
 const fmt = (d: string) => `on ${d}`;
@@ -31,9 +33,14 @@ describe("buildAttention: the headline number IS the list", () => {
     expect(new Set(a.items.map((i) => i.key)).size).toBe(n);
   });
   it("an HR row counts as one item whatever number of records it stands for (the records are shown on the row)", () => {
-    const a = buildAttention([ok("hr", hrCandidates({ contracts: 7, probation: 0, docs: 2, identity: 0 }))]);
+    const a = buildAttention([ok("hr", hrCandidates([...Array.from({ length: 7 }, (_, n) => qi("contract_end", `c${n}`, "needs_action")), qi("employee_document", "d1", "needs_action"), qi("identity_document", "d2", "due_soon")]))]);
     expect(a.count).toBe(2);
-    expect(a.items.map((i) => [i.key, i.records])).toEqual([["hr:contracts", 7], ["hr:docs", 2]]);
+    expect(a.items.map((i) => [i.key, i.records])).toEqual([["hr:contracts", 7], ["hr:documents", 2]]);
+  });
+  it("an acknowledged HR item is still open but already seen: My Day does not count it as waiting, and a due-soon-only group says so", () => {
+    const rows = hrCandidates([qi("employee_document", "d1", "acknowledged"), qi("probation", "p1", "due_soon"), qi("attendance", "a1", "needs_action")]);
+    expect(rows.map((r) => [r.key, r.records, r.what])).toEqual([["hr:probation", 1, "Due soon on the Alerts page"], ["hr:attendance", 1, "1 needs action on the Alerts page"]]);
+    expect(rows[1]!.href).toBe("/alerts?type=attendance");
   });
 });
 
@@ -173,7 +180,7 @@ describe("a source that fails", () => {
 
 describe("all sources load and nothing is waiting", () => {
   it("says so", () => {
-    const a = buildAttention([ok("approvals", []), ok("project-tasks", taskCandidates({ today, open: [], reviews: [] }, fmt)), ok("hr", hrCandidates({ contracts: 0, probation: 0, docs: 0, identity: 0 }))]);
+    const a = buildAttention([ok("approvals", []), ok("project-tasks", taskCandidates({ today, open: [], reviews: [] }, fmt)), ok("hr", hrCandidates([]))]);
     expect(a.count).toBe(0);
     expect(a.errors).toEqual([]);
     expect(a.headline.text).toBe("Nothing needs your attention right now.");

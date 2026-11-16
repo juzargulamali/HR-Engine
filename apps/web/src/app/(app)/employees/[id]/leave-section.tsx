@@ -4,7 +4,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
+import Link from "next/link";
 import { LoadError } from "@/components/workspace/states";
+import { formatDate } from "@/components/sales/format";
 import { OvernightRecoveryForm } from "./overnight-recovery-form";
 import { OpeningBalancesCard } from "./opening-balances-form";
 
@@ -27,8 +29,11 @@ export async function LeaveSection({
   employeeId,
   canRecordOvernightRecovery = false,
   openingBalances,
+  canDecide = false,
 }: {
   employeeId: string;
+  /** The viewer may decide this person's requests (HR Admin, or their manager): a pending request then links to its row in Approvals, where the decision is made on the original request. */
+  canDecide?: boolean;
   canRecordOvernightRecovery?: boolean;
   /** Present only for an HR Admin of the employee's company: the setup step "Opening balances" (recorded once). `open` expands it (the person came from the setup step). */
   openingBalances?: { employeeName: string; companyName: string; open: boolean };
@@ -88,6 +93,29 @@ export async function LeaveSection({
         </Card>
       </div>
       )}
+
+      {!requestsError && !recoveryError ? (() => {
+        const waiting = [
+          ...(requests ?? []).filter((r) => r.status === "submitted" || r.status === "pending_approval").map((r) => ({ id: r.id, text: `${r.leave_type_code.replace(/_/g, " ")} · ${r.start_date === r.end_date ? formatDate(r.start_date) : `${formatDate(r.start_date)} to ${formatDate(r.end_date)}`} · ${r.total_days} days`, status: r.status })),
+          ...(recoveryCreditRequests ?? []).filter((r) => r.status === "submitted" || r.status === "pending_approval").map((r) => ({ id: r.id, text: `Recovery Leave earning · ${formatDate(r.work_date)} · ${r.proposed_days} days`, status: r.status })),
+        ];
+        if (waiting.length === 0) return null;
+        return (
+          <Card data-testid="pending-requests">
+            <CardHeader><CardTitle className="text-base">Pending requests ({waiting.length})</CardTitle></CardHeader>
+            <CardContent>
+              <ul className="divide-y divide-border">
+                {waiting.map((w) => (
+                  <li key={w.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                    <span className="capitalize">{w.text} · <Badge variant="secondary">{w.status.replace(/_/g, " ")}</Badge></span>
+                    {canDecide ? <Link href={`/approvals#request-${w.id}`} className="font-medium text-accent hover:underline">Open in Approvals</Link> : <span className="text-muted-foreground">Waiting for the approver</span>}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        );
+      })() : null}
 
       {requestsError ? <LoadError what="the leave requests" retryHref={here} /> : (
       <Table stack>

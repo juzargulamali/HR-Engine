@@ -34,11 +34,11 @@ export function TeamDistribution({ byCountry }: { byCountry: { countryCode: stri
   );
 }
 
-/** HR alerts that need a person: contracts, probation, documents. Leave requests are in the figures above and are not repeated here. */
+/** HR queue items that need a person: contracts, probation, documents, attendance, recovery, AI suggestions. Leave requests are in the figures above and are not repeated here. */
 export function HrAttention({ items }: { items: readonly ActionItem[] }) {
   return (
     <MyDayCard title="HR attention" actions={<Link href="/alerts" className={cardLink}>All alerts</Link>}>
-      {items.length === 0 ? <p className="text-sm text-muted-foreground">No contract, probation or document alerts right now.</p> : (
+      {items.length === 0 ? <p className="text-sm text-muted-foreground">Nothing in the HR queue needs attention right now.</p> : (
         <ul className="-mx-2 divide-y divide-border/60">
           {items.map((i) => (
             <li key={i.key}>

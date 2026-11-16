@@ -95,11 +95,11 @@ describe("RegisterTable", () => {
     expect(within(bob).getByText("Office, Work from home")).toBeTruthy(); // every mode shown
   });
 
-  it("shows no evidence as Not started / Not recorded, never as absent", () => {
+  it("shows no evidence as No record (or Rest day on a rest day), never as absent; the live clock state is its own column", () => {
     renderTable();
     const cara = screen.getByText("Cara Nothing").closest("tr")!;
     expect(within(cara).getByText("Not started")).toBeTruthy();
-    expect(within(cara).getByText("Not started / Not recorded")).toBeTruthy();
+    expect(within(cara).getByText("No record")).toBeTruthy();
     expect(within(cara).queryByText(/absent/i)).toBeNull();
   });
 
@@ -139,5 +139,21 @@ describe("RegisterTable", () => {
     expect(save.disabled).toBe(true);
     fireEvent.change(screen.getAllByLabelText(/^Reason/)[0]!, { target: { value: "Left at five" } });
     expect(save.disabled).toBe(false);
+  });
+
+  it("on a rest day, a day with nothing recorded says Rest day (not No record, not absent), and a recorded absence still says Absent", () => {
+    const rest = { ...base, employeeId: "e9", name: "Rae Rest", clockStatus: "not_started" as const, attendanceStatus: "not_recorded" as const, sessionCount: 0, firstClockIn: null, openSince: null, recordedSeconds: 0, isProvisional: false };
+    const absent = { ...rest, employeeId: "e10", name: "Abe Absent", attendanceStatus: "absent" as const };
+    render(<RegisterTable rows={[rest, absent]} details={{}} colleagues={[]} workDate="2027-01-15" canEdit isRestDay />);
+    expect(within(screen.getByText("Rae Rest").closest("tr")!).getByText("Rest day")).toBeTruthy();
+    expect(within(screen.getByText("Abe Absent").closest("tr")!).getByText("Absent")).toBeTruthy();
+  });
+
+  it("the employee a link asked for is open and marked when the page loads", () => {
+    render(<RegisterTable rows={rows} details={details} colleagues={[]} workDate="2027-01-12" canEdit focusEmployeeId="e1" />);
+    const alice = screen.getByText("Alice Clocked").closest("tr")!;
+    expect(alice.getAttribute("aria-current")).toBe("true");
+    expect(alice.getAttribute("id")).toBe("row-e1");
+    expect(document.getElementById("detail-e1")).not.toBeNull();
   });
 });

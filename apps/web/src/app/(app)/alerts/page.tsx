@@ -1,35 +1,32 @@
 import Link from "next/link";
-import { canViewHrAlerts, formatRecordedDuration, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { canViewHrAlerts, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/ui/alert";
 import { EmptyState } from "@/components/ui/empty-state";
-import { AutoRefresh } from "@/components/attendance/auto-refresh";
-import { ALERT_TYPE_LABELS } from "@/lib/recovery/labels";
-import { AcknowledgeAlertForm } from "./acknowledge-alert-form";
-import { ClickableRow } from "@/components/workspace/clickable-row";
+import { InfoHint } from "@/components/ui/info-hint";
 import { AccessNotice } from "@/components/os/access-notice";
 import { LoadError } from "@/components/workspace/states";
+import { RememberList } from "@/components/workspace/list-memory";
+import { ListToolbar, type ToolbarFilter } from "@/components/workspace/list-toolbar";
+import { withParams } from "@/components/workspace/url-state";
+import { loadHrQueue } from "@/lib/hr/queue-data";
+import { CONTRACT_LOOKAHEAD_DAYS, DOCUMENT_LOOKAHEAD_DAYS, QUEUE_GROUPS, countByState, STATE_LABEL, type QueueItem, type QueueState } from "@/lib/hr/queue";
+import { cn } from "@/lib/utils";
+import { QueueList } from "./queue-list";
 
 export const metadata = { title: "Alerts" };
 
-const HORIZON_DAYS = 30;
+const BASE = "/alerts";
+const VIEWS = ["all", "needs_action", "due_soon", "acknowledged"] as const;
+type View = (typeof VIEWS)[number];
 
-function daysUntil(dateStr: string, today: Date): number {
-  const target = new Date(`${dateStr}T00:00:00Z`);
-  return Math.round((target.getTime() - today.getTime()) / (24 * 60 * 60 * 1000));
-}
+const GROUPS = QUEUE_GROUPS;
 
-function UrgencyBadge({ days }: { days: number }) {
-  if (days < 0) return <Badge variant="destructive">{Math.abs(days)}d overdue</Badge>;
-  if (days === 0) return <Badge variant="destructive">Due today</Badge>;
-  return <Badge variant="secondary">{days}d left</Badge>;
-}
+type SearchParams = { company?: string; view?: string; type?: string; q?: string };
 
-export default async function AlertsPage() {
+export default async function AlertsPage({ searchParams }: { searchParams?: Promise<SearchParams> }) {
+  const sp = (await searchParams) ?? {};
   const session = await getCurrentSession();
   if (!session) return null;
 
@@ -37,358 +34,85 @@ export default async function AlertsPage() {
     return <AccessNotice title="Alerts">Alerts are restricted to HR Admin, CEO, and CTO.</AccessNotice>;
   }
 
+  const today = getBusinessDateString(resolveCountryTimeZone(null));
+  const data = await loadHrQueue({ grants: session.grants, today });
+
+  // The filters live in the address, so Back and the record's "back to Alerts" link return to the same company, type and view.
+  const company = data.companies.some((c) => c.id === sp.company) ? sp.company! : "";
+  const group = GROUPS.find((g) => g.value === sp.type) ?? GROUPS[0]!;
+  const view: View = (VIEWS as readonly string[]).includes(sp.view ?? "") ? (sp.view as View) : "all";
+  const q = (sp.q ?? "").trim().slice(0, 100).toLowerCase();
+
+  const scoped = data.items.filter((i) =>
+    (!company || i.companyId === company)
+    && (group.kinds.length === 0 || group.kinds.includes(i.kind))
+    && (!q || (i.employeeName ?? "").toLowerCase().includes(q)),
+  );
+  const counts = countByState(scoped);
+  const by = (s: QueueState): QueueItem[] => scoped.filter((i) => i.state === s);
+  const show = (s: QueueState) => view === "all" || view === s;
+  const read = data.failed.length === 0;
+
+  const here = (patch: Record<string, string | null>) => withParams(BASE, sp as Record<string, string>, patch);
+  const filtersInUse = !!(company || group.value || q);
+  const retryHref = withParams(BASE, sp as Record<string, string>, {});
+  const toolbarFilters: ToolbarFilter[] = [
+    ...(data.companies.length > 1 ? [{ name: "company", label: "Company", value: company, options: [{ value: "", label: "All companies" }, ...data.companies.map((c) => ({ value: c.id, label: c.name }))] }] : []),
+    { name: "type", label: "Type", value: group.value, options: GROUPS.map((g) => ({ value: g.value, label: g.label })) },
+  ];
+
+  // The processor's health is one line here (an alert may arrive late); its detail and the database fingerprint are in Administration.
   const supabase = await createClient();
-  const today = new Date();
-  const horizon = new Date(today.getTime() + HORIZON_DAYS * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
-  const todayStr = today.toISOString().slice(0, 10);
+  const { data: status } = await supabase.rpc("recovery_scheduler_status");
+  const processorLate = !!status && (status.stale || status.open_failures > 0 || (status.windows_policy_active && !status.scheduler_ready.ready));
 
-  // No explicit company filter on any of these — like employees/page.tsx,
-  // RLS alone decides what's visible (every company an HR Admin/CEO/CTO
-  // grant covers), never re-derived here.
-  const generatedAt = new Date().toISOString();
-  const [
-    { data: employees, error: employeesError },
-    { data: contracts, error: contractsError },
-    { data: employeeDocs, error: docsError },
-    { data: identityDocs, error: identityError },
-    { data: recoveryAlerts, error: recoveryError },
-    { data: schedulerStatus, error: schedulerError },
-    { data: companies, error: companiesError },
-  ] = await Promise.all([
-    supabase.from("employees").select("id, first_name, last_name, company_id, country_code").is("deleted_at", null),
-    supabase
-      .from("employment_contracts")
-      .select("id, employee_id, contract_type, end_date, probation_end_date")
-      .eq("is_current", true)
-      .or(`end_date.lte.${horizon},probation_end_date.lte.${horizon}`),
-    supabase
-      .from("employee_documents")
-      .select("id, employee_id, document_type, expiry_date, status")
-      .in("status", ["expiring_soon", "expired"]),
-    supabase
-      .from("identity_documents")
-      .select("id, employee_id, document_type, document_number, expiry_date")
-      .not("expiry_date", "is", null)
-      .lte("expiry_date", horizon),
-    // Recovery Leave work alerts: visibility is decided entirely by row-level security
-    // (HR Admin / CEO / CTO of the alert's own company — never the employee or a manager).
-    supabase
-      .from("recovery_alerts")
-      .select("id, company_id, employee_id, alert_type, triggered_at, period_started_at, recorded_seconds, elapsed_seconds, details, status, acknowledged_at, acknowledgement_note")
-      .in("status", ["open", "acknowledged"])
-      .order("triggered_at", { ascending: false })
-      .limit(100),
-    // Health of the background processing. Only HR Admin / Sys Admin may read it; for anyone else this
-    // simply returns an error and the banner is omitted.
-    supabase.rpc("recovery_scheduler_status"),
-    supabase.from("companies").select("id, legal_name"),
-  ]);
-  // A failed read is never "Nothing needs attention": name what could not be loaded. (The processor status is only readable by HR Admin /
-  // Sys Admin, so an error there for anyone else just means "not for you" and the banner is omitted.)
-  const failedReads = [
-    employeesError || companiesError ? "employees" : null,
-    contractsError ? "contracts and probation" : null,
-    docsError ? "employee documents" : null,
-    identityError ? "identity documents" : null,
-    recoveryError ? "Recovery Leave alerts" : null,
-    schedulerError && (session.grants.some((g) => g.role === "hr_admin" || g.role === "sys_admin")) ? "background processing status" : null,
-  ].filter((x): x is string => x !== null);
-  const companyName = new Map((companies ?? []).map((c) => [c.id, c.legal_name]));
-  const employeeMeta = new Map((employees ?? []).map((e) => [e.id, e]));
-  const isHrAdmin = session.grants.some((g) => g.role === "hr_admin");
-  const openAlerts = (recoveryAlerts ?? []).filter((a) => a.status === "open");
-  const acknowledgedAlerts = (recoveryAlerts ?? []).filter((a) => a.status === "acknowledged").slice(0, 10);
-  const alertTz = (employeeId: string) => resolveCountryTimeZone(employeeMeta.get(employeeId)?.country_code);
-  const fmtLocal = (iso: string, employeeId: string) =>
-    new Intl.DateTimeFormat("en-GB", { timeZone: alertTz(employeeId), weekday: "short", day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
-
-  const employeeName = new Map((employees ?? []).map((e) => [e.id, `${e.first_name} ${e.last_name}`]));
-
-  const contractsEnding = (contracts ?? [])
-    .filter((c) => c.end_date)
-    .map((c) => ({ ...c, days: daysUntil(c.end_date!, today) }))
-    .sort((a, b) => a.days - b.days);
-
-  const probationEnding = (contracts ?? [])
-    .filter((c) => c.probation_end_date)
-    .map((c) => ({ ...c, days: daysUntil(c.probation_end_date!, today) }))
-    .sort((a, b) => a.days - b.days);
-
-  const docsFlagged = (employeeDocs ?? [])
-    .map((d) => ({ ...d, days: d.expiry_date ? daysUntil(d.expiry_date, today) : null }))
-    .sort((a, b) => (a.days ?? 0) - (b.days ?? 0));
-
-  const identityFlagged = (identityDocs ?? [])
-    .map((d) => ({ ...d, days: daysUntil(d.expiry_date!, today) }))
-    .sort((a, b) => a.days - b.days);
-
-  const nothingFlagged =
-    contractsEnding.length === 0 &&
-    probationEnding.length === 0 &&
-    docsFlagged.length === 0 &&
-    identityFlagged.length === 0 &&
-    openAlerts.length === 0;
+  const nothing = scoped.length === 0;
 
   return (
     <div className="space-y-6">
+      <RememberList section="alerts" />
       <div>
-        <h1 className="text-2xl font-semibold">Alerts</h1>
-        <p className="text-muted-foreground">
-          Contracts, probation reviews, and documents due for attention in the next {HORIZON_DAYS} days, or already
-          overdue. As of {todayStr}.
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="text-2xl font-semibold">Alerts</h1>
+          <InfoHint label="How the Alerts queue works" testId="info-hint-alerts">
+            <p><strong>Needs action</strong>: overdue, expired, or waiting for a person. <strong>Due soon</strong>: contracts and probation within {CONTRACT_LOOKAHEAD_DAYS} days, documents within {DOCUMENT_LOOKAHEAD_DAYS} days. <strong>Acknowledged</strong>: someone marked it as seen.</p>
+            <p className="mt-2"><strong>Mark as seen</strong> records that you looked at it and nothing else. The item stays listed until the record itself is fixed: renew the document, record the contract change, correct the day. Fixing the record removes it here and on the employee&apos;s profile the next time the page loads.</p>
+            <p className="mt-2">Dates are calendar days. Attendance and Recovery Leave items open the register on that employee and date.</p>
+          </InfoHint>
+        </div>
+        <p className="text-muted-foreground">Everything HR needs to act on, in one list. As of {today}.</p>
       </div>
 
-      {failedReads.length > 0 ? <LoadError what={`part of the alerts (${failedReads.join(", ")})`} retryHref="/alerts" /> : null}
-
-      {schedulerStatus ? (
-        <Alert
-          variant={
-            schedulerStatus.stale || schedulerStatus.open_failures > 0 || (schedulerStatus.windows_policy_active && !schedulerStatus.scheduler_ready.ready) ? "warning" : "default"
-          }
-          data-testid="processor-status"
-        >
-          <p className="font-medium">Recovery Leave background processing</p>
-          <p className="mt-1">
-            {schedulerStatus.scheduler_ready.ready
-              ? "5-minute processor: verified running."
-              : `5-minute processor: not verified (${schedulerStatus.scheduler_ready.reasons.join("; ")}). ${
-                  schedulerStatus.windows_policy_active
-                    ? "Windows and alerts are only processed by the daily safety-net run until it is enabled."
-                    : "A Recovery Leave windows policy cannot be activated until it is."
-                }`}{" "}
-            {schedulerStatus.last_success_at
-              ? `Last successful run: ${new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(schedulerStatus.last_success_at))}.`
-              : "It has not run yet."}{" "}
-            {schedulerStatus.stale ? "It is overdue, so windows may close and alerts may appear late. " : ""}
-            {schedulerStatus.open_failures > 0 ? `${schedulerStatus.open_failures} employee(s) failed on the last run and will be retried. ` : ""}
-          </p>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Work still being finished: {schedulerStatus.work_remaining.open_periods} open working period(s), {schedulerStatus.work_remaining.open_windowed_sessions} open
-            session(s), {schedulerStatus.work_remaining.unresolved_failures} failure(s), {schedulerStatus.work_remaining.unrouted_window_requests} unrouted request(s). The
-            scheduler must stay enabled until all are 0, even after a policy is switched off.{" "}
-            {schedulerStatus.database_fingerprint ? (
-              <>
-                Database fingerprint: <span className="font-mono" data-testid="database-fingerprint">{schedulerStatus.database_fingerprint}</span> — compare it with the value the
-                verification SQL prints in the Supabase project you expect (Enginious HR Engine_V2).
-              </>
-            ) : null}
-          </p>
+      {!read ? <LoadError what={`part of the alerts (${data.failed.join(", ")})`} retryHref={retryHref} /> : null}
+      {processorLate ? (
+        <Alert variant="warning" data-testid="processor-late">
+          Recovery Leave background processing is not running on time, so Recovery Leave alerts and windows may appear late. A System Administrator can check Administration, Background processing.
         </Alert>
       ) : null}
 
-      {openAlerts.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Recovery Leave work alerts</CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Warnings only: recording continues and none of these creates a recovery day by itself. Times are in each employee&apos;s own country
-              time zone. Elapsed hours (the whole stretch) are not the same as recorded hours (clocked-in time only).
-            </p>
-            <AutoRefresh generatedAt={generatedAt} timeZone={resolveCountryTimeZone(null)} intervalSeconds={60} />
-          </CardHeader>
-          <CardContent>
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Company</TableHead>
-                  <TableHead>Alert</TableHead>
-                  <TableHead>Working period began</TableHead>
-                  <TableHead>Recorded</TableHead>
-                  <TableHead>Elapsed</TableHead>
-                  <TableHead>Triggered</TableHead>
-                  <TableHead>Rest / rollover</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {openAlerts.map((a) => {
-                  const d = a.details as { gaps?: unknown[]; still_open?: boolean; window_index?: number; threshold_hours?: number };
-                  return (
-                    <ClickableRow key={a.id} href={`/employees/${a.employee_id}`}>
-                      <TableCell>
-                        <Link href={`/employees/${a.employee_id}`} className="hover:underline">
-                          {employeeName.get(a.employee_id) ?? "—"}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{companyName.get(a.company_id) ?? "—"}</TableCell>
-                      <TableCell>
-                        <Badge variant="warning">{ALERT_TYPE_LABELS[a.alert_type]}</Badge>
-                      </TableCell>
-                      <TableCell>{fmtLocal(a.period_started_at, a.employee_id)}</TableCell>
-                      <TableCell>{formatRecordedDuration(Number(a.recorded_seconds))}</TableCell>
-                      <TableCell>{formatRecordedDuration(Number(a.elapsed_seconds))}</TableCell>
-                      <TableCell>{fmtLocal(a.triggered_at, a.employee_id)}</TableCell>
-                      <TableCell className="max-w-xs text-sm text-muted-foreground">
-                        {a.alert_type === "window_rollover"
-                          ? `Window ${d.window_index ?? "?"} rolled over automatically at 24 elapsed hours without a completed rest; no manual clock-out was made.`
-                          : `${d.threshold_hours ?? 20} recorded hours reached without a completed rest${d.still_open ? " — still clocked in" : ""}; ${(d.gaps ?? []).length} clocked-out gap(s) shorter than the rest threshold.`}
-                      </TableCell>
-                      <TableCell>{isHrAdmin ? <AcknowledgeAlertForm alertId={a.id} /> : null}</TableCell>
-                    </ClickableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            {acknowledgedAlerts.length > 0 ? (
-              <p className="mt-3 text-sm text-muted-foreground">
-                Recently acknowledged: {acknowledgedAlerts.map((a) => `${employeeName.get(a.employee_id) ?? "—"} (${ALERT_TYPE_LABELS[a.alert_type]})`).join(", ")}.
-              </p>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+      <ListToolbar search={{ value: sp.q ?? "", placeholder: "Search employee name", label: "Search the queue by employee name" }} filters={toolbarFilters} clearHref={filtersInUse ? here({ company: null, type: null, q: null }) : undefined} />
 
-      {nothingFlagged && failedReads.length === 0 ? (
-        <Card>
-          <CardContent>
-            <EmptyState dense title="Nothing needs attention right now." description="No contracts, documents, or probation periods are due within the next 30 days." />
-          </CardContent>
-        </Card>
-      ) : null}
+      <nav aria-label="View" className="flex flex-wrap gap-2">
+        {VIEWS.map((v) => {
+          const n = v === "all" ? scoped.length : counts[v];
+          return (
+            <Link key={v} href={here({ view: v === "all" ? null : v })} aria-current={view === v ? "page" : undefined}
+              className={cn("inline-flex min-h-10 items-center gap-1.5 rounded-md border px-3 text-sm font-medium", view === v ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:text-foreground")}>
+              {v === "all" ? "All" : STATE_LABEL[v]} <span className="text-[13px]">{read ? n : "—"}</span>
+            </Link>
+          );
+        })}
+      </nav>
 
-      {contractsEnding.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Contracts ending</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Contract type</TableHead>
-                  <TableHead>End date</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {contractsEnding.map((c) => (
-                  <ClickableRow key={c.id} href={`/employees/${c.employee_id}`}>
-                    <TableCell>
-                      <Link href={`/employees/${c.employee_id}`} className="hover:underline">
-                        {employeeName.get(c.employee_id) ?? "—"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="capitalize">{c.contract_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell>{c.end_date}</TableCell>
-                    <TableCell>
-                      <UrgencyBadge days={c.days} />
-                    </TableCell>
-                  </ClickableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {probationEnding.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Probation reviews due</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Probation end date</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {probationEnding.map((c) => (
-                  <ClickableRow key={c.id} href={`/employees/${c.employee_id}`}>
-                    <TableCell>
-                      <Link href={`/employees/${c.employee_id}`} className="hover:underline">
-                        {employeeName.get(c.employee_id) ?? "—"}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{c.probation_end_date}</TableCell>
-                    <TableCell>
-                      <UrgencyBadge days={c.days} />
-                    </TableCell>
-                  </ClickableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {docsFlagged.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Documents expiring or expired</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Expiry</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {docsFlagged.map((d) => (
-                  <ClickableRow key={d.id} href={`/employees/${d.employee_id}`}>
-                    <TableCell>
-                      <Link href={`/employees/${d.employee_id}`} className="hover:underline">
-                        {employeeName.get(d.employee_id) ?? "—"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="capitalize">{d.document_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell>{d.expiry_date ?? "—"}</TableCell>
-                    <TableCell>{d.days !== null ? <UrgencyBadge days={d.days} /> : <Badge variant="outline">No date</Badge>}</TableCell>
-                  </ClickableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {identityFlagged.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Identity documents expiring soon</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table stack>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Type</TableHead>
-                  <TableHead>Number</TableHead>
-                  <TableHead>Expiry</TableHead>
-                  <TableHead />
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {identityFlagged.map((d) => (
-                  <TableRow key={d.id}>
-                    <TableCell>
-                      <Link href={`/employees/${d.employee_id}`} className="hover:underline">
-                        {employeeName.get(d.employee_id) ?? "—"}
-                      </Link>
-                    </TableCell>
-                    <TableCell className="capitalize">{d.document_type.replace(/_/g, " ")}</TableCell>
-                    <TableCell className="font-mono text-sm">{d.document_number}</TableCell>
-                    <TableCell>{d.expiry_date}</TableCell>
-                    <TableCell>
-                      <UrgencyBadge days={d.days} />
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      ) : null}
+      {nothing && read ? (
+        <EmptyState dense title="Nothing needs attention right now." description={filtersInUse ? "No items match these filters." : "No contract, probation, document, attendance or recovery items are due."} />
+      ) : (
+        <div className="space-y-8">
+          {show("needs_action") ? <QueueList title="Needs action" tone="needs_action" items={by("needs_action")} from="alerts" empty={read ? "Nothing needs action." : null} /> : null}
+          {show("due_soon") ? <QueueList title="Due soon" tone="due_soon" items={by("due_soon")} from="alerts" empty={read ? "Nothing is coming up." : null} /> : null}
+          {show("acknowledged") ? <QueueList title="Acknowledged" tone="acknowledged" items={by("acknowledged")} from="alerts" empty={read ? "Nothing has been acknowledged." : null} /> : null}
+        </div>
+      )}
     </div>
   );
 }

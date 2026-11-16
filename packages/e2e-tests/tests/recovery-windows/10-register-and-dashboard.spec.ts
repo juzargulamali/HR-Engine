@@ -38,7 +38,7 @@ test.describe("automatic attendance register (HR Admin) @recovery-windows", () =
     await register.goto();
     await expect(hrAdminPage.locator("p", { hasText: /^Clocked in now$/ })).toBeVisible(); // the summary tile (the same words are also a filter option)
     await expect(hrAdminPage.getByText(/^Present on \d{4}-\d{2}-\d{2}$/)).toBeVisible();
-    await expect(hrAdminPage.getByText("Not started / not recorded", { exact: true })).toBeVisible();
+    await expect(hrAdminPage.locator("p", { hasText: /^(No record|Rest day, nothing recorded)$/ })).toBeVisible();
     await expect(hrAdminPage.locator("p", { hasText: /^Needs review$/ })).toBeVisible();
   });
 

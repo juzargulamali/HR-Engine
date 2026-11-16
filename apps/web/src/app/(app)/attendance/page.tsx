@@ -16,6 +16,9 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { AutoRefresh } from "@/components/attendance/auto-refresh";
 import { workModeLabel } from "@/lib/recovery/labels";
 import { RegisterTable } from "./register-table";
+import { BackLink } from "@/components/workspace/list-memory";
+import { InfoHint } from "@/components/ui/info-hint";
+import { reviewFlagLabel } from "@/lib/recovery/labels";
 import type { Colleague, RegisterDetail, RegisterRowView, SessionDetail, WindowDetail } from "./register-types";
 
 export const metadata = { title: "Attendance" };
@@ -31,9 +34,9 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
 export default async function AttendancePage({
   searchParams,
 }: {
-  searchParams: Promise<{ date?: string; companyId?: string; q?: string; filter?: string; manual?: string }>;
+  searchParams: Promise<{ date?: string; companyId?: string; q?: string; filter?: string; manual?: string; employee?: string; from?: string }>;
 }) {
-  const { date, companyId: companyIdParam, q: qParam, filter: filterParam, manual: manualParam } = await searchParams;
+  const { date, companyId: companyIdParam, q: qParam, filter: filterParam, manual: manualParam, employee: employeeParam, from: fromParam } = await searchParams;
   const session = await getCurrentSession();
   if (!session) return null;
 
@@ -354,11 +357,24 @@ export default async function AttendancePage({
     });
   }
 
+  // A link from the HR queue or a profile names one employee: that row opens. Only someone in this company's register can be named.
+  const focusEmployeeId = employeeParam && allRows.some((r) => r.employeeId === employeeParam) ? employeeParam : null;
+  // Needs review leads the page: who, why, and a link straight to that person's row for this date.
+  const reviewRows = allRows.filter((r) => r.recoverySummary === "needs_review" || !!r.presenceConflict || r.openAlertCount > 0);
+  const reviewReasons = (r: RegisterRowView): string[] => [
+    r.presenceConflict ? "Manual entry and clock records differ" : null,
+    r.recoverySummary === "needs_review" ? "Recovery window waiting for HR verification" : null,
+    r.openAlertCount > 0 ? `${r.openAlertCount === 1 ? "1 open HR alert" : `${r.openAlertCount} open HR alerts`}` : null,
+    ...r.reviewFlags.map(reviewFlagLabel),
+  ].filter((x): x is string => x !== null);
+  const rowHref = (employeeId: string) => `/attendance?${new URLSearchParams({ companyId, date: workDate, employee: employeeId }).toString()}#row-${employeeId}`;
+
   const hrLinkParams = new URLSearchParams({ companyId, date: workDate });
   if (q) hrLinkParams.set("q", q);
 
   return (
     <div className="space-y-6">
+      {fromParam === "alerts" ? <BackLink section="alerts" fallback="/alerts">Alerts</BackLink> : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold">Attendance</h1>
@@ -422,10 +438,34 @@ export default async function AttendancePage({
 
       {!showManual ? (
         <>
+          {reviewRows.length > 0 ? (
+            <Card data-testid="needs-review">
+              <CardHeader>
+                <div className="flex flex-wrap items-center gap-2">
+                  <CardTitle>Needs review ({reviewRows.length})</CardTitle>
+                  <InfoHint label="Needs review" testId="info-hint-needs-review">A day lands here when a manual entry and the clock records differ, a recovery window waits for HR to verify it, or an HR alert is open. Opening a row shows the sessions behind it, and Edit corrects the original record. When the record is corrected, the person leaves this list the next time the page loads.</InfoHint>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <ul className="divide-y divide-border">
+                  {reviewRows.map((r) => (
+                    <li key={r.employeeId} className="flex flex-wrap items-start justify-between gap-2 py-2" data-testid={`review-${r.employeeId}`}>
+                      <div>
+                        <p className="font-medium">{r.name} <span className="text-sm font-normal text-muted-foreground">{company.legal_name} · {workDate}</span></p>
+                        <p className="text-sm text-muted-foreground">{reviewReasons(r).join(" · ")}</p>
+                      </div>
+                      <Link href={rowHref(r.employeeId)} className="text-sm font-medium text-accent hover:underline">Open this day</Link>
+                    </li>
+                  ))}
+                </ul>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <SummaryTile label="Clocked in now" value={clockedInNow} hint="Live clock status — separate from attendance for the date" />
             <SummaryTile label={`Present on ${workDate}`} value={presentOnDate} hint="Stays Present after clocking out" />
-            <SummaryTile label="Not started / not recorded" value={notStartedCount} hint="No clock evidence — not treated as absent" />
+            <SummaryTile label={isRecoveryDay ? "Rest day, nothing recorded" : "No record"} value={notStartedCount} hint="No clock evidence. Never treated as absent" />
             <SummaryTile label="Needs review" value={needsReviewCount} hint="Conditions HR should look at" />
           </div>
 
@@ -437,7 +477,7 @@ export default async function AttendancePage({
             </CardHeader>
             <CardContent>
               {allRows.length > 0 ? (
-                <RegisterTable rows={rows} details={details} colleagues={colleagues} workDate={workDate} canEdit />
+                <RegisterTable rows={rows} details={details} colleagues={colleagues} workDate={workDate} canEdit isRestDay={isRecoveryDay} focusEmployeeId={focusEmployeeId} />
               ) : (
                 <p className="text-muted-foreground">No active employees in this company yet.</p>
               )}

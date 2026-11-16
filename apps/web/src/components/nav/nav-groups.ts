@@ -207,6 +207,7 @@ export function buildNavModules(grants: readonly RoleGrant[], options: NavOption
   const organisationLinks: NavLinkData[] = [
     ...(showAssetsLink ? [{ href: "/assets", label: "Assets", iconKey: "assets" as const }] : []),
     ...(showAdminLink ? [{ href: "/admin/companies", label: "Companies", iconKey: "companies" as const }] : []),
+    ...(showAdminLink ? [{ href: "/admin/background-processing", label: "Background processing", iconKey: "audit" as const }] : []),
   ];
   if (organisationLinks.length > 0) peopleSections.push({ label: "Organisation", links: organisationLinks });
   if (showInsightsLinks) {
