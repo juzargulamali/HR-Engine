@@ -92,17 +92,19 @@ export function RegisterTable({
                   ) : null}
                 </TableCell>
                 <TableCell>
-                  <Badge variant={DAY_LABEL_TONE[dayLabel(r)]} data-testid="day-label">{dayLabel(r)}</Badge>
-                  {r.attendanceSource && r.attendanceSource !== "self_clock" ? (
-                    <div className="text-sm text-muted-foreground">
-                      Manual entry{r.manualHours != null ? ` · ${r.manualHours} h` : ""}
-                    </div>
-                  ) : null}
-                  {r.presenceConflict ? (
-                    <div className="text-sm text-warning" title={r.presenceConflict}>
-                      Manual and clock records differ — review
-                    </div>
-                  ) : null}
+                  <div className="flex min-w-0 flex-col items-start gap-1 max-md:items-end">
+                    <Badge variant={DAY_LABEL_TONE[dayLabel(r)]} data-testid="day-label">{dayLabel(r)}</Badge>
+                    {r.attendanceSource && r.attendanceSource !== "self_clock" ? (
+                      <div className="text-sm text-muted-foreground">
+                        Manual entry{r.manualHours != null ? ` · ${r.manualHours} h` : ""}
+                      </div>
+                    ) : null}
+                    {r.presenceConflict ? (
+                      <div className="text-sm text-warning" title={r.presenceConflict}>
+                        Manual and clock records differ, review
+                      </div>
+                    ) : null}
+                  </div>
                 </TableCell>
                 <TableCell>{r.workModes.length > 0 ? r.workModes.map(workModeLabel).join(", ") : "—"}</TableCell>
                 <TableCell>{fmtTime(r.firstClockIn, r.timeZone)}</TableCell>

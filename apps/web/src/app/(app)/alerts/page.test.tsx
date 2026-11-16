@@ -108,6 +108,7 @@ describe("Alerts page: the HR work queue", () => {
   });
 
   it("the company filter narrows the queue and the empty state of a filter says so", async () => {
+    grants = [{ role: "hr_admin", companyId: "c1", countryCode: null }, { role: "hr_admin", companyId: "c2", countryCode: null }];
     tables = { ...tables, employee_documents: rows([{ id: "d1", employee_id: "e3", document_type: "visa", expiry_date: day(-3) }]) };
     expect(await render({ company: "c2" })).toContain("Lena Nowak");
     const html = await render({ company: "c1" });

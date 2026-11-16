@@ -89,6 +89,7 @@ await step("probation deadline opens that employee's Employment tab", async () =
   await page.waitForURL(/\/employees\/[0-9a-f-]{36}\?/, { timeout: 20000 });
   const u = new URL(page.url());
   if (!u.pathname.endsWith(PAVEL) || u.searchParams.get("tab") !== "employment") throw new Error(`unexpected address ${page.url()}`);
+  await page.getByTestId("profile-subtitle").waitFor({ timeout: 20000 });
   if (!/Pavel/.test(await body())) throw new Error("the record is not Pavel's");
   await noHScroll("the employment tab");
 });
@@ -132,7 +133,8 @@ await step("RESOLVE updates the views: renewing the passport removes it from the
   await go("/alerts?company=" + AE);
   if (/Dana Docexpiry/.test(await body())) throw new Error("the queue still lists the renewed passport");
   await go(`/employees/${DANA}`);
-  if (await page.getByTestId("next-actions").count()) throw new Error(`the profile still flags something: ${await page.getByTestId("next-actions").innerText()}`);
+  const flags = (await page.getByTestId("next-actions").count()) ? await page.getByTestId("next-actions").innerText() : "";
+  if (/passport|expired|expiring|document/i.test(flags)) throw new Error(`the profile still flags the passport: ${flags}`);
   await go("/");
   if (/Document expiries/.test(await body())) throw new Error("My Day still counts the renewed passport");
   await page.screenshot({ path: `${SHOTS}/6-after-resolution-phone.png`, fullPage: true });

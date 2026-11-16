@@ -73,5 +73,7 @@ export async function loadHrQueue(opts: { grants: readonly RoleGrant[]; today: s
     ...aiSuggestionItems(draftsRes.data ?? [], ctx),
   ]);
 
-  return { items, failed, companies: [...companies].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)), today };
+  // The company filter offers only companies the viewer holds an alerts role for (the companies list itself is readable by every signed-in person, and must not leak other companies' names here).
+  const offered = [...companies].filter(([id]) => (["hr_admin", "ceo", "cto"] as const).some((role) => hasRole(opts.grants, role, { companyId: id })));
+  return { items, failed, companies: offered.map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)), today };
 }
