@@ -172,9 +172,12 @@ end $$;
 -- The per-company exact-match index is replaced by the reservations (global, permanent, and blind to the ignored records, which a unique index on the table could not be).
 drop index if exists employees_company_employee_number_unique;
 
--- The next number for a NEW employee: the lowest still-free number of the pool, claimed atomically across all companies; when the pool is empty, the next free number of the shared sequence. SECURITY DEFINER because the
--- caller (HR Admin through the app) has no right to the pool, the sequence or the reservations. The claim is part of the hiring transaction: if the hire fails, the pool number goes back.
--- "Skip locked": two hires at the same moment each take a different row (the lowest not being claimed by the other); a pool number somebody has since reserved by hand, or an active or invited employee shows, is skipped.
+-- The next number for a NEW employee: the lowest still-free number of the pool, claimed atomically across all companies; when the pool is truly empty, the next free number of the shared sequence. SECURITY DEFINER because
+-- the caller (HR Admin through the app) has no right to the pool, the sequence or the reservations. The claim is part of the hiring transaction: if the hire fails, the pool number goes back.
+-- Two hires at the same moment each take a different row: the first pass skips rows another hire has locked ("skip locked"). A number that is only LOCKED by another hire is NOT an exhausted pool: when the first
+-- pass finds nothing but a free number still exists, this hire WAITS for that other hire to finish (it takes the number if the other hire rolls back; it moves on to the sequence only once the pool really has no free
+-- number left). A pool number somebody has since reserved by hand, or an active or invited employee shows, is skipped. (Two hires that each insert several employees in one transaction against a pool smaller than
+-- their combined demand can wait on each other: the database stops one of them with a deadlock error and nothing is saved; sending it again works.)
 create or replace function next_employee_number(p_employee_id uuid)
 returns text
 language plpgsql
@@ -194,6 +197,17 @@ begin
   order by p.number_value
   limit 1
   for update of p skip locked;
+  if v_key is null then
+    -- nothing free that is not locked: is a free number merely locked by another in-flight hire? Wait for it (the row is re-checked once the other hire commits or rolls back).
+    select p.number_key into v_key
+    from employee_number_pool p
+    where p.claimed_by is null
+      and not exists (select 1 from employee_number_reservations r where r.number_key = p.number_key)
+      and not exists (select 1 from employees e where employee_number_canonical(e.employee_number) = p.number_key and employee_number_in_scope(e.deleted_at, e.employment_status, e.user_id))
+    order by p.number_value
+    limit 1
+    for update of p;
+  end if;
   if v_key is not null then
     update employee_number_pool set claimed_by = p_employee_id, claimed_at = now() where number_key = v_key;
     return v_key;
