@@ -28,8 +28,11 @@ select item, result from (
                    and not has_function_privilege('anon', 'public.apply_due_employment_changes(timestamptz)', 'execute')
                    and (not exists (select 1 from pg_roles where rolname = 'service_role') or has_function_privilege('service_role', 'public.apply_due_employment_changes(timestamptz)', 'execute'))
               then 'OK' else 'FAIL - missing, older version, or privileges differ' end
-  union all select 5, 'the two internal helpers exist in their current form and are not callable by signed-in users or anon',
+  union all select 5, 'the three internal helpers (employee lock, apply, set pay) exist in their current form and are not callable by signed-in users or anon',
          case when to_regprocedure('public._hr_apply_career_event(uuid)') is not null and to_regprocedure('public._hr_set_current_pay(uuid, date, numeric, jsonb, text, uuid)') is not null
+                   and to_regprocedure('public._hr_lock_employee(uuid)') is not null
+                   and not has_function_privilege('authenticated', 'public._hr_lock_employee(uuid)', 'execute')
+                   and not has_function_privilege('anon', 'public._hr_lock_employee(uuid)', 'execute')
                    and to_regprocedure('public._hr_set_current_pay(uuid, date, numeric, numeric, text, uuid)') is null
                    and (select prorettype::regtype::text from pg_proc where oid = 'public._hr_apply_career_event(uuid)'::regprocedure) = 'text'
                    and not has_function_privilege('authenticated', 'public._hr_apply_career_event(uuid)', 'execute')
@@ -46,11 +49,14 @@ select item, result from (
                    and not has_function_privilege('anon', 'public.hr_business_date(text, timestamptz)', 'execute')
                    and not has_function_privilege('anon', 'public.hr_business_today(text)', 'execute')
               then 'OK' else 'FAIL - a helper is missing or answers differently' end
-  union all select 7, 'the five functions that write run as their owner with a pinned search path',
+  union all select 7, 'the six functions that write or lock run as their owner with a pinned search path; the save, the cancellation and the apply helper take the employee lock first, and the daily job does not list its work with a skip-locked cursor',
          case when (select count(*) from pg_proc where pronamespace = 'public'::regnamespace
-                      and proname in ('record_employment_change', 'apply_due_employment_changes', 'dismiss_employment_change', '_hr_apply_career_event', '_hr_set_current_pay')
-                      and prosecdef and proconfig is not null and 'search_path=public' = any (proconfig)) = 5
-              then 'OK' else 'FAIL - a function is not security definer with search_path = public' end
+                      and proname in ('record_employment_change', 'apply_due_employment_changes', 'dismiss_employment_change', '_hr_apply_career_event', '_hr_set_current_pay', '_hr_lock_employee')
+                      and prosecdef and proconfig is not null and 'search_path=public' = any (proconfig)) = 6
+                   and (select count(*) from pg_proc where pronamespace = 'public'::regnamespace
+                          and proname in ('record_employment_change', 'dismiss_employment_change', '_hr_apply_career_event') and prosrc like '%_hr_lock_employee(%') = 3
+                   and (select prosrc not like '%skip locked%' from pg_proc where oid = to_regprocedure('public.apply_due_employment_changes(timestamptz)'))
+              then 'OK' else 'FAIL - a function is not security definer with search_path = public, or an older version without the employee lock is installed (apply the migration file again)' end
   union all select 8, 'the two one-opening-balance indexes exist (leave ledger per employee and leave type; comp-day ledger per employee)',
          case when to_regclass('public.leave_ledger_opening_balance_unique') is not null and to_regclass('public.comp_day_ledger_opening_balance_unique') is not null
                    and (select indisunique from pg_index where indexrelid = 'public.leave_ledger_opening_balance_unique'::regclass)

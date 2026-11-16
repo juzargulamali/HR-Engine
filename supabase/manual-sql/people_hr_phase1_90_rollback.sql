@@ -1,6 +1,6 @@
 -- ROLLBACK for 20270115000100_people_hr_phase1.sql. Deploy the app from before this change FIRST (the Employment tab and the daily employment-changes job call these functions).
 -- It STOPS while any change is still SCHEDULED (applied_at is null): a scheduled change exists only in that column, so dropping it would lose the change. Let each come due and apply, or ask HR to
--- record it again after the rollback, then run this again. It deletes no employee, contract, pay version, career event, ledger row or document. It drops the eight functions, the three indexes
+-- record it again after the rollback, then run this again. It deletes no employee, contract, pay version, career event, ledger row or document. It drops the nine functions, the three indexes
 -- and the six columns this migration added (applied_at, base_compensation_id, conflict_reason, conflict_at, dismissed_at, dismissed_by). Safe to run twice.
 -- It also STOPS while a CANCELLED scheduled change exists (dismissed_at set, never applied): the previous build has no idea what "cancelled" means and would list it as a change that happened. Those rows
 -- never took effect; decide with HR whether to keep them (then do not roll back) or to remove them yourself, then run this again. This file never deletes them.
@@ -25,6 +25,7 @@ begin
   drop function if exists _hr_apply_career_event(uuid);
   drop function if exists _hr_set_current_pay(uuid, date, numeric, jsonb, text, uuid);
   drop function if exists _hr_set_current_pay(uuid, date, numeric, numeric, text, uuid);
+  drop function if exists _hr_lock_employee(uuid);
   drop function if exists hr_business_today(text);
   drop function if exists hr_business_date(text, timestamptz);
   drop function if exists hr_business_time_zone(text);

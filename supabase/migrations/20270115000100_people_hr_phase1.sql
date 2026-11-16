@@ -10,6 +10,11 @@
 -- RE-RUNNABLE. Every statement is `if not exists` / `create or replace`, and the earlier signatures of the functions below (a first draft of this file, never merged) are dropped by name and
 -- signature first, so running this file over that draft converges instead of leaving two versions of a function side by side. The verify pack's row 7 fails if a function is not this version.
 --
+-- LOCK ORDER (the same on every path: the save, the daily job and the cancellation). The employee's row in `employees` is locked FIRST (_hr_lock_employee), then the change's row in
+-- `employee_career_events`, then the pay rows are read and written. Whatever a path decides about the employee's status or pay, it decides AFTER holding that lock, so two sessions touching
+-- the same employee run one after the other and the second sees what the first committed. The daily job takes no lock while it lists what is due; it locks each employee as it reaches that
+-- employee's change (and gives up on one employee after 10 seconds, reporting that as a failure, rather than waiting forever behind a stuck session).
+--
 -- WHAT IT DOES
 --   1. employee_career_events: applied_at (null = SCHEDULED, a change dated in the future and not yet in force; a time = applied; every existing row is marked applied at the time it was written;
 --      the column default is now(), so a row written by the PREVIOUS app build during the install window counts as applied), base_compensation_id (the pay version that was current when a pay change
@@ -74,6 +79,23 @@ grant execute on function hr_business_time_zone(text), hr_business_date(text, ti
 create unique index if not exists leave_ledger_opening_balance_unique on leave_ledger (employee_id, leave_type_code) where reference_type = 'opening_balance';
 create unique index if not exists comp_day_ledger_opening_balance_unique on comp_day_ledger (employee_id) where source = 'opening_balance';
 
+-- Internal: take the employee's lock (the FIRST lock on every path) and return the employee as it is now, after any session that held the lock has committed. A lock already held by this
+-- transaction is simply kept. Returns a row with a null id when there is no such employee.
+create or replace function _hr_lock_employee(p_employee_id uuid)
+returns employees
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  emp employees%rowtype;
+begin
+  select * into emp from employees where id = p_employee_id for update;
+  return emp;
+end;
+$$;
+revoke all on function _hr_lock_employee(uuid) from public, anon, authenticated;
+
 -- Internal: put a pay version in force for an employee. The new version is inserted with exactly the allowances it is given, then every other current version is superseded. Bank and payment details
 -- carry over from the version being replaced, so a raise never drops an IBAN.
 create or replace function _hr_set_current_pay(p_employee_id uuid, p_effective date, p_basic numeric, p_allowances jsonb, p_currency text, p_actor uuid)
@@ -96,7 +118,9 @@ end;
 $$;
 revoke all on function _hr_set_current_pay(uuid, date, numeric, jsonb, text, uuid) from public, anon, authenticated;
 
--- Internal: apply one scheduled or just-recorded career event (title and/or pay). Returns 'applied', 'already' (it was applied before; nothing is done) or 'conflict'.
+-- Internal: apply one scheduled or just-recorded career event (title and/or pay). Returns 'applied', 'already' (it was applied or cancelled before; nothing is done), 'left' (the employee has
+-- left or was removed; nothing is done) or 'conflict'.
+-- Locks the employee FIRST and the event second, then decides everything from what it reads while holding both: the event's state, the employee's status and the current pay version.
 -- A PAY change was worked out from one pay version (base_compensation_id). If that version is no longer the current one, someone changed pay since: applying now would overwrite the newer pay
 -- (or put back a figure that was not edited, such as the basic salary of an "others only" change). Nothing is written then, title included, and the event is held with a reason for HR to review.
 create or replace function _hr_apply_career_event(p_event_id uuid)
@@ -107,12 +131,17 @@ set search_path = public
 as $$
 declare
   e employee_career_events%rowtype;
+  emp employees%rowtype;
   v_cur compensation_details%rowtype;
+  v_employee uuid;
   v_currency text;
 begin
-  select * into e from employee_career_events where id = p_event_id for update;
-  if not found or e.applied_at is not null then return 'already'; end if;
-  if e.dismissed_at is not null then return 'already'; end if;
+  select employee_id into v_employee from employee_career_events where id = p_event_id;   -- an unlocked read, only to know whose lock to take first
+  if v_employee is null then return 'already'; end if;
+  emp := _hr_lock_employee(v_employee);                                                    -- lock 1: the employee
+  select * into e from employee_career_events where id = p_event_id for update;            -- lock 2: the change
+  if not found or e.applied_at is not null or e.dismissed_at is not null then return 'already'; end if;
+  if emp.id is null or emp.deleted_at is not null or emp.employment_status = 'terminated' then return 'left'; end if;
   if e.new_base_salary is not null then
     select * into v_cur from compensation_details where employee_id = e.employee_id and is_current order by effective_from desc, created_at desc limit 1;
     if v_cur.id is distinct from e.base_compensation_id then
@@ -128,7 +157,7 @@ begin
     update employees set job_title = e.new_job_title where id = e.employee_id;
   end if;
   if e.new_base_salary is not null then
-    v_currency := coalesce(e.currency, v_cur.currency, (select c.default_currency from employees em join companies c on c.id = em.company_id where em.id = e.employee_id));
+    v_currency := coalesce(e.currency, v_cur.currency, (select c.default_currency from companies c where c.id = emp.company_id));
     perform _hr_set_current_pay(e.employee_id, e.effective_date, e.new_base_salary, coalesce(e.new_allowances, '{}'::jsonb), v_currency, e.created_by);
   end if;
   update employee_career_events set applied_at = now(), conflict_reason = null, conflict_at = null where id = e.id;
@@ -164,9 +193,9 @@ declare
   v_new_other numeric;
 begin
   if auth.uid() is null then raise exception 'Sign in to change job or pay.' using errcode = '42501'; end if;
-  select * into emp from employees where id = p_employee_id for update;   -- serialises two changes to the same employee
-  v_hr := found and has_role('hr_admin', emp.company_id);
-  v_finance := found and has_role('finance', emp.company_id);
+  emp := _hr_lock_employee(p_employee_id);   -- lock 1 (the same first lock as the daily job and the cancellation): serialises every change to this employee
+  v_hr := emp.id is not null and has_role('hr_admin', emp.company_id);
+  v_finance := emp.id is not null and has_role('finance', emp.company_id);
   if not (v_hr or v_finance) then raise exception 'You are not allowed to change this employee''s job or pay.' using errcode = '42501'; end if;
   if emp.deleted_at is not null or emp.employment_status = 'terminated' then raise exception 'This employee has left or was removed, so their job and pay cannot be changed.' using errcode = '22023'; end if;
   if p_effective_date is null then raise exception 'Enter the date the change takes effect.' using errcode = '22023'; end if;
@@ -236,21 +265,22 @@ declare
   v_held jsonb := '[]'::jsonb;
   v_failures jsonb := '[]'::jsonb;
 begin
+  -- Wait at most 10 seconds for any one employee's lock: a session stuck on one employee is then reported as that event's failure instead of freezing the whole run.
+  perform set_config('lock_timeout', '10s', true);
+  -- Listing what is due takes NO lock. Each change is then handled by _hr_apply_career_event, which locks its employee first and rechecks everything (the change's state, the employee's
+  -- status, the pay version) while holding the lock, so a list that went stale while an earlier change was being applied, or while a person was saving, does no harm.
   for r in
-    select ev.id, ev.employee_id, em.employment_status, em.deleted_at
+    select ev.id, ev.employee_id
     from employee_career_events ev
     join employees em on em.id = ev.employee_id
     where ev.applied_at is null and ev.dismissed_at is null and ev.effective_date <= hr_business_date(em.country_code, p_at)
     order by ev.effective_date, ev.created_at
-    for update of ev skip locked
   loop
-    if r.deleted_at is not null or r.employment_status = 'terminated' then
-      v_skipped := v_skipped + 1;   -- the person has left: the event stays scheduled, visible, and is reported
-      continue;
-    end if;
     begin
       v_outcome := _hr_apply_career_event(r.id);
-      if v_outcome = 'applied' then
+      if v_outcome = 'left' then
+        v_skipped := v_skipped + 1;   -- the person has left: the event stays scheduled, visible, and is reported
+      elsif v_outcome = 'applied' then
         v_applied := v_applied + 1;
       elsif v_outcome = 'conflict' then
         v_conflicts := v_conflicts + 1;   -- held for HR review; the reason is written on the event
@@ -282,12 +312,16 @@ set search_path = public
 as $$
 declare
   e employee_career_events%rowtype;
-  v_company uuid;
+  emp employees%rowtype;
+  v_employee uuid;
 begin
   if auth.uid() is null then raise exception 'Sign in to cancel a scheduled change.' using errcode = '42501'; end if;
-  select * into e from employee_career_events where id = p_event_id for update;
-  if found then select company_id into v_company from employees where id = e.employee_id; end if;
-  if not found or not has_role('hr_admin', v_company) then raise exception 'You are not allowed to cancel this change.' using errcode = '42501'; end if;
+  select employee_id into v_employee from employee_career_events where id = p_event_id;   -- an unlocked read, only to know whose lock to take first
+  if v_employee is null then raise exception 'You are not allowed to cancel this change.' using errcode = '42501'; end if;
+  emp := _hr_lock_employee(v_employee);                                                    -- lock 1: the employee (the same first lock as the save and the daily job)
+  if emp.id is null or not has_role('hr_admin', emp.company_id) then raise exception 'You are not allowed to cancel this change.' using errcode = '42501'; end if;
+  select * into e from employee_career_events where id = p_event_id for update;            -- lock 2: the change; its state is read only now, under both locks
+  if not found then raise exception 'You are not allowed to cancel this change.' using errcode = '42501'; end if;
   if e.applied_at is not null then raise exception 'This change is already in force, so it cannot be cancelled. Record a new change instead.' using errcode = '22023'; end if;
   if e.dismissed_at is not null then return jsonb_build_object('status', 'cancelled', 'event_id', e.id); end if;   -- a second tap changes nothing
   update employee_career_events set dismissed_at = now(), dismissed_by = auth.uid() where id = e.id;

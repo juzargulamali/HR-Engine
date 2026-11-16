@@ -16,7 +16,7 @@ import { RlsTestDatabase } from "../src/harness";
 const id = () => randomUUID();
 const CO = { a: id(), b: id(), pl: id() };
 const U = { hrA: id(), finA: id(), hrB: id(), emp: id(), mgr: id(), ceoA: id(), hrPl: id() };
-const E = { emp: id(), mgr: id(), bare: id(), left: id(), other: id(), pl: id(), sched: id(), allow: id(), conf: id(), cascade: id(), f1: id(), f2: id(), f3: id() };
+const E = { emp: id(), mgr: id(), bare: id(), left: id(), other: id(), pl: id(), sched: id(), allow: id(), conf: id(), cascade: id(), f1: id(), f2: id(), f3: id(), race: id() };
 const SQL_USERS = Object.entries(U).map(([k, v]) => `('${v}', '${k}@hrp1.ae')`).join(", ");
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 const manual = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
@@ -57,7 +57,8 @@ describe("People & HR Phase 1: one effective-dated job-and-pay change, and one o
         ('${E.cascade}', null, 'HP-010', '${CO.a}', 'AE', 'Fictional', 'Cascade', '2024-01-01', 'Estimator'),
         ('${E.f1}', null, 'HP-011', '${CO.a}', 'AE', 'Fictional', 'FailOne', '2024-01-01', 'Fitter'),
         ('${E.f2}', null, 'HP-012', '${CO.a}', 'AE', 'Fictional', 'FailTwo', '2024-01-01', 'Fitter'),
-        ('${E.f3}', null, 'HP-013', '${CO.a}', 'AE', 'Fictional', 'FailThree', '2024-01-01', 'Fitter');
+        ('${E.f3}', null, 'HP-013', '${CO.a}', 'AE', 'Fictional', 'FailThree', '2024-01-01', 'Fitter'),
+        ('${E.race}', null, 'HP-014', '${CO.a}', 'AE', 'Fictional', 'Race', '2024-01-01', 'Rigger');
       update employees set manager_id = '${E.mgr}' where id = '${E.emp}';
       insert into user_roles (user_id, role, company_id) values ('${U.hrA}', 'hr_admin', '${CO.a}'), ('${U.finA}', 'finance', '${CO.a}'), ('${U.hrB}', 'hr_admin', '${CO.b}'), ('${U.mgr}', 'line_manager', '${CO.a}'), ('${U.ceoA}', 'ceo', '${CO.a}'), ('${U.hrPl}', 'hr_admin', '${CO.pl}');
       insert into compensation_details (employee_id, effective_from, base_salary, allowances, currency, bank_iban, created_by) values
@@ -71,7 +72,8 @@ describe("People & HR Phase 1: one effective-dated job-and-pay change, and one o
         ('${E.cascade}', '2024-01-01', 5000, '{"housing": 100}', 'AED', null, '${U.hrA}'),
         ('${E.f1}', '2024-01-01', 4000, '{}', 'AED', null, '${U.hrA}'),
         ('${E.f2}', '2024-01-01', 4000, '{}', 'AED', null, '${U.hrA}'),
-        ('${E.f3}', '2024-01-01', 4000, '{}', 'AED', null, '${U.hrA}');
+        ('${E.f3}', '2024-01-01', 4000, '{}', 'AED', null, '${U.hrA}'),
+        ('${E.race}', '2024-01-01', 5000, '{"housing": 100}', 'AED', null, '${U.hrA}');
       update employees set employment_status = 'terminated', termination_date = '2026-01-01' where id = '${E.left}';
     `);
   }, 60_000);
@@ -326,6 +328,42 @@ describe("People & HR Phase 1: one effective-dated job-and-pay change, and one o
     await admin(`insert into comp_day_ledger (employee_id, txn_date, entry_type, days, source, reference_type, created_by) values ('${E.emp}', '2024-02-01', 'earned', 1, 'overtime', 'manual_adjustment', '${U.hrA}')`);
   });
 
+  it("TWO SESSIONS: a manual pay change still being saved cannot be overwritten by the daily applier: the applier waits for the employee's lock, then holds the stale change", async () => {
+    await call(U.hrA, change(E.race, day(10), "Senior Rigger", 6000, null));     // scheduled, worked out from pay version 1
+    let release!: () => void;
+    const hold = new Promise<void>((r) => { release = r; });
+    let locked!: () => void;
+    const aHasLock = new Promise<void>((r) => { locked = r; });
+    // Session A (Finance): changes pay dated today inside a transaction it has not committed yet. It holds the employee's lock and the new pay version.
+    const a = db.asUserCommit(U.finA, async (q) => { await q(`select ${change(E.race, TODAY, null, 5500, null)}`); locked(); await hold; });
+    await aHasLock;
+    // Session B (the daily job): starts while A is still open. It must WAIT for the employee, not read pay around A.
+    const b = db.seed(`select ${applyAt(noon(day(10)))} as v`);
+    let blocked = false;
+    try {
+      for (let i = 0; i < 60 && !blocked; i++) {
+        const n = await admin<{ n: string }>(`select count(*) n from pg_stat_activity where datname = current_database() and wait_event_type = 'Lock' and query like '%apply_due_employment_changes%'`);
+        blocked = Number(n[0]!.n) > 0;
+        if (!blocked) await new Promise((r) => setTimeout(r, 100));
+      }
+    } finally {
+      release();   // always let A finish, so a failure here cannot leave the transaction open
+    }
+    await a;
+    const run = (await b).rows[0] as Row;
+    expect(blocked, "the applier should have been waiting on the employee's lock while the save was open").toBe(true);
+    // After A committed, B rechecked the pay version under the lock: pay moved on, so the scheduled change is held, not applied over A's pay.
+    expect(run.v).toMatchObject({ applied: 0, conflicts: 1, failed: 0 });
+    const cur = await current(E.race);
+    expect(cur).toHaveLength(1);                                     // exactly one current pay version, never two
+    expect(Number(cur[0]!.base_salary)).toBe(5500);                 // A's pay, not overwritten
+    expect(cur[0]!.allowances).toEqual({ housing: 100 });
+    expect(await title(E.race)).toBe("Rigger");                     // the held change wrote nothing, title included
+    const [held] = await events(E.race);
+    expect(held!.applied_at).toBeNull();
+    await admin(`delete from employee_career_events where employee_id = '${E.race}' and applied_at is null`);
+  });
+
   it("running the migration file again converges: it replaces an older draft's functions instead of leaving two versions, and the verify pack says OK", async () => {
     await admin(`create function record_employment_change(p_employee_id uuid, p_effective_date date, p_job_title text, p_basic numeric, p_other numeric, p_note text, p_today date) returns jsonb language sql as $$ select '{}'::jsonb $$;`);
     const pre = (await db.seed(manual("people_hr_phase1_00_preflight_readonly.sql"))).rows as { result: string }[];
@@ -352,7 +390,7 @@ describe("People & HR Phase 1: one effective-dated job-and-pay change, and one o
     await admin(`delete from employee_career_events where applied_at is null`);
     await db.seed(manual("people_hr_phase1_90_rollback.sql"));
     await db.seed(manual("people_hr_phase1_90_rollback.sql")); // safe twice
-    const left = await admin<{ n: string }>(`select count(*) n from pg_proc where proname in ('record_employment_change', 'apply_due_employment_changes', 'dismiss_employment_change', '_hr_apply_career_event', '_hr_set_current_pay', 'hr_business_today', 'hr_business_date', 'hr_business_time_zone')`);
+    const left = await admin<{ n: string }>(`select count(*) n from pg_proc where proname in ('record_employment_change', 'apply_due_employment_changes', 'dismiss_employment_change', '_hr_apply_career_event', '_hr_set_current_pay', '_hr_lock_employee', 'hr_business_today', 'hr_business_date', 'hr_business_time_zone')`);
     expect(Number(left[0]!.n)).toBe(0);
     const cols = await admin<{ n: string }>(`select count(*) n from information_schema.columns where table_name = 'employee_career_events' and column_name in ('applied_at', 'base_compensation_id', 'conflict_reason', 'conflict_at', 'dismissed_at', 'dismissed_by')`);
     expect(Number(cols[0]!.n)).toBe(0);
