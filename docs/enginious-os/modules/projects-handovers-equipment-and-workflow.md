@@ -468,7 +468,7 @@ Every action is a button or form that calls a server action, which calls the dat
 
 Total: 22 rows. Read-only items (Open brief, Open the project, Download PDF, Open to print, the links into Inventory) change no data and have no row. Budget actions on the Budget tab are not listed: `Unverified: Project Budget & Expenses reference not written`.
 
-## 7. Inventory Phase 1 changes to the Equipment tab (2026-11-16; Inventory Phase 1, branch `claude/inventory-phase-1`: **merged as PR #101, merge `2059b4b`, pinned to head `7338a88`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; hosted migration `20270114000100` applied with verify rows 1 to 7 `OK`, preflight passed and the real-phone walkthrough passed (all owner-reported 2026-11-16, not run by Claude); Production `Unverified` by Claude**)
+## 7. Inventory Phase 1 changes to the Equipment tab (2026-11-16; Inventory Phase 1, branch `claude/inventory-phase-1`: **merged as PR #101, merge `2059b4b`, pinned to head `7338a88`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; hosted migration `20270114000100` applied with verify rows 1 to 7 `OK`, preflight passed and the real-phone walkthrough passed (all owner-reported 2026-11-16, not run by Claude); Production: Ready and Current on `2059b4b` in Vercel (owner-confirmed 2026-11-16; not verified by Claude)**)
 
 Read against the code on the branch; driven signed in on the isolated stack as the Project Manager (`apps/web/os-shell-checks/inventory-phase1-flow.mjs`). Full reference: `modules/inventory.md` sections 4.3 and 5.
 
