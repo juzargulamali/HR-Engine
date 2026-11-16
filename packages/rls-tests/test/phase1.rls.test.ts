@@ -643,34 +643,27 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
     });
   });
 
-  describe("employee_number reuse after soft-delete", () => {
-    it("blocks a duplicate number while both rows are live, but frees it as soon as the original is soft-deleted", async () => {
+  describe("employee_number reservation (replaces the earlier reuse-after-soft-delete rule, migration 20270117000100)", () => {
+    it("blocks a duplicate number while both rows are live, and still blocks it after the original is soft-deleted: the number stays reserved for that employee", async () => {
       const scratchId = randomUUID();
       await db.seed(`
         insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date)
           values ('${scratchId}', 'REUSE-01', '${COMPANY_HQ}', 'AE', 'To', 'Delete', '2024-01-01');
       `);
-
-      // Blocked while both rows would be live.
-      await expect(
+      const insertSame = () =>
         db.asUser(USER_HR_ADMIN, (query) =>
           query(
             "insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('REUSE-01', $1, 'AE', 'Still', 'Blocked', '2024-01-01')",
             [COMPANY_HQ],
           ),
-        ),
-      ).rejects.toThrow(/Employee number REUSE-001 is already used by another employee/);   // worded by the employee-number trigger (migration 20270117000100); still a unique violation (23505)
+        );
 
-      // A soft-delete (not a permanent one) already frees the number up.
+      // Blocked while both rows would be live.
+      await expect(insertSame()).rejects.toThrow(/Employee number REUSE-001 is reserved for another employee/);   // worded by the employee-number trigger; still a unique violation (23505)
+
+      // A soft-delete no longer frees the number: it stays reserved for the removed employee (restoring them brings it back).
       await db.seed(`update employees set deleted_at = now() where id = '${scratchId}';`);
-
-      const { rows } = await db.asUser(USER_HR_ADMIN, (query) =>
-        query(
-          "insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('REUSE-01', $1, 'AE', 'New', 'Hire', '2024-01-01') returning id",
-          [COMPANY_HQ],
-        ),
-      );
-      expect(rows.length).toBe(1);
+      await expect(insertSame()).rejects.toThrow(/Employee number REUSE-001 is reserved for another employee/);
     });
   });
 

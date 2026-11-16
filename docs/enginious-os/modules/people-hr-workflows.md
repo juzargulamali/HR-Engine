@@ -53,8 +53,8 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 
 **When something goes wrong:**
 
-* *The employee number could not be assigned* — not expected (the database skips every number already held, in every company, removed employees included); if two saves ever raced for one, nothing was saved and sending again takes the next number.
-* *Correcting a number by hand* (an HR Admin or the owner through the database; no screen edits a number) — an equivalent number held by anyone in any company is refused with "Employee number E002 is already used by another employee, in this or another company." and nothing is saved. Restoring a removed employee whose number has since been given to someone else is refused the same way.
+* *The employee number could not be assigned* — not expected (the database skips every reserved number, in every company); if two saves ever raced for one, nothing was saved and sending again takes the next number.
+* *Correcting or entering a number by hand* (an HR Admin or the owner through the database; no screen edits a number) — a number reserved for another employee, in any company, is refused with "Employee number E002 is reserved for another employee (current, removed or former), in this or another company." and nothing is saved. Restoring or rehiring the same record keeps its number; an ignored test record brought back onto a number now held by someone else is refused the same way.
 * *Sent twice, or retried after a lost answer* — the same record opens; nothing else is written.
 * *Contract, pay or balances could not be saved after the person was created* — the profile opens on the first step still to do with a sentence naming what was not saved ("contract", "pay", "balances"); the person exists once.
 * *No access* — "You cannot add employees to this company."

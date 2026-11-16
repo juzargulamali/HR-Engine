@@ -8,26 +8,43 @@ select item, result from (
                    and employee_number_canonical('E2') = 'E002' and employee_number_canonical(' e 0002 ') = 'E002' and employee_number_canonical('E01234') = 'E1234'
                    and employee_number_canonical('L-1') = 'L-001' and employee_number_canonical('contractor') = 'CONTRACTOR' and employee_number_canonical('E0') = 'E000'
               then 'OK' else 'FAIL - the function is missing, not immutable, or answers differently' end as result
-  union all select 2, 'the unique index is on the NORMALISED number across ALL companies (no company in it), among live (not removed) employees, and the per-company index it replaces is gone',
-         case when exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'employees_employee_number_canonical_unique'
-                             and indexdef ilike '%unique%' and indexdef ilike '%employee_number_canonical(employee_number)%' and indexdef not ilike '%company_id%' and indexdef ilike '%deleted_at is null%')
-                   and to_regclass('public.employees_company_employee_number_unique') is null
-              then 'OK' else 'FAIL - the index is missing, still per company, or the old per-company index is still there' end
-  union all select 3, 'the trigger that numbers a new hire, saves a new or changed number in canonical form and words a duplicate or a restore onto a held number is on employees (insert, or update of employee_number and deleted_at only)',
+  union all select 2, 'the reservations table exists with the normalised number as its primary key, row level security is on, and signed-in users and anon have no right to read or write it',
+         case when to_regclass('public.employee_number_reservations') is not null
+                   and exists (select 1 from pg_index i where i.indrelid = 'public.employee_number_reservations'::regclass and i.indisprimary
+                                and (select a.attname from pg_attribute a where a.attrelid = i.indrelid and a.attnum = i.indkey[0]) = 'number_key')
+                   and (select relrowsecurity from pg_class where oid = 'public.employee_number_reservations'::regclass)
+                   and not has_table_privilege('authenticated', 'public.employee_number_reservations', 'select')
+                   and not has_table_privilege('authenticated', 'public.employee_number_reservations', 'insert')
+                   and not has_table_privilege('anon', 'public.employee_number_reservations', 'select')
+              then 'OK' else 'FAIL - the table is missing, has no key, is open, or is readable by signed-in users' end
+  union all select 3, 'the trigger that numbers a new hire, saves a new or changed number in canonical form and reserves it is on employees (insert, or update of employee_number, deleted_at and employment_status only), and the per-company index is gone',
          case when exists (select 1 from pg_trigger where tgrelid = 'public.employees'::regclass and tgname = 'employees_canonical_number' and not tgisinternal
-                             and pg_get_triggerdef(oid) ilike '%before insert or update of employee_number, deleted_at%')
-              then 'OK' else 'FAIL - the trigger is missing or fires on more than the number' end
-  union all select 4, 'no two live employees, in any companies, have equivalent numbers now (the index would not exist otherwise)',
-         case when (select count(*) from (select 1 from employees where deleted_at is null group by employee_number_canonical(employee_number) having count(*) > 1) d) = 0
-              then 'OK' else 'FAIL - equivalent live numbers exist (run the audit pack)' end
-  union all select 5, 'the sequence exists and sits at or above the highest E-number held by ANY employee, removed ones included (so no number already held can be given out)',
-         case when to_regclass('public.employee_number_seq') is not null
+                             and pg_get_triggerdef(oid) ilike '%before insert or update of employee_number, deleted_at, employment_status on%')
+                   and to_regclass('public.employees_company_employee_number_unique') is null
+              then 'OK' else 'FAIL - the trigger is missing or fires on more than it should, or the old per-company index is still there' end
+  union all select 4, 'the trigger that claims the number when a deactivated login is reactivated is on profiles',
+         case when exists (select 1 from pg_trigger where tgrelid = 'public.profiles'::regclass and tgname = 'profiles_employee_number_reactivation' and not tgisinternal
+                             and pg_get_triggerdef(oid) ilike '%before update of account_status on%')
+              then 'OK' else 'FAIL - the profiles trigger is missing' end
+  union all select 5, 'every ACTIVE or INVITED employee has their CURRENT number reserved for that same employee (none missing, none reserved for someone else)',
+         case when to_regclass('public.employee_number_reservations') is not null
+                   and (select count(*) from employees e left join employee_number_reservations r on r.number_key = employee_number_canonical(e.employee_number)
+                         where employee_number_canonical(e.employee_number) <> '' and employee_number_in_scope(e.deleted_at, e.employment_status, e.user_id)
+                           and (r.employee_id is null or r.employee_id <> e.id)) = 0
+              then 'OK' else 'FAIL - an active or invited employee''s number is not reserved for them (apply the migration again; if it persists, run the audit pack)' end
+  union all select 6, 'no two active or invited employees have equivalent numbers now',
+         case when (select count(*) from (select 1 from employees where employee_number_canonical(employee_number) <> '' and employee_number_in_scope(deleted_at, employment_status, user_id)
+                                          group by employee_number_canonical(employee_number) having count(*) > 1) d) = 0
+              then 'OK' else 'FAIL - equivalent numbers exist (run the audit pack)' end
+  union all select 7, 'the sequence exists and sits at or above the highest E-number any reservation holds (so no reserved number can be given out)',
+         case when to_regclass('public.employee_number_seq') is not null and to_regclass('public.employee_number_reservations') is not null
                    and (select case when is_called then last_value else 0 end from employee_number_seq)
-                       >= (select coalesce(max(substring(employee_number_canonical(employee_number) from '^E([0-9]+)$')::bigint), 0) from employees where employee_number_canonical(employee_number) ~ '^E[0-9]{1,15}$')
-              then 'OK' else 'FAIL - the sequence is missing or below an existing number (apply the migration again)' end
-  union all select 6, 'signed-in users can call employee_number_canonical; anon cannot; nobody but the database itself can call next_employee_number() or touch the sequence directly',
+                       >= (select coalesce(max(substring(number_key from '^E([0-9]+)$')::bigint), 0) from employee_number_reservations where number_key ~ '^E[0-9]{1,15}$')
+              then 'OK' else 'FAIL - the sequence is missing or below a reserved number (apply the migration again)' end
+  union all select 8, 'signed-in users can call employee_number_canonical; anon cannot; nobody but the database itself can call next_employee_number(), employee_number_claim() or touch the sequence',
          case when has_function_privilege('authenticated', 'public.employee_number_canonical(text)', 'execute') and not has_function_privilege('anon', 'public.employee_number_canonical(text)', 'execute')
                    and not has_function_privilege('authenticated', 'public.next_employee_number()', 'execute') and not has_function_privilege('anon', 'public.next_employee_number()', 'execute')
+                   and not has_function_privilege('authenticated', 'public.employee_number_claim(uuid, text, text)', 'execute')
                    and not has_sequence_privilege('authenticated', 'public.employee_number_seq', 'usage') and not has_sequence_privilege('anon', 'public.employee_number_seq', 'usage')
               then 'OK' else 'FAIL - privileges differ' end
 ) x order by ord;

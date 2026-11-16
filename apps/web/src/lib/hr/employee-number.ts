@@ -1,7 +1,8 @@
 /**
  * The ONE rule for what an employee number is, the same in the app and in the database (`employee_number_canonical`, migration 20270117000100). Two numbers are the same number
  * when their canonical forms are equal, so E02, e002 and E002 are one number and are saved as E002. There is ONE series for every Enginious company: a number belongs to one employee record
- * and is unique across all companies. New hires are numbered by the database (E001, E002, ...); this file is for checking a number that is supplied or changed by hand.
+ * and is unique across all companies. A number is PERMANENTLY RESERVED for the record it was first given to: it is never given to another record, even after a correction, a removal or a physical delete.
+ * New hires are numbered by the database (E001, E002, ...); this file is for checking a number that is supplied or changed by hand.
  *
  *   1. trim and remove every space, then upper-case;
  *   2. if the number ends in digits, drop those digits' leading zeros and pad back to at least three digits (E2 -> E002, E01234 -> E1234);
@@ -34,16 +35,16 @@ export function checkEmployeeNumber(input: string): EmployeeNumberCheck {
   return { ok: true, canonical };
 }
 
-/** The sentence for a number that is already held. The database raises the same words (employees_save_canonical_number), so a duplicate reads the same on every path. */
+/** The sentence for a number that is already reserved. The database raises the same words (employees_save_canonical_number), so a duplicate reads the same on every path. Names no one. */
 export function duplicateEmployeeNumberMessage(entered: string, canonical: string): string {
   const typed = entered.trim();
   const alias = typed && typed.replace(/\s+/g, "").toUpperCase() !== canonical ? ` ${typed} is the same number as ${canonical}.` : "";
-  return `Employee number ${canonical} is already used by another employee, in this or another company.${alias} Numbers that differ only in capitals, spaces or leading zeros are the same number, and one number belongs to one employee across Enginious. Use a different number.`;
+  return `Employee number ${canonical} is reserved for another employee (current, removed or former), in this or another company.${alias} Numbers that differ only in capitals, spaces or leading zeros are the same number, and a number is never reused. Use a different number.`;
 }
 
 /** What to show for a database error on a write that carries a number (a correction, a restore): the database's own sentence for a duplicate, a plain fallback otherwise. */
 export function employeeNumberErrorMessage(error: { code?: string | null; message?: string | null }): string {
   if (error.code === "23505" && /employee number/i.test(error.message ?? "")) return error.message!;
-  if (error.code === "23505") return "That employee number is already used by another employee, in this or another company. Nothing was saved.";
+  if (error.code === "23505") return "That employee number is reserved for another employee, in this or another company. Nothing was saved.";
   return error.message ?? "The employee number could not be saved.";
 }

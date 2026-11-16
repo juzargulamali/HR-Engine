@@ -4,13 +4,18 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// Employee numbers (migration 20270117000100_people_hr_employee_number_unique.sql): ONE shared series across Enginious UAE, Saudi Arabia and Europe, against a real Postgres. Fictional data throughout.
+// Employee numbers (migration 20270117000100_people_hr_employee_number_unique.sql): ONE shared series across Enginious UAE, Saudi Arabia and Europe, PERMANENTLY RESERVED FROM NOW for ACTIVE or INVITED employees,
+// against a real Postgres. Fictional data throughout.
+//   * "active or invited" = not removed, not terminated, login not deactivated (no login yet or an invited login counts). Removed, terminated and deactivated-login records are IGNORED: no reservation, no
+//     collision, their numbers are free;
 //   * the SQL function gives exactly the canonical forms in supabase/tests/employee-number-vectors.json (the same file the app's normaliser is tested against);
-//   * BEFORE the migration there are live equivalent numbers, within a company and across companies: the audit pack reports them (all companies, inactive and removed included, classed A/B/C, E003 checked
-//     globally), the migration REFUSES and changes nothing, existing numbers stay as recorded; the owner approves specific corrections; the migration then applies and starts the series ABOVE every number any row holds;
-//   * after that: uniqueness on the normalised number ACROSS companies among live rows; a new hire is numbered by the database from one sequence (two hires at once in different companies get different numbers; a
-//     number taken is never given out again; no truncation after E999); a supplied or changed number is saved canonically, an unchanged one is never rewritten;
-//   * giving someone access to all three companies (roles and module grants) never creates an employee row, never changes the employee's id, company or number, and never takes a number from the series;
+//   * BEFORE the migration there are equivalent numbers among active/invited employees (within and across companies): the audit pack reports them (E003 checked globally; ignored records counted, not collisions),
+//     the preflight says STOP, the migration REFUSES and changes nothing, existing numbers stay as recorded; the owner approves specific corrections; the migration then applies and reserves every active/invited number;
+//   * after that: a number is reserved for the record it was first given to, for good (also when its employee resigns, is terminated, removed or deleted for good, or the number is corrected away): refused for anyone
+//     else by every path (hand, script, import, correction); automatic numbering skips it even if the sequence is rewound; restoring or rehiring the SAME record keeps its number; an ignored record that is brought back
+//     claims its number or is refused if another employee holds it; every number nobody active/invited holds is free;
+//   * a new hire is numbered by the database (two hires at once in different companies get different numbers; no truncation after E999); a supplied or changed number is saved canonically, an unchanged one is never rewritten;
+//   * giving someone access to all three companies never creates an employee row, never changes the employee's id, company or number, and never takes a number from the series;
 //   * the packs behave as documented.
 const MIGRATION = "20270117000100_people_hr_employee_number_unique.sql";
 const manual = (f: string) => readFileSync(path.join(__dirname, "../../../supabase/manual-sql", f), "utf8");
@@ -22,8 +27,9 @@ const HR = { uae: id(), ksa: id(), eu: id() };   // one HR Admin per company
 const SYSADMIN = id();
 const lit = (s: string) => `'${s.replace(/'/g, "''")}'`;
 type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+const RESERVED = (n: string) => `Employee number ${n} is reserved for another employee (current, removed or former), in this or another company. Numbers that differ only in capitals, spaces or leading zeros are the same number, and a number is never reused. Use a different number.`;
 
-describe("Employee numbers: one shared series, equivalent numbers are one number, assigned by the database", () => {
+describe("Employee numbers: one shared series, permanently reserved from now, assigned by the database", () => {
   const db = new RlsTestDatabase();
   const admin = async <T = Row>(sql: string) => (await db.seed(sql)).rows as T[];
   const code = async (p: Promise<unknown>) => { try { await p; return "ok"; } catch (e) { return (e as { code?: string }).code ?? String(e); } };
@@ -36,13 +42,24 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
     await db.seed(`insert into employees (id, employee_number, company_id, country_code, first_name, last_name, hire_date${cols}) values ('${empId}', ${number === null ? "null" : lit(number)}, '${company}', 'AE', 'Fictional', 'Person${++n}', '2024-01-01'${vals})`);
     return empId;
   };
+  const login = async (status: "invited" | "active" | "deactivated") => {   // a login for an employee: profiles are created 'invited' by the auth trigger
+    const u = id();
+    await admin(`insert into auth.users (id, email) values ('${u}', 'p${++n}@numbers.test')`);
+    if (status !== "invited") await admin(`update profiles set account_status = '${status}' where id = '${u}'`);
+    return u;
+  };
   const numberOf = async (empId: string | undefined) => (await admin<{ employee_number: string }>(`select employee_number from employees where id = '${empId}'`))[0]!.employee_number;
-  const auditSummary = async () => Object.fromEntries((await admin<Row>(manual("people_hr_employee_number_00_audit_readonly.sql"))).filter((r) => r.kind === "SUMMARY").map((r) => [r.group_key, r.number_as_recorded]));
-  const state = async () => (await admin<Row>(`select to_regprocedure('public.employee_number_canonical(text)') is not null as fn, to_regclass('public.employee_number_seq') is not null as seq, to_regclass('public.employees_employee_number_canonical_unique') is not null as idx, to_regclass('public.employees_company_employee_number_unique') is not null as old`))[0];
+  const ownerOf = async (key: string) => (await admin<{ employee_id: string }>(`select employee_id from employee_number_reservations where number_key = ${lit(key)}`))[0]?.employee_id;
+  const auditRows = async () => await admin<Row>(manual("people_hr_employee_number_00_audit_readonly.sql"));
+  const summaryOf = (rows: Row[]) => Object.fromEntries(rows.filter((r) => r.kind === "SUMMARY").map((r) => [r.group_key, r.number_as_recorded]));
+  const BLOCK = "groups that block the migration (active or invited employees, any companies)";
+  const state = async () => (await admin<Row>(`select to_regprocedure('public.employee_number_canonical(text)') is not null as fn, to_regclass('public.employee_number_seq') is not null as seq, to_regclass('public.employees_company_employee_number_unique') is not null as old`))[0];
+  const seqLast = async () => Number((await admin<{ v: string }>(`select last_value::text v from employee_number_seq`))[0]!.v);
+  const asHr = (user: string, company: string, number: string | null) => db.asUserCommit(user, async (q) => (await q(`insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values (${number === null ? "null" : lit(number)}, '${company}', 'AE', 'Fictional', 'Hire${++n}', '2026-01-01') returning id, employee_number`)).rows[0] as { id: string; employee_number: string });
   const ids: Record<string, string> = {};
 
   beforeAll(async () => {
-    await db.setupBefore(MIGRATION);   // every migration BEFORE this one: the per-company exact-match index only
+    await db.setupBefore(MIGRATION);   // every migration BEFORE this one: the per-company partial exact-match index only
     await db.seed(`
       insert into countries (code, name, default_currency) values ('AE', 'United Arab Emirates', 'AED'), ('SA', 'Saudi Arabia', 'SAR'), ('PL', 'Poland', 'PLN') on conflict do nothing;
       insert into companies (id, legal_name, country_code, default_currency) values ('${CO.uae}', '${NAME[CO.uae]}', 'AE', 'AED'), ('${CO.ksa}', '${NAME[CO.ksa]}', 'SA', 'SAR'), ('${CO.eu}', '${NAME[CO.eu]}', 'PL', 'PLN');
@@ -50,92 +67,107 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
       insert into user_roles (user_id, role, company_id) values ('${HR.uae}', 'hr_admin', '${CO.uae}'), ('${HR.ksa}', 'hr_admin', '${CO.ksa}'), ('${HR.eu}', 'hr_admin', '${CO.eu}');
       insert into user_roles (user_id, role) values ('${SYSADMIN}', 'sys_admin');
     `);
-    // Today's data: the per-company index allows every one of these (a different company, or a different spelling, is not an exact match).
-    ids.e2 = await hire(CO.uae, "E2");                                                    // E002 group: UAE E2, Saudi E002, Europe e02 (terminated: still live) -> across companies
+    // ACTIVE or INVITED employees: today's data. The per-company index allows every collision here (a different company or a different spelling is not an exact match).
+    ids.e2 = await hire(CO.uae, "E2");                                                    // class A, across companies: UAE E2, Saudi E002, Europe e02
     ids.e002 = await hire(CO.ksa, "E002");
-    ids.e02 = await hire(CO.eu, "e02", "employment_status='terminated'");
-    ids.tasneem = await hire(CO.uae, "E003");                                             // E003 was only ever checked within one company: Saudi holds E03 as a live employee
-    ids.e03 = await hire(CO.ksa, "E03");
-    ids.e3gone = await hire(CO.eu, "E3", "deleted_at=now()");                             // and a removed Europe employee held E3
-    ids.e7a = await hire(CO.uae, "E7");                                                   // E007 group within ONE company
+    ids.e02 = await hire(CO.eu, "e02");
+    ids.tasneem = await hire(CO.uae, "E003");                                             // E003 was only ever checked within one company: an INVITED Saudi employee holds E03
+    ids.e03 = await hire(CO.ksa, "E03", `user_id='${await login("invited")}'`);
+    ids.e7a = await hire(CO.uae, "E7");                                                   // class A within ONE company
     ids.e7b = await hire(CO.uae, "e007");
     ids.l1 = await hire(CO.uae, "L-1");                                                   // outside the E-series: left as recorded
     ids.di9 = await hire(CO.ksa, "DI-9");
-    ids.k5 = await hire(CO.uae, "K-5", "deleted_at=now()");                               // class B: a live employee reusing a removed employee's number
     ids.k5live = await hire(CO.uae, "k-005");
-    ids.z1 = await hire(CO.eu, "Z-1", "deleted_at=now()");                                // class C: removed only
-    ids.z2 = await hire(CO.ksa, "z-001", "deleted_at=now()");
-    ids.top = await hire(CO.eu, "E0450", "deleted_at=now()");                             // the HIGHEST E-number is held by a REMOVED employee
     ids.live120 = await hire(CO.ksa, "E120");
+    ids.inv130 = await hire(CO.eu, "E130", `user_id='${await login("invited")}'`);        // an invited employee: the highest in-scope E-number
+    // IGNORED records (test accounts): removed, terminated, or with a deactivated login
+    ids.e3gone = await hire(CO.eu, "E3", "deleted_at=now()");                             // shares E003 with an active employee: NOT a collision
+    ids.k5 = await hire(CO.uae, "K-5", "deleted_at=now()");                               // shares K-005 with an active employee
+    ids.z1 = await hire(CO.eu, "Z-1", "deleted_at=now()");
+    ids.z2 = await hire(CO.ksa, "z-001", "employment_status='terminated'");
+    ids.top = await hire(CO.eu, "E0450", "deleted_at=now()");                             // a removed test account holds a high E-number: it must NOT push the series up
+    ids.term460 = await hire(CO.uae, "E0460", "employment_status='terminated'");
+    ids.deact = await hire(CO.eu, "E2", `user_id='${await login("deactivated")}'`);       // a deactivated login still shows E002
   }, 60_000);
 
   afterAll(async () => { await db.teardown(); });
 
-  it("BEFORE the migration the audit pack reports every group across ALL companies (inactive and removed included), with scope, class, E003 checked globally and the series start, and changes nothing", async () => {
+  it("BEFORE the migration the audit pack covers active and invited employees in ALL companies, reports each blocking group (E003 checked globally), counts the ignored records without treating them as collisions, and changes nothing", async () => {
     const before = await admin<Row>(`select employee_number from employees order by id`);
-    const rows = await admin<Row>(manual("people_hr_employee_number_00_audit_readonly.sql"));
-    const summary = Object.fromEntries(rows.filter((r) => r.kind === "SUMMARY").map((r) => [r.group_key, r.number_as_recorded]));
-    expect(summary["groups that block the migration (live employees, any companies)"]).toBe("3");
+    const rows = await auditRows();
+    const summary = summaryOf(rows);
+    expect(summary[BLOCK]).toBe("3");
     expect(summary["  of which across different companies"]).toBe("2");
-    expect(summary["groups that reuse a removed employee's number (not a blocker)"]).toBe("1");
-    expect(summary["groups among removed employees only (information)"]).toBe("1");
-    expect(summary["employees audited (all companies, including terminated and removed)"]).toBe("16");
-    expect(summary["employees holding E003 or an equivalent spelling (any company, any status)"]).toBe("3");
-    expect(summary["highest E-number held by ANY employee (live, terminated or removed)"]).toBe("E450");
-    expect(summary["the first number the new series would give out"]).toBe("E451");
-    const a = rows.filter((r) => r.kind === "COLLISION" && r.class === "A");
-    expect(a.filter((r) => r.group_key === "E002").map((r) => r.number_as_recorded).sort()).toEqual(["E002", "E2", "e02"]);   // three companies, the inactive one included
-    expect(new Set(a.filter((r) => r.group_key === "E002").map((r) => r.company))).toEqual(new Set(Object.values(NAME)));
-    expect(a.find((r) => r.number_as_recorded === "e02")).toMatchObject({ employment_status: "terminated", removed: "no", employee_id: ids.e02, scope: "different companies" });
-    expect(a.filter((r) => r.group_key === "E003").map((r) => r.number_as_recorded).sort()).toEqual(["E003", "E03", "E3"]);   // the removed Europe row is listed with its group
-    expect(a.filter((r) => r.group_key === "E007").map((r) => r.scope)).toEqual(["same company", "same company"]);
+    expect(summary["active or invited employees audited (all companies)"]).toBe("12");
+    expect(summary["  of which invited (login not yet accepted)"]).toBe("2");
+    expect(summary["records ignored (removed, terminated or deactivated login): not reserved, not collisions"]).toBe("7");
+    expect(summary["  of which share a number with an active or invited employee (information; the active one keeps it)"]).toBe("3");
+    expect(summary["active or invited employees holding E003 or an equivalent spelling"]).toBe("2");
+    expect(summary["highest E-number an active or invited employee holds"]).toBe("E130");   // the ignored E450 and E460 do not count
+    expect(summary["the first number the new series would give out"]).toBe("E131");
+    const coll = rows.filter((r) => r.kind === "COLLISION");
+    expect(coll.every((r) => r.class === "A" && (r.standing === "active" || r.standing === "invited"))).toBe(true);
+    expect(coll.filter((r) => r.group_key === "E002").map((r) => r.number_as_recorded).sort()).toEqual(["E002", "E2", "e02"]);   // three companies; the deactivated login's E2 is NOT in it
+    expect(new Set(coll.filter((r) => r.group_key === "E002").map((r) => r.company))).toEqual(new Set(Object.values(NAME)));
+    expect(coll.filter((r) => r.group_key === "E003").map((r) => `${r.number_as_recorded}:${r.standing}`).sort()).toEqual(["E003:active", "E03:invited"]);   // the removed E3 is ignored
+    expect(coll.filter((r) => r.group_key === "E007").map((r) => r.scope)).toEqual(["same company", "same company"]);
+    expect(coll.some((r) => ["K-005", "Z-001"].includes(r.group_key))).toBe(false);   // ignored records are not collisions
     const e003 = rows.filter((r) => r.kind === "E003");
-    expect(e003.map((r) => `${r.company}|${r.number_as_recorded}|${r.removed}`).sort()).toEqual([`${NAME[CO.eu]}|E3|yes`, `${NAME[CO.ksa]}|E03|no`, `${NAME[CO.uae]}|E003|no`].sort());
-    expect(rows.filter((r) => r.kind === "COLLISION" && r.class === "B").map((r) => [r.number_as_recorded, r.removed]).sort()).toEqual([["K-5", "yes"], ["k-005", "no"]]);
-    expect(rows.filter((r) => r.kind === "COLLISION" && r.class === "C").map((r) => r.number_as_recorded).sort()).toEqual(["Z-1", "z-001"]);
+    expect(e003.map((r) => `${r.company}|${r.number_as_recorded}|${r.standing}`).sort()).toEqual([`${NAME[CO.eu]}|E3|ignored: removed`, `${NAME[CO.ksa]}|E03|invited`, `${NAME[CO.uae]}|E003|active`].sort());
     expect(rows.some((r) => r.kind === "NOT STANDARD" && r.scope === "outside series" && r.number_as_recorded === "DI-9")).toBe(true);
     expect(rows.some((r) => r.kind === "NOT STANDARD" && r.scope === "not canonical" && r.number_as_recorded === "E2" && r.group_key === "E002")).toBe(true);
     expect(await admin<Row>(`select employee_number from employees order by id`)).toEqual(before);   // read only
   });
 
-  it("BEFORE the migration the preflight says STOP (3 groups) and the migration refuses with that count and changes nothing: no function, no sequence, no new index, the old index stays, every number as recorded", async () => {
+  it("BEFORE the migration the preflight says STOP (3 groups, 7 employees; ignored records not counted) and the migration refuses with that count and changes nothing: no function, no sequence, no table, the old index stays, every number as recorded", async () => {
     const pre = (await db.seed(manual("people_hr_employee_number_05_preflight_readonly.sql"))).rows as { result: string }[];
     expect(pre[0]!.result).toBe("OK");
     expect(pre[1]!.result).toBe("not installed yet");
-    expect(pre[2]!.result).toMatch(/^STOP - 3 group\(s\)/);
-    expect(pre[5]!.result).toBe("E451");
+    expect(pre[2]!.result).toMatch(/^STOP - 3 group\(s\) of equivalent numbers \(7 employees\)/);
+    expect(pre[3]!.result).toBe("12");
+    expect(pre[4]!.result).toBe("7");
+    expect(pre[5]!.result).toBe("E131");
     const msg = await message(db.applyMigration(MIGRATION));
-    expect(msg).toMatch(/STOP: 3 group\(s\) of equivalent employee numbers \(7 live employees\) exist across the companies/);
-    expect(await state()).toEqual({ fn: false, seq: false, idx: false, old: true });
+    expect(msg).toMatch(/STOP: 3 group\(s\) of equivalent employee numbers \(7 active or invited employees\) exist across the companies/);
+    expect(await state()).toEqual({ fn: false, seq: false, old: true });
+    expect((await admin<{ t: string | null }>(`select to_regclass('public.employee_number_reservations')::text t`))[0]!.t).toBeNull();
     expect(await numberOf(ids.e2)).toBe("E2");
     expect(await numberOf(ids.e02)).toBe("e02");
   });
 
-  it("the owner approves specific corrections one employee at a time; until none is left the audit still blocks, and every other number stays as recorded", async () => {
-    await admin(`update employees set employee_number = 'E500' where id = '${ids.e002}'`);   // approved correction 1
-    await admin(`update employees set employee_number = 'E501' where id = '${ids.e02}'`);    // approved correction 2: the E002 group is now one holder (E2)
-    expect((await auditSummary())["groups that block the migration (live employees, any companies)"]).toBe("2");
-    await admin(`update employees set employee_number = 'E502' where id = '${ids.e03}'`);    // approved correction 3: Tasneem's E003 now has one live holder
-    await admin(`update employees set employee_number = 'E503' where id = '${ids.e7b}'`);    // approved correction 4
-    expect((await auditSummary())["groups that block the migration (live employees, any companies)"]).toBe("0");
-    expect(await numberOf(ids.e2)).toBe("E2");
-    expect(await numberOf(ids.tasneem)).toBe("E003");
-    expect(await numberOf(ids.l1)).toBe("L-1");
-    expect(await numberOf(ids.di9)).toBe("DI-9");
+  it("the owner approves specific corrections one employee at a time; the audit shows the blockers go down, and every other number (the ignored records' too) stays as recorded", async () => {
+    const fix = async (key: string, to: string) => admin(`update employees set employee_number = '${to}' where id = '${ids[key]}'`);
+    await fix("e002", "E500"); await fix("e02", "E501");                 // E002 group: UAE E2 keeps it
+    expect(summaryOf(await auditRows())[BLOCK]).toBe("2");
+    await fix("e03", "E502");                                             // the invited Saudi employee is renumbered: Tasneem keeps E003
+    expect(summaryOf(await auditRows())[BLOCK]).toBe("1");
+    await fix("e7b", "E503");
+    expect(summaryOf(await auditRows())[BLOCK]).toBe("0");
+    for (const [key, was] of [["e2", "E2"], ["tasneem", "E003"], ["l1", "L-1"], ["di9", "DI-9"], ["k5live", "k-005"], ["e3gone", "E3"], ["k5", "K-5"], ["z2", "z-001"], ["deact", "E2"]] as const) {
+      expect(await numberOf(ids[key]), key).toBe(was);
+    }
   });
 
-  it("with no blocking group the preflight is OK and the migration applies: no existing number is rewritten, the series starts above EVERY number any row holds (a removed E450 and the corrections up to E503)", async () => {
+  it("with no blocking group the preflight is OK and the migration applies: no existing number is rewritten, every ACTIVE or INVITED employee's number is reserved for them, ignored records get no reservation, and the series starts above the active numbers only", async () => {
     const pre = (await db.seed(manual("people_hr_employee_number_05_preflight_readonly.sql"))).rows as { result: string }[];
     expect(pre[2]!.result).toBe("OK");
     expect(pre[5]!.result).toBe("E504");
     const recorded = await admin<Row>(`select id, employee_number from employees order by id`);
-    // Supabase grants table and sequence privileges to the signed-in role by DEFAULT when an object is created; the harness's grants file does the same for the tables that exist. It runs BEFORE this migration
-    // (as on a real project the sequence is created afterwards and this file's own revoke is what keeps people away from it).
+    // Supabase grants table and sequence privileges to the signed-in role by DEFAULT when an object is created; the harness's grants file does the same for the objects that exist. It runs BEFORE this migration
+    // (as on a real project the new objects are created afterwards and this file's own revokes are what keep people away from them).
     await db.seed(readFileSync(path.join(__dirname, "../../../supabase/tests/grant-authenticated-access.sql"), "utf8"));
     await db.applyMigration(MIGRATION);
     expect(await admin<Row>(`select id, employee_number from employees order by id`)).toEqual(recorded);
-    expect(await state()).toEqual({ fn: true, seq: true, idx: true, old: false });
-    expect((await admin<{ v: string }>(`select last_value::text v from employee_number_seq`))[0]!.v).toBe("503");
+    expect(await state()).toEqual({ fn: true, seq: true, old: false });
+    expect(await seqLast()).toBe(503);                                                  // above the active E503; the ignored E450 and E460 are not counted
+    expect((await admin<{ n: string }>(`select count(*) n from employee_number_reservations`))[0]!.n).toBe("12");
+    expect(await ownerOf("E002")).toBe(ids.e2);
+    expect(await ownerOf("E003")).toBe(ids.tasneem);
+    expect(await ownerOf("E502")).toBe(ids.e03);                                        // the invited employee's corrected number
+    expect(await ownerOf("K-005")).toBe(ids.k5live);
+    expect(await ownerOf("E130")).toBe(ids.inv130);                                     // an invited employee
+    for (const k of ["E450", "E460", "Z-001", "K-005X", "E003X"]) expect(await ownerOf(k), `${k} is ignored`).toBeUndefined();
+    await expect(db.asUser(HR.uae, (q) => q(`select * from employee_number_reservations`))).rejects.toThrow(/permission denied/);   // nobody reads or writes it directly
   });
 
   it("the SQL function gives the same canonical forms as the shared vectors, and every equivalence group is one number", async () => {
@@ -148,37 +180,90 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
     expect((await admin<{ c: string | null }>(`select employee_number_canonical(null) as c`))[0]!.c).toBe("");
   });
 
-  it("an equivalent number is refused ACROSS companies, in any spelling, whichever path wrote it (insert, or changing a number); E003 is held globally", async () => {
+  it("a number held by an active or invited employee is refused ACROSS companies, in any spelling, by every path; the refusal is a sentence that names no one", async () => {
     for (const company of [CO.uae, CO.ksa, CO.eu]) {
       for (const dup of ["E02", "e002", "E2", " e 0002 "]) expect(await code(hire(company, dup)), `${dup} in ${NAME[company]}`).toBe("23505");   // E2 is held by the UAE
     }
     for (const dup of ["E3", "e03", "E003", "e 0003"]) expect(await code(hire(CO.eu, dup)), dup).toBe("23505");   // Tasneem's E003, from Europe
-    const other = await hire(CO.ksa, "E610");
-    expect(await code(admin(`update employees set employee_number = 'e2' where id = '${other}'`))).toBe("23505");
-    expect(await numberOf(other)).toBe("E610");
+    for (const dup of ["E502", "e0502", "E130"]) expect(await code(hire(CO.uae, dup)), dup).toBe("23505");       // invited employees' numbers
     expect(await code(hire(CO.eu, "l-01"))).toBe("23505");   // L-1 (UAE) holds L-001
-    // the refusal is a sentence, not an index name, and names no one (the other employee may belong to a company the writer cannot see)
+    expect(await code(hire(CO.eu, "K-5"))).toBe("23505");    // k-005 is held by an active employee
     const sentence = await message(hire(CO.eu, "e 003"));
-    expect(sentence).toBe("Employee number E003 is already used by another employee, in this or another company. Numbers that differ only in capitals, spaces or leading zeros are the same number, and one number belongs to one employee across Enginious. Use a different number.");
+    expect(sentence).toBe(RESERVED("E003"));
     expect(sentence).not.toMatch(/Tasneem|Fictional|employees_/);
-    expect(await message(admin(`update employees set employee_number = 'E03' where id = '${other}'`))).toBe(sentence);
+    const other = await hire(CO.ksa, "E610");
+    expect(await code(admin(`update employees set employee_number = 'e2' where id = '${other}'`))).toBe("23505");   // a correction into a reserved number
+    expect(await message(admin(`update employees set employee_number = 'E130' where id = '${other}'`))).toBe(RESERVED("E130"));
+    expect(await numberOf(other)).toBe("E610");
     expect(await code(hire(CO.eu, "E0044"))).toBe("ok");     // E0044 is E044: a different number
     expect(await code(hire(CO.ksa, "L-002"))).toBe("ok");
   });
 
-  it("a NEW hire with no number is numbered by the database as an HR Admin of any company (E504, E505, E506, ...), also when the number is blank; the number is canonical", async () => {
-    const asHr = (user: string, company: string, number: string | null) => db.asUserCommit(user, async (q) => (await q(`insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values (${number === null ? "null" : lit(number)}, '${company}', 'AE', 'Fictional', 'Hire${++n}', '2026-01-01') returning id, employee_number`)).rows[0] as { id: string; employee_number: string });
-    expect((await asHr(HR.uae, CO.uae, null)).employee_number).toBe("E504");
-    expect((await asHr(HR.ksa, CO.ksa, "")).employee_number).toBe("E505");
-    expect((await asHr(HR.eu, CO.eu, "   ")).employee_number).toBe("E506");
+  it("every number nobody active or invited holds is AVAILABLE, including the numbers of removed, terminated and deactivated test records; and bringing such a record back claims its number or is refused", async () => {
+    expect(await code(hire(CO.uae, "E450"))).toBe("ok");        // the removed test account's number is free
+    expect(await code(hire(CO.eu, "E460"))).toBe("ok");         // the terminated test account's number is free
+    expect(await code(hire(CO.ksa, "Z-1"))).toBe("ok");         // so is a removed one's
+    // those ignored test records, brought back, now meet a reservation held by someone else
+    expect(await message(admin(`update employees set deleted_at = null where id = '${ids.top}'`))).toBe(RESERVED("E450"));
+    expect(await code(admin(`update employees set employment_status = 'active' where id = '${ids.term460}'`))).toBe("23505");
+    expect(await code(admin(`update employees set deleted_at = null where id = '${ids.z1}'`))).toBe("23505");
+    // a deactivated login reactivated whose number an active employee holds: refused, and the login stays deactivated
+    const deactUser = (await admin<{ user_id: string }>(`select user_id from employees where id = '${ids.deact}'`))[0]!.user_id;
+    expect(await message(admin(`update profiles set account_status = 'active' where id = '${deactUser}'`))).toBe(RESERVED("E002"));
+    expect((await admin<{ s: string }>(`select account_status::text s from profiles where id = '${deactUser}'`))[0]!.s).toBe("deactivated");
+    // an ignored record whose number nobody took is brought back and keeps it (claiming it)
+    const free = await hire(CO.uae, "R-77", "deleted_at=now()");
+    await admin(`delete from employee_number_reservations where employee_id = '${free}'`);   // (a record the rule never saw: its insert reserved R-077, as everything created after rollout; forget it to mimic a pre-rollout test account)
+    await db.asUserCommit(HR.uae, (q) => q(`update employees set deleted_at = null, deleted_by = null where id = '${free}'`));
+    expect(await numberOf(free)).toBe("R-077");
+    expect(await ownerOf("R-077")).toBe(free);
+    const freeUser = await login("deactivated");
+    const g7 = await hire(CO.ksa, "G-7", `user_id='${freeUser}'`);
+    await admin(`delete from employee_number_reservations where employee_id = '${g7}'`);
+    await admin(`update profiles set account_status = 'active' where id = '${freeUser}'`);   // reactivated: claims G-007
+    expect(await ownerOf("G-007")).toBe(g7);
+  });
+
+  it("an IMPORT is held to the same rule: a statement that supplies an equivalent number twice, or one reserved number among many, fails as a whole and saves nothing; many blank numbers get different numbers", async () => {
+    const row = (num: string | null) => `(${num === null ? "null" : lit(num)}, '${CO.ksa}', 'AE', 'Fictional', 'Import${++n}', '2024-01-01')`;
+    const cols = "(employee_number, company_id, country_code, first_name, last_name, hire_date)";
+    const count = async () => (await admin<{ n: string }>(`select count(*) n from employees`))[0]!.n;
+    const before = await count();
+    expect(await code(admin(`insert into employees ${cols} values ${row("E800")}, ${row("e0800")}`))).toBe("23505");   // equivalent to each other
+    expect(await code(admin(`insert into employees ${cols} values ${row("E801")}, ${row("E003")}, ${row("E802")}`))).toBe("23505");   // one reserved number
+    expect(await count()).toBe(before);
+    expect(await admin(`select 1 from employee_number_reservations where number_key in ('E800', 'E801', 'E802')`)).toHaveLength(0);   // and none was reserved by the failed statements
+    await admin(`insert into employees ${cols} values ${row(null)}, ${row(null)}, ${row(null)}`);
+    const got = await admin<{ employee_number: string }>(`select employee_number from employees where first_name = 'Fictional' and last_name like 'Import%' order by employee_number`);
+    expect(new Set(got.map((r) => r.employee_number)).size).toBe(3);
+  });
+
+  it("a NEW hire with no number is numbered by the database as an HR Admin of any company, also when the number is blank; the number is canonical; the series is closed to signed-in users", async () => {
+    const start = await seqLast();
+    const a = Number((await asHr(HR.uae, CO.uae, null)).employee_number.slice(1));
+    expect(a).toBeGreaterThan(start);
+    const b = Number((await asHr(HR.ksa, CO.ksa, "")).employee_number.slice(1));
+    const c = Number((await asHr(HR.eu, CO.eu, "   ")).employee_number.slice(1));
+    expect([b > a, c > b]).toEqual([true, true]);
     expect((await asHr(HR.uae, CO.uae, "  m 7 ")).employee_number).toBe("M007");   // a supplied number (import, script) is saved canonically and does not use the series
-    expect((await admin<{ v: string }>(`select last_value::text v from employee_number_seq`))[0]!.v).toBe("506");
-    // an HR Admin has no right to the sequence or the numbering function themselves
     await expect(db.asUser(HR.uae, (q) => q(`select next_employee_number()`))).rejects.toThrow(/permission denied/);
     await expect(db.asUser(HR.uae, (q) => q(`select nextval('employee_number_seq')`))).rejects.toThrow(/permission denied/);
   });
 
-  it("two hires saved AT THE SAME TIME in different companies get different numbers (each transaction holds its number open until the other has taken its own)", async () => {
+  it("the numbering counts E008, E009, E010, E011 and E098, E099, E100, E101: three digits at least, so E010 follows E009, E100 follows E099, and nothing is truncated", async () => {
+    await admin(`select setval('employee_number_seq', 7, true)`);   // E001 to E007 are not needed: rewind to just before E008
+    const got: string[] = [];
+    for (let i = 0; i < 4; i++) got.push(await numberOf(await hire([CO.uae, CO.ksa, CO.eu][i % 3]!, null)));
+    expect(got).toEqual(["E008", "E009", "E010", "E011"]);
+    expect(await code(hire(CO.uae, "e10"))).toBe("23505");          // E10 is E010
+    await admin(`select setval('employee_number_seq', 97, true)`);   // and E098, E099, then E100, E101 (E120 and E130 are held, but that is further on)
+    const next: string[] = [];
+    for (let i = 0; i < 4; i++) next.push(await numberOf(await hire([CO.eu, CO.ksa, CO.uae][i % 3]!, null)));
+    expect(next).toEqual(["E098", "E099", "E100", "E101"]);
+    expect(await code(hire(CO.eu, "e0100"))).toBe("23505");         // E0100 is E100
+  });
+
+  it("two hires saved AT THE SAME TIME in different companies get different numbers (each transaction holds its number open until the other has taken its own), a burst of 12 are all different, and two writers racing to hand-enter the same number in different spellings: exactly one wins", async () => {
     const results: string[] = [];
     const users: [string, string][] = [[HR.uae, CO.uae], [HR.ksa, CO.ksa], [HR.eu, CO.eu]];
     let inserted = 0;
@@ -191,46 +276,75 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
       await gate;   // nobody commits until all three hold a number: genuinely simultaneous
     })));
     expect(new Set(results).size).toBe(3);
-    // and a burst: 12 more at once across the three companies are all different
     const burst = await Promise.all(Array.from({ length: 12 }, (_, i) => {
       const [user, company] = users[i % 3]!;
       return db.asUserCommit(user, async (q) => ((await q(`insert into employees (company_id, country_code, first_name, last_name, hire_date) values ('${company}', 'AE', 'Fictional', 'Burst${++n}', '2026-01-01') returning employee_number`)).rows[0] as { employee_number: string }).employee_number);
     }));
     expect(new Set(burst).size).toBe(12);
-    const all = (await admin<{ k: string }>(`select employee_number_canonical(employee_number) k from employees where deleted_at is null`)).map((r) => r.k);
-    expect(new Set(all).size).toBe(all.length);   // still unique across the whole table
+    const race = await Promise.all(["E900", "e0900"].map((num, i) => code(db.asUserCommit(users[i]![0], (q) => q(`insert into employees (employee_number, company_id, country_code, first_name, last_name, hire_date) values ('${num}', '${users[i]![1]}', 'AE', 'Fictional', 'Race${++n}', '2026-01-01')`)))));
+    expect(race.filter((r) => r === "ok")).toHaveLength(1);
+    expect(race.filter((r) => r === "23505")).toHaveLength(1);
   });
 
-  it("numbers taken are RESERVED: a rolled-back hire, a failed hire and a removed employee's number are never given out again; a number typed by hand is skipped when the sequence reaches it", async () => {
-    const next = async () => numberOf(await hire(CO.uae, null));
-    const before = Number((await admin<{ v: string }>(`select last_value::text v from employee_number_seq`))[0]!.v);
-    await db.asUser(HR.uae, (q) => q(`insert into employees (company_id, country_code, first_name, last_name, hire_date) values ('${CO.uae}', 'AE', 'Fictional', 'Rolledback', '2026-01-01')`));   // rolled back by the harness
-    const gap = await next();
-    expect(Number(gap.slice(1))).toBeGreaterThan(before + 1);   // the rolled-back hire used a number: a gap, never a reuse
-    const removed = await hire(CO.eu, null, "deleted_at=now()");
-    const removedNumber = await numberOf(removed);
-    const afterRemoved = await next();
-    expect(afterRemoved).not.toBe(removedNumber);
-    expect(Number(afterRemoved.slice(1))).toBeGreaterThan(Number(removedNumber.slice(1)));
-    // a hand-typed E-number ahead of the sequence is skipped, with the same canonical spelling
-    const last = Number((await admin<{ v: string }>(`select last_value::text v from employee_number_seq`))[0]!.v);
-    await hire(CO.ksa, `e0${last + 1}`);   // takes the very next number by hand (leading zero: still the same number)
-    expect(await next()).toBe(`E${last + 2}`);
-    // a number held by a REMOVED employee is skipped too (not reissued automatically)
-    await admin(`select setval('employee_number_seq', ${last + 9}, true)`);
-    await hire(CO.eu, `E${last + 10}`, "deleted_at=now()");
-    expect(await next()).toBe(`E${last + 11}`);
+  it("a CORRECTED number keeps its OLD number reserved for the same record: nobody else can take it, the series never gives it out even when rewound, and the record itself may return to it", async () => {
+    const hired = await asHr(HR.uae, CO.uae, null);
+    const oldNumber = hired.employee_number;
+    await db.asUserCommit(HR.uae, (q) => q(`update employees set employee_number = 'e0700' where id = '${hired.id}'`));   // the correction, as the company's HR Admin
+    expect(await numberOf(hired.id)).toBe("E700");
+    expect(await ownerOf(oldNumber)).toBe(hired.id);                                    // the old number is still reserved for this record
+    expect(await code(hire(CO.ksa, oldNumber.toLowerCase()))).toBe("23505");            // nobody else, in any company, in any spelling
+    expect(await message(hire(CO.eu, oldNumber))).toBe(RESERVED(oldNumber));
+    await admin(`select setval('employee_number_seq', ${Number(oldNumber.slice(1)) - 1}, true)`);   // rewind the series to just before the old number
+    const next = await numberOf(await hire(CO.eu, null));
+    expect(next).not.toBe(oldNumber);                                                    // skipped: reserved
+    expect(Number(next.slice(1))).toBeGreaterThan(Number(oldNumber.slice(1)));
+    await admin(`update employees set employee_number = '${oldNumber}' where id = '${hired.id}'`);   // the same record may go back to a number reserved for it
+    expect(await numberOf(hired.id)).toBe(oldNumber);
+    expect(await code(hire(CO.eu, "E700"))).toBe("23505");                               // and the number it moved through is still its own
   });
 
-  it("no truncation after E999: E999, E1000, E1001 in order, still unique", async () => {
-    await admin(`select setval('employee_number_seq', 998, true)`);
-    const got: string[] = [];
-    for (let i = 0; i < 3; i++) got.push(await numberOf(await hire(i % 2 ? CO.ksa : CO.eu, null)));
-    expect(got).toEqual(["E999", "E1000", "E1001"]);
-    expect(await code(hire(CO.uae, "e01000"))).toBe("23505");   // E01000 is E1000
+  it("a record deleted for good keeps its number reserved: not reusable by hand in any company, not given out again by the series; the same holds for the delete function HR Admin uses", async () => {
+    const hired = await asHr(HR.ksa, CO.ksa, null);
+    const number = hired.employee_number;
+    await admin(`update employees set deleted_at = now() where id = '${hired.id}'`);                       // removed first (the delete function requires it)
+    await db.asUserCommit(HR.ksa, (q) => q(`select permanently_delete_employee('${hired.id}')`));         // deleted for good, as the company's HR Admin
+    expect(await admin(`select 1 from employees where id = '${hired.id}'`)).toHaveLength(0);
+    expect(await ownerOf(number)).toBe(hired.id);                                                          // the reservation outlives the record
+    expect(await code(hire(CO.uae, number))).toBe("23505");
+    expect(await code(hire(CO.eu, number.toLowerCase()))).toBe("23505");
+    expect(await message(asHr(HR.uae, CO.uae, number))).toBe(RESERVED(number));
+    await admin(`select setval('employee_number_seq', ${Number(number.slice(1)) - 1}, true)`);
+    const next = await numberOf(await hire(CO.uae, null));
+    expect(next).not.toBe(number);
+    expect(Number(next.slice(1))).toBeGreaterThan(Number(number.slice(1)));
   });
 
-  it("a supplied or CHANGED number is saved canonically; an update that does not change the number never rewrites it (L-1 stays L-1, E2 stays E2); a number cannot be blanked", async () => {
+  it("someone who RESIGNS or is TERMINATED later keeps their number: it stays reserved (also while removed), is never available to others, and comes back with the same record on restore or rehire; a second record for the same person gets a new number", async () => {
+    const hired = await asHr(HR.eu, CO.eu, null);
+    const number = hired.employee_number;
+    await admin(`update employees set employment_status = 'terminated', termination_date = current_date where id = '${hired.id}'`);   // resigns / is terminated
+    expect(await code(hire(CO.uae, number))).toBe("23505");
+    expect(await ownerOf(number)).toBe(hired.id);
+    await admin(`update employees set deleted_at = now() where id = '${hired.id}'`);                       // and later removed
+    expect(await code(hire(CO.ksa, number.toLowerCase()))).toBe("23505");
+    await db.asUserCommit(HR.eu, (q) => q(`update employees set deleted_at = null, deleted_by = null where id = '${hired.id}'`));   // restored, as the company's HR Admin
+    expect(await numberOf(hired.id)).toBe(number);
+    await admin(`update employees set employment_status = 'active', termination_date = null where id = '${hired.id}'`);   // rehired: the same record
+    expect(await numberOf(hired.id)).toBe(number);
+    expect(await ownerOf(number)).toBe(hired.id);
+    const second = await hire(CO.eu, null, "job_title='Rehired'");                                        // a NEW record for the same person is a new hire
+    expect(await numberOf(second)).not.toBe(number);
+    // and a login deactivated after the migration keeps its employee's number too
+    const u = await login("active");
+    const e = await hire(CO.ksa, null, `user_id='${u}'`);
+    const eNumber = await numberOf(e);
+    await admin(`update profiles set account_status = 'deactivated' where id = '${u}'`);
+    expect(await code(hire(CO.eu, eNumber))).toBe("23505");
+    await admin(`update profiles set account_status = 'active' where id = '${u}'`);                        // reactivated: same record, same number
+    expect(await numberOf(e)).toBe(eNumber);
+  });
+
+  it("an update that does not change the number never rewrites it (L-1 stays L-1, E2 stays E2); a changed or supplied number is saved canonically; a number cannot be blanked", async () => {
     const created = await hire(CO.uae, "  m 8 ");
     expect(await numberOf(created)).toBe("M008");
     await admin(`update employees set employee_number = 'x02' where id = '${created}'`);
@@ -241,17 +355,15 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
     expect(await numberOf(ids.e2)).toBe("E2");
     expect(await code(admin(`update employees set employee_number = '   ' where id = '${created}'`))).toBe("23514");
     expect(await numberOf(created)).toBe("X002");
+    expect(await ownerOf("M008")).toBe(created);                                                    // M008 was reserved by the first save and is still this record's
   });
 
-  it("a removed employee's number may be reused by hand (the earlier decision), and restoring that employee onto a number a live employee now holds is refused", async () => {
-    const gone = await hire(CO.uae, "R-9");
-    await admin(`update employees set deleted_at = now() where id = '${gone}'`);
-    expect(await code(hire(CO.eu, "r-009"))).toBe("ok");               // reuse of a removed number, in another company
-    expect(await code(admin(`update employees set deleted_at = null, deleted_by = null where id = '${gone}'`))).toBe("23505");
-    expect(await message(admin(`update employees set deleted_at = null, deleted_by = null where id = '${gone}'`))).toBe("This employee cannot be restored: employee number R-009 is now used by another employee, in this or another company. Numbers that differ only in capitals, spaces or leading zeros are the same number.");
-    // as the signed-in HR Admin of the company (the restoreEmployee path), the same refusal
-    await expect(db.asUser(HR.uae, (q) => q(`update employees set deleted_at = null, deleted_by = null where id = '${gone}'`))).rejects.toMatchObject({ code: "23505" });
-    expect(await numberOf(gone)).toBe("R-009");
+  it("no truncation after E999: E999, E1000, E1001 in order, still unique and reserved", async () => {
+    await admin(`select setval('employee_number_seq', 998, true)`);
+    const got: string[] = [];
+    for (let i = 0; i < 3; i++) got.push(await numberOf(await hire(i % 2 ? CO.ksa : CO.eu, null)));
+    expect(got).toEqual(["E999", "E1000", "E1001"]);
+    expect(await code(hire(CO.uae, "e01000"))).toBe("23505");   // E01000 is E1000
   });
 
   describe("access never touches the employee number", () => {
@@ -261,21 +373,20 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
       person.emp = await hire(CO.uae, null, `user_id='${person.user}'`);   // hired by the UAE company; the login is linked
     });
 
-    it("roles in all three companies and module access in all three leave the employee row, its id, company, number and the series exactly as they were; no second employee is created", async () => {
+    it("roles in all three companies and module access in all three leave the employee row, its id, company, number, its reservation and the series exactly as they were; no second employee is created", async () => {
       const snapshot = async () => ({
         row: (await admin<Row>(`select id, user_id, company_id, employee_number, employment_status, deleted_at from employees where id = '${person.emp}'`))[0],
         count: (await admin<{ n: string }>(`select count(*) n from employees`))[0]!.n,
         linked: (await admin<{ n: string }>(`select count(*) n from employees where user_id = '${person.user}'`))[0]!.n,
         seq: (await admin<{ v: string; c: boolean }>(`select last_value::text v, is_called c from employee_number_seq`))[0],
+        reservations: (await admin<{ n: string }>(`select count(*) n from employee_number_reservations`))[0]!.n,
       });
       const before = await snapshot();
       expect(before.row!.employee_number).toMatch(/^E\d{3,}$/);
-      // People & Access, role assignment (the assignRole path: a System Administrator inserts user_roles) in every company
       for (const co of [CO.uae, CO.ksa, CO.eu]) {
         await db.asUserCommit(SYSADMIN, (q) => q(`insert into user_roles (user_id, role, company_id) values ('${person.user}', 'hr_admin', '${co}')`));
         await db.asUserCommit(SYSADMIN, (q) => q(`insert into user_roles (user_id, role, company_id) values ('${person.user}', 'ceo', '${co}')`));
       }
-      // People & Access, module access (the applyModuleAccess path: a founder grants Projects access) in every company
       for (const co of [CO.uae, CO.ksa, CO.eu]) {
         await admin(`insert into proj_company_grants (user_id, company_id, capabilities, note) values ('${SYSADMIN}', '${co}', '{founder}', 'test founder') on conflict (user_id, company_id) where revoked_at is null do nothing`);
         await db.asUserCommit(SYSADMIN, (q) => q(`select proj_grant_access('${person.user}', '${co}', '{}', 'all three companies')`));
@@ -283,27 +394,33 @@ describe("Employee numbers: one shared series, equivalent numbers are one number
       expect((await admin<{ n: string }>(`select count(*) n from user_roles where user_id = '${person.user}'`))[0]!.n).toBe("6");
       expect((await admin<{ n: string }>(`select count(*) n from proj_company_grants where user_id = '${person.user}' and revoked_at is null`))[0]!.n).toBe("3");
       expect(await snapshot()).toEqual(before);
-      // removing access afterwards changes nothing either
       const grants = await admin<{ id: string }>(`select id from user_roles where user_id = '${person.user}'`);
       for (const g of grants) await db.asUserCommit(SYSADMIN, (q) => q(`select revoke_role_grant('${g.id}')`));
       expect(await snapshot()).toEqual(before);
     });
   });
 
-  it("the packs behave as documented: preflight, verify (every row OK) and rollback (restores the per-company index, changes no number, forgets nothing it should keep, safe twice)", async () => {
+  it("the packs behave as documented: preflight, verify (every row OK) and rollback (restores the per-company index, changes no number, KEEPS the reservations, safe twice); applying again reserves the active and invited numbers that exist then and the series restarts above everything reserved", async () => {
     const pre = (await db.seed(manual("people_hr_employee_number_05_preflight_readonly.sql"))).rows as { result: string }[];
     expect(pre[1]!.result).toMatch(/^already installed/);
     const verify = await admin<{ item: string; result: string }>(manual("people_hr_employee_number_20_verify_readonly.sql"));
-    expect(verify).toHaveLength(6);
+    expect(verify).toHaveLength(8);
     expect(verify.filter((r) => r.result !== "OK")).toEqual([]);
     const recorded = await admin<Row>(`select id, employee_number from employees order by id`);
+    const reserved = (await admin<{ n: string }>(`select count(*) n from employee_number_reservations`))[0]!.n;
     await db.seed(manual("people_hr_employee_number_90_rollback.sql"));
     await db.seed(manual("people_hr_employee_number_90_rollback.sql"));
     expect(await admin<Row>(`select id, employee_number from employees order by id`)).toEqual(recorded);
-    expect(await state()).toEqual({ fn: false, seq: false, idx: false, old: true });
-    await db.applyMigration(MIGRATION);   // and it applies again, and the series restarts above everything still held
-    expect(await state()).toEqual({ fn: true, seq: true, idx: true, old: false });
+    expect(await state()).toEqual({ fn: false, seq: false, old: true });
+    expect((await admin<{ n: string }>(`select count(*) n from employee_number_reservations`))[0]!.n).toBe(reserved);   // the reservations survive a rollback
+    // while rolled back nothing reserves: a number is hand-entered by an active employee
+    const meanwhile = await hire(CO.uae, "E3000");
+    await db.applyMigration(MIGRATION);   // and it applies again: the new active number is reserved, the old reservations are untouched, the series restarts above everything reserved
+    expect(await state()).toEqual({ fn: true, seq: true, old: false });
+    expect(await ownerOf("E3000")).toBe(meanwhile);
+    expect((await admin<{ n: string }>(`select count(*) n from employee_number_reservations`))[0]!.n).not.toBe(reserved);
     expect((await admin<{ result: string }>(manual("people_hr_employee_number_20_verify_readonly.sql"))).every((r) => r.result === "OK")).toBe(true);
-    expect(Number((await numberOf(await hire(CO.eu, null))).slice(1))).toBeGreaterThan(1001);
+    expect(await code(hire(CO.eu, "E3000"))).toBe("23505");
+    expect(Number((await numberOf(await hire(CO.eu, null))).slice(1))).toBeGreaterThan(3000);
   });
 });

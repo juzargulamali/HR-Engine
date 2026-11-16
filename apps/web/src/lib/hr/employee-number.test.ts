@@ -36,12 +36,12 @@ describe("checkEmployeeNumber", () => {
 
 describe("duplicate-number sentences", () => {
   it("name the canonical number, say it is shared across companies and what counts as the same number; say what was typed when that differs", () => {
-    expect(duplicateEmployeeNumberMessage("E02", "E002")).toBe("Employee number E002 is already used by another employee, in this or another company. E02 is the same number as E002. Numbers that differ only in capitals, spaces or leading zeros are the same number, and one number belongs to one employee across Enginious. Use a different number.");
-    expect(duplicateEmployeeNumberMessage("E002", "E002")).toBe("Employee number E002 is already used by another employee, in this or another company. Numbers that differ only in capitals, spaces or leading zeros are the same number, and one number belongs to one employee across Enginious. Use a different number.");
+    expect(duplicateEmployeeNumberMessage("E02", "E002")).toBe("Employee number E002 is reserved for another employee (current, removed or former), in this or another company. E02 is the same number as E002. Numbers that differ only in capitals, spaces or leading zeros are the same number, and a number is never reused. Use a different number.");
+    expect(duplicateEmployeeNumberMessage("E002", "E002")).toBe("Employee number E002 is reserved for another employee (current, removed or former), in this or another company. Numbers that differ only in capitals, spaces or leading zeros are the same number, and a number is never reused. Use a different number.");
   });
   it("a database duplicate is shown as the database's own sentence; a bare duplicate gets a plain one; other errors pass through", () => {
-    expect(employeeNumberErrorMessage({ code: "23505", message: "Employee number E002 is already used by another employee." })).toBe("Employee number E002 is already used by another employee.");
-    expect(employeeNumberErrorMessage({ code: "23505", message: 'duplicate key value violates unique constraint "x"' })).toBe("That employee number is already used by another employee, in this or another company. Nothing was saved.");
+    expect(employeeNumberErrorMessage({ code: "23505", message: "Employee number E002 is reserved for another employee." })).toBe("Employee number E002 is reserved for another employee.");
+    expect(employeeNumberErrorMessage({ code: "23505", message: 'duplicate key value violates unique constraint "x"' })).toBe("That employee number is reserved for another employee, in this or another company. Nothing was saved.");
     expect(employeeNumberErrorMessage({ code: "42501", message: "denied" })).toBe("denied");
   });
 });
