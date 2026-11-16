@@ -142,9 +142,10 @@ On the profile, **Remove** or **Restore** (HR Admin of the company). Removed rec
 ## 10b. Onboarding a new employee end to end (draft PR #108)
 
 1. **Add employee** (HR Admin of the company). You land on `/employees/<id>/onboarding`.
-2. **Complete profile**, then **Invite**: an unrestricted System Administrator invites; an HR Admin links an existing account.
-3. **HR roles** and **Module access**: record the plan (it grants nothing). Review shows exact companies, HR roles and module rights.
-4. **Apply**: tick the confirmation. Each item is applied by someone allowed to; the rest show who must. Retry any time: the employee, invitation and grants already made are reused.
+2. **Complete profile**, then **Invite**: an HR Admin of the employee's company (or an unrestricted System Administrator) invites and links the login in one step; an existing account for the address is linked, never invited twice.
+3. **HR roles**: the same HR Admin gives **Employee** and **Reporting Manager** (either or both) for that company. HR Admin, Finance, CEO, CTO and System Administrator stay with an unrestricted System Administrator; each line says who can apply it.
+4. **Module access**: record the plan (it grants nothing). A founder or access manager of the module applies it; the review shows the exact grant pending and who can apply it.
+5. **Review and apply**: tick the confirmation. Each item is applied by someone allowed to; the rest show who must. Retry any time: the employee, invitation, roles and grants already made are reused, and nobody repeats a step.
 
 Evidence: `onboarding.test.ts`, `onboarding-plan.rls.test.ts`, `onboarding-delegation.rls.test.ts`, `employees/[id]/onboarding/page.test.tsx`.
 
@@ -158,7 +159,7 @@ Compensation tab → history → **Correct pay record** → old and new values, 
 
 ## 10e. One-time pre-launch cleanup (owner only; draft PR #108)
 
-Run once before go-live, by the owner, in the Production SQL editor; never automatic and never a migration. (1) `prelaunch_cleanup_00_audit_readonly.sql`: set the cutoff, read the counts by company, type and status. (2) `prelaunch_cleanup_05_impact_readonly.sql`: read which approved requests touched a balance, comp-off credit, attendance record or payroll export, and the proposed reversal rows. (3) `prelaunch_cleanup_10_cleanup.sql`: set the cutoff, your own user id and (only if you approve it) the ids of approved requests to reverse; run. (4) `prelaunch_cleanup_20_verify_readonly.sql`: every row OK. Nothing is deleted; attendance and payroll rows are never changed; items at or after the cutoff stay. Evidence: `prelaunch-cleanup.rls.test.ts`.
+Run once before go-live, by the owner, in the Production SQL editor; never automatic and never a migration. (1) `prelaunch_cleanup_00_audit_readonly.sql`: set the cutoff, read the counts by company, type and status, and note the **E. TOTAL** row. (2) `prelaunch_cleanup_05_impact_readonly.sql`: information on approved requests that touched a balance, comp-off credit, attendance record or payroll export; they are left untouched. (3) `prelaunch_cleanup_10_cleanup.sql`: set the cutoff, type the audit's total as the EXPECTED TOTAL, and your own user id; run. (4) `prelaunch_cleanup_20_verify_readonly.sql`: every row OK. It cancels outstanding leave applications and Recovery Leave / comp-off requests, closes their pending approval steps and acknowledges the related alerts and attendance exceptions (they stay visible under Acknowledged). **Approved requests, balances, attendance history and payroll are never changed; there is no reversal option.** Evidence: `prelaunch-cleanup.rls.test.ts`.
 
 ## 11. Staff guidance written for these workflows
 

@@ -1105,6 +1105,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "give access",
       "hr role",
       "assign role",
+      "employee role",
+      "reporting manager role",
       "module access",
       "review access",
       "resume onboarding",
@@ -1112,13 +1114,13 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "who can finish",
       "employee login"
     ],
-    "summary": "Onboarding is one page for one person, opened when you add an employee and from the profile's setup card. It lists six steps in order: Add employee, Complete profile, Invite, HR roles, Module access and Review. Each step says if it is done, blocked or waiting, who can finish it and what to do next. You can leave and come back: the page reads the real records, so nothing is repeated.",
+    "summary": "Onboarding is one page for one person, opened when you add an employee. It lists six steps: Add employee, Complete profile, Invite, HR roles, Module access and Review. Each says if it is done, blocked or waiting, who can finish it and what to do next. An HR Admin of the employee's company can invite the login and give the Employee and Reporting Manager roles. You can leave and come back: nothing is repeated.",
     "steps": [
-      "Open the employee's Onboarding page. Read the next action at the top.",
-      "Complete the profile steps. Then the invitation step: an unrestricted System Administrator sends the invitation; an HR Admin links an account that already exists.",
-      "Choose the HR roles and module access this person should have, and save the plan. Saving a plan gives no access by itself.",
-      "Open Review. It lists the exact companies, HR roles and module rights. Tick the confirmation and apply what you are allowed to apply; items for someone else are shown with who must apply them.",
-      "Come back any time. Pressing a step again reuses the employee, the invitation and the access already created."
+      "Open the employee's Onboarding page and read the next action at the top.",
+      "Enter the work email in the plan and press Invite and link. An existing account is linked; no second invitation is sent.",
+      "Choose the roles (Employee, Reporting Manager, or both) and the module access, and save the plan. Saving gives no access by itself.",
+      "Open Review, tick the confirmation and apply what you are allowed to apply. HR Admin, Finance, CEO, CTO and System Administrator roles, and module access, are shown with who can apply them.",
+      "Come back any time: the employee, invitation, roles and access already given are reused."
     ],
     "links": [
       {
