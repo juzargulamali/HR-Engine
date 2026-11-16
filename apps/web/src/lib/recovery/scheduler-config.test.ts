@@ -2,23 +2,26 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 
-// The scheduling configuration is spread over four places that must agree: vercel.json (the daily
-// safety net), the owner's pg_cron script (the 5-minute primary), the migration's status function
+// The scheduling configuration is spread over four places that must agree: apps/web/vercel.json (the daily
+// safety net, when registered), the owner's pg_cron script (the 5-minute primary), the migration's status function
 // (which looks the job up by name) and the cron route. These tests pin them to each other.
 const REPO = path.resolve(import.meta.dirname, "../../../../..");
 const read = (p: string) => readFileSync(path.join(REPO, p), "utf8");
 
 describe("Recovery Leave processor scheduling configuration", () => {
-  it("vercel.json registers the protected safety-net route, at most once a day (the Hobby plan's limit)", () => {
-    const { crons } = JSON.parse(read("vercel.json")) as { crons: { path: string; schedule: string }[] };
+  it("the Recovery safety-net route exists and is protected; if it is ever registered with Vercel (apps/web/vercel.json) it runs at most once a day (the Hobby plan's limit)", () => {
+    // It is deliberately NOT registered today (scheduled-job activation is the owner's decision, and the route is behind the sign-in redirect);
+    // the pg_cron job is the primary trigger. When it is registered, the entry must be one fixed minute of one fixed hour: never "*/5".
+    const { crons } = JSON.parse(read("apps/web/vercel.json")) as { crons: { path: string; schedule: string }[] };
     const entry = crons.find((c) => c.path === "/api/cron/recovery-windows");
-    expect(entry).toBeTruthy();
-    const [minute, hour, dayOfMonth] = entry!.schedule.split(" ");
-    expect(minute).toMatch(/^\d+$/); // one fixed minute...
-    expect(hour).toMatch(/^\d+$/); // ...of one fixed hour: once a day, never "*/5"
-    expect(dayOfMonth).toBeDefined();
-    // the route file exists and is the one the cron points at
-    expect(() => read("apps/web/src/app/api/cron/recovery-windows/route.ts")).not.toThrow();
+    if (entry) {
+      const [minute, hour] = entry.schedule.split(" ");
+      expect(minute).toMatch(/^\d+$/);
+      expect(hour).toMatch(/^\d+$/);
+    }
+    // the route file exists and refuses a call without the cron secret
+    const route = read("apps/web/src/app/api/cron/recovery-windows/route.ts");
+    expect(route).toContain("isAuthorizedCronRequest");
   });
 
   it("the owner's pg_cron script schedules the processor every 5 minutes under the name the status function looks for", () => {

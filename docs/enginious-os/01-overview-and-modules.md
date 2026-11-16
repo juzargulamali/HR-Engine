@@ -16,7 +16,7 @@ One web application for a small group of companies (AE, SA, PL; three entities i
 | Web app | Next.js (App Router, TypeScript), server components and server actions, in `apps/web` | `docs/01-architecture.md` section 1.3 (the "14+" version number there is not re-checked) |
 | Shared logic | `packages/domain`: permissions, leave/claims/budget rules, date logic, pure functions with tests | `packages/domain/src/index.ts` |
 | Database | Supabase Postgres. Every business table has row-level security; in the four module areas (Sales, Projects, Inventory, Budget) tables have SELECT policies only and every write is a SECURITY DEFINER function; HR-core tables also take some direct table writes from the signed-in user under RLS, triggers and column privileges (see `03-roles-access-and-approvals.md` section 1) | `docs/01-architecture.md`; spec 4.3.3 |
-| Hosting | Vercel (deploys `main`; previews also use the live V2 database); Vercel cron calls `/api/cron/*` | `vercel.json`; `docs/launch-refinement-install-order.md` |
+| Hosting | Vercel (deploys `main`; previews also use the live V2 database); Vercel cron calls `/api/cron/*` | `apps/web/vercel.json`; `docs/launch-refinement-install-order.md` |
 | Auth | Supabase Auth in hosted environments; **locally an in-repo stand-in** | `docs/people-access-account-controls-verification.md` |
 
 ## 3. Repo map
@@ -42,7 +42,7 @@ One web application for a small group of companies (AE, SA, PL; three entities i
 | V2 (hosted) | Live Supabase + Vercel used by previews. Launch migrations 1 to 15 applied | Owner-reported |
 | Production | Ready at `551f615` | Owner-reported |
 | Dispatch/return notes | Per-company switch `inv_company_settings.project_notes_enabled`, default false; kept **OFF** on hosted | `supabase/migrations/20261217000100_inv_project_notes.sql`; owner-reported |
-| Scheduled jobs | Listed in `vercel.json`; only `/api/cron/crm-reminders` passes the sign-in proxy (`apps/web/src/proxy.ts` PUBLIC_PATHS), and scheduler activation is deferred by owner decision (spec D-01); hosted Vercel cron and `pg_cron` status is `Unverified` (owner to check both histories) | `vercel.json`; `proxy.ts` |
+| Scheduled jobs | Registered in `apps/web/vercel.json` (the Root Directory Vercel reads): only `/api/cron/employment-changes`; six more definitions are held (Map 04 section 5); only `/api/cron/crm-reminders` and `/api/cron/employment-changes` pass the sign-in proxy (`apps/web/src/proxy.ts` PUBLIC_PATHS), and scheduler activation is deferred by owner decision (spec D-01); hosted Vercel cron and `pg_cron` status is `Unverified` (owner to check both histories) | `vercel.json`; `proxy.ts` |
 
 ## 5. Module inventory
 
@@ -121,7 +121,7 @@ Items below are from the owner's release notes and the spec register; the code w
 |---|---|---|
 | Global notification bell | Deferred; the header has alerts and search only (no bell found in `shell-chrome.tsx`; `notifications` table has no screen, spec D-26) | grep of `shell-chrome.tsx` |
 | Kit-contents checking | Deferred | owner notes; `Unverified` in code |
-| Scheduled-job activation | Deferred (owner decision); `vercel.json` lists jobs, proxy blocks all but one | `proxy.ts`; install-order |
+| Scheduled-job activation | Deferred (owner decision) except `/api/cron/employment-changes`, registered in `apps/web/vercel.json`; the other six definitions are held; the proxy blocks all but two | `proxy.ts`; install-order |
 | Cross-project expense copying | Deferred | owner notes; `Unverified` |
 | Next-expiry line | Deferred | owner notes; `Unverified` |
 | Departments screen | Deferred (no `/departments` route) | route list in file 02 |

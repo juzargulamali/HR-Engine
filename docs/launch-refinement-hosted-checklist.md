@@ -38,7 +38,7 @@ Other results: `profstat_20` says signed-in users cannot read `status_reason`, `
 
 ## C. Scheduled jobs: two separate checks, neither is activated or changed
 
-1. **Vercel cron history** (the entries in `vercel.json`): in the Vercel project, Settings > Cron Jobs and the runtime logs for those paths. Record the last run time and result of each path.
+1. **Vercel cron history** (the entries in `apps/web/vercel.json`, the Production Root Directory; only `/api/cron/employment-changes` is registered, the others are held, see the Map file 04 section 5): in the Vercel project, Settings > Cron Jobs and the runtime logs for those paths. Record the last run time and result of each path.
 2. **PostgreSQL `pg_cron` history**: in the SQL Editor, `select jobid, jobname, schedule, active from cron.job;` and the newest rows of `select * from cron.job_run_details order by start_time desc limit 50;` (SELECT only; `recovery_windows_00_preflight_readonly.sql` row 0.10 shows whether `pg_cron` is installed).
 
 Compare each with the baseline recorded before step 1 of the install order. **If no baseline exists, record the current state now and say so: before/after equality cannot be established**, only that nothing new appeared afterwards. This stack adds no job to either scheduler; activating them is a separate deferred owner decision.

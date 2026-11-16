@@ -12,7 +12,7 @@ import { isAuthorizedCronRequest } from "@/lib/cron/auth";
  * an event whose employee has left stays scheduled. Re-running is safe: an applied event is never applied twice.
  *
  * A FAILED application is a failure of the job: the response is a 500 that lists each failed event, so the scheduler's history shows red. The events applied in the same run are kept and are counted in
- * the same body. Held events are reported (`conflicts`, `held`) but are not failures: they wait for HR. Authorised by the cron secret only, like the other jobs in vercel.json.
+ * the same body. Held events are reported (`conflicts`, `held`) but are not failures: they wait for HR. Authorised by the cron secret only. Registered with Vercel in apps/web/vercel.json (the project's Root Directory), once.
  */
 export const dynamic = "force-dynamic";
 

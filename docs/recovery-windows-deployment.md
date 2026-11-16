@@ -193,7 +193,7 @@ Because the migration is additive, there is nothing to roll back in the database
    session (§5). **No session, period, window, request, credit or audit row is deleted or changed**; the earlier version's wording is
    re-drafted for normal reactivation. (Emergency owner fallback, a plain `UPDATE … SET effective_to`, is in the disable script.)
 2. **Keep the 5-minute processor running** until `recovery_windowed_work_remaining()` is all zeros. Then, and only then, run the guarded
-   retire block in `recovery_windows_40_disable_and_reconcile.sql` (and remove the `vercel.json` cron in a normal change if wanted).
+   retire block in `recovery_windows_40_disable_and_reconcile.sql` (the `recovery-windows` Vercel cron is not registered in `apps/web/vercel.json` today).
 3. **Reconcile** with the read-only queries in the same file (periods/windows by state, requests by type, credits posted with source
    `recovery_window*`, sessions still running under the model, alerts, processor failures). Decide pending requests in the app as
    normal; reverse any credit that should not stand through HR's normal process.

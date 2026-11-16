@@ -131,13 +131,15 @@ This overwrites `apps/web/src/types/database.types.ts`, currently hand-written t
 
 ## Scheduled jobs
 
-`vercel.json` schedules three Cron-triggered Route Handlers (see `docs/05-automation-rules.md` §5.1):
-monthly leave accrual (`/api/cron/leave-accrual`), the daily comp-day expiry sweep
-(`/api/cron/comp-day-expiry`), and the daily employee-document expiry/reminder sweep
-(`/api/cron/document-expiry`). All three run under the service-role client (they're trusted backend
-jobs writing rows no user-scoped RLS policy allows) and refuse every request unless it carries
-`Authorization: Bearer $CRON_SECRET` — set `CRON_SECRET` in the Vercel project's env to the same
-value Vercel Cron is configured to send.
+Vercel reads cron definitions only from `vercel.json` in the project's Root Directory (`apps/web` in
+Production), so `apps/web/vercel.json` is the one place to register a job. It currently registers
+`/api/cron/employment-changes` (daily, applies due scheduled job and pay changes). The older jobs
+(monthly leave accrual `/api/cron/leave-accrual`, comp-day expiry `/api/cron/comp-day-expiry`,
+document expiry `/api/cron/document-expiry`, plus recovery-windows, balance discrepancies and CRM
+reminders) are held, not registered; see `docs/enginious-os/04-flows-sales-to-warehouse-and-others.md`
+section 5. Every cron route runs under the service-role client and refuses every request unless it
+carries `Authorization: Bearer $CRON_SECRET`; set `CRON_SECRET` in the Vercel Production environment.
+Cron jobs run on Production deployments only.
 
 ## Security notes for anyone extending this
 
