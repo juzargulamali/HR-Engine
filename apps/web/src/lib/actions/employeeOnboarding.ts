@@ -197,8 +197,9 @@ export async function createEmployee(_prev: CreateEmployeeState, formData: FormD
   });
   const first = remainingSteps(steps)[0];
   // The profile opens on the tab and form of the first step still to do (`?tab=...&step=...`), with the one-off markers the page reads: created, and what failed.
-  // Nothing failed: the profile's Overview opens, with the setup checklist; only after a partial failure does it open the first step that still needs doing.
-  const url = new URL(failed.length > 0 && first?.href ? first.href : `/employees/${d.employeeId}`, "https://placeholder.invalid");
+  // Nothing failed: the guided onboarding opens; only after a partial failure does the profile open on the first step that still needs doing.
+  // Success lands in the guided onboarding (one resumable flow for the same employee, company and account); a partial failure still opens the step that needs doing.
+  const url = new URL(failed.length > 0 && first?.href ? first.href : `/employees/${d.employeeId}/onboarding`, "https://placeholder.invalid");
   url.searchParams.set("created", "1");
   if (failed.length) url.searchParams.set("notice", [...new Set(failed)].map((f) => WHAT[f] ?? f).join(","));
   redirect(`${url.pathname}${url.search}`);

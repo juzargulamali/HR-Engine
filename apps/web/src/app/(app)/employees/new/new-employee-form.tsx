@@ -246,7 +246,7 @@ export function NewEmployeeForm({
             </Alert>
           ) : null}
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Creates the employee and opens their profile. Contract, pay, documents and the account can be finished there.</p>
+            <p className="text-sm text-muted-foreground">Creates the employee and opens onboarding: the profile, the invitation, HR roles and module access, in one flow you can leave and resume.</p>
             <div className="flex flex-wrap gap-3">
               <Button type="submit" disabled={pending || !companyId} className="min-h-11">
                 {pending ? "Creating…" : "Create employee"}

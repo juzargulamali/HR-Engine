@@ -41,6 +41,9 @@ export interface SetupStep {
 
 const tab = (id: string, t: string, step?: string) => `/employees/${id}?tab=${t}${step ? `&step=${step}` : ""}`;
 
+/** The guided onboarding for one employee: the same employee, company and account through invitation, HR roles and module access. */
+export const onboardingHref = (employeeId: string) => `/employees/${employeeId}/onboarding`;
+
 export function peopleAccessHref(linkedUserId: string | null, employeeId: string, tabName: "account" | "roles" | "modules" | "job" = "account"): string {
   const person = linkedUserId ? `u:${linkedUserId}` : `e:${employeeId}`;
   return `/people-access?person=${encodeURIComponent(person)}&tab=${tabName}`;
@@ -74,10 +77,10 @@ export function computeSetup(i: SetupInput): SetupStep[] {
   }
   // The account step is visible to whoever may manage accounts or HR records; its count is not a record count, so it is always known.
   steps.push(inactive ? na("account", "Account invitation") : i.linkedUserId
-    ? { key: "account", label: "Account invitation", status: "done", detail: "A login is linked, so this person sees their own profile, leave and approvals.", href: i.viewerCanOpenAccess ? peopleAccessHref(i.linkedUserId, i.employeeId, "account") : null, actionLabel: i.viewerCanOpenAccess ? "Open People & Access" : null }
+    ? { key: "account", label: "Account invitation", status: "done", detail: "A login is linked, so this person sees their own profile, leave and approvals.", href: i.viewerCanOpenAccess ? onboardingHref(i.employeeId) : null, actionLabel: i.viewerCanOpenAccess ? "Open onboarding" : null }
     : i.viewerCanInvite
-      ? { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Invite them in People & Access, then link the account here.", href: peopleAccessHref(null, i.employeeId, "account"), actionLabel: "Open People & Access" }
-      : { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. A System Administrator invites them in People & Access; once the account exists you link it here.", href: tab(i.employeeId, "overview", "account"), actionLabel: "Link an account" });
+      ? { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Onboarding invites them and links the account to this employee in one flow.", href: onboardingHref(i.employeeId), actionLabel: "Open onboarding" }
+      : { key: "account", label: "Account invitation", status: "todo", detail: "No login yet. Onboarding keeps the address and shows who can send the invitation (a System Administrator); once the account exists you link it there.", href: onboardingHref(i.employeeId), actionLabel: "Open onboarding" });
   return steps;
 }
 

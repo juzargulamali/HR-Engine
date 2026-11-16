@@ -49,7 +49,7 @@ describe("createEmployee", () => {
     expect(wrote("employees")[0]!.row).toMatchObject({ id: EMP, company_id: CO, country_code: "SA" });
     // no employee number is sent: the database gives the new hire the next number of the one shared series
     expect(wrote("employees")[0]!.row).not.toHaveProperty("employee_number");
-    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}/onboarding?created=1`);
   });
   it("asks for the country only when the company has none, and then uses the posted one", async () => {
     selects.companies = { data: { id: CO, country_code: "", default_currency: "SAR" }, error: null };
@@ -64,12 +64,12 @@ describe("createEmployee", () => {
     expect(wrote("compensation_details")[0]!.row).toMatchObject({ base_salary: 5000, currency: "SAR", effective_from: "2026-11-01", allowances: { other: 500 } });
     expect(wrote("leave_ledger")).toHaveLength(1);
     expect(wrote("comp_day_ledger")).toHaveLength(1);
-    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}/onboarding?created=1`);
   });
   it("leaving everything optional out writes only the employee, and the profile opens on its Overview with the setup checklist", async () => {
     const r = await run({});
     expect(inserts.map((i) => i.table)).toEqual(["employees"]);
-    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}/onboarding?created=1`);
   });
   it("a repeated send hits the primary key: it opens the existing profile and writes nothing else", async () => {
     insertResults.employees = { error: { code: "23505", message: 'duplicate key value violates unique constraint "employees_pkey"' } };
@@ -81,7 +81,7 @@ describe("createEmployee", () => {
   it("a number typed into the request is ignored: the number always comes from the database's series, never from the browser", async () => {
     const r = await run({ employeeNumber: "E002" });
     expect(wrote("employees")[0]!.row).not.toHaveProperty("employee_number");
-    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}/onboarding?created=1`);
   });
   it("a number conflict (not expected, the database skips held numbers) saves nothing and asks to try again, with no raw constraint name", async () => {
     insertResults.employees = { error: { code: "23505", message: 'duplicate key value violates unique constraint "employees_employee_number_canonical_unique"' } };

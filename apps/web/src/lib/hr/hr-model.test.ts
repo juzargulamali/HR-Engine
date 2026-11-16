@@ -20,7 +20,7 @@ describe("computeSetup", () => {
     const steps = computeSetup({ ...base, counts: { contracts: 1, compensation: 2, identityDocuments: 1, employeeDocuments: 0, openingBalances: 2 }, linkedUserId: "u1", viewerCanOpenAccess: true });
     expect(steps.every((s) => s.status === "done")).toBe(true);
     expect(steps.find((s) => s.key === "opening_balances")!.href).toBeNull();
-    expect(steps.find((s) => s.key === "account")!.href).toBe("/people-access?person=u%3Au1&tab=account");
+    expect(steps.find((s) => s.key === "account")!.href).toBe("/employees/e1/onboarding");
     expect(setupSummary(steps).text).toBe("Setup complete");
   });
   it("hides a step the viewer cannot see instead of calling it to do", () => {
@@ -32,9 +32,10 @@ describe("computeSetup", () => {
     expect(computeSetup({ ...base, removed: true })[0]!.detail).toMatch(/removed/);
   });
   it("only a System Administrator is sent to invite; an HR Admin is told what to do", () => {
-    expect(computeSetup({ ...base, viewerCanInvite: true }).find((s) => s.key === "account")!.href).toBe("/people-access?person=e%3Ae1&tab=account");
+    // both open the guided onboarding (the same employee, company and account), which names who can send the invitation
+    expect(computeSetup({ ...base, viewerCanInvite: true }).find((s) => s.key === "account")!.href).toBe("/employees/e1/onboarding");
     const hr = computeSetup(base).find((s) => s.key === "account")!;
-    expect(hr.href).toBe("/employees/e1?tab=overview&step=account");
+    expect(hr.href).toBe("/employees/e1/onboarding");
     expect(hr.detail).toMatch(/System Administrator/);
     expect(remainingSteps(computeSetup(base)).length).toBe(4);
   });

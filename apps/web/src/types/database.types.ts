@@ -1273,6 +1273,44 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      employee_onboarding_plans: {
+        Row: {
+          id: string;
+          employee_id: string;
+          company_id: string;
+          invite_email: string | null;
+          hr_roles: { role: string; companyId: string }[];
+          module_grants: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          prepared_by: string;
+          prepared_at: string;
+          updated_by: string | null;
+          updated_at: string;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+        };
+        Insert: {
+          employee_id: string;
+          company_id: string;
+          invite_email?: string | null;
+          hr_roles?: { role: string; companyId: string }[];
+          module_grants?: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          prepared_by: string;
+          updated_by?: string | null;
+          updated_at?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+        };
+        Update: {
+          invite_email?: string | null;
+          hr_roles?: { role: string; companyId: string }[];
+          module_grants?: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          updated_by?: string | null;
+          updated_at?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+        };
+        Relationships: [];
+      };
       recovery_alerts: {
         Row: {
           id: string;
@@ -2338,6 +2376,10 @@ export interface Database {
       hr_acknowledge_recovery_reduction: {
         Args: { p_request_id: string; p_note: string };
         Returns: undefined;
+      };
+      onboarding_access_snapshot: {
+        Args: { p_employee_id: string };
+        Returns: unknown;
       };
       acknowledge_hr_queue_item: {
         Args: { p_kind: string; p_source_id: string; p_source_date: string; p_note?: string | null };

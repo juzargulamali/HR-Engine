@@ -118,7 +118,7 @@ const LIMIT = 400;
 
 const nameFromProfile = (p: { full_name: string | null; email: string | null }) => p.full_name?.trim() || p.email?.split("@")[0] || "Unnamed user";
 
-async function ownModuleGrants(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<ModuleGrantRef[]> {
+export async function ownModuleGrants(supabase: Awaited<ReturnType<typeof createClient>>, userId: string): Promise<ModuleGrantRef[]> {
   const out: ModuleGrantRef[] = [];
   const results = await Promise.all((Object.keys(GRANT_TABLE) as AccessModule[]).map(async (module) => {
     // A module that is not installed in this database (or any failure) simply means no access to manage there.

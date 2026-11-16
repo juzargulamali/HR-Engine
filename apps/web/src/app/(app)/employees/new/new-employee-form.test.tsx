@@ -65,7 +65,7 @@ describe("company-first onboarding", () => {
     expect(details).toHaveLength(2);
     expect(details.every((d) => !d.open)).toBe(true);
     expect(details.map((d) => d.querySelector("summary")!.textContent)).toEqual(["Contract and pay now (optional)", "Opening balances (optional)"]);
-    expect(screen.getByText(/Creates the employee and opens their profile/)).toBeTruthy();
+    expect(screen.getByText(/Creates the employee and opens onboarding/)).toBeTruthy();
   });
 
   it("posts the form's id once per mount and keeps what was typed when the action answers with an error", async () => {

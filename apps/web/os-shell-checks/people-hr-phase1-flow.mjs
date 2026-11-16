@@ -79,6 +79,7 @@ await step("add an employee once (identity and job only): double click creates o
   await page.getByRole("button", { name: /^Create employee/ }).dblclick();
   await page.waitForURL(/\/employees\/[0-9a-f-]{36}/, { timeout: 20000 });
   EMP = page.url().match(/employees\/([0-9a-f-]{36})/)[1];
+  await go(`/employees/${EMP}`);   // Add employee now lands in the guided onboarding; these checks continue on the profile
   EMPNO = one(`select employee_number from employees where id = '${EMP}'`);
   if (!/^E\d{3,}$/.test(EMPNO)) throw new Error(`the new hire was not given a number of the shared series: ${EMPNO}`);
   if (one(`select count(*) from employees where company_id = '${AE}' and employee_number = '${EMPNO}'`) !== "1") throw new Error("a double click created more than one employee");

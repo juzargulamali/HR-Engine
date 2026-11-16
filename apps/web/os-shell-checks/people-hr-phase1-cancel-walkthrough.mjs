@@ -59,6 +59,7 @@ await step("onboarding: create an employee with identity and job only; the profi
   await page.getByRole("button", { name: /^Create employee/ }).click();
   await page.waitForURL(/\/employees\/[0-9a-f-]{36}/, { timeout: 20000 });
   EMP = page.url().match(/employees\/([0-9a-f-]{36})/)[1];
+  await go(`/employees/${EMP}`);   // Add employee now lands in the guided onboarding; these checks continue on the profile
   EMPNO = one(`select employee_number from employees where id = '${EMP}'`);
   await page.getByTestId("setup-checklist").waitFor();
   if (one(`select count(*) from employees where employee_number = '${EMPNO}'`) !== "1") throw new Error("not exactly one employee");
