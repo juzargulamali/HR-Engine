@@ -88,7 +88,7 @@ Status: built = code present and wired at the stamp; partial = works with known 
 | Cross-company inventory sharing | An owner company shares a location with another; receiving, transfers and trace via `inv_xshare_*` | migration `20261218000100`; `docs/inventory-cross-company-receiving.md` |
 
 ```
-Sales (enquiry, won) --handover--> Projects (PM accepts) --equipment requests--> Inventory (reserve, pick, dispatch, return, notes)   [pick, site runs served and the check for the Project Manager: Inventory Phase 1, draft, `modules/inventory.md`]
+Sales (enquiry, won) --handover--> Projects (PM accepts) --equipment requests--> Inventory (reserve, pick, dispatch, return, notes)   [pick, site runs served and the check for the Project Manager: Inventory Phase 1, merged as PR #101, `modules/inventory.md`]
                                         |                                                  ^ cross-company sharing (inv_xshare_*)
                                         +--budget, funding, expenses--> Finance (Budget inbox)
 Leave / Claims / Timesheets / Letters / Payroll runs ---------------> Approvals page (approvals table; resolve_approver*)
