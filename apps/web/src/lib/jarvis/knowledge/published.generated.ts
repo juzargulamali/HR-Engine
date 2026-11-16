@@ -940,8 +940,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Enter the new job title and/or the new pay, and the date it takes effect.",
       "Read the line beside the button, which says what will happen on save, then save.",
       "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.",
-      "If the pay you entered was a mistake (the wrong amount, or the joining date used for a current salary), do not record a raise: use Correct pay record (see Correct a mistaken pay record below).",
-      "If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator."
+      "If the pay you entered was a mistake, do not record a raise: use Correct pay record (see Correct a mistaken pay record below). If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator."
     ],
     "links": [
       {
@@ -976,9 +975,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Open the person and go to the Documents tab.",
       "Press Add document (or Renew beside an existing one) and choose the type.",
       "Fill in what the type asks for and attach the file if it is required. A file can be a PDF, JPEG, PNG or WebP of up to 10 MB; the form refuses another type or a bigger file beside the field before anything is sent.",
-      "Save. Identity documents are visible only to the person and their HR Admin.",
-      "If an identity document shows No file attached, an HR Admin presses Attach file on that row and chooses the scan. It is added to the same document; the number and dates do not change, and a document that already has a file cannot be replaced this way.",
-      "If saving fails, read the message under the file field and press the button again. Pressing again never creates a second document."
+      "Save. Identity documents are visible only to the person and their HR Admin. If saving fails, read the message under the file field and press the button again: it never creates a second document.",
+      "If an identity document shows No file attached, an HR Admin presses Attach file on that row and chooses the scan. It is added to the same document; the number and dates do not change, and a document that already has a file cannot be replaced this way."
     ],
     "links": [
       {

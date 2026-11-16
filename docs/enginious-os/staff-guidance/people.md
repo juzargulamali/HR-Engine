@@ -128,8 +128,7 @@ A job title and pay change is made in one form on the person's Employment tab, a
 2. Enter the new job title and/or the new pay, and the date it takes effect.
 3. Read the line beside the button, which says what will happen on save, then save.
 4. Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.
-5. If the pay you entered was a mistake (the wrong amount, or the joining date used for a current salary), do not record a raise: use Correct pay record (see Correct a mistaken pay record below).
-6. If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator.
+5. If the pay you entered was a mistake, do not record a raise: use Correct pay record (see Correct a mistaken pay record below). If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator.
 
 ## Add or renew a document
 - id: people-renew-document
@@ -144,9 +143,8 @@ All documents are added in one form on the person's Documents tab. The type you 
 1. Open the person and go to the Documents tab.
 2. Press Add document (or Renew beside an existing one) and choose the type.
 3. Fill in what the type asks for and attach the file if it is required. A file can be a PDF, JPEG, PNG or WebP of up to 10 MB; the form refuses another type or a bigger file beside the field before anything is sent.
-4. Save. Identity documents are visible only to the person and their HR Admin.
+4. Save. Identity documents are visible only to the person and their HR Admin. If saving fails, read the message under the file field and press the button again: it never creates a second document.
 5. If an identity document shows No file attached, an HR Admin presses Attach file on that row and chooses the scan. It is added to the same document; the number and dates do not change, and a document that already has a file cannot be replaced this way.
-6. If saving fails, read the message under the file field and press the button again. Pressing again never creates a second document.
 
 ## Find someone's account and module access
 - id: people-find-access-record
