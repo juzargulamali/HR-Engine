@@ -8,6 +8,42 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | People & HR: guided onboarding, signed uploads, Correct pay record (added to draft PR #108, branch `feat/employee-number-uniqueness`; **not merged; hosted migrations `20270118000200` and `20270118000300` not applied; uploads need no migration**)
+
+**What changed for people.**
+
+* **Onboarding is one resumable page** (`/employees/[id]/onboarding`): Add employee, Complete profile, Invite, HR roles, Module access, Review, for the same employee, company and account. Each step shows done, blocked, who can finish it and the next action. The final review lists the exact companies, HR roles and module rights; applying needs a confirmation tick, applies only what the person is already allowed to apply, and a retry reuses everything already created. Add employee now opens this page.
+* **Uploads of 1 MB to 10 MB now work.** Employee documents, insurance attachments and reimbursement receipts go from the browser straight to the private bucket (PDF, JPEG, PNG or WebP, up to 10 MB), authorised before the link is signed and rechecked before the file is linked. Pressing the button again never makes a second record. Previously Next's 1 MB server-action body limit stopped them (reproduced with a synthetic PDF; Production logs not available).
+* **Attach file** on an identity document that says No file attached, on that same row, keeping its number and dates.
+* **Correct pay record** on the compensation history: change the amount, allowances or effective date of a mistaken entry, with a reason; the original stays in the audit trail; affected approved payroll runs and final settlements are flagged, not changed. Update pay is unchanged.
+* **An HR Admin of the company can now invite and give the Employee and Reporting Manager roles.** The hosted diagnostic confirmed Saeed holds HR Admin, System Admin and Finance, each scoped to Enginious LLC FZ; both invitation and role assignment needed an unrestricted System Administrator, so they came back to the owner. With the owner's approval, an HR Admin of the employee's own company can send the invitation (for that employee and the planned address) and give **Employee** and **Reporting Manager**, for that company only, from the same onboarding flow. HR Admin, Finance, CEO, CTO and System Administrator stay with an unrestricted System Administrator; another company's HR Admin is refused. Module access is unchanged: the review shows the exact grant pending and who can apply it, and the flow stays resumable. The diagnostic's budget module is now named Project Budget & Expenses (it was shown as Phone / PBX).
+
+* **A one-time pre-launch cleanup, run by the owner, not part of deployment.** Four pinned SQL files cancel outstanding leave applications and comp-off / Recovery Leave requests submitted before the go-live cutoff, close their pending approval steps and acknowledge their alerts (they stay under Acknowledged): read-only audit and impact first, then the cleanup (which refuses unless the audit's total is typed in), then a verifier. **Previously approved requests, balances, attendance history and payroll are never changed; there is no reversal option.** Nothing is deleted. See `modules/people-hr.md` section 19.
+
+**Migrations.** `20270118000200_people_hr_pay_correction.sql` (`compensation_corrections`, `correct_pay_record`), `20270118000300_people_hr_onboarding.sql` (`employee_onboarding_plans`, `onboarding_access_snapshot`, and one new insert policy on `user_roles` that lets an HR Admin give Employee and Reporting Manager for their own company). Also in this PR, amended before it is applied: `20270117000100` (the allocator waits for a pool number locked by another hire rather than treating the pool as exhausted).
+
+**Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (sections 16 to 19), `people-hr-workflows.md` (10b to 10e), `staff-guidance/people.md`, this log, `05-data-tests-and-release-ledger.md`.
+
+**Tests.** `people-hr-pay-correction.rls.test.ts`, `onboarding-plan.rls.test.ts`, `onboarding-delegation.rls.test.ts`, `people-hr-uploads.rls.test.ts`, `employee-number-allocator.rls.test.ts`, `prelaunch-cleanup.rls.test.ts`; `lib/hr/onboarding.test.ts`, `lib/actions/onboarding.test.ts`, `payCorrection.test.ts`, `hrUploads.test.ts`, `employeeDocuments.test.ts`, `upload-rules.test.ts`, the onboarding page, document, insurance, receipt, Attach file and pay dialog component tests.
+
+### 2026-11-16 | Employee numbers: one shared series across the companies, permanently reserved (branch `feat/employee-number-uniqueness` from `main` `713f6dd`; **a draft pull request; not merged; hosted migration `20270117000100` not applied; the audit has not been run on the hosted database**)
+
+**What changed for people.**
+
+* **New employees get their number automatically** from one series shared by every company: `E001`, `E002`, ... `E009`, `E010`, ... (at least three digits, no truncation after `E999`). The Add employee form has no number field.
+* **`E02`, `e002` and `E002` are the same number** and are saved as `E002`, unique across Enginious UAE, Saudi Arabia and Europe.
+* **From rollout, a number belongs to its employee for good.** If an active or invited employee resigns, is terminated, removed, corrected to another number or deleted for good, their number stays reserved and is never available to anyone else. Restoring or rehiring the same record keeps it.
+* **Deleted, terminated and deactivated records at rollout are ignored** (test accounts): their numbers are available. **Their E-series numbers become a pool that automatic numbering uses first**, lowest first (never a number an active or invited employee holds, never rebuilt); when the pool is empty the shared sequence continues above the highest reserved E-number.
+* **Giving someone access to several companies never creates a second employee record or a new number.**
+* **Duplicates are refused with a clear sentence** on any path that writes a number.
+* **Existing numbers are not rewritten.** The migration refuses to run, changing nothing, while two active or invited employees (any companies) have equivalent numbers; the read-only audit lists them for the owner to decide, one employee at a time.
+
+**Migrations.** `20270117000100_people_hr_employee_number_unique.sql` (function `employee_number_canonical`, tables `employee_number_reservations`, `employee_number_pool` and `employee_number_allocation`, sequence `employee_number_seq`, triggers on `employees` and `profiles`; the per-company index is dropped; packs `people_hr_employee_number_00_audit_readonly.sql`, `..._05_preflight_readonly.sql`, `..._20_verify_readonly.sql`, `..._25_pool_status_readonly.sql`, `..._90_rollback.sql`). Supersedes the number-reuse decision of `20261023000000`.
+
+**Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (section 15), `people-hr-workflows.md`, `staff-guidance/people.md`, this log, `05-data-tests-and-release-ledger.md`.
+
+**Hosted status.** Not applied; audit not run. **Tests.** `packages/rls-tests/test/employee-number.rls.test.ts`, `phase1.rls.test.ts` (one assertion changed); `web/lib/hr/employee-number.test.ts`, `employeeOnboarding.test.ts`, `new-employee-form.test.tsx`.
+
 ### 2026-11-16 | People & HR Phase 2: Daily HR work (branch `feat/people-hr-phase2` from `main` `93d10a1`; **a draft pull request; not merged; hosted migration `20270116000100` not applied**)
 
 **What changed for people.**

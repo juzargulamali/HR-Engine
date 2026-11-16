@@ -1,8 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect, useMemo, useRef, useState } from "react";
-import { addDocument, type AddDocumentState } from "@/lib/actions/employeeDocuments";
+import { startTransition, useActionState, useEffect, useMemo, useRef, useState } from "react";
+import { addDocument, prepareDocumentUpload, type AddDocumentState } from "@/lib/actions/employeeDocuments";
+import { uploadChosenFile } from "@/lib/hr-upload-client";
+import { UPLOAD_ACCEPT, UPLOAD_LIMIT_TEXT } from "@/lib/upload-rules";
 import { DOCUMENT_TYPES, missingForType, ruleForKey, typeKey, typesForCountry, type DocumentTypeRule } from "@/lib/hr/document-types";
 import { Alert } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -50,6 +52,8 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
   const [expiry, setExpiry] = useState("");
   const [hasFile, setHasFile] = useState(false);
   const [localError, setLocalError] = useState<{ field: "number" | "file" | "expiry"; text: string } | null>(null);
+  // True from the moment Save is pressed until the file is safely in private storage (the save itself is `pending`).
+  const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -64,6 +68,7 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
   }, [offered, p.countryCode]);
 
   const saved = state.saved;
+  const busy = uploading || pending;
   useEffect(() => { if (open && !saved) rootRef.current?.querySelector<HTMLElement>("select, input:not([type=hidden])")?.focus({ preventScroll: false }); }, [open, saved]);
 
   if (offered.length === 0) return null;
@@ -89,7 +94,7 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
       ref={rootRef}
       className="space-y-4 rounded-md border border-border p-4"
       data-testid="add-document-form"
-      onKeyDown={(e) => { if (e.key === "Escape" && !pending) close(); }}
+      onKeyDown={(e) => { if (e.key === "Escape" && !busy) close(); }}
     >
       <div className="space-y-1">
         <p className="text-sm font-semibold">{p.renew ? "Renew document" : "Add document"}</p>
@@ -108,14 +113,30 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
         </div>
       ) : (
         <form
-          action={formAction}
           className="space-y-4"
-          onSubmit={(e) => {
-            if (!rule) { e.preventDefault(); return; }
-            const m = missingForType(rule, { number, expiry, hasFile });
-            if (!m) { setLocalError(null); return; }
+          onSubmit={async (e) => {
             e.preventDefault();
-            setLocalError({ field: rule.numberRequired && !number.trim() ? "number" : rule.fileRequired && !hasFile ? "file" : "expiry", text: m });
+            if (!rule || busy) return;
+            const m = missingForType(rule, { number, expiry, hasFile });
+            if (m) {
+              setLocalError({ field: rule.numberRequired && !number.trim() ? "number" : rule.fileRequired && !hasFile ? "file" : "expiry", text: m });
+              return;
+            }
+            setLocalError(null);
+            // The file never goes through the server action: it is sent straight to private storage first, and the action only receives its name, type and size.
+            const data = new FormData(e.currentTarget);
+            data.delete("file");
+            const file = fileRef.current?.files?.[0] ?? null;
+            if (file) {
+              setUploading(true);
+              const problem = await uploadChosenFile(file, (declared) => prepareDocumentUpload({ employeeId: p.employeeId, typeKey: key, submissionId, ...declared }));
+              setUploading(false);
+              if (problem) { setLocalError({ field: "file", text: problem }); return; }
+              data.set("fileName", file.name);
+              data.set("fileType", file.type);
+              data.set("fileSize", String(file.size));
+            }
+            startTransition(() => formAction(data));
           }}
         >
           <input type="hidden" name="employeeId" value={p.employeeId} />
@@ -160,8 +181,8 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
 
               <div className="space-y-1.5">
                 <Label htmlFor="docFile">{rule.fileRequired ? "File" : "Scan"} <span className="font-normal text-muted-foreground">({need(rule.fileRequired)})</span></Label>
-                <input ref={fileRef} id="docFile" name="file" type="file" accept="application/pdf,image/*" className={fileClass} onChange={(e) => { setHasFile((e.target.files?.length ?? 0) > 0); setLocalError(null); }} aria-invalid={localError?.field === "file"} data-testid="add-document-file" />
-                <p className="text-sm text-muted-foreground">PDF, JPEG, PNG or WebP, up to 10 MB.</p>
+                <input ref={fileRef} id="docFile" name="file" type="file" accept={UPLOAD_ACCEPT} className={fileClass} onChange={(e) => { setHasFile((e.target.files?.length ?? 0) > 0); setLocalError(null); }} aria-invalid={localError?.field === "file"} data-testid="add-document-file" />
+                <p className="text-sm text-muted-foreground">{UPLOAD_LIMIT_TEXT}</p>
                 {localError?.field === "file" ? <p className="text-sm text-destructive" role="alert">{localError.text}</p> : null}
               </div>
 
@@ -182,8 +203,8 @@ export function AddDocumentForm(p: AddDocumentFormProps) {
           <div className="space-y-2">
             <p className="text-sm text-muted-foreground" data-testid="add-document-effect">{effect}</p>
             <div className="flex flex-wrap gap-2">
-              <Button type="submit" size="sm" disabled={pending || !rule} data-testid="add-document-submit">{pending ? "Saving…" : p.renew ? "Save renewed document" : "Add document"}</Button>
-              <Button type="button" size="sm" variant="outline" disabled={pending} onClick={close}>Cancel</Button>
+              <Button type="submit" size="sm" disabled={busy || !rule} data-testid="add-document-submit">{uploading ? "Uploading file…" : pending ? "Saving…" : p.renew ? "Save renewed document" : "Add document"}</Button>
+              <Button type="button" size="sm" variant="outline" disabled={busy} onClick={close}>Cancel</Button>
             </div>
           </div>
         </form>

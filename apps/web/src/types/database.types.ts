@@ -330,7 +330,7 @@ export interface Database {
         Insert: {
           id?: string;
           user_id?: string | null;
-          employee_number: string;
+          employee_number?: string;
           company_id: string;
           country_code: string;
           department_id?: string | null;
@@ -428,6 +428,30 @@ export interface Database {
           created_by: string;
         };
         Update: Partial<Database["public"]["Tables"]["compensation_details"]["Insert"]>;
+        Relationships: [];
+      };
+      compensation_corrections: {
+        Row: {
+          id: string;
+          company_id: string;
+          employee_id: string;
+          compensation_id: string;
+          request_key: string;
+          previous_effective_from: string;
+          previous_base_salary: string;
+          previous_allowances: Record<string, unknown>;
+          new_effective_from: string;
+          new_base_salary: string;
+          new_allowances: Record<string, unknown>;
+          currency: string;
+          reason: string;
+          corrected_by: string;
+          corrected_at: string;
+          /** payroll_runs, final_settlement, pending_changes, in_force_today_before and in_force_today_after, as they were when the correction was saved. */
+          impact: Record<string, unknown>;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
         Relationships: [];
       };
       employee_career_events: {
@@ -1247,6 +1271,44 @@ export interface Database {
         };
         Insert: Record<string, never>;
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      employee_onboarding_plans: {
+        Row: {
+          id: string;
+          employee_id: string;
+          company_id: string;
+          invite_email: string | null;
+          hr_roles: { role: string; companyId: string }[];
+          module_grants: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          prepared_by: string;
+          prepared_at: string;
+          updated_by: string | null;
+          updated_at: string;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+        };
+        Insert: {
+          employee_id: string;
+          company_id: string;
+          invite_email?: string | null;
+          hr_roles?: { role: string; companyId: string }[];
+          module_grants?: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          prepared_by: string;
+          updated_by?: string | null;
+          updated_at?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+        };
+        Update: {
+          invite_email?: string | null;
+          hr_roles?: { role: string; companyId: string }[];
+          module_grants?: { module: string; companyId: string; capabilities: string[]; note?: string | null }[];
+          updated_by?: string | null;
+          updated_at?: string;
+          reviewed_by?: string | null;
+          reviewed_at?: string | null;
+        };
         Relationships: [];
       };
       recovery_alerts: {
@@ -2148,6 +2210,7 @@ export interface Database {
       ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
       record_employment_change: { Args: { p_employee_id: string; p_effective_date: string; p_job_title: string | null; p_basic: number | null; p_other: number | null; p_note: string | null }; Returns: unknown };
       dismiss_employment_change: { Args: { p_event_id: string }; Returns: unknown };
+      correct_pay_record: { Args: { p_compensation_id: string; p_effective_from: string | null; p_basic: number | null; p_allowances: unknown; p_reason: string; p_request_key: string }; Returns: unknown };
       apply_due_employment_changes: { Args: { p_at?: string }; Returns: unknown };
       hr_business_today: { Args: { p_country_code: string }; Returns: string };
       ops_tv_board: { Args: { p_company_id: string }; Returns: unknown };
@@ -2313,6 +2376,10 @@ export interface Database {
       hr_acknowledge_recovery_reduction: {
         Args: { p_request_id: string; p_note: string };
         Returns: undefined;
+      };
+      onboarding_access_snapshot: {
+        Args: { p_employee_id: string };
+        Returns: unknown;
       };
       acknowledge_hr_queue_item: {
         Args: { p_kind: string; p_source_id: string; p_source_date: string; p_note?: string | null };

@@ -3,10 +3,13 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { canManageInsurance, getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
+import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
+import { discardHrUpload, readBackHrUpload, signHrUpload } from "@/lib/hr-upload-server";
+import { employeeNumberErrorMessage } from "@/lib/hr/employee-number";
 import type { ActionState } from "./companies";
-import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
+import { sanitizeForStoragePath, UPLOAD_PAGE_OUT_OF_DATE, validateUploadMeta, type PrepareUploadResult } from "@/lib/upload-rules";
 import { applyPolandTerminationLeaveTrueUp } from "./polandTermination";
 
 /** createEmployee moved to employeeOnboarding.ts (company-first, retry-safe create). */
@@ -297,7 +300,9 @@ export async function restoreEmployee(employeeId: string): Promise<{ error: stri
   const { error } = await supabase.from("employees").update({ deleted_at: null, deleted_by: null }).eq("id", employeeId);
   revalidatePath("/employees");
   revalidatePath(`/employees/${employeeId}`);
-  return { error: error?.message ?? null };
+  // Employee numbers are one shared series: a removed employee's number may have been given to someone else since. The database says so; show it as a sentence, not as a constraint name.
+  if (error) return { error: error.code === "23505" ? employeeNumberErrorMessage(error) : error.message };
+  return { error: null };
 }
 
 /**
@@ -424,7 +429,47 @@ const addInsurancePolicySchema = z.object({
   expiryDate: z.string().optional(),
 });
 
-/** employee_insurance_policies — same visibility/write pattern as identity documents, HR Admin only. */
+/** A retry of the same submission within this window, with no file to key on, returns the policy it already made. */
+const INSURANCE_RETRY_WINDOW_MS = 2 * 60 * 1000;
+
+/** `<company>/<employee>/<submission>-<name>`: the insurance bucket's convention (company, then employee), with the one-time submission id as the retry key. */
+const insurancePath = (companyId: string, employeeId: string, submission: string, name: string) => `${companyId}/${employeeId}/${submission}-${sanitizeForStoragePath(name)}`;
+
+/** The employee's company, from the database, and whether this person is an HR Admin of it. */
+async function authoriseInsurance(employeeId: string) {
+  const session = await getCurrentSession();
+  if (!session) return { error: "Sign in again to continue." } as const;
+  const supabase = await createClient();
+  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", employeeId).maybeSingle();
+  if (!employee) return { error: "Employee not found." } as const;
+  if (!canManageInsurance(session.grants, employee.company_id)) return { error: "Only an HR Admin of this employee's company can add insurance policies." } as const;
+  return { error: null, supabase, session, companyId: employee.company_id } as const;
+}
+
+/**
+ * Step 1 of adding a policy WITH a document (see addInsurancePolicy). Authorises the HR Admin for this employee from the database, checks the declared file against the
+ * displayed limits (PDF, JPEG, PNG or WebP, up to 10 MB) and returns the one-time upload link for the private insurance bucket. Nothing is recorded.
+ */
+export async function prepareInsuranceUpload(input: { employeeId: string; submissionId: string; name: string; size: number; type: string }): Promise<PrepareUploadResult> {
+  const employeeId = z.string().uuid().safeParse(input.employeeId);
+  const submission = z.string().uuid().safeParse(input.submissionId);
+  if (!employeeId.success) return { error: "That employee could not be identified. Reload the page and try again." };
+  if (!submission.success) return { error: UPLOAD_PAGE_OUT_OF_DATE };
+  const metaError = validateUploadMeta(input);
+  if (metaError) return { error: metaError };
+  const auth = await authoriseInsurance(employeeId.data);
+  if (auth.error) return { error: auth.error };
+  return signHrUpload("insurance-documents", insurancePath(auth.companyId, employeeId.data, submission.data, input.name));
+}
+
+/**
+ * employee_insurance_policies — same visibility/write pattern as identity documents, HR Admin only.
+ *
+ * The document does not pass through this action (a server action accepts 1 MB by default and a Vercel function 4.5 MB): the browser sends it straight to the private
+ * bucket after prepareInsuranceUpload, and this action reads it back (real size and leading bytes) before the policy row links it. The form posts only the declared
+ * `fileName`, `fileType` and `fileSize`. Retry-safe: the stored path comes from the form's one-time `submissionId`, so a repeat returns the policy already saved. A file
+ * that fails a check, or a row that cannot be saved, deletes the file again.
+ */
 export async function addInsurancePolicy(_prevState: ActionState, formData: FormData): Promise<ActionState> {
   const parsed = addInsurancePolicySchema.safeParse({
     employeeId: formData.get("employeeId"),
@@ -436,30 +481,35 @@ export async function addInsurancePolicy(_prevState: ActionState, formData: Form
     return { error: parsed.error.issues[0]?.message ?? "Invalid input." };
   }
   const d = parsed.data;
+  const legacy = formData.get("file");
+  if (legacy instanceof File && legacy.size > 0) return { error: UPLOAD_PAGE_OUT_OF_DATE };
 
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { error: "Not signed in." };
-
-  // Same reasoning as addDocument() (employeeDocuments.ts): derive the real company
-  // from the employee row rather than trusting a client-submitted one,
-  // since this bucket's storage RLS doesn't cross-check the two itself.
-  const { data: employee } = await supabase.from("employees").select("company_id").eq("id", d.employeeId).single();
-  if (!employee) return { error: "Employee not found." };
+  // Same reasoning as addDocument() (employeeDocuments.ts): derive the real company from the employee row rather than trusting a client-submitted one.
+  const auth = await authoriseInsurance(d.employeeId);
+  if (auth.error) return { error: auth.error };
+  const { supabase, session } = auth;
 
   let filePath: string | null = null;
-  const file = formData.get("file");
-  if (file instanceof File && file.size > 0) {
-    const validationError = validateUploadFile(file);
+  const fileName = String(formData.get("fileName") ?? "");
+  if (fileName) {
+    const declared = { name: fileName, type: String(formData.get("fileType") ?? ""), size: Number(formData.get("fileSize") ?? 0) };
+    const validationError = validateUploadMeta(declared);
     if (validationError) return { error: validationError };
+    const submission = z.string().uuid().safeParse(String(formData.get("submissionId") ?? ""));
+    if (!submission.success) return { error: UPLOAD_PAGE_OUT_OF_DATE };
+    filePath = insurancePath(auth.companyId, d.employeeId, submission.data, fileName);
 
-    filePath = `${employee.company_id}/${d.employeeId}/${Date.now()}-${sanitizeForStoragePath(file.name)}`;
-    const { error: uploadError } = await supabase.storage
-      .from("insurance-documents")
-      .upload(filePath, file, { contentType: file.type });
-    if (uploadError) return { error: `Upload failed: ${uploadError.message}` };
+    // A repeat of a submission that was already saved returns that policy instead of adding a second one.
+    const { data: again } = await supabase.from("employee_insurance_policies").select("id").eq("employee_id", d.employeeId).eq("file_path", filePath).maybeSingle();
+    if (again) return { error: null };
+    const checked = await readBackHrUpload("insurance-documents", filePath, declared);
+    if (checked.error) return { error: checked.error };
+  } else {
+    const since = new Date(Date.now() - INSURANCE_RETRY_WINDOW_MS).toISOString();
+    let q = supabase.from("employee_insurance_policies").select("id").eq("employee_id", d.employeeId).eq("insurance_name", d.insuranceName).eq("policy_number", d.policyNumber).eq("created_by", session.userId).is("file_path", null).gte("created_at", since);
+    q = d.expiryDate ? q.eq("expiry_date", d.expiryDate) : q.is("expiry_date", null);
+    const { data: again } = await q.limit(1).maybeSingle();
+    if (again) return { error: null };
   }
 
   const { error } = await supabase.from("employee_insurance_policies").insert({
@@ -468,14 +518,17 @@ export async function addInsurancePolicy(_prevState: ActionState, formData: Form
     policy_number: d.policyNumber,
     expiry_date: d.expiryDate || null,
     file_path: filePath,
-    created_by: user.id,
+    created_by: session.userId,
   });
 
   if (error) {
-    // The contract scan (if any) was already uploaded above — without
-    // this, a failed row insert leaves it orphaned in Storage with nothing
-    // ever pointing at it.
-    if (filePath) await supabase.storage.from("insurance-documents").remove([filePath]);
+    if (filePath) {
+      // A simultaneous retry may have saved the policy a moment earlier: then the file is in use and stays.
+      const { data: raced } = await supabase.from("employee_insurance_policies").select("id").eq("employee_id", d.employeeId).eq("file_path", filePath).maybeSingle();
+      if (raced) return { error: null };
+      // Without this, a failed row insert leaves the document in storage with nothing ever pointing at it.
+      await discardHrUpload("insurance-documents", filePath);
+    }
     return { error: error.message };
   }
 

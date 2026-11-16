@@ -2,6 +2,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/ui/empty-state";
 import { documentFormHref } from "@/lib/hr/document-types";
+import { AttachIdentityFile } from "./attach-identity-file";
 import { DeleteEmployeeDocumentButton } from "./delete-employee-document-button";
 import { DeleteIdentityDocumentButton } from "./delete-identity-document-button";
 import { groupByType, STATE_WORDS, type DocumentRow } from "./documents-data";
@@ -40,6 +41,7 @@ export function DocumentsList({ employeeId, rows, canEditEmployeeDocuments, canE
                     ) : (
                       <span className="text-sm text-muted-foreground">No file attached</span>
                     )}
+                    {d.store === "identity" && canEdit && !d.removed && !d.url && !d.urlFailed ? <AttachIdentityFile documentId={d.id} label={d.label} /> : null}
                     {canEdit && !d.removed && d.expiryDate ? (
                       <Link href={documentFormHref(employeeId, d.store, d.storedType, true, d.id)} className="text-sm font-medium text-accent hover:underline" data-testid={`renew-${d.id}`}>Renew</Link>
                     ) : null}

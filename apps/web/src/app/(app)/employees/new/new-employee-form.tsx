@@ -135,20 +135,14 @@ export function NewEmployeeForm({
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
-                <Label htmlFor="employeeNumber">Employee number *</Label>
-                <Input id="employeeNumber" name="employeeNumber" placeholder="E010" required className="h-11" />
-                {state.existingEmployeeId ? (
-                  <p className="text-sm text-destructive" data-testid="number-in-use">
-                    That number is already used in this company.{" "}
-                    <Link href={`/employees/${state.existingEmployeeId}`} className="underline">
-                      Open that employee
-                    </Link>
-                  </p>
-                ) : null}
-              </div>
-              <div className="space-y-1.5">
                 <Label htmlFor="jobTitle">Job title</Label>
                 <Input id="jobTitle" name="jobTitle" className="h-11" />
+              </div>
+              <div className="space-y-1.5">
+                <span className="text-sm font-medium">Employee number</span>
+                <p className="text-sm text-muted-foreground" data-testid="number-auto">
+                  Assigned automatically when you save: the next number of the one series shared by every company (E001, E002, ...). It stays with this person if they are given access to other companies.
+                </p>
               </div>
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
@@ -252,7 +246,7 @@ export function NewEmployeeForm({
             </Alert>
           ) : null}
           <div className="space-y-2">
-            <p className="text-sm text-muted-foreground">Creates the employee and opens their profile. Contract, pay, documents and the account can be finished there.</p>
+            <p className="text-sm text-muted-foreground">Creates the employee and opens onboarding: the profile, the invitation, HR roles and module access, in one flow you can leave and resume.</p>
             <div className="flex flex-wrap gap-3">
               <Button type="submit" disabled={pending || !companyId} className="min-h-11">
                 {pending ? "Creating…" : "Create employee"}

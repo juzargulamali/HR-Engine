@@ -65,25 +65,26 @@ describe("company-first onboarding", () => {
     expect(details).toHaveLength(2);
     expect(details.every((d) => !d.open)).toBe(true);
     expect(details.map((d) => d.querySelector("summary")!.textContent)).toEqual(["Contract and pay now (optional)", "Opening balances (optional)"]);
-    expect(screen.getByText(/Creates the employee and opens their profile/)).toBeTruthy();
+    expect(screen.getByText(/Creates the employee and opens onboarding/)).toBeTruthy();
   });
 
   it("posts the form's id once per mount and keeps what was typed when the action answers with an error", async () => {
-    createEmployee.mockResolvedValue({ error: "Employee number E010 is already used in this company.", existingEmployeeId: "e-existing" });
+    createEmployee.mockResolvedValue({ error: "The employee could not be created. Nothing was saved. Check the details and try again." });
     setup();
     choose("c-ae");
     fireEvent.change(screen.getByLabelText("First name *"), { target: { value: "Riya" } });
     fireEvent.change(screen.getByLabelText("Last name *"), { target: { value: "Rigger" } });
-    fireEvent.change(screen.getByLabelText("Employee number *"), { target: { value: "E010" } });
     fireEvent.change(screen.getByLabelText("Hire date *"), { target: { value: "2026-11-01" } });
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Create employee" })); });
     await waitFor(() => expect(createEmployee).toHaveBeenCalledTimes(1));
     const posted = createEmployee.mock.calls[0]![1] as FormData;
     expect(posted.get("employeeId")).toBe("11111111-1111-4111-8111-111111111111");
     expect(posted.get("companyId")).toBe("c-ae");
-    await waitFor(() => expect(screen.getByTestId("number-in-use")).toBeTruthy());
-    expect(screen.getByRole("link", { name: "Open that employee" }).getAttribute("href")).toBe("/employees/e-existing");
+    // there is no number field: the number is assigned by the database, and the form says so
+    expect(posted.has("employeeNumber")).toBe(false);
+    expect(screen.queryByLabelText("Employee number *")).toBeNull();
+    expect(screen.getByTestId("number-auto").textContent).toContain("Assigned automatically when you save");
+    await waitFor(() => expect(screen.getByText(/could not be created/)).toBeTruthy());
     expect((screen.getByLabelText("First name *") as HTMLInputElement).value).toBe("Riya");
-    expect((screen.getByLabelText("Employee number *") as HTMLInputElement).value).toBe("E010");
   });
 });

@@ -37,7 +37,7 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 |---|---|---|
 | 1. Choose the company | Nothing else is asked yet ("Choose the company first. Its country and currency are used for this employee.") | Country, currency |
 | 2. Defaults appear | The company's country and currency are shown. A company with no country asks for the employee's country in place; a company with no default currency says so and asks for one only if pay is entered | Country, currency |
-| 3. Identity and job | First and last name, employee number, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number) | Company, country |
+| 3. Identity and job | First and last name, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number). **No employee number is typed**: the form says it is assigned automatically when you save: the lowest free number from a pool of numbers of old test accounts first, then the one series shared by every company | Company, country, employee number |
 | 4. Contract and pay (optional) | Contract type ("Add later" is the empty choice); the start is the hire date unless changed; basic salary, others, currency (the company's) | Hire date, currency |
 | 5. Opening balances (optional) | Annual leave days, comp days earned to date; a note under the circled i says they are for a mid-year hire or a transfer and are recorded once | Hire date |
 | 6. Save | The profile **Overview** opens ("Employee created. Finish setup below.") with the checklist | |
@@ -53,7 +53,8 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 
 **When something goes wrong:**
 
-* *The same employee number is already used in this company* — the message links to that person; nothing was created.
+* *The employee number could not be assigned* — not expected (the database skips every reserved number, in every company); if two saves ever raced for one, nothing was saved and sending again takes the next number.
+* *Correcting or entering a number by hand* (an HR Admin or the owner through the database; no screen edits a number) — a number reserved for another employee, in any company, is refused with "Employee number E002 is reserved for another employee (current, removed or former), in this or another company." and nothing is saved. Restoring or rehiring the same record keeps its number; an ignored test record brought back onto a number now held by someone else is refused the same way.
 * *Sent twice, or retried after a lost answer* — the same record opens; nothing else is written.
 * *Contract, pay or balances could not be saved after the person was created* — the profile opens on the first step still to do with a sentence naming what was not saved ("contract", "pay", "balances"); the person exists once.
 * *No access* — "You cannot add employees to this company."
@@ -137,6 +138,28 @@ On the profile, **Remove** or **Restore** (HR Admin of the company). Removed rec
 7. **If a part could not be read**, the page names it and offers Try again. It never says nothing needs attention after a failed read.
 
 **Attendance register.** Open `/attendance`. It leads with Needs review. A day with nothing recorded says No record on a working day and Rest day on a rest day or public holiday; Absent only when recorded as absent; live clock status is its own column. **Profile tabs.** Leave leads with balances and Pending requests (each linking to its row in Approvals for someone who can decide); Attendance leads with Needs review and the days concerned.
+
+## 10b. Onboarding a new employee end to end (draft PR #108)
+
+1. **Add employee** (HR Admin of the company). You land on `/employees/<id>/onboarding`.
+2. **Complete profile**, then **Invite**: an HR Admin of the employee's company (or an unrestricted System Administrator) invites and links the login in one step; an existing account for the address is linked, never invited twice.
+3. **HR roles**: the same HR Admin gives **Employee** and **Reporting Manager** (either or both) for that company. HR Admin, Finance, CEO, CTO and System Administrator stay with an unrestricted System Administrator; each line says who can apply it.
+4. **Module access**: record the plan (it grants nothing). A founder or access manager of the module applies it; the review shows the exact grant pending and who can apply it.
+5. **Review and apply**: tick the confirmation. Each item is applied by someone allowed to; the rest show who must. Retry any time: the employee, invitation, roles and grants already made are reused, and nobody repeats a step.
+
+Evidence: `onboarding.test.ts`, `onboarding-plan.rls.test.ts`, `onboarding-delegation.rls.test.ts`, `employees/[id]/onboarding/page.test.tsx`.
+
+## 10c. Attach a file, and upload sizes
+
+Document, insurance and receipt files go from the browser straight to private storage: PDF, JPEG, PNG or WebP, up to 10 MB. An identity document saved without a scan shows **Attach file**; the scan is added to the same row. Evidence: `hrUploads.test.ts`, `employeeDocuments.test.ts`, `attach-identity-file.test.tsx`, `people-hr-uploads.rls.test.ts`.
+
+## 10d. Correct a mistaken pay record
+
+Compensation tab → history → **Correct pay record** → old and new values, reason → save. Original kept in audit; impacted approved payroll runs or final settlements are flagged, never changed. Update pay is unchanged. Evidence: `people-hr-pay-correction.rls.test.ts`, `payCorrection.test.ts`.
+
+## 10e. One-time pre-launch cleanup (owner only; draft PR #108)
+
+Run once before go-live, by the owner, in the Production SQL editor; never automatic and never a migration. (1) `prelaunch_cleanup_00_audit_readonly.sql`: set the cutoff, read the counts by company, type and status, and note the **E. TOTAL** row. (2) `prelaunch_cleanup_05_impact_readonly.sql`: information on approved requests that touched a balance, comp-off credit, attendance record or payroll export; they are left untouched. (3) `prelaunch_cleanup_10_cleanup.sql`: set the cutoff, type the audit's total as the EXPECTED TOTAL, and your own user id; run. (4) `prelaunch_cleanup_20_verify_readonly.sql`: every row OK. It cancels outstanding leave applications and Recovery Leave / comp-off requests, closes their pending approval steps and acknowledges the related alerts and attendance exceptions (they stay visible under Acknowledged). **Approved requests, balances, attendance history and payroll are never changed; there is no reversal option.** Evidence: `prelaunch-cleanup.rls.test.ts`.
 
 ## 11. Staff guidance written for these workflows
 

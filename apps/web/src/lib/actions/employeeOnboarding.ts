@@ -9,8 +9,9 @@ import { createClient } from "@/lib/supabase/server";
 import { computeSetup, remainingSteps } from "@/lib/hr/setup";
 import type { ActionState } from "./companies";
 
-/** What the form gets back when the employee was NOT created: the sentence to show and, for a repeated employee number, the record that already uses it. */
+/** What the form gets back when the employee was NOT created: the sentence to show. */
 export interface CreateEmployeeState extends ActionState {
+  /** Kept for callers of the earlier form; no longer set (the number is assigned by the database, so a new hire cannot repeat one). */
   existingEmployeeId?: string;
 }
 
@@ -24,7 +25,7 @@ const createEmployeeSchema = z.object({
   companyId: z.string().uuid("Choose a company first."),
   /** Only used when the company has no country of its own; otherwise the company's country is used and this is ignored. */
   countryCode: z.preprocess(blank, z.string().length(2).optional()),
-  employeeNumber: z.string().trim().min(1, "Enter the employee number."),
+  // There is no employee number here: the database gives every new hire the next number of the one shared series (E001, E002, ...) when the row is saved, the same in every company.
   firstName: z.string().trim().min(1, "Enter the first name."),
   lastName: z.string().trim().min(1, "Enter the last name."),
   hireDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Enter the hire date."),
@@ -87,7 +88,6 @@ export async function createEmployee(_prev: CreateEmployeeState, formData: FormD
     id: d.employeeId,
     company_id: d.companyId,
     country_code: country,
-    employee_number: d.employeeNumber,
     first_name: d.firstName,
     last_name: d.lastName,
     hire_date: d.hireDate,
@@ -105,11 +105,8 @@ export async function createEmployee(_prev: CreateEmployeeState, formData: FormD
         if (existing) redirect(`/employees/${existing.id}`);
         return { error: "This employee was already created, but you cannot open the record. Ask an HR Admin of the company." };
       }
-      const { data: sameNumber } = await supabase.from("employees").select("id").eq("company_id", d.companyId).eq("employee_number", d.employeeNumber).is("deleted_at", null).maybeSingle();
-      return {
-        error: `Employee number ${d.employeeNumber} is already used in this company.`,
-        ...(sameNumber ? { existingEmployeeId: sameNumber.id } : {}),
-      };
+      // The number is given out by the database and it skips every number already held, so this is not expected; if two writes ever race for one, nothing was saved and sending again takes the next number.
+      return { error: "The employee number could not be assigned. Nothing was saved. Try again." };
     }
     return { error: "The employee could not be created. Nothing was saved. Check the details and try again." };
   }
@@ -200,8 +197,9 @@ export async function createEmployee(_prev: CreateEmployeeState, formData: FormD
   });
   const first = remainingSteps(steps)[0];
   // The profile opens on the tab and form of the first step still to do (`?tab=...&step=...`), with the one-off markers the page reads: created, and what failed.
-  // Nothing failed: the profile's Overview opens, with the setup checklist; only after a partial failure does it open the first step that still needs doing.
-  const url = new URL(failed.length > 0 && first?.href ? first.href : `/employees/${d.employeeId}`, "https://placeholder.invalid");
+  // Nothing failed: the guided onboarding opens; only after a partial failure does the profile open on the first step that still needs doing.
+  // Success lands in the guided onboarding (one resumable flow for the same employee, company and account); a partial failure still opens the step that needs doing.
+  const url = new URL(failed.length > 0 && first?.href ? first.href : `/employees/${d.employeeId}/onboarding`, "https://placeholder.invalid");
   url.searchParams.set("created", "1");
   if (failed.length) url.searchParams.set("notice", [...new Set(failed)].map((f) => WHAT[f] ?? f).join(","));
   redirect(`${url.pathname}${url.search}`);

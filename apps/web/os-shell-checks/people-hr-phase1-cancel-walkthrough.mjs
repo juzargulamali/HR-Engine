@@ -41,7 +41,7 @@ const badgesFullyVisible = async (words, what) => {
 const noHScroll = async (what) => { const o = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth })); if (o.sw > o.cw + 1) throw new Error(`${what}: horizontal overflow ${o.sw} > ${o.cw}`); };
 const go = async (path) => { await page.goto(`${BASE}${path}`, { waitUntil: "networkidle" }); };
 const plus = (n) => one(`select (current_date + ${n})::text`);
-const FIRST = "Nadia"; const LAST = "Cancelcheck"; const EMPNO = process.env.EMPNO ?? `ZZ-${String(Date.now()).slice(-6)}`;   // unique per run, so a rerun needs no reseed
+const FIRST = "Nadia"; const LAST = "Cancelcheck"; let EMPNO = "";   // assigned by the database from the shared series when the employee is saved; read back after creation (unique per run, so a rerun needs no reseed)
 let EMP = ""; let PAY_BEFORE = "";
 const paySnapshot = () => one(`select count(*) || ' version(s); current ' || coalesce(string_agg(id::text || ' ' || base_salary::text || ' ' || allowances::text || ' ' || currency, ';') filter (where is_current), 'none') from compensation_details where employee_id = '${EMP}'`);
 
@@ -54,11 +54,13 @@ await as("hr1");
 await step("onboarding: create an employee with identity and job only; the profile opens on the new record with its setup steps", async () => {
   await go("/employees/new");
   await page.locator("#companyId").selectOption(AE); await page.getByTestId("onboarding-summary").waitFor();
-  await page.locator("#firstName").fill(FIRST); await page.locator("#lastName").fill(LAST); await page.locator("#employeeNumber").fill(EMPNO);
+  await page.locator("#firstName").fill(FIRST); await page.locator("#lastName").fill(LAST); await page.getByTestId("number-auto").waitFor();
   await page.locator("#jobTitle").fill("Installation technician"); await page.locator("#hireDate").fill(plus(-60));
   await page.getByRole("button", { name: /^Create employee/ }).click();
   await page.waitForURL(/\/employees\/[0-9a-f-]{36}/, { timeout: 20000 });
   EMP = page.url().match(/employees\/([0-9a-f-]{36})/)[1];
+  await go(`/employees/${EMP}`);   // Add employee now lands in the guided onboarding; these checks continue on the profile
+  EMPNO = one(`select employee_number from employees where id = '${EMP}'`);
   await page.getByTestId("setup-checklist").waitFor();
   if (one(`select count(*) from employees where employee_number = '${EMPNO}'`) !== "1") throw new Error("not exactly one employee");
   if (!/To do/.test(await page.getByTestId("setup-status-compensation").innerText())) throw new Error("pay should still be to do");
