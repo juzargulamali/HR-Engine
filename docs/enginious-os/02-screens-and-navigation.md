@@ -112,10 +112,10 @@ Reference: [`modules/operations.md`](./modules/operations.md). Rows 237 to 249 a
 
 | Path | Shows | Menu / guard |
 |---|---|---|
-| `/inventory` | Today (warehouse work); redirects people with no grant to `/inventory/requests` (project managers) or `/inventory/mine`. *Inventory Phase 1 (draft, not merged):* names the company and the warehouse, lists the work under **Do now / Coming up / Waiting on someone else**, and each job's button opens its next step (`modules/inventory.md` 4.1) | Menu, grantees |
+| `/inventory` | Today (warehouse work); redirects people with no grant to `/inventory/requests` (project managers) or `/inventory/mine`. *Inventory Phase 1 (merged as PR #101):* names the company and the warehouse, lists the work under **Do now / Coming up / Waiting on someone else**, and each job's button opens its next step (`modules/inventory.md` 4.1) | Menu, grantees |
 | `/inventory/stock` | Stock: search, scan (`?action=scan`), receive, give equipment, who holds what (`?view=people`) | Menu; page gate narrower than RLS for acting PMs (spec F-G-05, `Unverified` after launch) |
 | `/inventory/history` | Movement ledger | Menu for people who may view stock or founders |
-| `/inventory/requests`, `/inventory/requests/[id]` | Equipment requests. *Inventory Phase 1 (draft, not merged):* the job workspace has four steps, `?step=prepare`, `pick`, `send`, `back` (Prepare, Pick, Send, Receive); on a database without the Phase 1 migration there is no Pick step and `?step=pick` opens Send (`modules/inventory.md` 4.2) | Menu (secondary for grantees); RLS `inv_can_see_request` |
+| `/inventory/requests`, `/inventory/requests/[id]` | Equipment requests. *Inventory Phase 1 (merged as PR #101):* the job workspace has four steps, `?step=prepare`, `pick`, `send`, `back` (Prepare, Pick, Send, Receive); on a database without the Phase 1 migration there is no Pick step and `?step=pick` opens Send (`modules/inventory.md` 4.2) | Menu (secondary for grantees); RLS `inv_can_see_request` |
 | `/inventory/manage` | Setup: catalogue, locations, settings | Menu (Manage): `manage_catalogue` or founder |
 | `/inventory/transfers/[id]` | One transfer (incl. cross-company) | Ctx |
 | `/inventory/scan`, `/inventory/labels` | Scanner, label sheet | Palette/Ctx; RLS only |
