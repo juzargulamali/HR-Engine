@@ -156,6 +156,10 @@ Document, insurance and receipt files go from the browser straight to private st
 
 Compensation tab → history → **Correct pay record** → old and new values, reason → save. Original kept in audit; impacted approved payroll runs or final settlements are flagged, never changed. Update pay is unchanged. Evidence: `people-hr-pay-correction.rls.test.ts`, `payCorrection.test.ts`.
 
+## 10e. One-time pre-launch cleanup (owner only; draft PR #108)
+
+Run once before go-live, by the owner, in the Production SQL editor; never automatic and never a migration. (1) `prelaunch_cleanup_00_audit_readonly.sql`: set the cutoff, read the counts by company, type and status. (2) `prelaunch_cleanup_05_impact_readonly.sql`: read which approved requests touched a balance, comp-off credit, attendance record or payroll export, and the proposed reversal rows. (3) `prelaunch_cleanup_10_cleanup.sql`: set the cutoff, your own user id and (only if you approve it) the ids of approved requests to reverse; run. (4) `prelaunch_cleanup_20_verify_readonly.sql`: every row OK. Nothing is deleted; attendance and payroll rows are never changed; items at or after the cutoff stay. Evidence: `prelaunch-cleanup.rls.test.ts`.
+
 ## 11. Staff guidance written for these workflows
 
 Five published topics in [`../staff-guidance/people.md`](../staff-guidance/people.md): add an employee; finish a new employee's remaining steps; change someone's job title or pay; add or renew a document; find someone's account and module access. They use the screens' own words and carry no record data.
