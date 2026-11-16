@@ -58,7 +58,8 @@ describe("locations section", () => {
     expect(screen.queryByRole("button", { name: /add a location/i })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Add (Riyadh|Poznan)/ })).toBeNull();
     expect(screen.queryByRole("button", { name: /^Edit/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /bins \(0\)/i })).toBeTruthy();
+    // No bins yet: the button says what to do next, and it is the path from the warehouse to its bins.
+    expect(screen.getByRole("button", { name: /add bins/i })).toBeTruthy();
     expect(screen.getByText(/only a founder can add or change locations/i)).toBeTruthy();
   });
 });

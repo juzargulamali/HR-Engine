@@ -21,7 +21,7 @@ export type QueueKind = "prepare" | "pick" | "send" | "returns" | "transfer" | "
 export type SourceKey = "requests" | "returns" | "transfers" | "sales" | "held" | "differences";
 export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", pick: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales", waiting: "requests", held: "held", difference: "differences" };
 /** What a failed source is called in the red banner. */
-export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks", held: "Equipment held for checking", differences: "Differences reported on dispatch and return notes" };
+export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Transfers in transit", sales: "Sales checks", held: "Equipment held for checking", differences: "Differences reported on dispatch and return notes" };
 export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales", "held", "differences"];
 
 export type ShowFilter = "all" | QueueKind;
@@ -305,8 +305,8 @@ export function heldRows(units: readonly HeldUnitInput[]): QueueRow[] {
         ? [{ text: `Reserved for request ${reserved.map((r) => r.code).join(", ")}: it needs a replacement before it can be sent`, tone: "warn" as const }]
         : u.reservedFor === null ? [{ text: "Whether a request still holds a reservation on it could not be read" }] : [],
       responsible: "The warehouse checks it, then releases it or sends it for repair.",
-      next: reserved.length > 0 ? "Check it, or reserve another unit for the request." : "Open the unit and record the check.",
-      href: `/inventory/stock?unit=${u.id}`, actionLabel: "Check it", operates: true,
+      next: reserved.length > 0 ? "Inspect it, or reserve another unit for the request." : "Open the unit and record the check.",
+      href: `/inventory/stock?unit=${u.id}`, actionLabel: "Inspect", operates: true,
     };
   });
 }
@@ -377,7 +377,7 @@ export function returnRows(entries: readonly HeldEntry[], names: ReturnNames, pr
       rows.push({
         id: `returns:${k}`, kind: "returns", title: `${who} has ${plural(n, "item")} ${isLate ? "overdue" : "due back"}`, forWhom: `Employee ${who}`,
         when: earliest.dueAt, zone: earliest.zone, whenLabel: words.label, late: words.late, facts,
-        href: `/inventory/stock?action=return&employee=${first.holderId}`, actionLabel: "Receive returns", operates: true,
+        href: `/inventory/stock?action=return&employee=${first.holderId}`, actionLabel: "Receive return", operates: true,
       });
     } else {
       const project = names.project.get(first.holderId) ?? "A project";
@@ -400,16 +400,32 @@ export interface TransferInput {
   expectedAt: string | null; zone: string;
   /** Items on it (units and counted lines), or null when that could not be read. */
   items: number | null;
+  /** `out`: this warehouse SENT it and the other warehouse has to receive it. Left out (or `in`) for a transfer on its way here. */
+  direction?: "in" | "out";
+  /** Lines the transfer sent in all, when known: with `items` it says how much was already received. */
+  sent?: number | null;
 }
 
 export function transferRows(ts: readonly TransferInput[], ctx: BuildContext, opts: { here: boolean }): QueueRow[] {
   return ts.map((t): QueueRow => {
     const zone = safeZone(t.zone);
     const words = t.expectedAt ? whenWords(t.expectedAt, zone, ctx.now, { upcoming: "Expected", was: "Was expected", today: "Expected today", time: false }) : { label: "No expected date recorded", late: false };
+    const received = typeof t.sent === "number" && t.items !== null ? Math.max(0, t.sent - t.items) : 0;
+    const partly: Fact[] = received > 0 ? [{ text: `${received} of ${t.sent} already received`, tone: "warn" }] : [];
+    if (t.direction === "out") {
+      // Sent from here: nothing for this warehouse to do. The row says who acts and what is still outstanding, and opens the transfer itself.
+      return {
+        id: `transfer-out:${t.id}`, kind: "transfer", title: `Transfer ${t.code} to ${t.toName}: in transit`,
+        forWhom: `From ${t.fromName}${t.items === null ? "" : ` · ${plural(t.items, "item")} still in transit`}`,
+        when: t.expectedAt, zone, whenLabel: words.label, late: words.late, facts: partly,
+        href: `/inventory/transfers/${t.id}`, actionLabel: "Open transfer", operates: false,
+        waitingOn: t.toName, responsible: `${t.toName} records it as received`, next: "Nothing to do here until it is received there.",
+      };
+    }
     return {
       id: `transfer:${t.id}`, kind: "transfer", title: opts.here ? `Transfer ${t.code} is on its way here` : `Transfer ${t.code} is on its way to ${t.toName}`,
       forWhom: `From ${t.fromName}${t.items === null ? "" : ` · ${plural(t.items, "item")}`}`,
-      when: t.expectedAt, zone, whenLabel: words.label, late: words.late, facts: [],
+      when: t.expectedAt, zone, whenLabel: words.label, late: words.late, facts: partly,
       href: `/inventory/stock?action=transfer&mode=receive&transfer=${t.id}`, actionLabel: "Receive transfer", operates: true,
     };
   });

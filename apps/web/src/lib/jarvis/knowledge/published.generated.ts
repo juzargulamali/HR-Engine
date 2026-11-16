@@ -238,8 +238,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     "summary": "Today shows the company and the warehouse you are working in, then three lists. Do now is work this warehouse can act on today. Coming up is the same work with a date that has not come. Waiting on someone else is work the warehouse cannot move on by itself: each row says how many are missing and who has to act. Each row is one job, and its button opens the next step.",
     "steps": [
       "Check the company and the warehouse at the top. With more than one company, choose the company first, then its warehouse. All companies only changes what you see.",
-      "Under Do now press the button on a job: Prepare equipment, Pick items, Send equipment, Receive return, Check availability or Check it.",
-      "Read Waiting on someone else for shortages: the line says how many are missing, whether it is to buy or to rent, and who acts.",
+      "Under Do now press the button on a job: Prepare equipment, Pick items, Send equipment, Receive return, Receive transfer, Check availability or Inspect.",
+      "Read Waiting on someone else: a shortage says how many are missing and who acts; a transfer you sent says which warehouse has to receive it.",
       "Use Scan a label to look a unit up. Scanning never changes stock."
     ],
     "links": [
@@ -305,7 +305,8 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "available again",
       "inspect",
       "clear a damaged unit",
-      "check condition"
+      "check condition",
+      "inspection"
     ],
     "summary": "Receive starts from what was sent and is still out, so nothing is typed again. You record what came back and its condition; what you leave unticked stays out. Good equipment is available again at once. Damaged equipment, or equipment needing a check, is held and cannot be reserved until warehouse staff at that warehouse inspect it and record the check.",
     "steps": [
@@ -313,7 +314,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Tick each unit that is back and choose its condition; type how many counted items came back.",
       "Read the line beside the button, for example 2 returned, 1 available, 1 held for inspection, 1 still out.",
       "Press Receive return, check the list and confirm.",
-      "To clear a held unit, open it from Today under Do now with Check it, and record its condition after inspecting it."
+      "To clear a held unit, open it from Today under Do now with Inspect, press Inspect on the unit, and record its condition."
     ],
     "links": [
       {
@@ -327,6 +328,328 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ],
     "screens": [
       "/inventory/requests/[id]"
+    ]
+  },
+  {
+    "id": "inventory-transfer-send",
+    "area": "inventory",
+    "title": "Send a transfer to another place",
+    "keywords": [
+      "transfer stock",
+      "send to another warehouse",
+      "move stock",
+      "move equipment between warehouses",
+      "transfer to another company",
+      "in transit",
+      "send to riyadh",
+      "send to dubai",
+      "which dubai",
+      "shipping details",
+      "who acts next"
+    ],
+    "summary": "A transfer moves stock from one warehouse to another. It is in transit, and available at neither warehouse, until the other warehouse receives it. Every warehouse is named with its company, for example Dubai · Enginious UAE, because two companies can each have a warehouse in the same city. A transfer never changes who owns the equipment.",
+    "steps": [
+      "Open the unit or the item in Stock and press Transfer stock, or press Transfer stock above the list. The warehouse you are working in is already filled in.",
+      "Choose Send to. Read the company beside the warehouse name before you choose.",
+      "Add what is going: scan or search for units; type the quantity of counted items.",
+      "Press Review. Check From, To and Who acts next, then press Confirm and send.",
+      "On Today the transfer waits under Waiting on someone else until the other warehouse receives it."
+    ],
+    "links": [
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      },
+      {
+        "label": "Today",
+        "href": "/inventory"
+      }
+    ],
+    "screens": [
+      "/inventory/stock"
+    ]
+  },
+  {
+    "id": "inventory-transfer-receive",
+    "area": "inventory",
+    "title": "Receive a transfer",
+    "keywords": [
+      "receive transfer",
+      "transfer arrived",
+      "partial receipt",
+      "only some arrived",
+      "still in transit",
+      "outstanding",
+      "damaged in transit",
+      "transfer from another company",
+      "owned by",
+      "receive against transfer",
+      "open the transfer"
+    ],
+    "summary": "You receive against the transfer that was sent, so nothing is typed again. The form shows where it came from, where it is received, how many lines were sent, how many were already received and what is still in transit. Nothing is assumed to have arrived: you say whether everything came or only some of it. What you do not receive stays in transit and the transfer stays open.",
+    "steps": [
+      "On Today press Receive transfer on the row, or open the transfer and press Receive this transfer.",
+      "Choose Everything still in transit arrived, or Only some of it arrived.",
+      "For only some, add each line that came, type the quantity of counted items and choose the condition. Damaged is held for inspection.",
+      "Press Review, then Confirm arrival. Read the result, for example 3 received, 1 held for inspection, 2 lines still in transit.",
+      "Open the transfer to see what was sent, received and is still in transit, and who acts next."
+    ],
+    "links": [
+      {
+        "label": "Today",
+        "href": "/inventory"
+      },
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      }
+    ],
+    "screens": [
+      "/inventory/transfers/[id]"
+    ]
+  },
+  {
+    "id": "inventory-receive-stock",
+    "area": "inventory",
+    "title": "Receive a new delivery, owned or rented",
+    "keywords": [
+      "receive stock",
+      "new stock",
+      "delivery arrived",
+      "bought equipment",
+      "rented equipment",
+      "rental",
+      "owned or rented",
+      "serial numbers",
+      "goods in",
+      "supplier"
+    ],
+    "summary": "Receive stock records new equipment on the shelf at one warehouse of one company. Items tracked one by one get their own ID and label; counted items get a quantity. You always say whether it is owned or rented: rented stock goes back to its supplier and never adds to what the company owns.",
+    "steps": [
+      "Open the item in Stock and press Receive stock: the item and your warehouse are already filled in. Or press Receive stock above the list and search for the item.",
+      "Choose Owned or Rented. For rented, add the supplier, its reference and the date it has to go back.",
+      "Type how many arrived. Serial numbers, condition and cost are under More details.",
+      "Press Review, check the list and confirm. Print the new labels from the item.",
+      "If the item is not in the list yet, add the item first, then receive it."
+    ],
+    "links": [
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      }
+    ],
+    "screens": [
+      "/inventory/stock"
+    ]
+  },
+  {
+    "id": "inventory-give-return",
+    "area": "inventory",
+    "title": "With people: give out and receive back",
+    "keywords": [
+      "give equipment",
+      "issue equipment",
+      "issue to employee",
+      "with people",
+      "who has it",
+      "receive return from employee",
+      "return my equipment",
+      "my equipment",
+      "equipment assigned to me",
+      "employee equipment request",
+      "hand back",
+      "left the company"
+    ],
+    "summary": "The warehouse gives equipment to an employee and receives it back; the employee sees it under My equipment. Start from what already knows the most: the unit, the employee's request, or the person's row under With people. A return lists what the person still holds; you add what came back and choose its condition. What you do not add stays with them.",
+    "steps": [
+      "To give: open the unit in Stock and press Give equipment, or open the employee's request and press Give equipment. Choose the person once.",
+      "To receive: open Stock, With people, and press Receive return on the person's row.",
+      "Add each item that came back and choose its condition. Damaged is held for inspection.",
+      "Press Review and confirm. Read the result, for example 2 returned, 1 available, 1 held for inspection, 1 still out.",
+      "Employees: to return something, hand it to the warehouse. It leaves My equipment when the warehouse records it."
+    ],
+    "links": [
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      },
+      {
+        "label": "My equipment",
+        "href": "/inventory/mine"
+      },
+      {
+        "label": "Equipment requests",
+        "href": "/inventory/requests"
+      }
+    ],
+    "screens": [
+      "/inventory/mine"
+    ]
+  },
+  {
+    "id": "inventory-find-equipment",
+    "area": "inventory",
+    "title": "Where is it, who has it, is it available",
+    "keywords": [
+      "where is it",
+      "who has it",
+      "is it available",
+      "find a unit",
+      "stock list",
+      "available here",
+      "not available",
+      "held or damaged",
+      "in transit",
+      "out for repair",
+      "missing",
+      "mark missing",
+      "send for repair",
+      "kit",
+      "pack a kit",
+      "unit history"
+    ],
+    "summary": "Stock lists every item with how many are available at the warehouse you chose. Open an item for its units, or scan a label. A unit says where it is now, who has it, whether it is available and what to do next. Damaged equipment and equipment held for inspection are not available until a warehouse operator inspects them.",
+    "steps": [
+      "Open Stock and check the company and warehouse at the top.",
+      "Search by name, model, serial number or ID, or press Scan a label.",
+      "Open the item, then a unit. Read Where is it now, Who has it, Is it available and What to do next.",
+      "Use the first button for the next step. Repairs, missing or found equipment, kits and write-offs are under More actions.",
+      "A row that says not available: held or damaged has units waiting for Inspect."
+    ],
+    "links": [
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      },
+      {
+        "label": "Scan",
+        "href": "/inventory/scan"
+      }
+    ],
+    "screens": [
+      "/inventory/stock"
+    ]
+  },
+  {
+    "id": "inventory-history",
+    "area": "inventory",
+    "title": "History: read what happened and when",
+    "keywords": [
+      "history",
+      "movements",
+      "what happened",
+      "who moved it",
+      "when was it sent",
+      "correct a mistake",
+      "correction",
+      "check a transaction",
+      "transfer sent",
+      "transfer received",
+      "reconcile"
+    ],
+    "summary": "History lists every movement of stock, newest first: when, what happened, how much, from where to where, who recorded it, and the project, person or request it was for. A transfer shows both warehouses with their companies and links to the transfer. Nothing in History is deleted: a mistake is put right by a new entry that names the one it corrects.",
+    "steps": [
+      "Open History. Filter by what happened, location, company or dates.",
+      "Open a row for its lines, its note and the related request or transfer.",
+      "On a transfer row press Open the transfer to see what was sent, received and is still in transit.",
+      "To put right a counted quantity recorded by mistake, open its entry and use Correct this entry. People who may confirm stock can do this.",
+      "Use Check a transaction when a save may not have gone through."
+    ],
+    "links": [
+      {
+        "label": "History",
+        "href": "/inventory/history"
+      }
+    ],
+    "screens": [
+      "/inventory/history"
+    ]
+  },
+  {
+    "id": "inventory-setup",
+    "area": "inventory",
+    "title": "Warehouses and bins, tracking and getting stock in",
+    "keywords": [
+      "warehouses and bins",
+      "bins",
+      "bin",
+      "locations",
+      "how is it tracked",
+      "individual",
+      "counted",
+      "consumable",
+      "categories",
+      "opening count",
+      "cycle count",
+      "sharing between companies",
+      "reference code",
+      "earlier asset register",
+      "administration"
+    ],
+    "summary": "This screen has four parts, in the order you need them: Warehouses and bins, Items and tracking, Getting stock in, and Administration for things needed now and then. It opens on the company of the warehouse you last worked in. Founders add warehouses; people who manage items add items, categories and bins.",
+    "steps": [
+      "Warehouses and bins: add a warehouse, then press Add bins on its row.",
+      "Items and tracking: press Add item, name it and choose how it is tracked. Only the fields that way needs are shown.",
+      "Getting stock in: press Receive stock for new deliveries. It opens with your warehouse filled in.",
+      "Administration: the company record, sharing between companies, opening stock and counts, corrections and the earlier asset register.",
+      "Each change says what it does before you confirm it."
+    ],
+    "links": [
+      {
+        "label": "Setup",
+        "href": "/inventory/manage"
+      },
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      },
+      {
+        "label": "People & Access",
+        "href": "/people-access"
+      }
+    ],
+    "screens": [
+      "/inventory/manage"
+    ]
+  },
+  {
+    "id": "inventory-labels-scan",
+    "area": "inventory",
+    "title": "Labels and QR codes",
+    "keywords": [
+      "print labels",
+      "qr label",
+      "qr code",
+      "scan a label",
+      "scan",
+      "camera",
+      "type the code",
+      "bin label",
+      "label not found",
+      "wrong label",
+      "scan several"
+    ],
+    "summary": "Every unit has a permanent ID and a QR label; counted items can have a label for a bin. Scanning only finds the record: it never changes stock. You can always type the code instead of using the camera. A code that is not an Inventory label, or that is not available to you, is said so and nothing is added.",
+    "steps": [
+      "Press Scan a label on Today or Stock, or open Scan.",
+      "Point the camera at the QR code, or type the code printed on the label.",
+      "To handle several, add each code to your list on Scan, then continue to one form for all of them.",
+      "To print, open the item or unit in Stock and choose Print label, or Print labels for all units.",
+      "Inside a form, scanning adds the item to the list. Counted items still need their quantity typed."
+    ],
+    "links": [
+      {
+        "label": "Scan",
+        "href": "/inventory/scan"
+      },
+      {
+        "label": "Stock",
+        "href": "/inventory/stock"
+      }
+    ],
+    "screens": [
+      "/inventory/scan",
+      "/inventory/labels"
     ]
   },
   {

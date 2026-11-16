@@ -143,6 +143,8 @@ export interface FormLocation {
 export interface FormProject { id: string; companyId: string; reference: string; name: string; status: string }
 export interface FormRequest { id: string; companyId: string; code: string; kind: "project" | "employee"; projectId: string | null; employeeId: string | null; title: string | null; status: string; expectedReturnAt: string | null }
 export interface FormTransfer { id: string; code: string; companyId: string; fromLocationId: string; fromName: string; toLocationId: string; toName: string; expectedAt: string | null; carrier: string | null; reference: string | null; dispatchedAt: string; held: Candidate[];
+  /** How many lines the transfer sent (a unit is one line, a counted item is one line), when that could be read: with `held` it says what was already received. */
+  sentLines?: number | null;
   /** Set by the database for a transfer sent by another company whose sharing authorisation has since been revoked: it can still be received. */
   sharingRevoked?: boolean }
 export interface FormRental { id: string; companyId: string; supplier: string; reference: string; deadline: string }

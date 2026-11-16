@@ -16,6 +16,7 @@ import { firstParam, parseRecordId, withParams } from "@/components/workspace/ur
 import { getInventoryContext } from "@/lib/inventory/context";
 import { dayStartIso, movementFromTo, movementKindWord, movementQuantity, movementWhat, movementWhen, movementZone, nextDay, type Resolver } from "@/lib/inventory/movement-view";
 import { loadMovements, MOVEMENTS_PER_PAGE, type MovementList } from "@/lib/inventory/stock";
+import { loadForeignPlaceNames } from "@/lib/inventory/xshare-data";
 import { MOVEMENT_WORDS } from "@/lib/inventory/words";
 import { cn } from "@/lib/utils";
 import { MovementSidePanel } from "./_panel/movement-panel";
@@ -86,13 +87,16 @@ export default async function MovementsPage({ searchParams }: { searchParams: Pr
   const clearHref = here({ kind: null, location: null, company: null, from: null, to: null, item: null, page: null });
   const filters: ToolbarFilter[] = [
     { name: "kind", label: "What happened", value: kind, options: [{ value: "", label: "Any" }, ...Object.entries(MOVEMENT_WORDS).map(([value, label]) => ({ value, label }))] },
-    ...(locations.length > 0 ? [{ name: "location", label: "Location", value: location, options: [{ value: "", label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: l.name }))] }] : []),
+    ...(locations.length > 0 ? [{ name: "location", label: "Location", value: location, options: [{ value: "", label: "All locations" }, ...locations.map((l) => ({ value: l.id, label: ctx.placeName(l.id) }))] }] : []),
     ...(companies.length > 1 ? [{ name: "company", label: "Company", value: company, options: [{ value: "", label: "All companies" }, ...companies.map((c) => ({ value: c.id, label: c.name }))] }] : []),
   ];
   const zoneOf = new Map(locations.map((l) => [l.id, l.timezone]));
-  const locName = new Map(locations.map((l) => [l.id, l.name]));
+  // The other end of a transfer between companies is a warehouse this person cannot read: the narrow functions name it, so the row says where it really went.
+  const own = new Set(ctx.locations.map((l) => l.id));
+  const unknown = list.rows.some((m) => m.lines.some((l) => (l.from_location_id && !own.has(l.from_location_id)) || (l.to_location_id && !own.has(l.to_location_id))));
+  const foreign = unknown ? await loadForeignPlaceNames() : new Map<string, string>();
   const resolver: Resolver = {
-    location: (id) => (id ? (locName.get(id) ?? "Another location") : "—"),
+    location: (id) => (id ? (own.has(id) ? ctx.placeName(id) : (foreign.get(id) ?? ctx.placeName(id))) : "—"),
     bin: () => null,
     employee: (id) => list.names.employee(id),
     project: (id) => list.names.project(id),

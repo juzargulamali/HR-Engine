@@ -67,12 +67,12 @@ describe("ActionSidePanel", () => {
   });
   it("opens each movement form with its own heading", async () => {
     expect(await render("receive")).toContain("Receive stock");
-    expect(await render("issue")).toContain("Issue to a person");
+    expect(await render("issue")).toContain("Give equipment");
     expect(await render("dispatch")).toContain("Dispatch to a project");
-    expect(await render("return")).toContain("Return");
+    expect(await render("return")).toContain("Receive return");
     const transfer = await render("transfer");
-    expect(transfer).toContain("Send stock");
-    expect(transfer).toContain("Receive a transfer");
+    expect(transfer).toContain("Transfer stock");
+    expect(transfer).toContain("Receive transfer");
   });
   it("prefills a dispatch from the project and request in the address, and the employee for an issue", async () => {
     const dispatch = await render("dispatch", { project: P1, request: R1 });

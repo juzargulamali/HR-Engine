@@ -83,15 +83,15 @@ export interface KindConfig {
 
 export const KIND_CONFIG: Record<MovementKind, KindConfig> = {
   receive: { title: "Receive stock", lead: "Record equipment or stock that has arrived. Individually tracked items get their own ID and label.", confirm: "Confirm receipt", locationLabel: "Receive into", source: "catalogue", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
-  issue: { title: "Issue to a person", lead: "Give equipment to an employee. They are then recorded as holding it until it comes back.", confirm: "Confirm issue", locationLabel: "Take from", source: "shelf", employee: "required", project: "none", expectedReturn: "optional", request: "optional", reason: "none", lineBin: true },
+  issue: { title: "Give equipment", lead: "Give equipment to an employee. They are then recorded as holding it until it comes back.", confirm: "Confirm issue", locationLabel: "Take from", source: "shelf", employee: "required", project: "none", expectedReturn: "optional", request: "optional", reason: "none", lineBin: true },
   dispatch: { title: "Dispatch to a project", lead: "Send equipment to a project. Name the request so it matches what was reserved.", confirm: "Confirm dispatch", locationLabel: "Take from", source: "shelf", employee: "none", project: "required", expectedReturn: "required", request: "optional", reason: "none", lineBin: true },
-  return: { title: "Return", lead: "Equipment coming back from an employee or a project. Anything you do not list stays outstanding.", confirm: "Confirm return", locationLabel: "Back into", source: "held", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
-  transfer: { title: "Send to another location", lead: "The stock is in transit until the other warehouse receives it. It is not available there before that.", confirm: "Confirm and send", locationLabel: "Send from", source: "shelf", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineBin: true },
-  receive_transfer: { title: "Receive a transfer", lead: "Record what arrived. Anything not listed stays in transit and the transfer stays open.", confirm: "Confirm arrival", locationLabel: "Receive into", source: "transit", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", linesOptional: true, lineCondition: true, lineBin: true },
+  return: { title: "Receive return", lead: "Equipment coming back from an employee or a project. Anything you do not list stays outstanding.", confirm: "Confirm return", locationLabel: "Back into", source: "held", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
+  transfer: { title: "Transfer stock", lead: "The stock is in transit until the other warehouse receives it. It is not available there before that.", confirm: "Confirm and send", locationLabel: "Send from", source: "shelf", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineBin: true },
+  receive_transfer: { title: "Receive transfer", lead: "Record what arrived. Anything not listed stays in transit and the transfer stays open.", confirm: "Confirm arrival", locationLabel: "Receive into", source: "transit", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", linesOptional: true, lineCondition: true, lineBin: true },
   project_transfer: { title: "Move between projects", lead: "Equipment goes straight from one project to another without coming back to the warehouse. The new project needs a request.", confirm: "Confirm move", locationLabel: "Warehouse", source: "held", employee: "none", project: "required", expectedReturn: "optional", request: "required", reason: "none" },
   repair_out: { title: "Send for repair", lead: "The equipment leaves the shelf for a repairer and is not available until it is back.", confirm: "Confirm sent for repair", locationLabel: "Take from", source: "shelf_any", employee: "none", project: "none", expectedReturn: "optional", request: "none", reason: "none", lineBin: true },
   repair_in: { title: "Back from repair", lead: "Record the condition it came back in. Good is available at once; anything else is held for checking.", confirm: "Confirm back from repair", locationLabel: "Back into", source: "repair", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
-  check: { title: "Check condition", lead: "Release held equipment after a check, or hold it back if it is not right.", confirm: "Confirm check", locationLabel: "At", source: "shelf_any", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
+  check: { title: "Inspect", lead: "Release held equipment after a check, or hold it back if it is not right.", confirm: "Confirm check", locationLabel: "At", source: "shelf_any", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
   adjust: { title: "Correct the stock", lead: "Mark equipment missing, found again, or retired. A reason is always needed and nothing is deleted.", confirm: "Confirm", locationLabel: "At", source: "shelf_any", employee: "none", project: "none", expectedReturn: "none", request: "none", reason: "required", lineBin: true },
   consume: { title: "Use up consumables", lead: "Consumables are used up, not given back. Say who used them if you know.", confirm: "Confirm use", locationLabel: "Take from", source: "shelf", employee: "optional", project: "optional", expectedReturn: "none", request: "optional", reason: "none", lineBin: true },
   return_unused: { title: "Return unused consumables", lead: "Unused consumables go back on the shelf only when you record it here, and never more than that person or project used.", confirm: "Confirm return", locationLabel: "Back into", source: "catalogue", employee: "optional", project: "optional", expectedReturn: "none", request: "none", reason: "none", lineCondition: true, lineBin: true },
@@ -463,6 +463,10 @@ export interface SummaryInput {
   expectedArrival?: string;
   repairReference?: string;
   transferCode?: string;
+  /** Receiving a transfer: the warehouse and company it was sent from. */
+  transferFrom?: string;
+  /** Receiving everything still in transit: each line, so the review names what will be received instead of "everything". */
+  arrivedLines?: readonly string[];
   adjustAction?: AdjustAction;
   rentalSupplier?: string;
   kit?: string;
@@ -529,7 +533,7 @@ export function fromTo(s: SummaryInput): { from: string; to: string } {
     case "dispatch": return { from: loc, to: s.project ? `Project: ${s.project}` : "—" };
     case "return": return { from: s.returnFrom === "project" ? `Project: ${s.project ?? "—"}` : `Employee: ${s.employee ?? "—"}`, to: loc };
     case "transfer": return { from: loc, to: `${s.toLocation ?? "—"} (in transit: not available there until it is received)` };
-    case "receive_transfer": return { from: `On the way${s.transferCode ? ` (${s.transferCode})` : ""}`, to: loc };
+    case "receive_transfer": return { from: `${s.transferFrom ? `${s.transferFrom}, in transit` : "In transit"}${s.transferCode ? ` (${s.transferCode})` : ""}`, to: loc };
     case "project_transfer": return { from: `Project: ${s.project ?? "—"}`, to: `Project: ${s.toProject ?? "—"}` };
     case "repair_out": return { from: loc, to: `Out for repair${s.repairReference ? ` (${s.repairReference})` : ""}` };
     case "repair_in": return { from: "At the repairer", to: loc };
@@ -551,8 +555,9 @@ export function fromTo(s: SummaryInput): { from: string; to: string } {
 export function summaryRows(s: SummaryInput): SummaryRow[] {
   const { from, to } = fromTo(s);
   const rows: SummaryRow[] = [];
-  rows.push({ label: "What", value: s.everything && s.drafts.length === 0 ? "Everything that applies" : s.drafts.map((d) => describeLine(d, s.kind)).join("\n") });
-  rows.push({ label: "How much", value: totalHow(s.drafts) });
+  const everything = s.everything && s.drafts.length === 0;
+  rows.push({ label: "What", value: everything ? (s.arrivedLines && s.arrivedLines.length > 0 ? s.arrivedLines.join("\n") : "Everything that applies") : s.drafts.map((d) => describeLine(d, s.kind)).join("\n") });
+  rows.push({ label: "How much", value: everything && s.arrivedLines && s.arrivedLines.length > 0 ? `Everything still in transit: ${s.arrivedLines.length} line${s.arrivedLines.length === 1 ? "" : "s"}, in the condition recorded when it was sent` : totalHow(s.drafts) });
   rows.push({ label: "From", value: from });
   rows.push({ label: "To", value: to });
   if (s.kind === "receive" && s.ownership) rows.push({ label: "Owned or rented", value: s.ownership === "owned" ? "Owned. It adds to what the company owns." : `Rented${s.rentalSupplier ? ` from ${s.rentalSupplier}` : ""}. It goes back to its supplier and never adds to what the company owns.` });
@@ -569,7 +574,7 @@ export function summaryRows(s: SummaryInput): SummaryRow[] {
     const held = s.drafts.filter((d) => !lineBecomesAvailable(d, d.condition)).length;
     if (held > 0) rows.push({ label: "Held back", value: `${held} item${held === 1 ? " is" : "s are"} not available again (damaged, or needing a check). ${held === 1 ? "It is" : "They are"} held for checking and not available until someone releases ${held === 1 ? "it" : "them"}` });
   }
-  if (s.kind === "transfer") rows.push({ label: "Status after", value: "In transit. The other warehouse records it as received." });
+  if (s.kind === "transfer") rows.push({ label: "Who acts next", value: `${s.toLocation ?? "The other warehouse"} records it as received. Until then it is in transit and available at neither warehouse.` });
   return rows;
 }
 

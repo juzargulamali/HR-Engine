@@ -17,7 +17,7 @@ function useClosePanel() {
   const sp = useSearchParams();
   return () => {
     if (!confirmDiscard()) return;
-    router.push(withParams(pathname, sp, { action: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null }), { scroll: false });
+    router.push(withParams(pathname, sp, { action: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null, item: null }), { scroll: false });
   };
 }
 
@@ -37,9 +37,9 @@ export function TransferPanelBody({ context, initial, startWith }: { context: Fo
   return (
     <div className="space-y-4">
       <div role="group" aria-label="Transfer" className="inline-flex rounded-md border border-border p-0.5 text-sm">
-        <button type="button" aria-pressed={mode === "send"} onClick={() => setMode("send")} className={`rounded px-3 py-1.5 font-medium ${mode === "send" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Send stock</button>
+        <button type="button" aria-pressed={mode === "send"} onClick={() => setMode("send")} className={`rounded px-3 py-1.5 font-medium ${mode === "send" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>Transfer stock</button>
         <button type="button" aria-pressed={mode === "receive"} onClick={() => setMode("receive")} className={`rounded px-3 py-1.5 font-medium ${mode === "receive" ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-          Receive a transfer{open > 0 ? ` (${open} on the way)` : ""}
+          Receive transfer{open > 0 ? ` (${open} in transit)` : ""}
         </button>
       </div>
       {mode === "send"

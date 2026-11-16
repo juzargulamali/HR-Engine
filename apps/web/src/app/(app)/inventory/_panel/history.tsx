@@ -3,11 +3,16 @@ import { movementFromTo, movementKindWord, movementQuantity, movementWhen, movem
 import type { MovementBrief, Names } from "@/lib/inventory/stock";
 import type { InvBinRow, InvLocationRow } from "@/types/inventory";
 
-export function makeResolver(locations: readonly InvLocationRow[], bins: readonly InvBinRow[], names: Names): Resolver {
+export function makeResolver(locations: readonly InvLocationRow[], bins: readonly InvBinRow[], names: Names, placeName?: (id: string) => string): Resolver {
   const loc = new Map(locations.map((l) => [l.id, l.name]));
   const bin = new Map(bins.map((b) => [b.id, b.label?.trim() ? `${b.code} (${b.label})` : b.code]));
   return {
-    location: (id) => (id ? (loc.get(id) ?? "Another location") : "—"),
+    // With the company when the person works with several ("Dubai · Enginious UAE"); a place they cannot read is said to be another company's.
+    location: (id) => {
+      if (!id) return "—";
+      const said = placeName?.(id);
+      return said && said !== "A warehouse of another company" ? said : (loc.get(id) ?? said ?? "Another location");
+    },
     bin: (id) => (id ? (bin.get(id) ?? null) : null),
     employee: (id) => names.employee(id),
     project: (id) => names.project(id),

@@ -39,7 +39,7 @@ const dlgFill = async (label, value) => R.dialog().getByLabel(label, { exact: tr
 // ---------------------------------------------------------------------------------------------------------------------------
 await R.as("ceo");
 await step("founder adds a category in Setup", async () => {
-  await R.go("/inventory/manage");
+  await R.go("/inventory/manage?section=catalogue");
   await R.page.getByRole("button", { name: "Add a category", exact: true }).click();
   await R.dialog().waitFor();
   await dlgFill("Name", CAT);
@@ -96,7 +96,7 @@ await step("founder registers four Floor sensor units (they start as Not counted
 
 let COUNT_ID = "";
 await step("founder starts an opening count at Dubai", async () => {
-  await R.go("/inventory/manage");
+  await R.go("/inventory/manage?section=admin");
   await R.page.getByRole("button", { name: "Start a count", exact: true }).click();
   await R.dialog().waitFor();
   await R.dialog().getByLabel("Location", { exact: true }).selectOption({ label: "Dubai" });

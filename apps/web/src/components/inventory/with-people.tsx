@@ -127,6 +127,7 @@ export async function WithPeople({ sp, ctx }: { sp: Params; ctx: InventoryContex
                               {conditionText(i.condition)} · since {formatDate(i.issuedAt)}{i.expectedReturnAt ? ` · back by ${formatDate(i.expectedReturnAt)}` : ""}
                               {i.overdue ? <span className="font-medium text-[hsl(var(--os-amber))]"> · overdue</span> : null}
                             </span>
+                            {i.code && hasInvCapability(ctx.grants, companyOf.get(g.employeeId) ?? "", "warehouse") ? <Link href={`/inventory/stock?action=return&employee=${g.employeeId}&codes=${encodeURIComponent(i.code)}`} className="text-[13px] font-medium underline underline-offset-2">Receive return of {i.code}</Link> : null}
                           </li>
                         ))}
                       </ul>
@@ -139,7 +140,7 @@ export async function WithPeople({ sp, ctx }: { sp: Params; ctx: InventoryContex
                     {hasInvCapability(ctx.grants, companyOf.get(g.employeeId) ?? "", "warehouse") ? (
                       <span className="inline-flex flex-wrap gap-2">
                         {!g.left ? <Link href={`/inventory/stock?action=issue&employee=${g.employeeId}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Give equipment</Link> : null}
-                        <Link href={`/inventory/stock?action=return&employee=${g.employeeId}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Receive returns</Link>
+                        <Link href={`/inventory/stock?action=return&employee=${g.employeeId}`} className={buttonVariants({ size: "sm", variant: "outline" })}>Receive return</Link>
                       </span>
                     ) : null}
                   </TableCell>

@@ -159,7 +159,7 @@ await step("Stock: the warehouse bar, the compact columns and a clear dash for c
   await R.shot("stock");
 });
 
-await step("Stock: With people lists who holds what, with Give equipment and Receive returns", async () => {
+await step("Stock: With people lists who holds what, with Give equipment and Receive return", async () => {
   await R.page.getByRole("link", { name: "With people" }).click();
   await R.page.waitForURL(/view=people/);
   await R.expectText(/With people/);
@@ -207,8 +207,8 @@ await step("Item panel: contextual actions, and the unplanned project dispatch s
   await R.go(`/inventory/stock?open=${HDMI}`);
   await R.panel().waitFor();
   await R.panel().getByRole("button", { name: /More actions/ }).click();
-  await R.page.getByRole("menuitem", { name: /Give to a person/ }).waitFor();
-  await R.page.getByRole("menuitem", { name: /Move to another warehouse/ }).waitFor();
+  await R.page.getByRole("menuitem", { name: /Give equipment/ }).waitFor();
+  await R.page.getByRole("menuitem", { name: /Transfer stock/ }).waitFor();
   await R.page.getByRole("menuitem", { name: /Send to a project \(not from a request\)/ }).click();
   await R.dialog().waitFor();
   await R.expectText(/does not fulfil a request/, "dialog[open]");

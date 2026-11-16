@@ -35,8 +35,18 @@ export interface InventoryContext {
   employeeId: string | null;
   /** Project Manager / department head of a running project: may prepare equipment requirements without a stock grant. */
   managesProjects: boolean;
+  /**
+   * The short name of a company. For the person's own companies it is the selector name; for any other company (the owner of equipment received from
+   * another company, the other side of a transfer) it is the same short name worked out from the company directory every signed-in person may read
+   * (`companies_select`), so a transfer never shows a legal name on one side and a short name on the other. "Unknown" only when the company is not listed.
+   */
   companyName: (id: string) => string;
   locationName: (id: string | null | undefined) => string;
+  /**
+   * A warehouse as it is said wherever stock is about to change or a movement is read: "Dubai · Enginious UAE". The company is always named when the person
+   * works with more than one company (the same city can be a warehouse of two companies); with one company the plain name is enough.
+   */
+  placeName: (id: string | null | undefined) => string;
 }
 
 /**
@@ -50,7 +60,7 @@ export const getInventoryContext = cache(async (): Promise<InventoryContext | nu
   const supabase = await createClient();
   const base = (installed: boolean, extra: Partial<InventoryContext> = {}): InventoryContext => ({
     userId: session.userId, fullName: session.fullName, installed, grants: [], companies: [], locations: [], assignedLocationIds: [],
-    employeeId: null, managesProjects: false, companyName: () => "Unknown", locationName: () => "Unknown", ...extra,
+    employeeId: null, managesProjects: false, companyName: () => "Unknown", locationName: () => "Unknown", placeName: () => "Unknown", ...extra,
   });
 
   const [{ data: grantRows, error: grantError }, emp, mgr] = await Promise.all([
@@ -69,27 +79,42 @@ export const getInventoryContext = cache(async (): Promise<InventoryContext | nu
   if (grants.length === 0) return base(true, { employeeId, managesProjects });
 
   const companyIds = grants.map((g) => g.companyId);
-  const [{ data: companyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: locationRows, error: locationError }, { data: assigned, error: assignedError }] = await Promise.all([
-    supabase.from("companies").select("id, legal_name, country_code").in("id", companyIds).order("legal_name"),
+  const [{ data: allCompanyRows, error: companyError }, { data: settingsRows, error: settingsError }, { data: locationRows, error: locationError }, { data: assigned, error: assignedError }] = await Promise.all([
+    // Every company of the directory (names and country only): the person's own are picked out below; the others are only ever named, as the owner of
+    // received equipment or the other side of a transfer.
+    supabase.from("companies").select("id, legal_name, country_code").order("legal_name").limit(200),
     supabase.from("inv_company_settings").select("company_id, reference_code, is_enabled").in("company_id", companyIds),
     supabase.from("inv_locations").select("*").in("company_id", companyIds).order("name"),
     supabase.from("inv_operator_locations").select("location_id").eq("user_id", session.userId).is("removed_at", null),
   ]);
   if (companyError || settingsError || locationError || assignedError) return base(true, { loadFailed: true });
   const settings = new Map((settingsRows ?? []).map((s) => [s.company_id, s]));
-  const named = sortCompaniesForDisplay((companyRows ?? []).map((c) => ({ id: c.id, legalName: c.legal_name, countryCode: c.country_code })));
+  const companyRows = (allCompanyRows ?? []).filter((c) => companyIds.includes(c.id));
+  const named = sortCompaniesForDisplay(companyRows.map((c) => ({ id: c.id, legalName: c.legal_name, countryCode: c.country_code })));
   const display = companyDisplayNames(named);
   const companies: InvCompanyInfo[] = named.map((c) => ({
     id: c.id, name: display.get(c.id) ?? c.legalName, legalName: c.legalName, referenceCode: settings.get(c.id)?.reference_code ?? null, isEnabled: settings.get(c.id)?.is_enabled ?? false,
   }));
   const names = new Map(companies.map((c) => [c.id, c.name]));
+  // Companies the person holds no grant for: the short name when it is theirs alone in the whole directory and no company of the person already carries it.
+  const taken = new Set(names.values());
+  for (const [id, name] of companyDisplayNames((allCompanyRows ?? []).map((c) => ({ id: c.id, legalName: c.legal_name, countryCode: c.country_code })))) {
+    if (!names.has(id)) names.set(id, taken.has(name) ? ((allCompanyRows ?? []).find((c) => c.id === id)?.legal_name ?? name) : name);
+  }
   const locations = (locationRows ?? []) as InvLocationRow[];
   const locNames = new Map(locations.map((l) => [l.id, l.name]));
+  const locCompany = new Map(locations.map((l) => [l.id, l.company_id]));
   return base(true, {
     grants, companies, locations, employeeId, managesProjects,
     assignedLocationIds: (assigned ?? []).map((a) => a.location_id),
     companyName: (id) => names.get(id) ?? "Unknown",
     locationName: (id) => (id ? (locNames.get(id) ?? "Unknown") : "—"),
+    placeName: (id) => {
+      if (!id) return "—";
+      const name = locNames.get(id);
+      if (!name) return "A warehouse of another company";
+      return companies.length > 1 ? `${name} · ${names.get(locCompany.get(id) ?? "") ?? "Unknown"}` : name;
+    },
   });
 });
 

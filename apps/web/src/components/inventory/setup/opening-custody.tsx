@@ -148,6 +148,7 @@ export function OpeningCustody({ companyId, units, items, projects, canConfirm }
           <ActionForm action={confirmInventoryOpeningCustody} submitLabel={count === 0 ? "Confirm" : `Confirm ${count} ${count === 1 ? "line" : "lines"}`} pendingLabel="Confirming…" onDone={(s) => { setResult(((s as InvActionState).detail as Record<string, unknown> | undefined) ?? {}); setTicked(new Set()); setLines([]); }}>
             <input type="hidden" name="companyId" value={companyId} />
             <input type="hidden" name="key" value={issued.key} />
+            <p className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground" data-testid="custody-effect">What this does: {count === 0 ? "nothing yet. Tick the units or add the quantities that are already out." : `${count} ${count === 1 ? "line becomes" : "lines become"} real stock that is recorded as already with the person or on the project named. Nothing is put on a shelf, and it shows under With people or on the project until it is returned.`}</p>
             <input type="hidden" name="lines" value={payload} />
             <Field label="Note (optional)" htmlFor="oc-note"><Textarea id="oc-note" name="note" rows={2} maxLength={300} /></Field>
             {count === 0 ? <p className="text-sm text-muted-foreground">Tick the units, or add a quantity, then confirm. Your name and the time are recorded as the verification.</p> : null}

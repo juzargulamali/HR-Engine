@@ -29,13 +29,16 @@ vi.mock("@/components/os/ask-for-access", () => ({ AskForAccess: ({ generic = "a
 vi.mock("@/lib/supabase/server", () => ({
   createClient: async () => ({ from: () => emptyChain(state.loadError ? { data: null, error: { message: "boom" } } : ok), rpc: () => emptyChain(ok) }),
 }));
+vi.mock("server-only", () => ({}));
+const cookie = vi.hoisted(() => ({ warehouse: "" }));
+vi.mock("next/headers", () => ({ cookies: async () => ({ get: (name: string) => (name === "inv_warehouse" && cookie.warehouse ? { value: cookie.warehouse } : undefined) }) }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: vi.fn(), replace: vi.fn() }), usePathname: () => "/inventory/manage", useSearchParams: () => new URLSearchParams() }));
 vi.mock("@/lib/inventory/context", () => ({
   getInventoryContext: async () => ({
     userId: "u-me", fullName: "Me", installed: true, grants: state.caps.length ? [{ companyId: COMPANY, capabilities: state.caps as InvCapability[] }] : [],
     companies: [{ id: COMPANY, name: "Enginious UAE", referenceCode: "UAE", isEnabled: true }],
     locations: [{ id: LOCATION, company_id: COMPANY, code: "DXB", name: "Dubai", kind: "warehouse", timezone: "Asia/Dubai", address: null, is_active: true, created_by: null, created_at: "", updated_at: "" }],
-    assignedLocationIds: [], employeeId: null, managesProjects: false, companyName: () => "Enginious UAE", locationName: () => "Dubai",
+    assignedLocationIds: [], employeeId: null, managesProjects: false, companyName: () => "Enginious UAE", locationName: () => "Dubai", placeName: () => "Dubai",
   }),
 }));
 
@@ -44,23 +47,48 @@ import InventoryManagePage from "./page";
 const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(await InventoryManagePage({ searchParams: Promise.resolve(sp) }));
 
 describe("Setup page", () => {
-  it("shows every section as a heading on one page for a founder, including the earlier asset register", async () => {
-    state.caps = ["founder"]; state.loadError = false;
+  it("opens on Warehouses and bins, with the three routine groups and Administration as tabs, and nothing else crowding it", async () => {
+    state.caps = ["founder"]; state.loadError = false; cookie.warehouse = "";
     const html = await render();
-    for (const heading of ["Getting started", "Company settings", "Locations and bins", "Categories", "Opening stock and counts", "Record equipment already with employees or on projects", "Technology templates", "Earlier asset register"]) {
-      expect(html).toContain(heading);
-    }
-    expect(html).toContain("0 of 5 steps done");
+    for (const tab of ["Warehouses and bins", "Catalogue and tracking", "Getting stock in", "Administration"]) expect(html).toContain(`>${tab}</a>`);
     expect(html).toContain("Add a location");
+    // Occasional administration is one tab away, not on the routine screen.
+    for (const heading of ["Company record</h2>", "Opening stock and counts</h2>", "Earlier asset register</h2>", "Technology templates</h2>", "Categories</h2>"]) expect(html).not.toContain(heading);
+  });
+
+  it("groups catalogue and tracking, getting stock in, and administration, each on its own tab", async () => {
+    state.caps = ["founder"]; state.loadError = false; cookie.warehouse = "";
+    const catalogue = await render({ section: "catalogue" });
+    for (const heading of ["Items and how they are tracked", "Categories", "Technology templates"]) expect(catalogue).toContain(heading);
+    for (const way of ["Individual item", "Counted stock", "Kit", "Consumable"]) expect(catalogue).toContain(way);
+    const stock = await render({ section: "stock" });
+    for (const text of ["New stock arrives (bought or rented)", "Stock that was already on the shelves when Inventory started", "Equipment that was already with people or on projects", "Getting started", "0 of 5 steps done"]) expect(stock).toContain(text);
+    const admin = await render({ section: "admin" });
+    for (const heading of ["Company record", "Sharing equipment between companies", "Opening stock and counts", "Record equipment already with employees or on projects", "Corrections", "Earlier asset register"]) expect(admin).toContain(heading);
+    // The checklist's steps open the group that holds them.
+    expect(stock).toContain("section=admin#counts");
+    expect(stock).toContain("section=catalogue#categories");
+  });
+
+  it("carries the company and the working warehouse forward without asking for them again", async () => {
+    state.caps = ["founder"]; state.loadError = false; cookie.warehouse = LOCATION;
+    const html = await render();
+    expect(html).toContain('data-testid="setup-context"');
+    expect(html).toContain(`data-warehouse-id="${LOCATION}"`);
+    expect(html).toContain("Working here");
+    const stock = await render({ section: "stock" });
+    expect(stock).toContain(`/inventory/stock?action=receive&amp;location=${LOCATION}`);
+    expect(stock).toContain("Receive stock at Dubai");
+    cookie.warehouse = "";
   });
 
   it("hides the earlier asset register and location editing from someone who only manages the catalogue", async () => {
     state.caps = ["manage_catalogue"]; state.loadError = false;
     const html = await render();
-    expect(html).not.toContain("Earlier asset register</h2>");
     expect(html).not.toContain("Add a location");
     expect(html).toContain("Only a founder can add or change locations");
-    expect(html).toContain("Add a category");
+    expect(await render({ section: "catalogue" })).toContain("Add a category");
+    expect(await render({ section: "admin" })).not.toContain("Earlier asset register</h2>");
   });
 
   it("says who it is for, instead of failing, to someone with no Inventory rights", async () => {
@@ -70,7 +98,7 @@ describe("Setup page", () => {
 
   it("says it could not load, never 'no categories', when the data service fails", async () => {
     state.caps = ["founder"]; state.loadError = true;
-    const html = await render();
+    const html = await render({ section: "catalogue" });
     expect(html).toContain("not an empty list");
     expect(html).not.toContain("No categories yet");
   });

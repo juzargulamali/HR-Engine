@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { canOperateAnyStock } from "@enginious-hr/domain";
+import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { listTable } from "@/components/workspace/list-table";
 import { Boxes, CalendarClock, TriangleAlert } from "lucide-react";
@@ -42,7 +45,8 @@ export default async function MyEquipmentPage() {
     <div className="space-y-4">
       <div>
         <h1 className="text-2xl font-semibold">Equipment assigned to me</h1>
-        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Company equipment recorded as assigned to you. If something here is wrong, or has been lost or damaged, tell the warehouse.</p>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">Company equipment recorded as assigned to you. If something here is wrong, or has been lost or damaged, tell the warehouse. To return something, hand it to the warehouse: they record the return and its condition, and it leaves this list.</p>
+        {ctx.employeeId && canOperateAnyStock(ctx.grants) && rows.length > 0 ? <p className="mt-2"><Link href={`/inventory/stock?action=return&employee=${ctx.employeeId}`} className={cn(buttonVariants({ size: "sm", variant: "outline" }), "h-11 sm:h-8")}>Receive return</Link><span className="ml-2 text-sm text-muted-foreground">You operate a warehouse: this opens the return with you and what you hold already filled in.</span></p> : null}
       </div>
       {rows.length === 0 ? (
         <EmptyState title="Nothing is assigned to you" description="When the warehouse issues you equipment it appears here with its ID and the date it is expected back." />

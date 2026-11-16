@@ -239,7 +239,7 @@ describe("summaryRows (the review step)", () => {
   it("says a transfer is in transit and not available at the destination", () => {
     const r = rows("transfer", { toLocation: "Riyadh" });
     expect(get(r, "To")).toMatch(/Riyadh.*in transit.*not available there/);
-    expect(get(r, "Status after")).toMatch(/In transit/);
+    expect(get(r, "Who acts next")).toMatch(/Riyadh records it as received.*in transit/);
   });
   it("says what stays outstanding on a partial return and what is held back", () => {
     const r = summaryRows({ kind: "return", returnFrom: "employee", employee: "Sara Ali", location: "Dubai warehouse", stillOutstanding: 3, drafts: [unit("1"), unit("2", { condition: "damaged" })] });
@@ -277,7 +277,14 @@ describe("summaryRows (the review step)", () => {
   it("says 'everything' when the list was left empty on purpose", () => {
     const r = summaryRows({ kind: "receive_transfer", drafts: [], location: "Riyadh", everything: true, transferCode: "UAE-T-00004" });
     expect(get(r, "What")).toBe("Everything that applies");
-    expect(get(r, "From")).toBe("On the way (UAE-T-00004)");
+    expect(get(r, "From")).toBe("In transit (UAE-T-00004)");
+  });
+  it("a receipt of everything names each line and where it came from, never just 'everything'", () => {
+    const r = summaryRows({ kind: "receive_transfer", drafts: [], location: "Riyadh · Enginious Saudi Arabia", everything: true, transferCode: "UAE-T-00004", transferFrom: "Dubai · Enginious UAE", arrivedLines: ["Truss 3 m (UAE-E-00007)", "HDMI cable, 4"] });
+    expect(get(r, "What")).toBe("Truss 3 m (UAE-E-00007)\nHDMI cable, 4");
+    expect(get(r, "How much")).toMatch(/Everything still in transit: 2 lines/);
+    expect(get(r, "From")).toBe("Dubai · Enginious UAE, in transit (UAE-T-00004)");
+    expect(get(r, "To")).toBe("Riyadh · Enginious Saudi Arabia");
   });
   it("has a sentence for every kind", () => {
     for (const kind of Object.keys(KIND_CONFIG) as MovementKind[]) {

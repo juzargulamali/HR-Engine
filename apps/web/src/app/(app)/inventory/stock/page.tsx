@@ -95,6 +95,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     scan: here({ action: "scan", open: null, unit: null }),
     receive: here({ action: "receive", open: null, unit: null }),
     issue: here({ action: "issue", open: null, unit: null }),
+    transfer: here({ action: "transfer", open: null, unit: null }),
   };
   const canSeePeople = ctx.grants.some((g) => hasInvCapability(ctx.grants, g.companyId, "view_employee_custody") || hasInvCapability(ctx.grants, g.companyId, "warehouse") || isInvFounder(ctx.grants, g.companyId));
   const viewTab = (active: boolean) => cn("-mb-px border-b-2 px-4 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", active ? "border-accent font-semibold text-foreground" : "border-transparent font-medium text-muted-foreground hover:text-foreground");
@@ -118,11 +119,11 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
   );
 
   // Panels: an action form or the scanner first, then one unit, then one item. The list behind them stays as it was.
-  const closeHref = here({ open: null, unit: null, action: null, bin: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null });
-  const params = { employee: firstParam(sp, "employee"), project: firstParam(sp, "project"), request: firstParam(sp, "request"), codes: firstParam(sp, "codes").slice(0, 3000), transfer: firstParam(sp, "transfer"), mode: firstParam(sp, "mode"), location };
-  const panel = action ? <ActionSidePanel action={action} params={params} closeHref={here({ action: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null })} />
+  const closeHref = here({ open: null, unit: null, action: null, bin: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null, item: null });
+  const params = { employee: firstParam(sp, "employee"), project: firstParam(sp, "project"), request: firstParam(sp, "request"), codes: firstParam(sp, "codes").slice(0, 3000), transfer: firstParam(sp, "transfer"), mode: firstParam(sp, "mode"), location, item: firstParam(sp, "item") };
+  const panel = action ? <ActionSidePanel action={action} params={params} closeHref={here({ action: null, employee: null, project: null, request: null, codes: null, transfer: null, mode: null, item: null })} />
     : unitRef ? <UnitSidePanel unitRef={unitRef} closeHref={here({ unit: null })} here={here} />
-    : openId ? <ItemSidePanel openId={openId} closeHref={closeHref} here={here} binCode={binCode} />
+    : openId ? <ItemSidePanel openId={openId} closeHref={closeHref} here={here} binCode={binCode} workingLocationId={location || undefined} />
     : null;
 
   if (viewPeople && canSeePeople) {
@@ -149,7 +150,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
     );
   }
 
-  const addButton = canAdd ? <QuickAddItem companies={ctx.companies.filter((c) => canManageCatalogue(ctx.grants, c.id)).map((c) => ({ id: c.id, name: c.name, categories: list.categories.filter((k) => k.company_id === c.id && k.is_active).map((k) => ({ id: k.id, label: categoryPath(list.categories, k.id) ?? k.name })).sort((a, b) => a.label.localeCompare(b.label)) }))} /> : null;
+  const addButton = canAdd ? <QuickAddItem defaultCompanyId={ctx.locations.find((l) => l.id === location)?.company_id} companies={ctx.companies.filter((c) => canManageCatalogue(ctx.grants, c.id)).map((c) => ({ id: c.id, name: c.name, categories: list.categories.filter((k) => k.company_id === c.id && k.is_active).map((k) => ({ id: k.id, label: categoryPath(list.categories, k.id) ?? k.name })).sort((a, b) => a.label.localeCompare(b.label)) }))} /> : null;
   const filter: StockFilter = { q, category: list.categories.some((c) => c.id === firstParam(sp, "category")) ? firstParam(sp, "category") : "", location, tracking, condition, company: list.companies.some((c) => c.id === firstParam(sp, "company")) ? firstParam(sp, "company") : "", status };
   const filterActive = isFilterActive(filter);
 
@@ -263,8 +264,9 @@ function Cell({ column, row: r, href, companyName, ownedBy }: { column: StockCol
           <PanelLink href={href} className="break-words font-medium underline-offset-2 hover:underline">{r.name}</PanelLink>
           {sub ? <div className="mt-0.5 break-words text-sm text-muted-foreground">{sub}</div> : null}
           {ownedBy ? <div className="mt-0.5 text-sm text-muted-foreground">{ownedBy}</div> : null}
-          {r.status === "draft" || r.status === "retired" || (r.draftUnits ?? 0) > 0 ? (
+          {r.status === "draft" || r.status === "retired" || (r.draftUnits ?? 0) > 0 || (r.attention ?? 0) > 0 ? (
             <div className="mt-1 flex flex-wrap gap-1">
+              {(r.attention ?? 0) > 0 ? <Badge variant="warning" title="Damaged, held for inspection, out for repair or missing: not counted as available">{fmt(r.attention ?? 0)} not available: held or damaged</Badge> : null}
               {r.status === "draft" ? <Badge variant="warning">Draft</Badge> : null}
               {r.status === "retired" ? <Badge variant="outline">Retired</Badge> : null}
               {(r.draftUnits ?? 0) > 0 ? <Badge variant="warning">{fmt(r.draftUnits ?? 0)} not counted yet</Badge> : null}

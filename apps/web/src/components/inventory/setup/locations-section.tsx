@@ -12,6 +12,7 @@ import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ActionForm, Field } from "@/components/sales/action-form";
+import { listTable } from "@/components/workspace/list-table";
 
 export interface LocationView { id: string; code: string; name: string; kind: "warehouse" | "office" | "other"; timezone: string; address: string | null; isActive: boolean }
 export interface BinView { id: string; locationId: string; code: string; label: string | null; isActive: boolean }
@@ -113,7 +114,8 @@ function BinsDialog({ location, bins, canEdit, onClose }: { location: LocationVi
   );
 }
 
-export function LocationsSection({ companyId, locations, bins, isFounder, canEditBins }: { companyId: string; locations: readonly LocationView[]; bins: readonly BinView[]; isFounder: boolean; canEditBins: boolean }) {
+export function LocationsSection({ companyId, locations: allLocations, bins, isFounder, canEditBins, currentId }: { companyId: string; locations: readonly LocationView[]; bins: readonly BinView[]; isFounder: boolean; canEditBins: boolean; /** The warehouse the person is working in: listed first and marked. */ currentId?: string | null }) {
+  const locations = currentId ? [...allLocations].sort((a, b) => Number(b.id === currentId) - Number(a.id === currentId)) : allLocations;
   const [draft, setDraft] = useState<Draft | null>(null);
   const [binsFor, setBinsFor] = useState<string | null>(null);
   const suggestions = isFounder ? missingSuggestions(locations) : [];
@@ -121,7 +123,7 @@ export function LocationsSection({ companyId, locations, bins, isFounder, canEdi
   const binLocation = locations.find((l) => l.id === binsFor) ?? null;
   return (
     <div className="space-y-4">
-      <p className="max-w-3xl text-sm text-muted-foreground">Each place that keeps equipment is a location with its own time zone. Only a founder adds or changes locations. Nothing is set up for you: a location exists only after a founder has saved it.</p>
+      <p className="max-w-3xl text-sm text-muted-foreground">Each place that keeps equipment is a location with its own time zone. A founder adds or changes locations; bins are added inside one.</p>
       {isFounder ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" onClick={() => open()}>Add a location</Button>
@@ -132,19 +134,19 @@ export function LocationsSection({ companyId, locations, bins, isFounder, canEdi
       {locations.length === 0 ? (
         <EmptyState dense title="No locations yet." description={isFounder ? "Add the first location, or use one of the suggestions above." : "A founder needs to add the first location."} />
       ) : (
-        <Table>
+        <Table className={listTable}>
           <TableHeader><TableRow><TableHead>Location</TableHead><TableHead>Code</TableHead><TableHead>Kind</TableHead><TableHead>Time zone</TableHead><TableHead>Status</TableHead><TableHead><span className="sr-only">Actions</span></TableHead></TableRow></TableHeader>
           <TableBody>
             {locations.map((l) => (
               <TableRow key={l.id}>
-                <TableCell className="font-medium">{l.name}{l.address ? <span className="block text-sm font-normal text-muted-foreground">{l.address}</span> : null}</TableCell>
-                <TableCell>{l.code}</TableCell>
-                <TableCell>{KIND_WORDS[l.kind]}</TableCell>
-                <TableCell>{l.timezone}</TableCell>
-                <TableCell>{l.isActive ? <Badge variant="outline">In use</Badge> : <Badge variant="warning">Switched off</Badge>}</TableCell>
-                <TableCell>
-                  <div className="flex flex-wrap justify-end gap-1">
-                    <Button type="button" size="sm" variant="ghost" onClick={() => setBinsFor(l.id)}>Bins ({bins.filter((b) => b.locationId === l.id).length})<span className="sr-only"> at {l.name}</span></Button>
+                <TableCell className="font-medium">{l.name}{l.id === currentId ? <Badge variant="secondary" className="ml-2 align-middle">Working here</Badge> : null}{l.address ? <span className="block text-sm font-normal text-muted-foreground">{l.address}</span> : null}</TableCell>
+                <TableCell data-label="Code">{l.code}</TableCell>
+                <TableCell data-label="Kind">{KIND_WORDS[l.kind]}</TableCell>
+                <TableCell data-label="Time zone">{l.timezone}</TableCell>
+                <TableCell data-label="Status">{l.isActive ? <Badge variant="outline">In use</Badge> : <Badge variant="warning">Switched off</Badge>}</TableCell>
+                <TableCell className="max-md:!block">
+                  <div className="flex flex-wrap justify-end gap-2 max-md:justify-start">
+                    <Button type="button" size="sm" variant="outline" className="h-11 sm:h-8" onClick={() => setBinsFor(l.id)}>{bins.some((b) => b.locationId === l.id) ? `Bins (${bins.filter((b) => b.locationId === l.id).length})` : canEditBins ? "Add bins" : "Bins (0)"}<span className="sr-only"> at {l.name}</span></Button>
                     {isFounder ? <Button type="button" size="sm" variant="ghost" onClick={() => setDraft({ id: l.id, code: l.code, name: l.name, kind: l.kind, timezone: l.timezone, address: l.address ?? "", isActive: l.isActive })}>Edit<span className="sr-only">{` ${l.name}`}</span></Button> : null}
                   </div>
                 </TableCell>

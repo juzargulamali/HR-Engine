@@ -27,7 +27,7 @@ export function WarehouseBar({ options, currentId, all, allowAll, scanHref, mult
     const q = new URLSearchParams(sp.toString());
     q.set("location", value);
     // A panel or record of another warehouse should not stay open under the new one.
-    for (const k of ["open", "unit", "action", "employee", "project", "request", "codes", "transfer", "mode", "bin"]) q.delete(k);
+    for (const k of ["open", "unit", "action", "employee", "project", "request", "codes", "transfer", "mode", "bin", "item"]) q.delete(k);
     router.push(`${pathname}?${q.toString()}`, { scroll: false });
   };
   const companies = [...new Map(options.map((o) => [o.companyId, o.companyName])).entries()].map(([id, name]) => ({ id, name }));

@@ -23,7 +23,7 @@ const loc = { id: L1, company_id: C1, code: "DXB", name: "Dubai warehouse", kind
 const bin = { id: B1, company_id: C1, location_id: L1, code: "A1", label: null, is_active: true, created_at: "" } as InvBinRow;
 
 vi.mock("@/lib/inventory/context", () => ({
-  getInventoryContext: async () => ({ userId: "u", fullName: "T", installed: true, grants, companies: [{ id: C1, name: "Enginious", referenceCode: "UAE", isEnabled: true }], locations: [loc], assignedLocationIds: [L1], employeeId: null, managesProjects: false, companyName: () => "Enginious", locationName: () => "Dubai warehouse" }),
+  getInventoryContext: async () => ({ userId: "u", fullName: "T", installed: true, grants, companies: [{ id: C1, name: "Enginious", referenceCode: "UAE", isEnabled: true }], locations: [loc], assignedLocationIds: [L1], employeeId: null, managesProjects: false, companyName: () => "Enginious", locationName: () => "Dubai warehouse", placeName: () => "Dubai warehouse" }),
 }));
 
 const names: Names = {
@@ -133,9 +133,9 @@ describe("UnitSidePanel", () => {
     unitDetail = baseUnit();
     const html = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
     expect(html).toContain("UAE-E-00042");
-    expect(html).toContain("Return from employee");
+    expect(html).toContain("Receive return");
     expect(html).toContain("employee=e1");
-    expect(html).not.toContain("Issue to a person");
+    expect(html).not.toContain("Give equipment");
     expect(html).toContain("Print label");
     expect(html).toContain("History");
     expect(html).toContain("Nothing has been recorded for this unit yet");
@@ -143,11 +143,11 @@ describe("UnitSidePanel", () => {
   it("offers issue, dispatch and transfer for a usable unit on the shelf, and says a draft unit cannot be used", async () => {
     unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Dubai warehouse" }) });
     const html = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
-    for (const a of ["Issue to a person", "Dispatch to a project", "Send to another location"]) expect(html).toContain(a);
+    for (const a of ["Give equipment", "Dispatch to a project", "Transfer stock"]) expect(html).toContain(a);
     unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", lifecycle: "draft", employee_id: null, where: "Not counted yet" }) });
     const draft = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
     expect(draft).toContain("Not counted yet");
-    expect(draft).not.toContain("Issue to a person");
+    expect(draft).not.toContain("Give equipment");
   });
   it("says who owns a unit that sits in another company's warehouse, apart from where it is and who holds it (never for a unit at home)", async () => {
     unitDetail = baseUnit({ unit: unitView({ custody_kind: "warehouse", employee_id: null, employeeName: null, where: "In the warehouse: Riyadh warehouse · Enginious KSA", ownedByNote: "Owned by Enginious UAE" }) });
@@ -203,12 +203,12 @@ describe("UnitSidePanel", () => {
       xUnits = [row];
       const html = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
       expect(html).toContain("Sharing revoked\u2014contact owner");
-      expect(html).toContain("Receive the transfer");
+      expect(html).toContain("Receive transfer");
       xUnits = [{ ...row, custody_kind: "warehouse", transfer_id: null, transfer_code: null, sharing_revoked: true }];
       const onShelf = await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }));
       expect(onShelf).toContain("Sharing revoked\u2014contact owner");
       expect(onShelf).toContain("At Riyadh warehouse");
-      expect(onShelf).not.toContain("Issue to a person");
+      expect(onShelf).not.toContain("Give equipment");
       expect(onShelf).not.toContain("Dispatch to a project");
       xUnits = [{ ...row, sharing_revoked: false }];
       expect(await render(UnitSidePanel({ unitRef: "UAE-E-00042", closeHref: "/inventory", here }))).not.toContain("Sharing revoked");
@@ -218,7 +218,7 @@ describe("UnitSidePanel", () => {
     grants = [{ companyId: C1, capabilities: ["view_stock"] }];
     unitDetail = baseUnit({ canOperate: false, canEdit: false, canSeeCosts: false });
     const html = await render(UnitSidePanel({ unitRef: U1, closeHref: "/inventory", here }));
-    expect(html).not.toContain("Return from employee");
+    expect(html).not.toContain("Receive return");
     expect(html).not.toContain("Send for repair");
     expect(html).not.toContain("Purchase cost");
   });

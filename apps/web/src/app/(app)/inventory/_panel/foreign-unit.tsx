@@ -27,9 +27,9 @@ export function ForeignUnitPanel({ unit: u, closeHref, here, canOperate }: { uni
     ["Ownership", u.rented ? "Rented by the owner" : "Owned"],
   ];
   const quick: { label: string; href: string }[] = [];
-  if (canOperate && u.custody === "transit" && u.transferId) quick.push({ label: "Receive the transfer", href: here({ action: "transfer", mode: "receive", transfer: u.transferId, unit: null, open: null }) });
+  if (canOperate && u.custody === "transit" && u.transferId) quick.push({ label: "Receive transfer", href: here({ action: "transfer", mode: "receive", transfer: u.transferId, unit: null, open: null }) });
   if (canOperate && u.custody === "warehouse" && u.usableHere) {
-    quick.push({ label: "Issue to a person", href: here({ action: "issue", codes: u.code, unit: null, open: null }) });
+    quick.push({ label: "Give equipment", href: here({ action: "issue", codes: u.code, unit: null, open: null }) });
     quick.push({ label: "Dispatch to a project", href: here({ action: "dispatch", codes: u.code, unit: null, open: null }) });
   }
   return (

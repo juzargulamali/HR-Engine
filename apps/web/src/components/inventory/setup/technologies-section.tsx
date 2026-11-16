@@ -28,7 +28,7 @@ export function TechnologiesSection({ rows, canEdit }: { rows: readonly Technolo
     const t = q.trim().toLowerCase();
     return rows.filter((r) => (status === "" || r.status === status) && (t === "" || r.name.toLowerCase().includes(t) || (r.description ?? "").toLowerCase().includes(t)));
   }, [rows, q, status]);
-  const href = (id: string) => `${withParams(pathname, sp, { tech: id })}#technologies`;
+  const href = (id: string) => `${withParams(pathname, sp, { tech: id, section: "catalogue" })}#technologies`;
   return (
     <div className="space-y-4">
       <div className="max-w-3xl space-y-1 text-sm text-muted-foreground">

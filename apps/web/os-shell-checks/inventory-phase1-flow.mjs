@@ -370,7 +370,7 @@ await step("the damaged laptop is out of availability, shown on Today as held, a
 });
 
 await step("the technician's inspection clears it: the unit is available again", async () => {
-  // The inspection itself is the existing Check condition movement (inv_check_condition), recorded here as the technician through the real function.
+  // The inspection itself is the existing Inspect movement (inv_check_condition), recorded here as the technician through the real function.
   const out = JSON.parse(asDb(1, `select inv_check_condition('${AE}', '${DXB}', 'inv1-clear-technician', '[{"unit_id":"${DAMAGED()}","condition":"good","note":"Fictional inspection: bench tested"}]'::jsonb)`));
   check(out.lines[0].available === true, "the cleared unit is not reported available");
   eq(s1(`select inv_unit_free('${DAMAGED()}', now() + interval '60 days', now() + interval '61 days', '${DXB}')`), "t", "the cleared laptop is free for a later period");

@@ -126,7 +126,7 @@ await step("operator issues the laptop to Eve against that request: review and s
   await noPrivate("operator: employee request panel");
   await R.panel().getByRole("link", { name: "Issue to the employee" }).click();
   await R.page.waitForURL(/action=issue/);
-  await mv().getByText("Issue to a person").first().waitFor();
+  await mv().getByText("Give equipment").first().waitFor();
   const box = mv().getByLabel("Search for an item or unit to add");
   await box.fill("LAP-SN-001");
   await mv().getByRole("list", { name: "Search results" }).getByRole("button", { name: /^Add Laptop 14 inch/ }).first().click();
@@ -181,7 +181,7 @@ await step("HR sees Eve's laptop under Equipment held by employees, with only he
   check((await R.mainText()).includes(LAP1()), "the laptop's ID is shown");
   await noPrivate("HR: equipment held by employees");
   await R.shot("flow2-employees-held");
-  check(!/Receive returns/.test(t), "HR (read-only access) has no Return button");
+  check(!/Receive return/.test(t), "HR (read-only access) has no Return button");
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------
@@ -350,7 +350,7 @@ await step("an employee who leaves while holding equipment stays on HR's list wi
   check(!(await mv().getByRole("list", { name: "Who receives it? results" }).count()), "no one to pick");
   // the operator can still take it back from the person who left
   await R.go("/inventory/stock?view=people");
-  check(/Receive returns/.test(await R.mainText()), "the operator still has the Return button for him");
+  check(/Receive return/.test(await R.mainText()), "the operator still has the Return button for him");
 });
 
 // ---------------------------------------------------------------------------------------------------------------------------

@@ -138,7 +138,7 @@ describe("Today page", () => {
     data = today(allRows.filter((r) => r.kind !== "transfer"), ["transfers"]);
     const html = await render();
     expect(html).toContain('role="alert"');
-    expect(html).toContain("Incoming transfers could not be loaded.");
+    expect(html).toContain("Transfers in transit could not be loaded.");
     expect(html).toContain("it is not an empty queue");
     expect(html).toContain("Try again");
     expect(html).toContain("(could not be loaded)");
@@ -151,7 +151,7 @@ describe("Today page", () => {
   it("when every source failed it says so and does not offer 'Nothing waiting'", async () => {
     data = today([], ["requests", "returns", "transfers", "sales"]);
     const html = await render();
-    for (const n of ["Equipment requests", "Equipment due back", "Incoming transfers", "Sales checks"]) expect(html).toContain(`${n} could not be loaded.`);
+    for (const n of ["Equipment requests", "Equipment due back", "Transfers in transit", "Sales checks"]) expect(html).toContain(`${n} could not be loaded.`);
     expect(html).not.toContain("Nothing waiting at");
     expect(html).not.toContain("Go to Stock");
   });

@@ -346,7 +346,8 @@ if (run("A3")) {
     for (const c of [M1, M2]) await H.searchAdd(c, new RegExp(`^Add Motor 2.2 kW ${c}`));
     await H.searchAdd("HDMI", /^Add HDMI cable/);
     await H.qtyOf("HDMI cable").fill("5");
-    await mv.getByLabel("Expected arrival (optional)").fill(dayAt(3, "12:00"));
+    await mv.locator("summary", { hasText: "Shipping details" }).click();   // Phase 2: the optional shipping fields are folded away
+  await mv.getByLabel("Expected arrival (optional)").fill(dayAt(3, "12:00"));
     await mv.getByLabel("Carrier (optional)").fill("DHL"); await mv.getByLabel("Reference (optional)").fill("WB-77");
     await R.shot("flow4-transfer-form");
     await H.review();
@@ -404,7 +405,7 @@ if (run("A3")) {
     const mv = H.mv();
     await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
     await mv.getByLabel(/Only some of it/).check();
-    const onTheWay = mv.getByRole("list", { name: /^On the way/ });
+    const onTheWay = mv.getByRole("list", { name: /^Still in transit/ });
     await onTheWay.getByRole("button", { name: new RegExp(`^Add Motor 2.2 kW ${M1}`) }).click(); await sleep(250);
     await onTheWay.getByRole("button", { name: /^Add HDMI cable/ }).click(); await sleep(250);
     await H.qtyOf("HDMI cable").fill("3");
@@ -427,6 +428,7 @@ if (run("A3")) {
     await R.go("/inventory/stock?action=transfer&mode=receive");
     const mv = H.mv();
     await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
+    await mv.getByRole("radio", { name: /Everything still in transit arrived/ }).check();   // Phase 2: what arrived is always chosen, never assumed
     await H.review();
     await mv.getByRole("button", { name: /^Confirm/ }).click();
     await mv.getByText("Recorded").first().waitFor({ timeout: 20000 });

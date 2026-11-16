@@ -3,7 +3,9 @@ import { AskForAccess } from "@/components/os/ask-for-access";
 import {
   canConfirmStock, canManageCatalogue, canOperateLocation, canViewStock, hasInvCapability, isInvFounder,
 } from "@enginious-hr/domain";
+import { cookies } from "next/headers";
 import { Alert } from "@/components/ui/alert";
+import { buttonVariants } from "@/components/ui/button";
 import { Muted, PageHeader, Panel } from "@/components/projects/parts";
 import { CategoriesSection } from "@/components/inventory/setup/categories-section";
 import { CompanyPicker } from "@/components/inventory/setup/company-picker";
@@ -21,6 +23,10 @@ import { withParams } from "@/components/workspace/url-state";
 import { getInventoryContext } from "@/lib/inventory/context";
 import { computeChecklist, type SetupFacts } from "@/lib/inventory/setup";
 import { createClient } from "@/lib/supabase/server";
+import { QuickAddItem } from "@/components/inventory/stock/quick-add-item";
+import { WAREHOUSE_COOKIE } from "@/lib/inventory/working-location";
+import { TRACKING_WORDS } from "@/lib/inventory/words";
+import { cn } from "@/lib/utils";
 import type { InvLegacyAssetRow } from "@/types/inventory";
 
 export const metadata = { title: "Inventory setup" };
@@ -45,9 +51,17 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
       </div>
     );
   }
+  // The company carries forward: the address first, then the company of the warehouse the person last worked in (the same remembered choice Today and
+  // Stock use), then the first one. A company they may not set up is never taken from the address or the cookie.
   const wanted = one(sp.company);
-  const company = allowed.find((c) => c.id === wanted) ?? allowed[0]!;
+  const cookieStore = await cookies();
+  const remembered = cookieStore.get(WAREHOUSE_COOKIE)?.value ?? "";
+  const rememberedLocation = ctx.locations.find((l) => l.id === remembered && l.is_active) ?? null;
+  const company = allowed.find((c) => c.id === wanted) ?? allowed.find((c) => c.id === rememberedLocation?.company_id) ?? allowed[0]!;
   const companyId = company.id;
+  const workingWarehouse = rememberedLocation && rememberedLocation.company_id === companyId ? rememberedLocation : (ctx.locations.filter((l) => l.company_id === companyId && l.is_active).length === 1 ? ctx.locations.find((l) => l.company_id === companyId && l.is_active)! : null);
+  const wantedSection = one(sp.section);
+  const section: SectionId = (SECTIONS.some(([id]) => id === wantedSection) ? wantedSection : UUID_RE.test(one(sp.count)) || one(sp.counts) === "all" ? "admin" : one(sp.tech) !== "" ? "catalogue" : "warehouses") as SectionId;
 
   const founder = isInvFounder(ctx.grants, companyId);
   const catalogue = canManageCatalogue(ctx.grants, companyId);
@@ -166,8 +180,8 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
   // --- the open count sheet (side panel) ---------------------------------------------------------------------------------------------------
   const countId = one(sp.count);
   const techParam = one(sp.tech);
-  const closeCount = `${withParams("/inventory/manage", sp, { count: null })}#counts`;
-  const closeTech = `${withParams("/inventory/manage", sp, { tech: null })}#technologies`;
+  const closeCount = `${withParams("/inventory/manage", sp, { count: null, section: "admin" })}#counts`;
+  const closeTech = `${withParams("/inventory/manage", sp, { tech: null, section: "catalogue" })}#technologies`;
   let sheet: React.ReactNode = null;
   if (viewStock && UUID_RE.test(countId)) {
     const { data: c } = await supabase.from("inv_counts").select("*").eq("id", countId).eq("company_id", companyId).maybeSingle();
@@ -243,63 +257,156 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
   const binViews: BinView[] = binRows.map((b) => ({ id: b.id, locationId: b.location_id, code: b.code, label: b.label, isActive: b.is_active }));
   const qtyItems = itemRows.filter((i) => i.tracking === "quantity" && i.status === "active").map((i) => ({ id: i.id, name: itemLabel(i), scale: i.quantity_scale, unitOfMeasure: i.unit_of_measure }));
 
+  // --- the four groups: three for routine setup, in the order it is done, and one for what is needed now and then ---------------------------------
+  const base = (patch: Record<string, string | null>) => withParams("/inventory/manage", sp, { count: null, tech: null, counts: null, ...patch });
+  const sectionHref = (anchor: string) => `${base({ section: ANCHOR_SECTION[anchor] ?? "warehouses" })}#${anchor}`;
+  const steps = checklist.steps.map((st) => (st.href.startsWith("#") ? { ...st, href: sectionHref(st.href.slice(1)) } : st));
+  const working = workingWarehouse ? { id: workingWarehouse.id, label: `${workingWarehouse.name} · ${company.name}` } : null;
+  const trackingCounts = (["individual", "quantity", "kit", "consumable"] as const).map((t) => ({ t, n: itemRows.filter((i) => i.tracking === t && i.status !== "retired").length }));
+  const tabCls = (active: boolean) => cn("-mb-px whitespace-nowrap border-b-2 px-3 py-2.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", active ? "border-accent font-semibold text-foreground" : "border-transparent font-medium text-muted-foreground hover:text-foreground");
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-section={section} data-company-id={companyId} data-warehouse-id={working?.id ?? ""}>
       <PageHeader
         title="Inventory setup"
-        description="Set up what Inventory knows about your company, then count it in. Everything here is one page: use the links to jump to a section."
+        description="Set Inventory up in the order you need it: where stock is kept, what you keep, then getting it in."
         actions={<CompanyPicker companies={allowed.map((c) => ({ id: c.id, name: c.name }))} value={companyId} />}
       />
-      <nav aria-label="Sections" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        {[["getting-started", "Getting started"], ["settings", "Company settings"], ["locations", "Locations and bins"], ["categories", "Categories"], ["counts", "Opening stock and counts"], ["custody", "Equipment already out"], ["technologies", "Technology templates"], ...(founder ? [["legacy", "Earlier asset register"]] : [])].map(([id, label]) => (
-          <a key={id} href={`#${id}`} className="font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">{label}</a>
-        ))}
+      <p className="text-sm" data-testid="setup-context">
+        <span className="text-muted-foreground">Setting up </span><strong>{company.name}</strong>
+        {working ? <><span className="text-muted-foreground"> · working warehouse </span><strong>{workingWarehouse!.name}</strong></> : null}
+<span className="text-muted-foreground">.</span>
+      </p>
+      <nav aria-label="Setup sections" className="grid grid-cols-2 gap-x-1 border-b border-border sm:flex">
+        {SECTIONS.map(([id, label]) => <Link key={id} href={base({ section: id === "warehouses" ? null : id })} scroll={false} aria-current={section === id ? "page" : undefined} className={tabCls(section === id)}>{label}</Link>)}
       </nav>
       {!company.isEnabled && company.referenceCode ? <Alert variant="warning" role="status">Inventory is switched off for {company.name}. Everything is kept and can be read, but nothing can be changed until a founder switches it on.</Alert> : null}
+      {!company.referenceCode ? <Alert variant="warning" role="status">No equipment can be registered for {company.name} until a founder sets its reference code. <Link href={sectionHref("settings")} className="font-medium underline underline-offset-2">Set the reference code</Link></Alert> : null}
 
-      <GettingStarted checklist={checklist} />
-      {stockFailed ? <LoadError what="some of the stock figures in the checklist" retryHref={`/inventory/manage?company=${companyId}`} /> : null}
-
-      <Panel id="settings" title="Company settings" description={company.name}>
-        <CompanySettings companyId={companyId} companyName={company.legalName && company.legalName !== company.name ? `${company.legalName} (shown as ${company.name})` : company.name} referenceCode={company.referenceCode} isEnabled={company.isEnabled} isFounder={founder} />
-      </Panel>
-
-      <Panel id="locations" title="Locations and bins" description="Where equipment is kept.">
-        <LocationsSection companyId={companyId} locations={locationViews} bins={binViews} isFounder={founder} canEditBins={catalogue} />
-      </Panel>
-
-      <Panel id="categories" title="Categories" description="How the catalogue is grouped.">
-        <CategoriesSection companyId={companyId} categories={(categories.data ?? []).map((c) => ({ id: c.id, name: c.name, parentId: c.parent_id, sortOrder: c.sort_order, isActive: c.is_active }))} itemCounts={itemCounts} canEdit={catalogue} />
-      </Panel>
-
-      <Panel id="counts" title="Opening stock and counts" description="Count a place, review it, and confirm it.">
-        {countsFailed ? <LoadError what="the counts" retryHref={`/inventory/manage?company=${companyId}`} /> : <CountsSection companyId={companyId} rows={counts} startable={startable} showAll={one(sp.counts) === "all"} canSeeCounts={viewStock} />}
-      </Panel>
-
-      <Panel id="custody" title="Record equipment already with employees or on projects" description="Equipment that is already out when Inventory starts.">
-        {viewStock ? <OpeningCustody companyId={companyId} units={custodyDrafts} items={qtyItems} projects={projectOptions} canConfirm={confirmer} /> : <Muted>You do not have stock access, so this is not shown to you.</Muted>}
-      </Panel>
-
-      <Panel id="technologies" title="Technology templates" description="Recipes for what an installation needs: checklists, not stock.">
-        <TechnologiesSection rows={technologyRows} canEdit={catalogue} />
-      </Panel>
-
-      {founder ? (
-        <Panel id="legacy" title="Earlier asset register" description="The HR Assets register that existed before Inventory. Founders only.">
-          {legacyFailed ? <LoadError what="the HR asset register" retryHref={`/inventory/manage?company=${companyId}#legacy`} /> : (
-            <LegacyImport
-              companyId={companyId} rows={legacy} locations={activeLocations.map((l) => ({ id: l.id, label: l.name }))}
-              items={itemRows.filter((i) => i.tracking === "individual" && i.status !== "retired").map((i) => ({ id: i.id, label: itemLabel(i) }))}
-            />
-          )}
-        </Panel>
+      {section === "warehouses" ? (
+        <>
+          <Panel id="locations" title="Warehouses and bins" description={`Where ${company.name} keeps equipment. A warehouse belongs to this company; its bins are inside it.`}>
+            <LocationsSection companyId={companyId} locations={locationViews} bins={binViews} isFounder={founder} canEditBins={catalogue} currentId={working?.id ?? null} />
+          </Panel>
+          <Muted>The company itself (its legal name, reference code and the on/off switch) is a separate record under <Link href={sectionHref("settings")} className="underline underline-offset-2">Administration, Company record</Link>. Next: <Link href={base({ section: "catalogue" })} className="underline underline-offset-2">Catalogue and tracking</Link>.</Muted>
+        </>
       ) : null}
 
-      <Muted>
-        Repairs, missing or found equipment and write-offs are done from the item itself (<Link href="/inventory/stock" className="underline underline-offset-2">Stock</Link>, then the item&apos;s actions). A counted quantity recorded by mistake is corrected from its entry in <Link href="/inventory/history" className="underline underline-offset-2">History</Link>; the original is kept and a new entry names it.
-      </Muted>
-      <Muted>Who can use Inventory is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>. Items and their exact specifications are in the <Link href="/inventory/stock" className="underline underline-offset-2">catalogue</Link>.</Muted>
+      {section === "catalogue" ? (
+        <>
+          <Panel id="items" title="Items and how they are tracked" description="An item is tracked one way, chosen when it is added. The form asks only for what that way needs.">
+            <div className="space-y-4">
+              <ul className="grid gap-2 sm:grid-cols-2">
+                {trackingCounts.map(({ t, n }) => (
+                  <li key={t} className="rounded-md border border-border p-3 text-sm">
+                    <p className="flex flex-wrap items-baseline justify-between gap-2"><span className="font-semibold">{TRACKING_WORDS[t].label}</span><Link href={`/inventory/stock?tracking=${t}&company=${companyId}`} className="tabular-nums underline underline-offset-2">{n} item{n === 1 ? "" : "s"}</Link></p>
+                    <p className="text-muted-foreground">{TRACKING_WORDS[t].help}</p>
+                  </li>
+                ))}
+              </ul>
+              {catalogue ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <QuickAddItem companies={[{ id: companyId, name: company.name, categories: (categories.data ?? []).filter((c) => c.is_active).map((c) => ({ id: c.id, label: c.name })) }]} />
+                  <span className="text-sm text-muted-foreground">It is added to {company.name}. You are then taken to the item, where Receive stock already names it.</span>
+                </div>
+              ) : <Muted>Catalogue rights are needed to add or change items.</Muted>}
+              {itemRows.length === 0 ? <Muted>No items yet. Add the first item, then go to Getting stock in.</Muted> : facts.draftItems > 0 ? <Muted>{facts.draftItems} item{facts.draftItems === 1 ? " is a draft" : "s are drafts"}: stock cannot be received for a draft until it is put in use from the item itself.</Muted> : null}
+            </div>
+          </Panel>
+          <Panel id="categories" title="Categories" description="How the catalogue is grouped.">
+            <CategoriesSection companyId={companyId} categories={(categories.data ?? []).map((c) => ({ id: c.id, name: c.name, parentId: c.parent_id, sortOrder: c.sort_order, isActive: c.is_active }))} itemCounts={itemCounts} canEdit={catalogue} />
+          </Panel>
+          <Panel id="technologies" title="Technology templates" description="Recipes for what an installation needs: checklists, not stock.">
+            <TechnologiesSection rows={technologyRows} canEdit={catalogue} />
+          </Panel>
+          <Muted>Next: <Link href={base({ section: "stock" })} className="underline underline-offset-2">Getting stock in</Link>.</Muted>
+        </>
+      ) : null}
+
+      {section === "stock" ? (
+        <>
+          <Panel id="ways-in" title="Getting stock in" description="Three ways stock enters Inventory. Each one is recorded against one company and one warehouse.">
+            <ul className="space-y-3 text-sm">
+              <li className="rounded-md border border-border p-3">
+                <p className="font-semibold">New stock arrives (bought or rented)</p>
+                <p className="text-muted-foreground">Receive stock records it on the shelf and gives individual items their IDs and labels.{working ? ` It opens with ${working.label} already chosen.` : ""}</p>
+                {activeLocations.length === 0 ? <p className="mt-2 text-muted-foreground">Add a warehouse first, under <Link href={sectionHref("locations")} className="underline underline-offset-2">Warehouses and bins</Link>.</p>
+                  : <Link href={`/inventory/stock?action=receive${working ? `&location=${working.id}` : ""}`} className={cn(buttonVariants({ size: "sm" }), "mt-2 h-11 sm:h-8")}>Receive stock{working ? ` at ${workingWarehouse!.name}` : ""}</Link>}
+              </li>
+              <li className="rounded-md border border-border p-3">
+                <p className="font-semibold">Stock that was already on the shelves when Inventory started</p>
+                <p className="text-muted-foreground">Count it once in an opening stock count. Nothing counts as stock until a person allowed to confirm stock confirms it.</p>
+                <Link href={sectionHref("counts")} className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2 h-11 sm:h-8")}>Opening stock and counts</Link>
+              </li>
+              <li className="rounded-md border border-border p-3">
+                <p className="font-semibold">Equipment that was already with people or on projects</p>
+                <p className="text-muted-foreground">Record it where it is, without bringing it back to the warehouse first.</p>
+                <Link href={sectionHref("custody")} className={cn(buttonVariants({ size: "sm", variant: "outline" }), "mt-2 h-11 sm:h-8")}>Equipment already out</Link>
+              </li>
+            </ul>
+          </Panel>
+          <GettingStarted checklist={{ ...checklist, steps }} />
+          {stockFailed ? <LoadError what="some of the stock figures in the checklist" retryHref={`/inventory/manage?company=${companyId}&section=stock`} /> : null}
+        </>
+      ) : null}
+
+      {section === "admin" ? (
+        <>
+          <Muted>Things needed now and then. Each one says what it changes before you confirm it.</Muted>
+          <Panel id="settings" title="Company record" description={`${company.name}: the company's legal record for Inventory. Warehouses and bins are set up separately.`}>
+            <dl className="mb-5 divide-y divide-border rounded-md border border-border text-sm" data-testid="company-record">
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Legal name</dt><dd className="break-words font-medium">{company.legalName || company.name}</dd></div>
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Shown in Inventory as</dt><dd className="break-words">{company.name}<span className="block text-[13px] text-muted-foreground">The short name is worked out from the company&apos;s country and is only how selectors and screens say it. Documents and this record keep the legal name; neither can be changed here.</span></dd></div>
+            </dl>
+            <CompanySettings companyId={companyId} companyName={company.legalName && company.legalName !== company.name ? `${company.legalName} (shown as ${company.name})` : company.name} referenceCode={company.referenceCode} isEnabled={company.isEnabled} isFounder={founder} />
+          </Panel>
+
+          <Panel id="sharing" title="Sharing equipment between companies" description="Which other companies may hold or use this company's equipment.">
+            <div className="space-y-2 text-sm">
+              <p className="text-muted-foreground">Allowing a company lets its warehouses receive transfers of {company.name}&apos;s equipment, and lets that equipment be used there. It never changes who owns it. Stopping it blocks new transfers; equipment already sent can still be received and tracked.</p>
+              <p>A founder of {company.name} allows or stops it under <Link href="/people-access" className="font-medium underline underline-offset-2">People &amp; Access, Company settings</Link>, where the companies currently allowed are listed.</p>
+            </div>
+          </Panel>
+
+          <Panel id="counts" title="Opening stock and counts" description="Count a place, review it, and confirm it.">
+            {countsFailed ? <LoadError what="the counts" retryHref={`/inventory/manage?company=${companyId}&section=admin`} /> : <CountsSection companyId={companyId} rows={counts} startable={startable} showAll={one(sp.counts) === "all"} canSeeCounts={viewStock} defaultLocationId={working?.id ?? null} />}
+          </Panel>
+
+          <Panel id="custody" title="Record equipment already with employees or on projects" description="Equipment that is already out when Inventory starts.">
+            {viewStock ? <OpeningCustody companyId={companyId} units={custodyDrafts} items={qtyItems} projects={projectOptions} canConfirm={confirmer} /> : <Muted>You do not have stock access, so this is not shown to you.</Muted>}
+          </Panel>
+
+          <Panel id="corrections" title="Corrections" description="Putting a record right. Nothing is deleted: a correction is a new entry that names the one it corrects.">
+            <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+              <li>A counted quantity recorded by mistake: open its entry in <Link href="/inventory/history" className="underline underline-offset-2">History</Link> and use Correct this entry (people who may confirm stock).</li>
+              <li>Missing, found or written-off equipment, repairs and inspections: open the item or unit in <Link href="/inventory/stock" className="underline underline-offset-2">Stock</Link> and use its actions.</li>
+              <li>A difference found while counting: a cycle count above records it with a reason when it is confirmed.</li>
+            </ul>
+          </Panel>
+
+          {founder ? (
+            <Panel id="legacy" title="Earlier asset register" description="The HR Assets register that existed before Inventory. Founders only.">
+              {legacyFailed ? <LoadError what="the HR asset register" retryHref={`/inventory/manage?company=${companyId}&section=admin#legacy`} /> : (
+                <LegacyImport
+                  companyId={companyId} rows={legacy} locations={activeLocations.map((l) => ({ id: l.id, label: l.name }))}
+                  items={itemRows.filter((i) => i.tracking === "individual" && i.status !== "retired").map((i) => ({ id: i.id, label: itemLabel(i) }))}
+                />
+              )}
+            </Panel>
+          ) : null}
+        </>
+      ) : null}
+
+      <Muted>Who can use Inventory is managed under <Link href="/people-access" className="underline underline-offset-2">People & Access</Link>.</Muted>
       {sheet}
     </div>
   );
 }
+
+const SECTIONS = [["warehouses", "Warehouses and bins"], ["catalogue", "Catalogue and tracking"], ["stock", "Getting stock in"], ["admin", "Administration"]] as const;
+type SectionId = (typeof SECTIONS)[number][0];
+/** Which group each part of Setup lives in (a link to `#counts` has to open Administration first). */
+const ANCHOR_SECTION: Record<string, SectionId> = {
+  locations: "warehouses", items: "catalogue", categories: "catalogue", technologies: "catalogue", "getting-started": "stock", "ways-in": "stock",
+  settings: "admin", sharing: "admin", counts: "admin", custody: "admin", corrections: "admin", legacy: "admin",
+};
