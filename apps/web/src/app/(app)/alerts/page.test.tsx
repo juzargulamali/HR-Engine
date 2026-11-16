@@ -17,9 +17,14 @@ let grants: { role: string; companyId: string | null; countryCode: string | null
 vi.mock("@/lib/supabase/server", () => ({ createClient: async () => fakeSupabase(tables, rpcs) }));
 vi.mock("@/lib/auth/session", () => ({ getCurrentSession: async () => ({ userId: "u1", employeeId: "e1", email: null, fullName: "Hana", grants }) }));
 
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import AlertsPage from "./page";
 
-const day = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
+// The page judges "today" in the business time zone (Dubai by default), not UTC. Count days from that same date, or the expected wording is a day out between 20:00 and 24:00 UTC.
+const day = (n: number) => {
+  const [y, m, d] = getBusinessDateString(resolveCountryTimeZone(null)).split("-").map(Number);
+  return new Date(Date.UTC(y!, m! - 1, d! + n)).toISOString().slice(0, 10);
+};
 const render = async (sp: Record<string, string> = {}) => renderToStaticMarkup(await AlertsPage({ searchParams: Promise.resolve(sp) }));
 
 beforeEach(() => {
