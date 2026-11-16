@@ -321,3 +321,17 @@ No capability, role, grant or policy was added or changed. The new database func
 | `inv_check_condition` (unchanged: the inspection that clears a damaged or held unit) | A warehouse operator at that location, or a founder | Refused. Open owner decision: `modules/inventory.md` section 10 |
 
 `inv_request_runs` is readable through `inv_can_see_request` and has no write policy. Company names in the Inventory selectors are display names worked out from the company's country; nothing about access depends on them (`modules/inventory.md` section 2).
+
+## Inventory Phase 2 (2026-11-16; Inventory Phase 2, branch `claude/inventory-phase-2` (from `main` `2059b4b`, `d5754d1` merged in): **not merged, no pull request opened by Claude, required CI not yet run on this head, no SQL (nothing to apply to the hosted database), Production not deployed from this branch**)
+
+**No permission changed.** No migration, function, policy or grant was added or altered; every write is still decided by the same database functions. What changed is what the screens offer and what they read, each through a right the person already had:
+
+| Screen | What it reads now | Through which existing right | Source |
+|---|---|---|---|
+| Today, a transfer from another company on its way to a warehouse the person operates | The transfer's code, both warehouses and companies, how many lines were sent and are still in transit | `inv_xshare_transfers`, which already listed it for the receiving warehouse's operators (they could already receive it from Stock) | `apps/web/src/lib/inventory/transfer-data.ts:112`; `20261218000100_inv_cross_company_receiving.sql:124` |
+| The transfer record, between companies | As before | `inv_xshare_transfer_trace`: the owner or sender side and the receiving warehouse's operators; anyone else "not found" | `transfer-data.ts:92` |
+| The transfer record, inside one company (new page for these) | The transfer, its movements and lines, the units and counted stock still in transit | Row level security on `inv_transfers`, `inv_movements`, `inv_movement_lines`, `inv_units`, `inv_balances`: people who may view that company's stock | `transfer-data.ts:21` |
+| Company names of other companies | The short name worked out from the country | The company directory every signed-in person may read (`companies_select`) | `apps/web/src/lib/inventory/context.ts:99-103` |
+| History, the other end of a transfer between companies | That warehouse's name and company | `inv_xshare_transfers` and `inv_xshare_destinations` (transfers the person is a party to; warehouses their company may send to) | `xshare-data.ts:84` |
+
+Buttons are offered as before: stock actions to people who may operate stock (`canOperateAnyStock`), **Receive this transfer** only to someone who may operate the receiving warehouse (`canOperateLocation`), Setup changes by the right each function checks. Driven refusals in `inventory-phase2-flow.mjs`: the sender calling `inv_transfer_receive` at another company's warehouse; a person without Inventory access calling `inv_xshare_transfer_trace`; the database refusing to give out a damaged unit; an employee calling `inv_save_bin`. Roles and capabilities are otherwise as in the sections above; the per-action table is `modules/inventory-action-catalogue.md`.
