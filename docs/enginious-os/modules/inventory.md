@@ -1,6 +1,8 @@
-# Inventory: module reference (Phase 1: one project equipment job)
+# Inventory: module reference
 
-**Status (2026-11-16).** Written for **Inventory Phase 1** on branch `claude/inventory-phase-1` (from `main` `fd36b84`): **merged as PR #101, merge `2059b4b`, pinned to head `7338a88`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; hosted migration `20270114000100` applied with verify rows 1 to 7 `OK`, preflight passed and the real-phone walkthrough passed (all owner-reported 2026-11-16, not run by Claude); Production: Ready and Current on `2059b4b` in Vercel (owner-confirmed 2026-11-16; not verified by Claude)**. Code read and run locally at the branch head; nothing hosted was touched by Claude. This file documents, against the implementation, **only the paths Phase 1 touches**. Everything in section 9 is deliberately **not yet documented in detail** (Phase 2).
+**Status (2026-11-16), Inventory Phase 2.** The whole module is now documented: this file (the module's shared facts and the project equipment job), [`inventory-workflows.md`](./inventory-workflows.md) (every other workflow), [`inventory-coverage-index.md`](./inventory-coverage-index.md) (67 screens and parts, each with its evidence) and [`inventory-action-catalogue.md`](./inventory-action-catalogue.md) (54 actions). Phase 2 is on branch `claude/inventory-phase-2` (from `main` `2059b4b`, with `main` `d5754d1` merged in): **not merged, no pull request opened by Claude, required CI not yet run on this head, no SQL in this phase (nothing to apply to the hosted database), Production not deployed from this branch.** Code read and run locally at the branch head; nothing hosted was touched by Claude. What Phase 2 changed is in section 9 and, row by row, in `inventory-workflows.md` section 16.
+
+**Status of Phase 1 (history, as reconciled by PR #102).** Written for **Inventory Phase 1** on branch `claude/inventory-phase-1` (from `main` `fd36b84`): **merged as PR #101, merge `2059b4b`, pinned to head `7338a88`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; hosted migration `20270114000100` applied with verify rows 1 to 7 `OK`, preflight passed and the real-phone walkthrough passed (all owner-reported 2026-11-16, not run by Claude); Production: Ready and Current on `2059b4b` in Vercel (owner-confirmed 2026-11-16; not verified by Claude)**. Code read and run locally at the branch head; nothing hosted was touched by Claude. Sections 1 and 3 to 6 below document, against the implementation, the paths Phase 1 touched; they are current, with the label changes of Phase 2 noted where they apply.
 
 Paths are relative to the repository root; `web/` means `apps/web/src/`. Migration `P1` means `supabase/migrations/20270114000100_inv_phase1_job_flow.sql`.
 
@@ -19,9 +21,10 @@ One project equipment job that is easy to complete from **Sales availability che
 
 * The country rule is the one the app already used for the three companies: the Sales chat groups (UAE = AE, KSA = SA, Europe = the one European company, `docs/chat-deployment.md`) and the follow-up time zones (`20270112000500_crm_follow_up_time_zone.sql`).
 * **Which hosted company carries which legal name is not known to Claude** (Claude cannot read the hosted database); the owner reported on 2026-11-16 that the preflight passed, including the three Inventory company labels. The owner pack's preflight prints every active company with its legal name, country and the short name it will get (`supabase/manual-sql/inv_phase1_job_flow_00_preflight_readonly.sql`, row 8).
-* The legal name stays in **Inventory setup, company settings** ("<legal name> (shown as <short name>)", `web/app/(app)/inventory/manage/page.tsx`) and on documents (dispatch and return notes are frozen payloads made in SQL and are untouched).
+* The legal name stays in **Inventory setup, Administration, Company record** (since Phase 2 shown as "Legal name" beside "Shown in Inventory as", `web/app/(app)/inventory/manage/page.tsx`) and on documents (dispatch and return notes are frozen payloads made in SQL and are untouched).
 * **No reset is needed and none is prepared.** A display fix was enough: no Inventory table, setting or record was changed or deleted.
-* Sales (`web/lib/crm/active-company.ts`), Projects and Operations (`web/lib/operations/company.ts`) still show legal names. Only the Inventory selectors and screens use the short names in this phase (see section 10, open decisions).
+* Sales (`web/lib/crm/active-company.ts`), Projects and Operations (`web/lib/operations/company.ts`) still show legal names. Only the Inventory selectors and screens use the short names (see section 10, open decisions).
+* **Phase 2:** the short name is also used for a company the person holds no grant for (the owner of received equipment, the other side of a transfer), so a transfer never shows a legal name on one side and a short name on the other (`web/lib/inventory/context.ts:99-103`, `xshare-data.ts:21`). A warehouse is named with its company ("Dubai · Enginious UAE") whenever the person works with more than one company, and always on a transfer (`ctx.placeName`, `context.ts:112`): the same city can be a warehouse of two companies, and they stay separate records.
 
 Selector as built (`web/components/inventory/warehouse-bar.tsx`): with more than one company the person chooses the **company** first, then a **warehouse inside it**; with one company there is the warehouse chooser only, with the company named beside it. The choice is kept in the address (`?location=`) and remembered in a cookie (`inv_warehouse`); the database checks the location on every movement (`inv_loc`). Today shows "<company> · <warehouse>" under its heading (`web/app/(app)/inventory/page.tsx:83`) and the job shows it in its header (`web/components/inventory/workspace/workspace-header.tsx`).
 
@@ -57,7 +60,7 @@ No dependency was added. Libraries already installed and reused: `jsqr` (camera 
 | Row button **Prepare equipment** | Opens the job at Prepare | anyone who sees the row | `requestRow` |
 | Row button **Pick items** / **Send equipment** / **Receive return** | Opens the job at that step. Offered only to people who may operate stock (`canOperateAnyStock`); the row's title is still a link | warehouse operators, founders | `today-row.tsx` |
 | Row button **Check availability** | The existing record-the-check dialog (`inv_record_opportunity_check`) | warehouse, catalogue managers, founders | `record-check-button.tsx` |
-| Row button **Check it** (held unit) | Opens the unit on Stock, where the existing Check condition records the inspection | warehouse operators | `heldRows` |
+| Row button **Inspect** (held unit; "Check it" before Phase 2) | Opens the unit on Stock, where **Inspect** is the first button and records the inspection (`inv_check_condition`) | warehouse operators | `heldRows` |
 
 A request row's next action: something reserved is unsent and the leave date has come: **Pick items** while part of it is not picked, then **Send equipment**; else a line still has something to reserve: **Prepare equipment**; else something reserved is unsent: Pick, then Send. On a database without `P1` there is no pick step and a request goes from reserved to Send, as before (`pickInstalled`, `web/lib/inventory/planning-data.ts:183`).
 
@@ -132,67 +135,78 @@ Run problems (derived): `not_submitted`, `short`, `not_sent`, `partly_sent`, `le
 | Equipment that stays out across runs stays on the same custody record | Linking runs changes no stock; there is one dispatch line per unit and one project balance | same file, and the browser walkthrough |
 | Permissions on every write and direct read | Each function checks inside the database; tables have read policies only | same file (Sales, Project Manager, member, Warehouse, another location's operator, Operations, another company, an outsider) |
 
-## 7. Coverage index (Phase 1 paths)
+## 7. Coverage index
 
-Numbering is local to this file (`INV-nn`). Status `Driven` = driven signed in on the isolated stack by `apps/web/os-shell-checks/inventory-phase1-flow.mjs`; `Read` = code read and unit tested, not driven.
+Moved to [`inventory-coverage-index.md`](./inventory-coverage-index.md): the whole module, 67 entries. The Phase 1 rows keep their numbers (`INV-01` to `INV-17`).
 
-| # | Screen or part | Route | Reference | Status |
-|---|---|---|---|---|
-| INV-01 | Today: company and warehouse bar | `/inventory` | 2, 4.1 | Driven (one company, two warehouses); the two-select form for several companies is `Read` |
-| INV-02 | Today: Do now / Coming up / Waiting on someone else | `/inventory` | 4.1 | Driven |
-| INV-03 | Today: Sales check row and its dialog | `/inventory` | 4.1 | Driven |
-| INV-04 | Today: held unit row | `/inventory` | 4.1 | Driven (row); the Check it panel on Stock is Phase 2, not driven |
-| INV-05 | Job workspace header and site runs | `/inventory/requests/[id]` | 4.2 | Driven |
-| INV-06 | Job: Prepare, Reserve dialog with a shortage | `?step=prepare` | 4.2 | Driven |
-| INV-07 | Job: Pick | `?step=pick` | 4.2 | Driven (typed codes); the camera is `Read` |
-| INV-08 | Job: Send | `?step=send` | 4.2 | Driven |
-| INV-09 | Job: Receive | `?step=back` | 4.2 | Driven |
-| INV-10 | Uncertain save: check, then send again | Pick, Send, Receive | 4.2 | `Read` (component tests) |
-| INV-11 | Project Equipment: Availability check from Sales | `/projects/[id]/equipment` | 4.3 | Driven |
-| INV-12 | Project Equipment: Equipment by site run | `/projects/[id]/equipment` | 4.3 | Driven |
-| INV-13 | Request: Send to Warehouse, dates and site runs | `/projects/[id]/equipment`, `/inventory/requests?open=` | 4.3 | Driven on the project page; the side panel is `Read` |
-| INV-14 | Sales enquiry: Warehouse stock check card | `/sales/opportunities` panel | 4.4 | Driven |
-| INV-15 | Project Plan: supply route, Match to stock | `/projects/[id]/delivery` | 4.5 | `Read` (component tests); not driven in this pass |
-| INV-16 | Operations Overview: Equipment by site run | `/operations` | 4.5 | Driven |
-| INV-17 | Inventory setup: company settings name | `/inventory/manage` | 2 | `Read` |
+## 8. Action catalogue
 
-Total: 17 entries.
+Moved to [`inventory-action-catalogue.md`](./inventory-action-catalogue.md): the whole module, 54 actions. The nine Phase 1 actions keep their ids. A documented function is not an approved tool: JARVIS cannot read or change Inventory (section 12).
 
-## 8. Action catalogue (Phase 1 actions that change data)
+## 9. The whole module: where each area is documented
 
-A documented function is not an approved tool. JARVIS does not read or change Inventory.
+| Area | Where it lives | Reference | Changed in Phase 2 |
+|---|---|---|---|
+| Today | `/inventory` | section 4.1; transfers on Today: `inventory-workflows.md` 4.4 | Transfers from another company appear for the receiving warehouse; transfers sent from here wait under Waiting on someone else; the held row's button reads Inspect |
+| Stock, the item, the unit | `/inventory/stock`, `?open=`, `?unit=` | `inventory-workflows.md` 2 | Transfer stock above the list; held or damaged badge; where, who, available, next on the unit; Inspect first; actions carry the item and the warehouse |
+| History | `/inventory/history` | `inventory-workflows.md` 13 | The real source and destination of a transfer; warehouses named with their company; the transfer linked from the entry |
+| Setup | `/inventory/manage` | `inventory-workflows.md` 12 | Four groups; company and working warehouse carried; effects said before confirming |
+| Catalogue and tracking | Setup, Catalogue and tracking; the item panel | `inventory-workflows.md` 2.1, 12 | Add item from Setup with the company carried |
+| Warehouses and bins | Setup, Warehouses and bins | `inventory-workflows.md` 12 | Add bins on the warehouse's row; the working warehouse first |
+| Ownership and sharing | People & Access, Company settings; pointer in Setup, Administration | `inventory-workflows.md` 4.5 | Short company names for other companies; the pointer; the effect line on the form |
+| Standalone owned and rented intake | `?action=receive` | `inventory-workflows.md` 3 | The item and the warehouse carried; the link to Add item when the item is missing |
+| Transfers and receiving | `?action=transfer`, `/inventory/transfers/[id]` | `inventory-workflows.md` 4 | The transfer record for every transfer; receiving against it with sent, received and still in transit; nothing assumed to have arrived |
+| Employee requests and custody | `/inventory/requests`, `?action=issue|return`, With people, My equipment | `inventory-workflows.md` 5 | Reserved units, the holder and the remainder carried; result lines |
+| Project requests and site runs | the job workspace, the project's Equipment tab | sections 3, 4.2, 4.3, 5 | none |
+| Sales availability | the enquiry's Warehouse stock check card; Today | sections 3, 4.4 | none |
+| Reserve, pick, dispatch, return | the job workspace | sections 3, 4.2, 6 | Labels only (Receive return, Inspect) |
+| Damage and inspections | Today, Stock, the unit | `inventory-workflows.md` 7 | Visibly unavailable on Stock and the unit; Inspect has its own address |
+| Repairs, adjustments, corrections | More actions; History | `inventory-workflows.md` 8 | Setup, Administration says where each correction is made |
+| Counts and opening stock | Setup, Administration | `inventory-workflows.md` 11 | The working warehouse preselected; the effect said before starting and before confirming equipment already out |
+| Kits | the kit unit's More actions | `inventory-workflows.md` 9 | none |
+| Labels and QR | `/inventory/labels`, `/inventory/scan` | `inventory-workflows.md` 10 | none |
+| Dispatch and return notes | the project's Equipment tab, Today, History | `inventory-workflows.md` 14 | none (documented as they behave; the switch has no screen) |
+| Legacy import | Setup, Administration (founders) | `inventory-workflows.md` 15 | none (documented as it behaves) |
 
-| Id | Action | Function | Permitted | Starting state | Changes | Retry | Stop and ask |
-|---|---|---|---|---|---|---|---|
-| `inventory.check.ask` | Ask the warehouse to check | `inv_request_opportunity_check` | enquiry owner, Sales founder | open enquiry | one pending check, optional warehouse | safe: one pending check per enquiry | never reserves; do not present as a booking |
-| `inventory.check.record` | Check availability | `inv_record_opportunity_check` | warehouse, catalogue manager, founder | an enquiry of the company | a dated check with covers and summary | a second record supersedes the first | none |
-| `inventory.request.set_runs` | Save the dates and site runs | `inv_save_request_plan` or `inv_change_request_window`, `inv_set_request_runs` | Project Manager, acting PM, Projects founder, warehouse | request not cancelled or closed | plan dates, window; run links | safe: the list is replaced | a date change on a reserved request reports lines that could not move |
-| `inventory.request.send_to_warehouse` | Send to Warehouse | `inv_submit_request` | same | draft with a line and dates | `draft` to `submitted` | refused on a stale version | none |
-| `inventory.request.reserve` | Reserve | `inv_reserve` | warehouse operator at the location, founder | submitted or in progress | reservations; shortage mark | not idempotent by key: re-read the line first | a shortage needs a buy or rent decision |
-| `inventory.request.pick` | Pick items | `inv_pick_for_request` | warehouse operator at the location, founder | submitted or in progress, reserved and unsent | picked quantity only | idempotent by key; check before retry | a damaged or missing unit is refused: reserve another |
-| `inventory.request.send` | Send equipment | `inv_dispatch_to_project` | same | reserved for the request | one movement, custody to the project | idempotent by key; check before retry | never send unreserved stock against a request |
-| `inventory.request.receive` | Receive return | `inv_return_from_project` | same | held by the project | one movement; condition per line | idempotent by key; check before retry | a condition is never assumed |
-| `inventory.unit.inspect` | Check it (clear a held unit) | `inv_check_condition` | warehouse operator at the location, founder | held in a warehouse | condition; one movement | idempotent by key | see section 10, decision 1 |
-
-Total: 9 actions.
-
-## 9. Deliberately not documented in detail yet (Phase 2)
-
-Standalone receipts (Receive stock, owned or rented); employee issue and return (Give equipment, With people, My equipment, employee requests); warehouse transfers and cross-company receiving; Stock (list, item and unit panels, labels, kits, repairs, adjustments, corrections); History; Setup (catalogue, technologies, locations and bins, sharing, opening stock, counts); dispatch and return notes; the legacy asset import. Their existing behaviour is summarised in `04-flows-sales-to-warehouse-and-others.md` section 2 and in `docs/inventory-simplification.md`; they are unchanged by Phase 1 except for the labels named in section 4.
+What users enter fewer times, and what changed in Setup, are listed in `06-change-log.md` (entry of 2026-11-16, Inventory Phase 2).
 
 ## 10. Open decisions for the owner
 
-1. **Who may clear a damaged unit.** Kept as it was: any warehouse operator at that warehouse, or a founder (`inv_check_condition`). Option: only people who hold "confirm stock", or founders.
-2. **Does a short reservation need approval.** Kept as it was: no approval; the warehouse marks the rest to buy or to rent and the row waits on the buyer or the person arranging the rental.
-3. **Is a pick required before sending.** Not required by the database (the build deployed today sends without one, and must keep working). The screens lead Pick, then Send. Option: refuse a dispatch of unpicked equipment once every user is on the Phase 1 build.
+Kept from Phase 1 (the existing rule is still in place for each):
+
+1. **Who may clear a damaged unit.** Any warehouse operator at that warehouse, or a founder (`inv_check_condition`). Option: only people who hold "confirm stock", or founders.
+2. **Does a short reservation need approval.** No approval; the warehouse marks the rest to buy or to rent and the row waits on the buyer or the person arranging the rental.
+3. **Is a pick required before sending.** Not required by the database. The screens lead Pick, then Send. Option: refuse a dispatch of unpicked equipment.
 4. **Short names outside Inventory.** Sales, Projects and Operations still show legal names. Option: use the same display names there.
-5. **Sales naming a warehouse.** Sales now sees the names of its own company's warehouses when asking. Sales sees no stock level and no warehouse of another company; a cross-border check is not offered.
-6. **Cross-border jobs.** A request is raised in the project's company; equipment owned by another company is used only through the existing sharing switch. No cross-border company and warehouse pair was added to the request form in this phase.
+5. **Sales naming a warehouse.** Sales sees the names of its own company's warehouses when asking, no stock level, and no warehouse of another company.
+6. **Cross-company sourcing on a project request.** A request is raised in the project's company and reserves that company's warehouses; equipment owned by another company can serve it only after it has been **transferred** to one of those warehouses under the existing sharing switch. A request line that names another company's warehouse directly is **not built**. This is a separate workflow from a warehouse transfer and was left as it is in Phase 2. Options: (a) keep it (transfer first, then reserve); (b) let the request form offer authorised warehouses of other companies, which needs a decision on who approves the use, whose stock count it reduces and which company the dispatch is filed under.
+
+New in Phase 2:
+
+7. **The two warehouses called Dubai and the two called Riyadh (hosted, owner-reported).** They are separate records under different companies and Phase 2 keeps them so: nothing was moved, merged or renamed, and every transfer screen now names the company beside the city. **Proposal, not done:** if the Dubai and Riyadh records under Enginious Europe are not real places that company runs (for example, they were made to hold another company's stock before cross-company receiving existed), the owner can either rename them to say what they are (for example "Dubai: Europe cage") in Setup, or empty them by transferring their stock to the right company's warehouse and then switch them off. A location cannot be moved to another company, and stock ownership is never changed by a transfer. Which it is cannot be read from the code: the hosted records are the owner's to inspect (the Phase 1 preflight lists them).
+8. **Receiving everything at once.** Phase 2 stopped preselecting "everything arrived". Receiving everything is still one choice and keeps each line's recorded condition. Option: require a condition per line on every receipt (slower, never assumes the condition sent).
+9. **Who may see a transfer between companies on Today.** The receiving warehouse's operators now see an incoming transfer from another company on Today (they could already receive it from Stock). No right was added: it comes from the function that already listed it for them.
+10. **The dispatch and return notes switch.** Off by default and there is no screen for it. Option: add a founder switch to Setup, Administration.
+11. **Remembering a warehouse chosen inside a form.** The remembered warehouse changes only when the person uses the bar at the top of Today or Stock. Option: remember the last warehouse chosen in a form too.
 
 ## 11. Verification (local; nothing hosted)
 
+Phase 2, at the branch head:
+
+* Browser: `apps/web/os-shell-checks/inventory-phase2-flow.mjs` (seed `seed/inventory-phase2.sh`), **29 of 29**: (i) at 390 px a transfer between two companies whose warehouses are both called Dubai, a partial receipt with one unit damaged, a retried receipt posting once, the remainder on reopening, custody, owner and History checked against the database, both sides reading the same record; (ii) Give equipment, a partial return with one item damaged, the holder, returned and available quantities compared across With people, Stock, the unit, My equipment, History and the database, then Inspect; (iii) Setup at 390 px and 1366 px. Separate sessions for the sending technician, the receiving founder, a person with two companies, an employee.
+* Re-run on this build because Phase 2 touches the same screens: `inventory-phase1-flow.mjs` **21 of 21**; `inventory-transfer-location-flow.mjs` **21 of 21** (its strings were updated to the new labels and the new transfer record).
+* Web: typecheck, lint and the full unit suite (see `05-data-tests-and-release-ledger.md` section B for the counts at this head). New or extended: `transfer-view.test.ts`, `movement-form.test.tsx`, `transfers/[id]/page.test.tsx`, `manage/page.test.tsx`, `stock-movements.test.ts`.
+* Database: no migration and no function changed, so no RLS file was added or re-run. The stock rules of section 6 are those proved in Phase 1; the retry and the two refusals above were driven through the real functions.
+* Deployed-app compatibility: there is no schema change, so the deployed build and this build run on the same database in either order.
+* Not verified: anything hosted; a real phone; a real camera scan; the paths named in `inventory-coverage-index.md` section 8; the browser checks listed there as not re-run.
+
+Phase 1 (history):
+
 * `packages/rls-tests/test/inventory_phase1_job_flow.rls.test.ts`: 17 tests on a database built from every migration, with real parallel connections.
 * Web unit and component tests: `company-display.test.ts`, `today.test.ts`, `workspace-phase1.test.ts`, `runs.test.ts`, `pick-step.test.tsx`, `steps.test.tsx`, `request-view.test.tsx`, `sales-card.test.tsx`, `delivery-plan-view.test.tsx`, the Today page test.
-* Browser: `apps/web/os-shell-checks/inventory-phase1-flow.mjs` (seed `seed/inventory-phase1.sh`), 21 steps, separate sessions for Sales, the Project Manager, a technician at 390 px and Operations.
+* Browser: `apps/web/os-shell-checks/inventory-phase1-flow.mjs` (seed `seed/inventory-phase1.sh`), 21 steps.
 * Deployed-app compatibility: the `fd36b84` build on the new schema ran its own `inventory-workspace-flow.mjs` 23 of 23; the Phase 1 build on a database without the migration loaded Today, the job, the project Equipment tab, Requests, Stock and Operations and sent equipment (4 of 4).
-* Not verified: anything hosted; a real phone; a real camera scan; a person with grants in several companies in a browser; the Project Plan screens in a browser in this pass.
+
+## 12. JARVIS and Inventory
+
+JARVIS has **no live access** to Inventory: it cannot read stock, a request, a transfer, a movement or who holds what, and it cannot change anything (`web/lib/jarvis/assistant.ts:67`: "I cannot read or change Inventory…", with links to Inventory and My equipment; `web/lib/jarvis/runtime.ts:24`: no Inventory action is registered and no grant passes for one). What it can do is **explain**: it answers "how do I" questions from the published staff guidance (`docs/enginious-os/staff-guidance/inventory.md`, 12 topics since Phase 2) and says which screen to open. Phase 2 granted nothing new. The full statement, with the list of future capability proposals, is in [`jarvis.md`](./jarvis.md) section 17 and [`jarvis-rulebook.md`](./jarvis-rulebook.md) section 9.

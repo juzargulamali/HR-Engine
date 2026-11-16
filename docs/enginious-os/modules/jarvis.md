@@ -392,3 +392,51 @@ Source: `packages/domain/src/crmStages.ts` (`CRM_SOURCES`); `apps/web/src/lib/ja
 * **What JARVIS may do, send and store is unchanged.** `jarvis_create_enquiry` still calls `crm_create_opportunity`, which is not replaced, and keeps its own ledger keyed by the confirmation: a repeat returns the original result. It neither needs nor uses the form's submission identifier (`modules/sales-enquiries.md` section 10.1).
 * **Times.** JARVIS still converts the next action of a new enquiry and a meeting's follow-up on the Dubai clock, and labels the time "Time (Dubai)"; its lists and summaries are worded in Dubai dates. For a company on another zone the saved moment is then shown on that company's clock everywhere else in Sales. JARVIS stays on the Dubai clock in this release (owner decision, 2026-11-15; ledger decision 26).
 * JARVIS has no action for the handover's site contact, the outreach contact, the Operations question notice or the follow-up time zone. The rulebook (`jarvis-rulebook.md`) is unchanged.
+
+## 17. JARVIS and Inventory (2026-11-16; Inventory Phase 2 on branch `claude/inventory-phase-2`: not merged, required CI not yet run on this head, no SQL, Production not deployed from this branch)
+
+Verified in the code at the branch head. **Inventory Phase 2 grants JARVIS nothing new**: no read, no action, no data sent to the provider.
+
+### 17.1 What JARVIS can do with Inventory today
+
+| | What happens | Source |
+|---|---|---|
+| **Read** | Nothing. There is no approved Inventory read: JARVIS cannot see stock levels, where a unit is, who holds what, a request, a reservation, a transfer, a movement, a count or a cost. A request to look something up in Inventory ("show me the stock in Dubai") is routed to the unsupported answer: "I cannot read or change Inventory: JARVIS has no live access to that module yet. My live lookups cover Sales & CRM only. Open the screen instead.", with links to Inventory and My equipment | `web/lib/jarvis/router.ts:69` (the `inventory` area); `assistant.ts:67`; `classifier.ts:20` (the other-modules rule) |
+| **Act** | Nothing. No Inventory action is registered, and the module checker answers `false` for every module but Sales, so no grant can ever pass for an Inventory action | `web/lib/jarvis/runtime.ts:24-25`; `types.ts:8` (the module id exists; nothing uses it) |
+| **Explain** | Yes. A single how-to question ("How do I receive a transfer?", "Where do I see who has it?") is answered from the published staff guidance, with the steps and a link to the screen. The other-modules rule is relaxed only for a one-line how-to question; nothing is read from Inventory to answer it | `classifier.ts:35-44` (`HOW_TO`); `help/guidance.ts`, `help/match.ts`; `docs/enginious-os/staff-guidance/inventory.md` |
+| **What can I do here?** | On an Inventory screen JARVIS answers from the guidance topics written for that screen (`screens`), or says there is no approved guidance for it | `help/screens.ts`; the guidance test checks every `screens` entry against the app's real pages |
+
+### 17.2 The Inventory guidance JARVIS answers from (12 topics, all `published`: four that existed, eight new)
+
+| Topic id | For |
+|---|---|
+| `inventory-where` | Where Inventory is; Today, Requests, My equipment |
+| `inventory-today-jobs` | Today: Do now, Coming up, Waiting on someone else |
+| `inventory-job-pick-send` | Prepare, pick and send a job |
+| `inventory-job-receive` | Receive a return and inspect it |
+| `inventory-transfer-send` (new) | Send a transfer to another warehouse, with the company named |
+| `inventory-transfer-receive` (new) | Receive against the transfer; partial receipt; the transfer record |
+| `inventory-receive-stock` (new) | Receive a new delivery, owned or rented |
+| `inventory-give-return` (new) | Give equipment, With people, Receive return, My equipment |
+| `inventory-find-equipment` (new) | Where is it, who has it, is it available, what next |
+| `inventory-history` (new) | Read History; corrections; check a transaction |
+| `inventory-setup` (new) | Setup's four parts |
+| `inventory-labels-scan` (new) | Labels and scanning |
+
+The published set is 105 topics (`npm run build:jarvis-knowledge`; `node scripts/build-jarvis-knowledge.mjs --check` passes). Titles of the new topics avoid the words the matcher treats as "equipment" so that a general question ("How do I book inventory?") still reaches `inventory-where` and is not answered with a list of look-alikes (`help-answer.test.ts`, the paraphrase and the no-guidance cases).
+
+### 17.3 Where a person must open Inventory
+
+Everything that reads a record or changes one: checking availability or a stock level; finding a unit or who holds it; preparing, picking, sending or receiving a job; sending or receiving a transfer; giving equipment or receiving a return; inspecting a held unit; repairs, missing or found equipment and write-offs; counts and opening stock; Setup; printing labels; reading History or correcting an entry; acknowledging a dispatch or return note. JARVIS can say which screen and which button; it cannot do it or see the result.
+
+### 17.4 Future capabilities: proposals only, none built, none approved
+
+Each would need the owner's decision, a registered action with its own permission check and data policy, and its own tests. A documented Inventory action ([`inventory-action-catalogue.md`](./inventory-action-catalogue.md)) is **not** a JARVIS tool.
+
+1. **Read, own scope:** "What equipment is assigned to me?" from `inv_my_equipment` (the employee's own rows only).
+2. **Read, warehouse scope:** "What is waiting at my warehouse today?" as counts from the Today sources the person can already open; "Where is unit X?" for a person who may view stock.
+3. **Read, transfers:** "Which transfers are still in transit to or from my warehouse?" from the transfers the person is already a party to.
+4. **Explain a record:** "Why is this unit not available?" from the unit's own facts (the four answers the unit panel already shows).
+5. **Draft, never post:** a transfer or a return prefilled for review in the Inventory form, which the person confirms there. JARVIS would never record a movement itself.
+6. **No proposal** for: costs, another company's stock, employee custody outside the reader's right, counts, corrections, write-offs, sharing or access. These stay in their screens.
+

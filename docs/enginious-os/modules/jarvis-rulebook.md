@@ -148,3 +148,16 @@ This is **not a JARVIS capability**. It cannot be asked for in the panel, no JAR
 | Draft an internal Project Closeout Report `projects.closeout.draft` | Whoever manages the project (Project Manager, temporary leader, founder), from the project's Closeout report screen. No pilot list | One project the requester manages; the evidence snapshot the database builds for it (`proj_closeout_evidence`) | The review of what will be sent; the draft with its source references; statements to check | **Source `project_closeout_evidence` only:** the evidence lines the Project Manager saw on "Review data to be sent": project, venue and dates, scope, team names and project roles with recorded ownership, decisions, feedback facts, delivery, handover and equipment facts, plus only the optional free texts they deliberately ticked (every one starts unticked). **Never:** prices, costs, margins, budgets, payroll, chat, task comments, files, contact or employee details | The review screen and its button "Send to Anthropic and write the draft"; the result is a draft that a person edits and approves. One call per project and exact reviewed content; at most 10 calls per project per day | `JARVIS_DISABLED` (the provider switch) |
 
 How it differs from section 3: the evidence is kind B1 material for Projects, admitted for this one use only, and one point is **stricter**: a line that mentions an amount of money is withheld before the review (`lib/projects/closeout/evidence.ts`), although ordinary record text may carry figures elsewhere. Layers 1 to 5 of section 3 apply unchanged (declared source, sharing restriction, screening of what goes out, screening of what comes back, blind logs). Reference: [`projects-closeout-report.md`](./projects-closeout-report.md).
+
+## 9. Inventory (2026-11-16; Inventory Phase 2, branch `claude/inventory-phase-2`: not merged, no SQL)
+
+Nothing in sections 2 to 7 changes. Stated for Inventory so it does not have to be inferred:
+
+| Rule | State |
+|---|---|
+| Read Inventory records (stock, units, requests, reservations, transfers, movements, custody, counts, costs) | **Not approved.** No action exists. A request is answered with the unsupported text and links to Inventory and My equipment |
+| Change Inventory (any action in `inventory-action-catalogue.md`) | **Not approved.** No action exists and no grant passes for the `inventory` module |
+| Explain how to do something in Inventory | **Approved**, from the published guidance only (12 Inventory topics in `staff-guidance/inventory.md`), for a single how-to question or "What can I do here?" on an Inventory screen. Nothing is read from Inventory and nothing about Inventory is sent to the provider beyond the question itself under the existing data policy |
+| Inventory Phase 2 | Adds eight guidance topics and corrects two. **No capability, no read, no action** |
+| Future Inventory capabilities | Proposals only, listed in `jarvis.md` section 17.4; each needs the owner's decision |
+
