@@ -21,7 +21,7 @@ export type QueueKind = "prepare" | "pick" | "send" | "returns" | "transfer" | "
 export type SourceKey = "requests" | "returns" | "transfers" | "sales" | "held" | "differences";
 export const SOURCE_OF: Record<QueueKind, SourceKey> = { prepare: "requests", pick: "requests", send: "requests", returns: "returns", transfer: "transfers", sales: "sales", waiting: "requests", held: "held", difference: "differences" };
 /** What a failed source is called in the red banner. */
-export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Incoming transfers", sales: "Sales checks", held: "Equipment held for checking", differences: "Differences reported on dispatch and return notes" };
+export const SOURCE_NOUN: Record<SourceKey, string> = { requests: "Equipment requests", returns: "Equipment due back", transfers: "Transfers in transit", sales: "Sales checks", held: "Equipment held for checking", differences: "Differences reported on dispatch and return notes" };
 export const SOURCE_KEYS: readonly SourceKey[] = ["requests", "returns", "transfers", "sales", "held", "differences"];
 
 export type ShowFilter = "all" | QueueKind;

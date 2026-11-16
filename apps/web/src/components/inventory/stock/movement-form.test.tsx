@@ -66,7 +66,7 @@ describe("MovementForm: review before confirm", () => {
     const dl = screen.getByText("What").closest("dl")!;
     expect(within(dl).getByText(/Laptop X1 \(UAE-E-00042\)/)).toBeTruthy();
     expect(within(dl).getByText("Employee: Sara Ali")).toBeTruthy();
-    expect(within(dl).getByText("Dubai warehouse")).toBeTruthy();
+    expect(within(dl).getByText("Dubai warehouse · Enginious")).toBeTruthy();
     for (const label of ["What", "How much", "From", "To", "Who"]) expect(within(dl).getByText(label)).toBeTruthy();
     expect(s.submit).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /confirm issue/i })).toBeTruthy();

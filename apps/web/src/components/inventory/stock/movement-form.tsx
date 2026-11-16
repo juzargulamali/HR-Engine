@@ -232,7 +232,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE"), and ALWAYS on a transfer: the same
   // city can be a warehouse of two companies, and a transfer has to say which.
   const isTransferKind = kind === "transfer" || kind === "receive_transfer";
-  const placeText = (l: FormLocation) => (isTransferKind || multiCompany || l.companyId !== companyId ? `${l.name} · ${l.companyName}` : l.name);
+  // Wherever stock is about to change (the review step, the result) the warehouse is said with its company, whoever is looking.
+  const placeText = (l: FormLocation) => `${l.name} · ${l.companyName}`;
   const names = {
     project: (id: string) => { const p = context.projects.find((x) => x.id === id); return p ? `${p.reference} ${p.name}` : undefined; },
   };
@@ -506,7 +507,9 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
       ) : null}
 
       {kind === "transfer" ? (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <details className="rounded-md border border-border/70 px-3 py-2" open={expectedArrival !== "" || carrier !== "" || reference !== ""}>
+        <summary className="cursor-pointer select-none text-sm font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Shipping details (optional): expected arrival, carrier, reference</summary>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <div className="space-y-1.5">
             <label htmlFor={`${uid}-arr`} className="text-sm font-medium leading-none">Expected arrival (optional)</label>
             <Input id={`${uid}-arr`} type="datetime-local" value={expectedArrival} min={nowLocalInput(tz)} onChange={(e) => setExpectedArrival(e.target.value)} disabled={locked} />
@@ -520,6 +523,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             <Input id={`${uid}-ref`} value={reference} onChange={(e) => setReference(e.target.value)} maxLength={200} disabled={locked} />
           </div>
         </div>
+        </details>
       ) : null}
 
       {cfg.reason === "required" ? (

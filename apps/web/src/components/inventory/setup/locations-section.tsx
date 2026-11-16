@@ -123,7 +123,7 @@ export function LocationsSection({ companyId, locations: allLocations, bins, isF
   const binLocation = locations.find((l) => l.id === binsFor) ?? null;
   return (
     <div className="space-y-4">
-      <p className="max-w-3xl text-sm text-muted-foreground">Each place that keeps equipment is a location with its own time zone. Only a founder adds or changes locations. Nothing is set up for you: a location exists only after a founder has saved it.</p>
+      <p className="max-w-3xl text-sm text-muted-foreground">Each place that keeps equipment is a location with its own time zone. A founder adds or changes locations; bins are added inside one.</p>
       {isFounder ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" onClick={() => open()}>Add a location</Button>

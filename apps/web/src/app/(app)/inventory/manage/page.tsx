@@ -275,9 +275,9 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
       <p className="text-sm" data-testid="setup-context">
         <span className="text-muted-foreground">Setting up </span><strong>{company.name}</strong>
         {working ? <><span className="text-muted-foreground"> · working warehouse </span><strong>{workingWarehouse!.name}</strong></> : null}
-        <span className="text-muted-foreground">. {allowed.length > 1 ? "Change the company above; " : ""}the warehouse is the one chosen on Today and Stock.</span>
+<span className="text-muted-foreground">.</span>
       </p>
-      <nav aria-label="Setup sections" className="flex gap-1 overflow-x-auto border-b border-border">
+      <nav aria-label="Setup sections" className="grid grid-cols-2 gap-x-1 border-b border-border sm:flex">
         {SECTIONS.map(([id, label]) => <Link key={id} href={base({ section: id === "warehouses" ? null : id })} scroll={false} aria-current={section === id ? "page" : undefined} className={tabCls(section === id)}>{label}</Link>)}
       </nav>
       {!company.isEnabled && company.referenceCode ? <Alert variant="warning" role="status">Inventory is switched off for {company.name}. Everything is kept and can be read, but nothing can be changed until a founder switches it on.</Alert> : null}
@@ -354,6 +354,10 @@ export default async function InventoryManagePage({ searchParams }: { searchPara
         <>
           <Muted>Things needed now and then. Each one says what it changes before you confirm it.</Muted>
           <Panel id="settings" title="Company record" description={`${company.name}: the company's legal record for Inventory. Warehouses and bins are set up separately.`}>
+            <dl className="mb-5 divide-y divide-border rounded-md border border-border text-sm" data-testid="company-record">
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Legal name</dt><dd className="break-words font-medium">{company.legalName || company.name}</dd></div>
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[12rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Shown in Inventory as</dt><dd className="break-words">{company.name}<span className="block text-[13px] text-muted-foreground">The short name is worked out from the company&apos;s country and is only how selectors and screens say it. Documents and this record keep the legal name; neither can be changed here.</span></dd></div>
+            </dl>
             <CompanySettings companyId={companyId} companyName={company.legalName && company.legalName !== company.name ? `${company.legalName} (shown as ${company.name})` : company.name} referenceCode={company.referenceCode} isEnabled={company.isEnabled} isFounder={founder} />
           </Panel>
 

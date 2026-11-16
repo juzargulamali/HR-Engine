@@ -44,7 +44,7 @@ describe("Transfer trace page", () => {
     const html = await render();
     expect(html).toContain("Dubai warehouse · Enginious UAE to Riyadh warehouse · Enginious KSA");
     expect(html).toContain("4 sent · 3 received · 1 still in transit");
-    expect(html).toContain("Riyadh warehouse · Enginious KSA acts next");
+    expect(html).toContain("Who acts next: </span>Riyadh warehouse · Enginious KSA. 1 still in transit is received there when it arrives.");
     expect(html).toContain("Partly received");
     expect(html).toContain("Owned by Enginious UAE");
     // Someone who may not operate the receiving warehouse is told who receives; no button.

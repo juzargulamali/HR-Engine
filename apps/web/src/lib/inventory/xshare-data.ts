@@ -76,6 +76,24 @@ export async function loadXTrace(transferId: string, db?: Db): Promise<XTrace | 
   };
 }
 
+/**
+ * Warehouses of OTHER companies the person meets on a transfer they are a party to, or may send to, by id: "Riyadh · Enginious Saudi Arabia". The person
+ * cannot read those warehouses' rows; the narrow functions name them. Used so History and the panels say the real other end of a transfer. A failed read
+ * gives no names (the screens then say "a warehouse of another company", which is true), never a wrong one.
+ */
+export async function loadForeignPlaceNames(db?: Db): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  try {
+    const client = db ?? (await createClient());
+    const [heads, dests] = await Promise.all([loadXTransfers(client), loadXDestinations(client)]);
+    for (const d of dests) out.set(d.id, `${d.name} · ${d.companyName}`);
+    for (const h of heads) { out.set(h.fromLocationId, `${h.fromName} · ${h.senderName}`); out.set(h.toLocationId, `${h.toName} · ${h.toCompanyName}`); }
+  } catch (e) {
+    console.error("[inventory] names of other companies' warehouses could not be read", e instanceof Error ? e.message : e);
+  }
+  return out;
+}
+
 /** Open cross-company transfers addressed to the given warehouses, ready for the Receive transfer form. */
 export async function loadXIncoming(operableLocationIds: readonly string[], db?: Db): Promise<FormTransfer[]> {
   if (operableLocationIds.length === 0) return [];

@@ -13,6 +13,7 @@ import { getInventoryContext } from "@/lib/inventory/context";
 import { lineFrom, lineTo, movementKindWord, movementWhen, movementZone, type Resolver } from "@/lib/inventory/movement-view";
 import { loadMovementDetail, type MovementDetail } from "@/lib/inventory/stock";
 import { loadNoteForMovement, type MovementNoteLoad } from "@/lib/inventory/project-notes-data";
+import { loadForeignPlaceNames } from "@/lib/inventory/xshare-data";
 import { noteKindWord } from "@/lib/inventory/project-notes";
 import { CONDITION_WORDS, formatQty } from "@/lib/inventory/words";
 import type { InvLocationRow } from "@/types/inventory";
@@ -38,9 +39,13 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   // The numbered note a dispatch to a project or a return from one made (only when the company switched notes on). A failed read says so; a movement without a note shows nothing.
   const noteLoad: MovementNoteLoad = m.kind === "dispatch_project" || m.kind === "return_project" ? await loadNoteForMovement(m.id) : { status: "none" };
   const loc = new Map(locations.map((l) => [l.id, l]));
+  const own = new Set(ctx.locations.map((l) => l.id));
+  const lineLocs = [m.from_location_id, m.to_location_id, ...m.lines.flatMap((l) => [l.from_location_id, l.to_location_id])].filter((x): x is string => !!x);
+  const foreign = lineLocs.some((id) => !own.has(id)) ? await loadForeignPlaceNames() : new Map<string, string>();
+  const placeName = (lid: string | null | undefined) => (lid ? (own.has(lid) ? ctx.placeName(lid) : (foreign.get(lid) ?? ctx.placeName(lid))) : "—");
   const zone = movementZone(m, (lid) => loc.get(lid)?.timezone ?? null, locations[0]?.timezone ?? "Asia/Dubai");
   const resolver: Resolver = {
-    location: (lid) => (lid ? ctx.placeName(lid) : "—"),
+    location: (lid) => placeName(lid),
     bin: (bid) => (bid ? (d.binLabels.get(bid) ?? null) : null),
     employee: (eid) => d.names.employee(eid),
     project: (pid) => d.names.project(pid),
@@ -61,7 +66,7 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   const rows: [string, React.ReactNode][] = [
     ["When", movementWhen(m.occurred_at, zone)],
     ["Recorded by", d.names.user(m.performed_by)],
-    ...(m.from_location_id && m.to_location_id && m.from_location_id !== m.to_location_id ? [["Sent from", ctx.placeName(m.from_location_id)] as [string, React.ReactNode], ["Going to", ctx.placeName(m.to_location_id)] as [string, React.ReactNode]] : m.from_location_id || m.to_location_id ? [["Warehouse", ctx.placeName(m.to_location_id ?? m.from_location_id)] as [string, React.ReactNode]] : []),
+    ...(m.from_location_id && m.to_location_id && m.from_location_id !== m.to_location_id ? [["Sent from", placeName(m.from_location_id)] as [string, React.ReactNode], ["Going to", placeName(m.to_location_id)] as [string, React.ReactNode]] : m.from_location_id || m.to_location_id ? [["Warehouse", placeName(m.to_location_id ?? m.from_location_id)] as [string, React.ReactNode]] : []),
     ...(m.transfer_id ? [["Transfer", <Link key="t" href={`/inventory/transfers/${m.transfer_id}`} className="font-medium underline underline-offset-2">Open the transfer: what was sent, received and is still in transit</Link>] as [string, React.ReactNode]] : []),
     ...(m.employee_id ? [["Employee", d.names.employee(m.employee_id)] as [string, React.ReactNode]] : []),
     ...(m.project_id ? [["Project", d.names.project(m.project_id)] as [string, React.ReactNode]] : []),

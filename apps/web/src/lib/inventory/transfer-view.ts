@@ -83,14 +83,14 @@ export function progressWords(p: TransferProgress): string {
 
 /** Which side acts next, in words. A transfer only ever waits for the receiving warehouse. */
 export function nextAction(v: Pick<TransferView, "status" | "to" | "units" | "quantities">): { waitingOn: "receiver" | "nobody"; text: string } {
-  if (v.status === "cancelled") return { waitingOn: "nobody", text: "Cancelled. Nothing is waiting." };
+  if (v.status === "cancelled") return { waitingOn: "nobody", text: "Nobody. The transfer was cancelled." };
   const p = transferProgress(v);
-  if (v.status === "received" || p.inTransit === 0) return { waitingOn: "nobody", text: `Complete. Everything was received at ${v.to.label}.` };
+  if (v.status === "received" || p.inTransit === 0) return { waitingOn: "nobody", text: `Nobody. Everything was received at ${v.to.label}.` };
   return {
     waitingOn: "receiver",
     text: p.received > 0
-      ? `${v.to.label} acts next: ${n(p.inTransit)} still in transit ${p.inTransit === 1 ? "is" : "are"} received there when ${p.inTransit === 1 ? "it arrives" : "they arrive"}.`
-      : `${v.to.label} acts next: it records the transfer as received when it arrives.`,
+      ? `${v.to.label}. ${n(p.inTransit)} still in transit ${p.inTransit === 1 ? "is" : "are"} received there when ${p.inTransit === 1 ? "it arrives" : "they arrive"}.`
+      : `${v.to.label}. It records the transfer as received when it arrives.`,
   };
 }
 

@@ -33,11 +33,11 @@ describe("a transfer as both sides read it", () => {
   });
 
   it("says the receiving warehouse acts next while anything is in transit, and nobody once it is complete", () => {
-    expect(nextAction(v)).toEqual({ waitingOn: "receiver", text: "Dubai · Enginious Europe acts next: 2 still in transit are received there when they arrive." });
+    expect(nextAction(v)).toEqual({ waitingOn: "receiver", text: "Dubai · Enginious Europe. 2 still in transit are received there when they arrive." });
     const fresh = viewFromTrace(mapTrace(raw({ units: [], quantities: [{ item_id: "i2", item_name: "HDMI cable", category: null, unit_of_measure: "each", owner_company_id: "c-uae", owner_company_name: "Enginious UAE", qty_sent: 4, qty_on_the_way: 4, on_the_way: [] }] })));
-    expect(nextAction(fresh).text).toBe("Dubai · Enginious Europe acts next: it records the transfer as received when it arrives.");
+    expect(nextAction(fresh).text).toBe("Dubai · Enginious Europe. It records the transfer as received when it arrives.");
     const done = viewFromTrace(mapTrace(raw({ status: "received", units: [], quantities: [{ item_id: "i2", item_name: "HDMI cable", category: null, unit_of_measure: "each", owner_company_id: "c-uae", owner_company_name: "Enginious UAE", qty_sent: 4, qty_on_the_way: 0, on_the_way: [] }] })));
-    expect(nextAction(done)).toEqual({ waitingOn: "nobody", text: "Complete. Everything was received at Dubai · Enginious Europe." });
+    expect(nextAction(done)).toEqual({ waitingOn: "nobody", text: "Nobody. Everything was received at Dubai · Enginious Europe." });
   });
 
   it("names the stock owner only where it differs from the company that runs the destination", () => {
