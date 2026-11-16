@@ -1,5 +1,5 @@
 -- READ ONLY. Run BEFORE applying 20270117000100_people_hr_employee_number_unique.sql. Changes nothing.
--- Expect: row 1 'OK'; row 2 'not installed yet' (or 'already installed' on a second run); row 3 'OK' (0 groups). Rows 4 to 6 are numbers for information.
+-- Expect: row 1 'OK'; row 2 'not installed yet' (or 'already installed' on a second run); row 3 'OK' (0 groups). Rows 4 to 8 are numbers for information.
 -- Row 3 counts every pair of ACTIVE or INVITED employees (not removed, not terminated, login not deactivated; no login or an invited login counts) in any companies with equivalent numbers. Removed, terminated and
 -- deactivated records are ignored. If it says STOP, do not apply the migration (it would refuse anyway and change nothing): run people_hr_employee_number_00_audit_readonly.sql, resolve each group with the owner's
 -- approval, then run this again.
@@ -17,7 +17,11 @@ e as (
   from e0
 ),
 dup as (select count(*) as groups, coalesce(sum(n), 0) as people from (select count(*) as n from e where in_scope and k <> '' group by k having count(*) > 1) d),
-top as (select coalesce(max(substring(k from '^E([0-9]+)$')::bigint), 0) as t from e where in_scope and k ~ '^E[0-9]{1,15}$')
+top as (select coalesce(max(substring(k from '^E([0-9]+)$')::bigint), 0) as t from e where in_scope and k ~ '^E[0-9]{1,15}$'),
+pool as (
+  select distinct k, substring(k from '^E([0-9]+)$')::bigint as v from e
+  where not in_scope and k ~ '^E[0-9]{1,15}$' and not exists (select 1 from e l where l.in_scope and l.k = e.k)
+)
 select item, result from (
   select 1 as ord, 'the tables and columns this migration builds on exist (employees with company_id, user_id, employee_number, employment_status and deleted_at; profiles with account_status; the per-company unique index from migration 20261023000000)' as item,
          case when to_regclass('public.employees') is not null and to_regclass('public.profiles') is not null
@@ -33,6 +37,11 @@ select item, result from (
               else 'STOP - ' || (select groups from dup)::text || ' group(s) of equivalent numbers (' || (select people from dup)::text || ' employees): run the audit pack, resolve them, run this again' end
   union all select 4, 'information: active or invited employees (their numbers will be reserved for them)', (select count(*) from e where in_scope)::text
   union all select 5, 'information: records ignored (removed, terminated or deactivated login): they get no reservation and cannot block', (select count(*) from e where not in_scope)::text
-  union all select 6, 'information: the first number the new series would give out (one above the highest E-number an active or invited employee holds)',
+  union all select 6, 'information: the sequence fallback (used once the pool is empty) would give out first (one above the highest E-number an active or invited employee holds)',
          (select 'E' || case when length((t + 1)::text) >= 3 then (t + 1)::text else lpad((t + 1)::text, 3, '0') end from top)
+  union all select 7, 'information: the pool of ignored records'' numbers handed out first, lowest first (the exact list is in the audit pack): how many',
+         (select count(*) from pool)::text
+  union all select 8, 'information: the NEXT number a new hire would be given',
+         coalesce((select 'E' || case when v < 100 then lpad(v::text, 3, '0') else v::text end from pool order by v limit 1),
+                  (select 'E' || case when length((t + 1)::text) >= 3 then (t + 1)::text else lpad((t + 1)::text, 3, '0') end from top))
 ) x order by ord;

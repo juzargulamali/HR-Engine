@@ -15,12 +15,12 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 * **New employees get their number automatically** from one series shared by every company: `E001`, `E002`, ... `E009`, `E010`, ... (at least three digits, no truncation after `E999`). The Add employee form has no number field.
 * **`E02`, `e002` and `E002` are the same number** and are saved as `E002`, unique across Enginious UAE, Saudi Arabia and Europe.
 * **From rollout, a number belongs to its employee for good.** If an active or invited employee resigns, is terminated, removed, corrected to another number or deleted for good, their number stays reserved and is never available to anyone else. Restoring or rehiring the same record keeps it.
-* **Deleted, terminated and deactivated records at rollout are ignored** (test accounts): their numbers are available.
+* **Deleted, terminated and deactivated records at rollout are ignored** (test accounts): their numbers are available. **Their E-series numbers become a pool that automatic numbering uses first**, lowest first (never a number an active or invited employee holds, never rebuilt); when the pool is empty the shared sequence continues above the highest reserved E-number.
 * **Giving someone access to several companies never creates a second employee record or a new number.**
 * **Duplicates are refused with a clear sentence** on any path that writes a number.
 * **Existing numbers are not rewritten.** The migration refuses to run, changing nothing, while two active or invited employees (any companies) have equivalent numbers; the read-only audit lists them for the owner to decide, one employee at a time.
 
-**Migrations.** `20270117000100_people_hr_employee_number_unique.sql` (function `employee_number_canonical`, table `employee_number_reservations`, sequence `employee_number_seq`, triggers on `employees` and `profiles`; the per-company index is dropped; packs `people_hr_employee_number_00_audit_readonly.sql`, `..._05_preflight_readonly.sql`, `..._20_verify_readonly.sql`, `..._90_rollback.sql`). Supersedes the number-reuse decision of `20261023000000`.
+**Migrations.** `20270117000100_people_hr_employee_number_unique.sql` (function `employee_number_canonical`, tables `employee_number_reservations`, `employee_number_pool` and `employee_number_allocation`, sequence `employee_number_seq`, triggers on `employees` and `profiles`; the per-company index is dropped; packs `people_hr_employee_number_00_audit_readonly.sql`, `..._05_preflight_readonly.sql`, `..._20_verify_readonly.sql`, `..._25_pool_status_readonly.sql`, `..._90_rollback.sql`). Supersedes the number-reuse decision of `20261023000000`.
 
 **Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (section 15), `people-hr-workflows.md`, `staff-guidance/people.md`, this log, `05-data-tests-and-release-ledger.md`.
 

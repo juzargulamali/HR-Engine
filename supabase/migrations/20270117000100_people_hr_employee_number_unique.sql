@@ -25,10 +25,16 @@
 -- had its own series, so such pairs can exist today. The audit pack lists every one for review. Nothing here decides which employee owns a number: that is a correction the owner approves one employee at a time,
 -- then the migration is applied.
 --
+-- THE POOL (what automatic numbering hands out FIRST). The deleted, terminated and deactivated test accounts ignored at this rollout still show numbers. Once, here, the E-series numbers they show are collected into
+-- employee_number_pool: normalised (E2, e002 and E002 are one number), deduplicated, and without any number an active or invited employee holds (so a number like E003 held by a live employee can never be in it). A new
+-- hire is given the LOWEST pool number that is still free, claimed atomically across all companies (rows another hire has locked are skipped, so two hires at once get different numbers), and it is then reserved for that
+-- employee permanently, even if they later leave. When the pool is empty the shared sequence below takes over. The pool is built ONCE and never rebuilt: a person who is deleted, terminated or deactivated AFTER this
+-- rollout does not add their number to it (their number stays reserved). Gaps in the numbering outside the pool are left alone. Only E-series numbers (E plus digits) enter the pool; a test account's L-001 does not.
+--
 -- THE RULE (one function, shared with the app and tested against the same vectors: supabase/tests/employee-number-vectors.json): trim, remove every space, upper-case; if the number ends in digits drop
 -- their leading zeros and pad back to at least three digits. E2, E02, e002 and " E 0002 " are all E002; E1234 stays E1234; a number with no trailing digits is only trimmed and upper-cased.
 --
--- THE SERIES. employee_number_seq. The next number is E + the next value, with at least three digits and NO truncation after E999 (E1000, E1001, ...). The sequence is started ABOVE the highest E-number held by an
+-- THE SEQUENCE FALLBACK (when the pool is empty). employee_number_seq. The next number is E + the next value, with at least three digits and NO truncation after E999 (E1000, E1001, ...). The sequence is started ABOVE the highest E-number held by an
 -- active or invited employee and only moves forward; a number taken from it is never given out again, even if the hire fails (the sequence is not rolled back). It also skips every reserved number and every number an
 -- active or invited employee shows. Every other number is available, including one an ignored (deleted, terminated or deactivated) test record still shows. Two hires saved at the same moment, in any companies,
 -- take different values (nextval is atomic).
@@ -107,6 +113,44 @@ from employees
 where employee_number_canonical(employee_number) <> '' and employee_number_in_scope(deleted_at, employment_status, user_id)
 on conflict (number_key) do nothing;
 
+-- The pool of numbers automatic numbering hands out first, and the one-row record that it was built. The pool is built ONCE (the record's presence stops any later build), from the records that are ignored NOW.
+create table if not exists employee_number_pool (
+  number_key   text primary key,                      -- employee_number_canonical(...), E plus digits only
+  number_value bigint not null,                       -- the digits, for the allocation order
+  claimed_by   uuid,                                  -- the employee it was given to (the reservation is what keeps it theirs for good)
+  claimed_at   timestamptz
+);
+create table if not exists employee_number_allocation (
+  id             boolean primary key default true check (id),   -- exactly one row
+  pool_built_at  timestamptz not null default now(),
+  pool_size      integer not null,                    -- how many numbers the pool held when it was built
+  sequence_start bigint not null                      -- the highest reserved E-number at rollout: the sequence fallback starts above it
+);
+alter table employee_number_pool enable row level security;
+alter table employee_number_allocation enable row level security;
+revoke all on table employee_number_pool, employee_number_allocation from public, anon, authenticated;
+do $$
+declare
+  v_top bigint;
+begin
+  if exists (select 1 from employee_number_allocation) then return; end if;   -- built once: never rebuilt
+  insert into employee_number_pool (number_key, number_value)
+  select s.k, s.v
+  from (
+    select distinct employee_number_canonical(e.employee_number) as k,
+           substring(employee_number_canonical(e.employee_number) from '^E([0-9]+)$')::bigint as v
+    from employees e
+    where employee_number_canonical(e.employee_number) ~ '^E[0-9]{1,15}$'
+      and not employee_number_in_scope(e.deleted_at, e.employment_status, e.user_id)
+  ) s
+  where not exists (select 1 from employee_number_reservations r where r.number_key = s.k)
+    and not exists (select 1 from employees h where employee_number_canonical(h.employee_number) = s.k and employee_number_in_scope(h.deleted_at, h.employment_status, h.user_id))
+  on conflict (number_key) do nothing;
+  select coalesce(max(substring(number_key from '^E([0-9]+)$')::bigint), 0) into v_top
+  from employee_number_reservations where number_key ~ '^E[0-9]{1,15}$';
+  insert into employee_number_allocation (pool_size, sequence_start) values ((select count(*) from employee_number_pool), v_top);
+end $$;
+
 -- The series. Started above the highest E-number any reservation holds; only ever moved forward, so applying this file again never lowers it.
 create sequence if not exists employee_number_seq as bigint minvalue 1;
 revoke all on sequence employee_number_seq from public, anon, authenticated;
@@ -128,17 +172,32 @@ end $$;
 -- The per-company exact-match index is replaced by the reservations (global, permanent, and blind to the ignored records, which a unique index on the table could not be).
 drop index if exists employees_company_employee_number_unique;
 
--- The next free number of the series. SECURITY DEFINER because the caller (HR Admin through the app) has no right to the sequence or the reservations.
-create or replace function next_employee_number()
+-- The next number for a NEW employee: the lowest still-free number of the pool, claimed atomically across all companies; when the pool is empty, the next free number of the shared sequence. SECURITY DEFINER because the
+-- caller (HR Admin through the app) has no right to the pool, the sequence or the reservations. The claim is part of the hiring transaction: if the hire fails, the pool number goes back.
+-- "Skip locked": two hires at the same moment each take a different row (the lowest not being claimed by the other); a pool number somebody has since reserved by hand, or an active or invited employee shows, is skipped.
+create or replace function next_employee_number(p_employee_id uuid)
 returns text
 language plpgsql
 security definer
 set search_path = public
 as $$
 declare
+  v_key text;
   v bigint;
   n text;
 begin
+  select p.number_key into v_key
+  from employee_number_pool p
+  where p.claimed_by is null
+    and not exists (select 1 from employee_number_reservations r where r.number_key = p.number_key)
+    and not exists (select 1 from employees e where employee_number_canonical(e.employee_number) = p.number_key and employee_number_in_scope(e.deleted_at, e.employment_status, e.user_id))
+  order by p.number_value
+  limit 1
+  for update of p skip locked;
+  if v_key is not null then
+    update employee_number_pool set claimed_by = p_employee_id, claimed_at = now() where number_key = v_key;
+    return v_key;
+  end if;
   loop
     v := nextval('employee_number_seq');
     n := 'E' || case when length(v::text) >= 3 then v::text else lpad(v::text, 3, '0') end;
@@ -148,7 +207,8 @@ begin
   return n;
 end;
 $$;
-revoke all on function next_employee_number() from public, anon, authenticated;
+drop function if exists next_employee_number();
+revoke all on function next_employee_number(uuid) from public, anon, authenticated;
 
 -- Reserve a number for a record, or refuse when it is reserved for another one. A refusal names no one: the other employee may belong to a company the writer cannot see. Internal.
 create or replace function employee_number_claim(p_employee_id uuid, p_number text, p_source text)
@@ -183,7 +243,7 @@ as $$
 begin
   if tg_op = 'INSERT' then
     if employee_number_canonical(new.employee_number) = '' then
-      new.employee_number := next_employee_number();
+      new.employee_number := next_employee_number(new.id);
       perform employee_number_claim(new.id, new.employee_number, 'assigned');
     else
       new.employee_number := employee_number_canonical(new.employee_number);

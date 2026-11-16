@@ -43,8 +43,22 @@ select item, result from (
               then 'OK' else 'FAIL - the sequence is missing or below a reserved number (apply the migration again)' end
   union all select 8, 'signed-in users can call employee_number_canonical; anon cannot; nobody but the database itself can call next_employee_number(), employee_number_claim() or touch the sequence',
          case when has_function_privilege('authenticated', 'public.employee_number_canonical(text)', 'execute') and not has_function_privilege('anon', 'public.employee_number_canonical(text)', 'execute')
-                   and not has_function_privilege('authenticated', 'public.next_employee_number()', 'execute') and not has_function_privilege('anon', 'public.next_employee_number()', 'execute')
+                   and not has_function_privilege('authenticated', 'public.next_employee_number(uuid)', 'execute') and not has_function_privilege('anon', 'public.next_employee_number(uuid)', 'execute')
                    and not has_function_privilege('authenticated', 'public.employee_number_claim(uuid, text, text)', 'execute')
                    and not has_sequence_privilege('authenticated', 'public.employee_number_seq', 'usage') and not has_sequence_privilege('anon', 'public.employee_number_seq', 'usage')
               then 'OK' else 'FAIL - privileges differ' end
+  union all select 9, 'the pool and its build record exist (the pool was built once), row level security is on, and signed-in users and anon have no right to read or write them',
+         case when to_regclass('public.employee_number_pool') is not null and to_regclass('public.employee_number_allocation') is not null
+                   and (select count(*) from employee_number_allocation) = 1
+                   and (select relrowsecurity from pg_class where oid = 'public.employee_number_pool'::regclass)
+                   and (select relrowsecurity from pg_class where oid = 'public.employee_number_allocation'::regclass)
+                   and not has_table_privilege('authenticated', 'public.employee_number_pool', 'select') and not has_table_privilege('authenticated', 'public.employee_number_pool', 'update')
+                   and not has_table_privilege('anon', 'public.employee_number_pool', 'select')
+              then 'OK' else 'FAIL - the pool or its build record is missing, built more than once, or open to signed-in users' end
+  union all select 10, 'every pool number already claimed is reserved for the employee it was claimed by, and no pool number is a number outside the E series',
+         case when to_regclass('public.employee_number_pool') is not null
+                   and (select count(*) from employee_number_pool p left join employee_number_reservations r on r.number_key = p.number_key
+                         where p.claimed_by is not null and (r.employee_id is null or r.employee_id <> p.claimed_by)) = 0
+                   and (select count(*) from employee_number_pool where number_key !~ '^E[0-9]{1,15}$') = 0
+              then 'OK' else 'FAIL - a claimed pool number is not reserved for its employee, or the pool holds a number outside the E series' end
 ) x order by ord;

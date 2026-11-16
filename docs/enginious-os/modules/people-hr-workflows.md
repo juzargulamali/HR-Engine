@@ -37,7 +37,7 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 |---|---|---|
 | 1. Choose the company | Nothing else is asked yet ("Choose the company first. Its country and currency are used for this employee.") | Country, currency |
 | 2. Defaults appear | The company's country and currency are shown. A company with no country asks for the employee's country in place; a company with no default currency says so and asks for one only if pay is entered | Country, currency |
-| 3. Identity and job | First and last name, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number). **No employee number is typed**: the form says it is assigned automatically when you save, from the one series shared by every company | Company, country, employee number |
+| 3. Identity and job | First and last name, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number). **No employee number is typed**: the form says it is assigned automatically when you save: the lowest free number from a pool of numbers of old test accounts first, then the one series shared by every company | Company, country, employee number |
 | 4. Contract and pay (optional) | Contract type ("Add later" is the empty choice); the start is the hire date unless changed; basic salary, others, currency (the company's) | Hire date, currency |
 | 5. Opening balances (optional) | Annual leave days, comp days earned to date; a note under the circled i says they are for a mid-year hire or a transfer and are recorded once | Hire date |
 | 6. Save | The profile **Overview** opens ("Employee created. Finish setup below.") with the checklist | |
