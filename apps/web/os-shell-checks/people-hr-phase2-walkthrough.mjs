@@ -122,7 +122,9 @@ await step("the acknowledged issue is still open in the OTHER views: the registe
   if (!/Document expiries/.test(day)) throw new Error("My Day does not list the document expiry that has not been seen");
 });
 
-await step("RESOLVE updates the views: renewing the passport removes it from the queue, the profile and My Day on the next load", async () => {
+const docRecords = async () => { await go("/"); const m = (await body()).match(/Document expiries (\d+) needs? action on the Alerts page (\d+)/); return m ? Number(m[2]) : 0; };
+await step("RESOLVE updates the views: renewing the passport removes it from the queue, the profile and My Day on the next load (the Polish passport, which this unscoped HR Admin also sees, stays)", async () => {
+  if ((await docRecords()) !== 2) throw new Error("My Day should count two expired passports (the UAE one and the Polish one) before the renewal");
   await go(`/employees/${DANA}`);
   if (!/expired/i.test(await page.getByTestId("next-actions").innerText())) throw new Error("the profile does not flag the expired passport before the renewal");
   await go(`/employees/${DANA}?tab=documents&add=identity:passport&renew=1&docId=${one(`select id from identity_documents where employee_id = '${DANA}'`)}`);
@@ -135,8 +137,7 @@ await step("RESOLVE updates the views: renewing the passport removes it from the
   await go(`/employees/${DANA}`);
   const flags = (await page.getByTestId("next-actions").count()) ? await page.getByTestId("next-actions").innerText() : "";
   if (/passport|expired|expiring|document/i.test(flags)) throw new Error(`the profile still flags the passport: ${flags}`);
-  await go("/");
-  if (/Document expiries/.test(await body())) throw new Error("My Day still counts the renewed passport");
+  if ((await docRecords()) !== 1) throw new Error("My Day should count only the Polish passport after the renewal");
   await page.screenshot({ path: `${SHOTS}/6-after-resolution-phone.png`, fullPage: true });
 });
 
