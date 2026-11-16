@@ -40,3 +40,11 @@ Counts: **5** rows in section 1 (four actions and the daily job) and **9** rows 
 * No action here sends an invitation, resets a password, or changes a role or module access: those are People & Access ([`people-access-invites-and-password-links.md`](./people-access-invites-and-password-links.md)).
 * No action cancels a scheduled change (an open decision in [`people-hr.md`](./people-hr.md) section 11).
 * No action reads or writes another company's employee: the company is taken from the employee row on the server, and the database policies refuse the rest (`RLS`: an HR Admin of one company is refused identically for another company's employee, pay and documents).
+
+## 4. Added in Phase 2 (the HR work queue)
+
+Source `P2` = `supabase/migrations/20270116000100_people_hr_phase2_queue.sql`. No other action is new: every fix a queue item points to is an action above or an existing attendance, document or contract action.
+
+| Id | Action (button) | Function | Permitted (enforced in) | Starting state | Changes | Retry | Stop and ask |
+|---|---|---|---|---|---|---|---|
+| `people.queue.acknowledge` | Mark as seen | `acknowledgeQueueItem` (`hrQueue.ts`) → `acknowledge_hr_queue_item` (`P2`); a Recovery Leave alert goes to `acknowledge_recovery_alert` | HR Admin of the item's company: `has_role('hr_admin', company)` read from the SOURCE record inside the function; CEO, CTO, the employee and a manager are refused | the source record still exists, is still current and still carries the date the screen showed | one `hr_queue_acknowledgements` row (kind, source id, date, note, who, when); nothing about the source record | asking twice is a no-op (one row); a changed record is refused with "changed or already resolved", reload | the message says the record changed, or a different company: do not retry |

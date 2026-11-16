@@ -8,6 +8,23 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | People & HR Phase 2: Daily HR work (branch `feat/people-hr-phase2` from `main` `93d10a1`; **a draft pull request; not merged; hosted migration `20270116000100` not applied**)
+
+**What changed for people.**
+
+* **Alerts is the HR work queue.** Needs action, Due soon and Acknowledged, covering contract renewals, probation, document expiries (employee and identity), attendance exceptions, Recovery Leave alerts and AI suggestions waiting for a decision. Each row names the employee and company, what is wrong, its date, who acts next and has one button that opens the exact record (the renewal form for that document, the Employment tab, the register on that company and date with the person's row open, the AI review screen). Filters for company, type and name are kept in the address, and the record's "Alerts" link returns to them.
+* **Mark as seen is not resolving.** HR Admin of the company records that an item was seen (optional note). It moves to Acknowledged and stays listed, with its link, until the source record is fixed; a renewal that changes the date makes it new again. Whether an issue is still open is always worked out again from the source record, so Alerts, the profile's Next actions and My Day agree.
+* **Attendance and leave entry points.** The register leads with Needs review and says No record, Rest day, Absent, On leave, Present or Partial day (a missing record is never read as absence; live clock status is its own column; rows stack on a phone). The profile's Attendance tab leads with the exceptions and the days concerned; the Leave tab leads with balances and Pending requests, each linking to its row in Approvals.
+* **My Day** counts the same items Alerts lists as waiting. Document expiry is judged from the dates and the newest version only, with the profile's 60-day look-ahead (the Alerts page used 30 days and the daily job's stored status, which is not running).
+* **Diagnostics out of the queue.** The Recovery Leave processor health and database fingerprint moved to Administration, Background processing (System Administrator). The queue keeps one line when the processor is late.
+* **Not changed.** Regional leave, holiday, attendance and Recovery Leave rules, approval routes, notifications, JARVIS capabilities and sensitive-data boundaries. Identity numbers and AI suggestion content are never read into the queue.
+
+**Migrations.** `20270116000100_people_hr_phase2_queue.sql` (table `hr_queue_acknowledgements`, function `acknowledge_hr_queue_item`; packs `people_hr_phase2_*`).
+
+**Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (section 14), `people-hr-workflows.md` (10a), `people-hr-coverage-index.md` (section 7), `people-hr-action-catalogue.md` (section 4), `modules/jarvis.md` (19), `jarvis-rulebook.md` (11), `staff-guidance/people.md` (two topics), this file, `02`, `03`, `05`.
+
+**Hosted status.** Not applied. **Tests.** `packages/rls-tests/test/people-hr-phase2.rls.test.ts`; `lib/hr/queue.test.ts`, `attendance-status.test.ts`; the alerts page, register table and attention tests; browser walkthrough `os-shell-checks/people-hr-phase2-walkthrough.mjs`.
+
 ### 2026-11-16 | People & HR Phase 1: employee directory, profile and onboarding (branch `feat/people-hr-phase1` from `main` `6526049`; **a draft pull request; not merged; hosted migration `20270115000100` not applied by Claude and owner-confirmed applied; Production not deployed from this branch**; required CI: first run recorded on the pull request (not part of this file))
 
 **What changed for people.**

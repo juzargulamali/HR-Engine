@@ -194,8 +194,8 @@ Opening a profile, a tab, a document link or an action address **directly** reac
 |---|---|
 | `/employees`, `/employees/new`, `/employees/[id]` (Overview, Employment, Compensation, Leave, Documents, Insurance & Loans, Performance) | **Phase 1** (this file) |
 | Profile tabs Attendance, Assets, and Final settlement | Exist; unchanged |
-| HR work queue (Alerts, approvals waiting on HR, what needs HR today) | **Phase 2, planned**: not started |
-| Letters, Payroll, Assets, Admin (Companies, Audit Log, AI Suggestions) | **Phase 3, planned**: not started |
+| HR work queue: Alerts (Needs action, Due soon, Acknowledged), the attendance register's Needs review, the profile's Leave and Attendance tabs, My Day's HR rows | **Phase 2** (section 14) |
+| Letters, Payroll, Assets, broader Admin (Companies, Audit Log, AI Suggestions) | **Phase 3, planned**: not started. Phase 2 adds only Administration, Background processing (section 14.7) |
 | People & Access | Exists; linked from the profile |
 | `/leave`, `/attendance-clock`, `/attendance`, `/reimbursements`, `/performance` (own pages) | Exist; unchanged |
 
@@ -220,3 +220,71 @@ Opening a profile, a tab, a document link or an action address **directly** reac
 ## 13. JARVIS and People & HR
 
 JARVIS has **no live access** to People & HR: it cannot read an employee, pay, a document or a setup step, and cannot change anything. Five published guidance topics explain the screens (`staff-guidance/people.md`): `people-add-employee`, `people-employee-remaining-steps`, `people-change-job-or-pay`, `people-renew-document`, `people-find-access-record`. The sensitive boundaries stay: salary and identity details are never read into an answer. See [`jarvis.md`](./jarvis.md) section 18 and [`jarvis-rulebook.md`](./jarvis-rulebook.md) section 10.
+
+## 14. Phase 2: the HR work queue (Daily HR work)
+
+Branch `feat/people-hr-phase2`, draft PR, migration `20270116000100_people_hr_phase2_queue.sql` (not applied anywhere). Goal: HR opens one queue, sees what needs attention, goes straight to the right record and sees the outcome in the relevant views. It adds no new kind of record: every item is worked out from an existing record and every fix is an existing action.
+
+### 14.1 Entry points, status, who acts, and where each one opens
+
+Read model: `lib/hr/queue.ts` (pure builders and wording), `lib/hr/queue-data.ts` (the read, through RLS, one source failing alone). The Alerts page, the employee profile and My Day all read it, so one issue has one status, one set of words and one link.
+
+| Item | Source of truth | In the queue when | Acts next | Opens | Resolved when (outcome appears in Alerts, the profile's Next actions and My Day on the next load) |
+|---|---|---|---|---|---|
+| Contract renewal | `employment_contracts`, the current row | `end_date` within 30 days or past | HR Admin of the company | `/employees/[id]?tab=employment` | A new contract version is recorded (the old one stops being current) or the end date is changed |
+| Probation deadline | `employment_contracts`, the current row | `probation_end_date` within 30 days or past | HR Admin of the company | `/employees/[id]?tab=employment` | The contract is changed (a new version without the probation date) |
+| Document expiry | `employee_documents` and `identity_documents`, judged from the dates (never the daily job's stored status); only the newest version of each type counts | Expired, or expiring within 60 days (the profile's own look-ahead) | HR Admin of the company | `/employees/[id]?tab=documents&add=<type>&renew=1&docId=` (the shared renewal form, number prefilled) | The document is renewed with a later date (or none) or removed |
+| Attendance exception | `attendance_records.presence_conflict` (a manual entry and the clock differ) and `recovery_windows` waiting for HR verification, last 60 days | Always, while the record says so | HR Admin of the company | `/attendance?companyId=&date=&filter=needs_review&employee=` (that company and date, the person's row open and marked) | HR corrects the original record in the register (the conflict clears) or verifies the window |
+| Recovery Leave alert | `recovery_alerts` (its own existing acknowledgement) | `open` | HR Admin of the company | The same register link, on the alert's local date | The alert is obsolete (the processor retires it) |
+| AI suggestion | `ai_drafts` with `status = draft` | HR Admin and System Administrator only | HR Admin or System Administrator | `/ai-suggestions#draft-<id>` (the existing review screen; its content is not copied into the queue) | It is authorised or rejected there |
+
+Other entry points, as traced:
+
+| Entry point | What changed | Where the status comes from |
+|---|---|---|
+| `/alerts` | Now the work queue: Needs action, Due soon, Acknowledged; filters Company, Type, employee name; the view tabs keep their counts; a failed read says which part failed with Try again, and "Nothing needs attention" only follows a successful read | `lib/hr/queue-data.ts` |
+| `/attendance` (register) | Leads with **Needs review** (who, why, "Open this day"); day wording No record / Rest day / Absent / On leave / Present / Partial day, with the live clock status in its own column; a link can open one person's row; the rows stack on a phone | `attendance_register_for_date` (unchanged) and `lib/hr/attendance-status.ts` |
+| Profile, Leave tab | Balances first, then **Pending requests**, each linking to its row in `/approvals#request-<id>` for someone who can decide, then the history | `leave_requests`, `recovery_credit_requests` (unchanged) |
+| Profile, Attendance tab | Leads with **Needs review** and the days concerned, each linking to the register on that date with the row open; the day words are the register's | `attendance_records`, `recovery_windows` |
+| Profile, Overview | Next actions now include the queue's items for this person, in the queue's words and with its links | `lib/hr/queue.ts` narrowed to the employee |
+| My Day, HR rows | One row per group (contracts, probation, documents, attendance, recovery, AI), counting what Alerts lists as Needs action or Due soon (an acknowledged item is not counted as waiting) | `hrCandidates` over the same items |
+| `/approvals` | Leave and Recovery Leave rows carry an anchor (`#request-<id>`) so a profile can link to the exact row. Nothing else changed: the decision is made on the original request | `approvals` (unchanged) |
+
+### 14.2 Acknowledging is not resolving
+
+* **Mark as seen** (HR Admin of the item's company) records who saw the item and when, with an optional note, in `hr_queue_acknowledgements`. It changes nothing about the contract, document or attendance record.
+* The item then moves to **Acknowledged** and stays listed, with the same link, for as long as the source record still says it is open. It says so ("Still open") and, when it is overdue, that it needs action until the record is fixed.
+* An acknowledgement belongs to **one date** (the contract end, probation end, expiry or work date). A renewal that moves the date makes the item new again; nothing is deleted.
+* Resolution is never stored. It is worked out again from the source record each time, so the queue and the profile cannot disagree.
+* Recovery Leave alerts keep their own acknowledgement (`acknowledge_recovery_alert`); AI suggestions are decided on their own screen and have no Mark as seen.
+
+### 14.3 Who sees and who acts
+
+| Role | Alerts | Mark as seen | AI suggestions in the queue |
+|---|---|---|---|
+| HR Admin (of the company) | Yes, that company (RLS decides the rows) | Yes, for that company | Yes |
+| CEO, CTO (of the company) | Yes (contracts and documents; not identity documents, as before) | No: the row says "HR Admin of <company>" acts next | No |
+| System Administrator | Alerts: no (as before) | No | The AI Suggestions screen only |
+| Line manager, employee, Finance | No | No | No |
+
+The profile shows a person's queue items to the same viewers; a line manager or the person themselves see only what their tabs always showed. Identity document **numbers** are never read into the queue, and an AI suggestion's payload is never copied into it.
+
+### 14.4 What the attendance words mean
+
+`lib/hr/attendance-status.ts`: **Absent** only when the day was recorded as absent; **On leave** for approved leave or a leave record; **Present** when recorded present or clock sessions exist; **Partial day**; **Rest day** when nothing is recorded on a weekly rest day or public holiday of the employee's country (the working-week rule leave already uses); **No record** when nothing is recorded on a working day. A missing record is never read as absence. Clock status (Clocked in, Clocked out, Not started) is a different fact and is always shown separately.
+
+### 14.5 Database
+
+One additive migration, because acknowledgement had nowhere to live except for Recovery Leave alerts: table `hr_queue_acknowledgements` (one row per record and date, read by HR Admin, CEO and CTO of the company, no direct write policy, audited) and `acknowledge_hr_queue_item(kind, source_id, source_date, note)` (security definer; reads the company and employee from the source record, refuses when the record changed since the screen loaded, requires HR Admin of that company; asking twice is a no-op). No existing table, policy or function changed. Packs: `supabase/manual-sql/people_hr_phase2_00_preflight_readonly.sql`, the migration, `..._20_verify_readonly.sql`, `..._90_rollback.sql` (stops while any acknowledgement exists).
+
+### 14.6 On a phone
+
+Rows are stacked cards (employee and company first, issue, date and status, who acts next, one primary button), not a table, so nothing scrolls sideways. Optional explanation is behind the shared circled help control (the queue's states, Mark as seen, Needs review). Dates, errors, the one-line effect of Mark as seen and who acts next stay on the page.
+
+### 14.7 Diagnostics moved to Administration
+
+The Recovery Leave processor's health, work remaining and the database fingerprint are no longer above the HR queue. They are on `/admin/background-processing` (System Administrator, the existing Administration layout; nav: Organisation, Background processing). The queue keeps one line, only when the processor is late, because that changes what HR can trust ("alerts may appear late").
+
+### 14.8 Not in Phase 2
+
+Letters, Payroll, Assets and a broader Administration redesign stay in Phase 3. The first automatic Production run of the Phase 1 employment scheduler is tracked separately (PR #106). The document-expiry daily job is still not registered (held, see the flows map section 5): the queue judges documents from their dates, so it does not depend on it.

@@ -158,3 +158,33 @@ Employment details and access are kept apart: saving an employee never changes a
 1. Open the employee's profile and find Account, HR roles and module access on the Overview.
 2. Press Open People & Access. The person is already chosen.
 3. Read the company and module named on the screen before changing anything, then save there.
+
+## Work through the HR Alerts queue
+- id: people-hr-alerts-queue
+- area: people
+- status: published
+- keywords: alerts; hr alerts; hr queue; needs action; due soon; acknowledged; mark as seen; probation due; contract ending; document expiring; document expired; expiry; renew passport; attendance exception
+- links: Alerts -> /alerts
+- screens: /alerts
+
+Alerts is the HR work queue: contracts ending, probation reviews, document expiries, attendance exceptions, Recovery Leave alerts and AI suggestions waiting for a decision, in three groups: Needs action, Due soon and Acknowledged. Each row names the employee and company, what is wrong, its date and who acts next, with one button that opens the exact record. Mark as seen only records that you looked; the item stays until the record itself is fixed.
+
+1. Open Alerts and narrow it by company or type if you need to.
+2. Press the button on a row. It opens the exact record: the renewal form, the Employment tab, or the register on that day.
+3. Fix the record there (renew the document, record the contract change, correct the attendance day), then use the link at the top of the page to return to the same company and filters.
+4. If it cannot be fixed yet, an HR Admin presses Mark as seen. The item moves to Acknowledged and stays listed, with its link, until the record is fixed.
+
+## Review an attendance day that needs review
+- id: people-attendance-review
+- area: people
+- status: published
+- keywords: attendance register; needs review; no record; rest day; absent; attendance exception; recovery window; verify recovery window; clock records differ; manual entry differs
+- links: Attendance register -> /attendance
+- screens: /attendance; /employees/[id]
+
+The attendance register leads with Needs review: days where a manual entry and the clock records differ, a recovery window waits for HR to verify it, or an HR alert is open. A day with nothing recorded says No record on a working day and Rest day on a weekly rest day or public holiday. It says Absent only when the day was recorded as absent. Clock status (Clocked in, Clocked out, Not started) is a separate fact.
+
+1. Open the Attendance register, or the Attendance tab on the person's profile.
+2. Choose Open this day on a Needs review row. The register opens on that company and date with the person's row open.
+3. Read the sessions behind the day and use Edit to correct the original record.
+4. Reload the page. A corrected day leaves Needs review, and leaves Alerts too.
