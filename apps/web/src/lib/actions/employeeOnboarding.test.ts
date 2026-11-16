@@ -47,7 +47,7 @@ describe("createEmployee", () => {
   it("takes the country from the company on the server and uses the posted id as the employee's id", async () => {
     const r = await run({ countryCode: "PL" });
     expect(wrote("employees")[0]!.row).toMatchObject({ id: EMP, company_id: CO, country_code: "SA", employee_number: "E010" });
-    expect(r.redirect).toMatch(`/employees/${EMP}?tab=employment&step=contract&created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
   });
   it("asks for the country only when the company has none, and then uses the posted one", async () => {
     selects.companies = { data: { id: CO, country_code: "", default_currency: "SAR" }, error: null };
@@ -62,12 +62,12 @@ describe("createEmployee", () => {
     expect(wrote("compensation_details")[0]!.row).toMatchObject({ base_salary: 5000, currency: "SAR", effective_from: "2026-11-01", allowances: { other: 500 } });
     expect(wrote("leave_ledger")).toHaveLength(1);
     expect(wrote("comp_day_ledger")).toHaveLength(1);
-    expect(r.redirect).toBe(`/employees/${EMP}?tab=documents&step=documents&created=1`);
+    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
   });
-  it("leaving everything optional out writes only the employee, and the profile opens on the first step still to do", async () => {
+  it("leaving everything optional out writes only the employee, and the profile opens on its Overview with the setup checklist", async () => {
     const r = await run({});
     expect(inserts.map((i) => i.table)).toEqual(["employees"]);
-    expect(r.redirect).toContain("step=contract");
+    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
   });
   it("a repeated send hits the primary key: it opens the existing profile and writes nothing else", async () => {
     insertResults.employees = { error: { code: "23505", message: 'duplicate key value violates unique constraint "employees_pkey"' } };

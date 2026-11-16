@@ -58,11 +58,10 @@ export async function EmploymentSection({
   const today = getBusinessDateString(resolveCountryTimeZone(country));
   const employeeName = `${employee.first_name} ${employee.last_name}`;
 
-  let company = companyName;
-  if (!company) {
-    const { data } = await supabase.from("companies").select("legal_name").eq("id", employee.company_id).maybeSingle();
-    company = data?.legal_name ?? "";
-  }
+  // The company's default currency is what the first salary is recorded in; the company name is only read when the page did not pass it.
+  const { data: companyRow } = await supabase.from("companies").select("legal_name, default_currency").eq("id", employee.company_id).maybeSingle();
+  const company = companyName || companyRow?.legal_name || "";
+  const companyCurrency = (companyRow?.default_currency ?? "").trim().toUpperCase();
 
   const [contractsRes, compRes, eventsRes] = await Promise.all([
     canSeeContracts
@@ -154,7 +153,7 @@ export async function EmploymentSection({
                 currentJobTitle={employee.job_title}
                 currentBasic={comp ? Number(comp.base_salary) : null}
                 currentOther={otherNow}
-                currency={comp?.currency ?? ""}
+                currency={comp?.currency ?? (/^[A-Z]{3}$/.test(companyCurrency) ? companyCurrency : "")}
                 canChangeTitle={canChangeTitle}
                 canSchedule={canChangeTitle}
                 leadWith={leadWith}

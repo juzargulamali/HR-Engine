@@ -200,7 +200,8 @@ export async function createEmployee(_prev: CreateEmployeeState, formData: FormD
   });
   const first = remainingSteps(steps)[0];
   // The profile opens on the tab and form of the first step still to do (`?tab=...&step=...`), with the one-off markers the page reads: created, and what failed.
-  const url = new URL(first?.href ?? `/employees/${d.employeeId}`, "https://placeholder.invalid");
+  // Nothing failed: the profile's Overview opens, with the setup checklist; only after a partial failure does it open the first step that still needs doing.
+  const url = new URL(failed.length > 0 && first?.href ? first.href : `/employees/${d.employeeId}`, "https://placeholder.invalid");
   url.searchParams.set("created", "1");
   if (failed.length) url.searchParams.set("notice", [...new Set(failed)].map((f) => WHAT[f] ?? f).join(","));
   redirect(`${url.pathname}${url.search}`);

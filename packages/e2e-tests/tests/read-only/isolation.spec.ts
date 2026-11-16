@@ -35,10 +35,10 @@ test.describe("cross-employee / cross-company isolation", () => {
     expect(employeeRowCount, "A plain employee's directory view should not exceed HR Admin's").toBeLessThanOrEqual(hrRowCount);
   });
 
-  test("HR Admin's 'New employee' action is not offered to a plain employee", async ({ employeePage, hrAdminPage }) => {
+  test("HR Admin's 'Add employee' action (formerly 'New employee') is not offered to a plain employee", async ({ employeePage, hrAdminPage }) => {
     await employeePage.goto("/employees");
     await hrAdminPage.goto("/employees");
-    await expect(employeePage.getByRole("link", { name: /new employee/i })).toHaveCount(0);
-    await expect(hrAdminPage.getByRole("link", { name: /new employee/i })).toBeVisible();
+    await expect(employeePage.getByRole("link", { name: /(add|new) employee/i })).toHaveCount(0);
+    await expect(hrAdminPage.getByRole("link", { name: /(add|new) employee/i })).toBeVisible();
   });
 });

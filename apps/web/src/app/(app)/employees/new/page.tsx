@@ -1,4 +1,4 @@
-import { hasRoleAnyScope } from "@enginious-hr/domain";
+import { canCreateEmployee, hasRoleAnyScope } from "@enginious-hr/domain";
 import { getCurrentSession } from "@/lib/auth/session";
 import { createClient } from "@/lib/supabase/server";
 import { LoadError } from "@/components/workspace/states";
@@ -27,10 +27,15 @@ export default async function NewEmployeePage() {
   // The company and country lists are what the form stands on; departments and managers are optional pickers, so a failed read of those only empties them.
   if (companies.error || countries.error) return <LoadError what="the companies" retryHref="/employees/new" />;
 
+  // Only the companies this person may add employees to are offered, and only their departments and managers: a restricted HR Admin never sees another company in the picker.
+  const allowed = (companies.data ?? []).filter((c) => canCreateEmployee(session.grants, c.id));
+  const allowedIds = new Set(allowed.map((c) => c.id));
+  if (allowed.length === 0) return <AccessNotice title="Add employee">You need the HR Admin role for a company to add an employee to it.</AccessNotice>;
+
   return (
     <div className="max-w-2xl space-y-4">
       <PageHeader title="Add employee" description="Choose the company, enter who they are once, and open their profile. Contract, pay, documents and the account can be finished there." />
-      <NewEmployeeForm companies={companies.data ?? []} countries={countries.data ?? []} departments={departments.data ?? []} managers={managers.data ?? []} />
+      <NewEmployeeForm companies={allowed} countries={countries.data ?? []} departments={(departments.data ?? []).filter((d) => allowedIds.has(d.company_id))} managers={(managers.data ?? []).filter((m) => allowedIds.has(m.company_id))} />
     </div>
   );
 }
