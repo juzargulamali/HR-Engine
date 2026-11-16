@@ -18,7 +18,8 @@ const R = makeRunner("transfer-location");
 await R.start();
 const { step, check, eq } = R;
 const AE = "00000000-0000-4000-8000-00000000a001"; const PL = "00000000-0000-4000-8000-00000000a002";
-const AE_NAME = "Enginious Local AE"; const PL_NAME = "Enginious Local PL";
+// The screens say a company by its short Inventory name (worked out from its country), not its legal name.
+const AE_NAME = "Enginious UAE"; const PL_NAME = "Enginious Europe";
 const s1 = (q) => sql(q).split("\n")[0];
 const DXB = s1("select id from inv_locations where name='Dubai'"); const RUH = s1("select id from inv_locations where name='Riyadh'"); const POZ = s1("select id from inv_locations where name='Poznan'");
 const H = movementHelpers(R);
@@ -57,7 +58,7 @@ await step("set-up (through the real functions): a PL-owned truss is counted in 
 await step("before: the Dubai stock list shows the truss available, labelled with its owner; the scan address opens the same unit", async () => {
   await R.as("ceo");
   const row = await stockRow(DXB, "Truss 3 m");
-  check(row && /Owned by Enginious Local PL/.test(row), "Dubai row names the owner: " + row);
+  check(row && /Owned by Enginious Europe/.test(row), "Dubai row names the owner: " + row);
   check(/\b1\b/.test(row), "available there: " + row);
   eq(await scanUnitId(), UNIT, "scan resolves the unit");
   const t = (await R.panel().innerText()).replace(/\s+/g, " ");
@@ -90,6 +91,7 @@ await step("Send transfer (UI): Dubai to Riyadh; the review names both warehouse
   const mv = H.mv();
   await pickPlace(mv.getByLabel("Send from", { exact: true }), /^Dubai/);
   await pickPlace(mv.getByLabel("Send to", { exact: true }), /^Riyadh/);
+  await mv.locator("summary", { hasText: "Shipping details" }).click();   // Phase 2: the optional shipping fields are folded away
   await mv.getByLabel("Expected arrival (optional)").fill(dayAt(3, "12:00"));
   await H.review();
   const t = await H.text();
@@ -119,10 +121,11 @@ await step("Receive transfer (UI): the screen names the owner, receiving puts it
   await R.go("/inventory/stock?action=transfer&mode=receive");
   const mv = H.mv();
   await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
-  await mv.getByText(/Owned by Enginious Local PL/).first().waitFor({ timeout: 10000 });
+  await mv.getByText(/Owned by Enginious Europe/).first().waitFor({ timeout: 10000 });
   const t = await H.text();
   check(/does not change who owns it/.test(t), "the receive step says it does not change the owner: " + t.slice(0, 500));
   await R.shot("transfer-location-1-receive");
+  await mv.getByRole("radio", { name: /Everything still in transit arrived/ }).check();   // Phase 2: what arrived is always chosen, never assumed
   await H.review();
   const before = Number(s1("select count(*) from inv_movements where kind='transfer_receive'"));
   await mv.getByRole("button", { name: /^Confirm/ }).click();
@@ -134,7 +137,7 @@ await step("Receive transfer (UI): the screen names the owner, receiving puts it
 
 await step("After receipt: Riyadh lists it available with 'Owned by', Dubai no longer lists it; the scan resolves the same unit and its record says Riyadh and who owns it", async () => {
   const ruh = await stockRow(RUH, "Truss 3 m");
-  check(ruh && /Owned by Enginious Local PL/.test(ruh), "Riyadh row names the owner: " + ruh);
+  check(ruh && /Owned by Enginious Europe/.test(ruh), "Riyadh row names the owner: " + ruh);
   const cells = (await R.page.locator("main table", { has: R.page.locator("caption", { hasText: "Inventory items" }) }).first().locator("tbody tr", { hasText: "Truss 3 m" }).first().locator("td").allInnerTexts()).map((x) => x.replace(/\s+/g, " ").trim());
   eq(cells[1], "1", "Available here at Riyadh is 1");
   await R.shot("transfer-location-2-riyadh-stock");
@@ -190,9 +193,10 @@ await step("Send transfer (UI): after AE's founder authorises sharing the hub is
   await R.panel().getByRole("link", { name: "Transfer stock" }).click();
   const mv = H.mv();
   const sel = mv.getByLabel("Send to", { exact: true });
-  await pickPlace(sel, new RegExp(`^${HUB_NAME} · ${PL_NAME} \\(authorised\\)`));
+  await pickPlace(sel, new RegExp(`^${HUB_NAME} · ${PL_NAME} \\(another company, authorised\\)`));
   const t0 = await H.text();
   check(/The equipment stays yours/.test(t0), "says it stays the sender's: " + t0.slice(0, 300));
+  await mv.locator("summary", { hasText: "Shipping details" }).click();   // Phase 2: the optional shipping fields are folded away
   await mv.getByLabel("Expected arrival (optional)").fill(dayAt(3, "12:00"));
   await H.review();
   const t = await H.text();
@@ -236,7 +240,7 @@ await step("incoming (UI): scan resolves the unit for the PL operator (opening t
   check(!/Laptop/.test(await R.mainText()), "another AE code tells nothing");
   await R.go(`/inventory/transfers/${XTR}`);
   const tr = await R.mainText();
-  check(/Dispatched/.test(tr) && /In transit/.test(tr) && new RegExp(`Not received yet at ${HUB_NAME}`).test(tr), "trace before receipt: " + tr.slice(0, 600));
+  check(/1 sent · 0 received · 1 still in transit/.test(tr) && /In transit/.test(tr) && new RegExp(`Who acts next: ${HUB_NAME} · ${PL_NAME}\\.`).test(tr) && !new RegExp(`Received at ${HUB_NAME}`).test(tr), "the transfer before receipt: " + tr.slice(0, 600));
   check(!/4321|Purchase cost/.test(tr), "no cost in the trace");
 });
 
@@ -262,6 +266,7 @@ await step("Receive transfer (UI): the PL operator receives it; the screen names
   const t = await H.text();
   check(t.includes(LAPCODE) && /does not change who owns it/.test(t), "names the unit and the owner rule: " + t.slice(0, 500));
   await R.shot("transfer-location-5-receive-hub");
+  await mv.getByRole("radio", { name: /Everything still in transit arrived/ }).check();   // Phase 2: what arrived is always chosen, never assumed
   await H.review();
   const before = Number(s1("select count(*) from inv_movements where kind='transfer_receive'"));
   await mv.getByRole("button", { name: /^Confirm/ }).click();
@@ -282,7 +287,7 @@ await step("after receipt: the PL operator sees it available at the hub, still o
   check(/Available at/.test(p) && !/4321|Purchase cost|Notes/.test(p), "record without cost: " + p.slice(0, 500));
   await R.go(`/inventory/transfers/${XTR}`);
   const tr = await R.mainText();
-  check(/Received/.test(tr) && new RegExp(`at ${HUB_NAME} \\(${PL_NAME}\\)`).test(tr), "receipt shown with the receiving company: " + tr.slice(0, 700));
+  check(/1 sent · 1 received · nothing in transit/.test(tr) && new RegExp(`Received at ${HUB_NAME} · ${PL_NAME}`).test(tr) && new RegExp(`\\(${PL_NAME}\\)`).test(tr), "receipt shown with the receiving company: " + tr.slice(0, 1400));
   await R.shot("transfer-location-6-trace-receiver");
 });
 
@@ -290,7 +295,7 @@ await step("the OWNER traces the same transfer through dispatch and receipt (the
   await R.as("hr1");
   await R.go(`/inventory/transfers/${XTR}`);
   const tr = await R.mainText();
-  check(/Dispatched/.test(tr) && new RegExp(`at ${HUB_NAME} \\(${PL_NAME}\\)`).test(tr) && /Received/.test(tr), "owner reads dispatch and receipt: " + tr.slice(0, 700));
+  check(new RegExp(`Sent from Dubai · ${AE_NAME}`).test(tr) && new RegExp(`Received at ${HUB_NAME} · ${PL_NAME}`).test(tr) && new RegExp(`\\(${PL_NAME}\\)`).test(tr), "owner reads dispatch and receipt: " + tr.slice(0, 1400));
   check(!/4321|Purchase cost/.test(tr), "no cost in the trace");
   await R.go(`/inventory/stock?unit=${LAP}`);
   const p = (await R.panel().innerText()).replace(/\s+/g, " ");
@@ -333,6 +338,7 @@ await step("Receive transfer (UI) after the revocation: the transfer is listed w
   await mv.getByLabel("Which transfer arrived?").selectOption({ index: 1 });
   await mv.getByText(new RegExp(`Owned by ${AE_NAME}`)).first().waitFor({ timeout: 10000 });
   check((await H.text()).includes(REVOKED), "the receive form says: " + (await H.text()).slice(0, 500));
+  await mv.getByRole("radio", { name: /Everything still in transit arrived/ }).check();   // Phase 2: what arrived is always chosen, never assumed
   await H.review();
   await mv.getByRole("button", { name: /^Confirm/ }).click();
   await mv.getByText("Recorded").first().waitFor({ timeout: 20000 });

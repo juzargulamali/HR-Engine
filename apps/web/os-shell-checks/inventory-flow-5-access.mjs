@@ -116,7 +116,7 @@ if (run("B2")) {
     let t = await R.mainText();
     check(!/Module access/.test(t) && (await R.page.locator("main section[data-module]").count()) === 0, "no module access cards for an operator: " + t.slice(0, 200));
     check(!/ceo@e2e\.local|pol\.exec@/.test(await R.page.content()), "no other person's e-mail in the People & Access page HTML");
-    await R.go("/inventory/manage");
+    await R.go("/inventory/manage?section=catalogue");
     t = await R.mainText();
     eq(await R.page.getByRole("button", { name: "Add a category" }).count(), 0, "no Add a category button for the operator");
     console.log("   Setup as hr1@:", t.slice(0, 160));
