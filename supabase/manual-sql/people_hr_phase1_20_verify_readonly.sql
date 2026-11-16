@@ -1,4 +1,4 @@
--- READ ONLY. Run AFTER 20270111000100_people_hr_phase1.sql. Every row must say OK except row 8, which is a count for information. Creates no row.
+-- READ ONLY. Run AFTER 20270115000100_people_hr_phase1.sql. Every row must say OK except row 8, which is a count for information. Creates no row.
 select item, result from (
   select 1 as ord, 'employee_career_events.applied_at exists with default now() and an index for scheduled rows' as item,
          case when exists (select 1 from pg_attribute a where a.attrelid = 'public.employee_career_events'::regclass and a.attname = 'applied_at' and not a.attisdropped)

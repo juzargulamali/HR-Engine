@@ -1,4 +1,4 @@
--- READ ONLY. Run BEFORE applying 20270111000100_people_hr_phase1.sql. Changes nothing.
+-- READ ONLY. Run BEFORE applying 20270115000100_people_hr_phase1.sql. Changes nothing.
 -- Expect: rows 1, 3 and 4 say 'OK'; row 2 says 'not installed yet' (or 'already installed' on a second run). Rows 5 and 6 are numbers for information.
 -- If row 3 or 4 does not say OK, STOP: the migration would fail on the one-opening-balance index. Do not delete anything: decide with HR which row is the true opening balance.
 select item, result from (

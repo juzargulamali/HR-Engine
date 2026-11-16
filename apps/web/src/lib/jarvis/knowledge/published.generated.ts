@@ -846,6 +846,182 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
     ]
   },
   {
+    "id": "people-add-employee",
+    "area": "people",
+    "title": "Add an employee",
+    "keywords": [
+      "add employee",
+      "new employee",
+      "create employee",
+      "new hire",
+      "add a person",
+      "onboard employee",
+      "onboarding",
+      "hire",
+      "employee number",
+      "add staff"
+    ],
+    "summary": "An HR Admin adds an employee from the Employees list. Choose the company first: its country and currency are used for the new person, so you do not type them. You enter the name, employee number and hire date once, and may add the contract, salary and opening leave balances now or later. Pressing the button twice never creates a second person.",
+    "steps": [
+      "Open Employees and press Add employee.",
+      "Choose the company, then fill in the name, employee number and hire date.",
+      "Add the job, department, manager, contract and salary if you have them; leave the rest for later.",
+      "Press the button at the bottom. The new profile opens and lists what is still to do."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      },
+      {
+        "label": "Add employee",
+        "href": "/employees/new"
+      }
+    ],
+    "screens": [
+      "/employees/new"
+    ]
+  },
+  {
+    "id": "people-employee-remaining-steps",
+    "area": "people",
+    "title": "Finish a new employee's remaining steps",
+    "keywords": [
+      "finish onboarding",
+      "remaining steps",
+      "what is left",
+      "incomplete employee",
+      "resume onboarding",
+      "continue adding employee",
+      "contract missing",
+      "salary missing",
+      "opening balances",
+      "needs attention",
+      "what is missing for employee"
+    ],
+    "summary": "A new employee's profile lists what is still to do: contract, salary, documents, opening leave balances (optional) and the account invitation. The list is worked out from what is already saved, so you can leave at any point and come back, on any device, to the same person. The Employees list flags the same people under Needs attention.",
+    "steps": [
+      "Open Employees, find the person by name or employee number, and open them. Rows marked Needs attention are the ones with steps left.",
+      "On the Overview, press the button beside a step. The form opens with the person and company already filled in.",
+      "Save it; the step is marked done when you return to the Overview.",
+      "A step that does not apply to this person says Not applicable."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
+      "/employees/[id]"
+    ]
+  },
+  {
+    "id": "people-change-job-or-pay",
+    "area": "people",
+    "title": "Change someone's job title or pay",
+    "keywords": [
+      "change salary",
+      "raise",
+      "pay rise",
+      "salary increase",
+      "promotion",
+      "change job title",
+      "new job title",
+      "schedule a salary change",
+      "change pay",
+      "effective date",
+      "pay history",
+      "scheduled change"
+    ],
+    "summary": "A job title and pay change is made in one form on the person's Employment tab, and the Compensation tab's Change salary button opens the same form. You choose the date it takes effect. A date of today or earlier applies now; a later date is scheduled, changes nothing until that day, and is listed under Scheduled changes until it is put in force. The job title and pay are saved together or not at all.",
+    "steps": [
+      "Open the person and go to the Employment tab, or press Change salary on the Compensation tab.",
+      "Enter the new job title and/or the new pay, and the date it takes effect.",
+      "Read the line beside the button, which says what will happen on save, then save.",
+      "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms; if it is still under Scheduled changes, tell your System Administrator."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
+      "/employees/[id]"
+    ]
+  },
+  {
+    "id": "people-renew-document",
+    "area": "people",
+    "title": "Add or renew a document",
+    "keywords": [
+      "add document",
+      "renew document",
+      "passport expired",
+      "visa expiring",
+      "document expiry",
+      "emirates id",
+      "iqama",
+      "labor card",
+      "upload document",
+      "renew passport",
+      "expired document",
+      "identity document"
+    ],
+    "summary": "All documents are added in one form on the person's Documents tab. The type you choose decides what is asked: an identity document needs its number, a visa or labor card needs a file and an expiry date. To renew, press Renew beside the expired or expiring document: the form opens with the person and type filled in and the earlier number copied, and the earlier document stays in the history.",
+    "steps": [
+      "Open the person and go to the Documents tab.",
+      "Press Add document (or Renew beside an existing one) and choose the type.",
+      "Fill in what the type asks for and attach the file if it is required.",
+      "Save. Identity documents are visible only to the person and their HR Admin."
+    ],
+    "links": [
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
+      "/employees/[id]"
+    ]
+  },
+  {
+    "id": "people-find-access-record",
+    "area": "people",
+    "title": "Find someone's account and module access",
+    "keywords": [
+      "invite employee",
+      "employee login",
+      "account invitation",
+      "no login",
+      "link account",
+      "give module access",
+      "employee access",
+      "where do I give access",
+      "people and access from profile"
+    ],
+    "summary": "Employment details and access are kept apart: saving an employee never changes an invitation or what they can open. From the person's profile, the Account, HR roles and module access card opens People & Access on that person, and says which company and modules a change would affect. Only a System Administrator sends invitations; an HR Admin links an account that already exists.",
+    "steps": [
+      "Open the employee's profile and find Account, HR roles and module access on the Overview.",
+      "Press Open People & Access. The person is already chosen.",
+      "Read the company and module named on the screen before changing anything, then save there."
+    ],
+    "links": [
+      {
+        "label": "People & Access",
+        "href": "/people-access"
+      },
+      {
+        "label": "Employees",
+        "href": "/employees"
+      }
+    ],
+    "screens": [
+      "/people-access"
+    ]
+  },
+  {
     "id": "projects-where",
     "area": "projects",
     "title": "Projects and tasks",

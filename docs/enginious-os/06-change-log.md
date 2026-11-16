@@ -8,6 +8,26 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | People & HR Phase 1: employee directory, profile and onboarding (branch `feat/people-hr-phase1` from `main` `6526049`; **a draft pull request; not merged; hosted migration `20270115000100` not applied by Claude; Production not deployed from this branch**; required CI: first run recorded on the pull request (not part of this file))
+
+**What changed for people.**
+
+* **Employees list.** Search by name or employee number, the number on each row, and a **Needs attention** column for HR Admins (setup still to do, expired or expiring documents, scheduled changes), each flag opening the exact tab or form. **Add employee** stays visible; search, filters and page are restored on return from a profile.
+* **Add employee, company first.** The company is chosen first and its own country and currency are used and shown; a missing country or default currency is asked for in place. Identity and job are entered once; contract, first pay and opening balances are optional in the same step. The person lands on their own profile. A repeated click, retry or double send reaches the same record.
+* **Setup you can leave and resume.** The profile's Setup card lists contract, compensation, documents, opening balances (optional) and the account invitation, worked out from the saved records (nothing stored), and each step opens its form with the employee and company already chosen. A leaver or removed record says Not applicable; a part the viewer cannot see is hidden, never "to do".
+* **One job-and-pay change.** One form replaces the two entry points; **Change salary** opens the same form. A date of today or earlier applies now; a later date is **scheduled** and listed until it is put in force; the job title and pay save together or not at all. Finance changes pay only, dated today or earlier.
+* **One Add document flow.** The type decides the fields (identity documents keep the number and the tighter access; visas, labor cards and certificates need a file and track expiry); **Renew** opens with the employee, company and type filled in and keeps the earlier document.
+* **Opening balances recorded once.** From creation or from the Leave tab; a repeat is refused and the database refuses a second row.
+* **Profile and links.** Overview with Next actions and At a glance; insurance, loans and performance name the employee and company and say who acts next; the Account, HR roles and module access card names the company and modules and opens People & Access on the person.
+
+**Database.** One additive migration, `20270115000100_people_hr_phase1.sql` (install-order row 53): `employee_career_events.applied_at`, two partial unique indexes, `record_employment_change`, `apply_due_employment_changes` and two internal helpers; no existing policy, function or grant replaced. Packs: preflight (6 rows), verify (8 rows), rollback (stops while a scheduled change exists). The previous build keeps working on the migrated schema.
+
+**Removed.** `createEmployee` in `employees.ts`, `addIdentityDocument`, `addEmployeeDocument`, `recordCareerEvent`, `addCompensationVersion` and their forms; each entry point now opens the shared flow.
+
+**Docs.** New `modules/people-hr.md`, `people-hr-workflows.md`, `people-hr-coverage-index.md` (37 screens and parts) and `people-hr-action-catalogue.md` (14 rows); 01, 02, 03, 04, 05, README and the install order updated; staff guidance gains five topics (published topics: 105 to 110); JARVIS gains no capability.
+
+**Verified (local, isolated stack; nothing hosted).** RLS suite 95 files, 2198 tests passed (13 new tests); web suite 382 files, 4251 tests passed; `people-hr-phase1-flow.mjs` 20 of 20 steps passed (run before the migration was renamed and the cron route added to the proxy list; the rename changes no behaviour) at 390 px (UAE, Saudi Arabia and Poland fixtures; leave and resume the same record; permission boundaries for an HR Admin of one company, Finance, a line manager and the employee; the grants of Sales, Projects, Operations, Inventory, Finance and HR unchanged). **Not verified:** anything hosted; a real phone; the scheduler reaching `/api/cron/employment-changes` (listed as public in `proxy.ts` like `crm-reminders`, and answers 401 without the cron secret; hosted cron history and secret unchecked); invitation delivery.
+
 ### 2026-11-16 | Inventory Phase 2: transfers between companies end to end, less repeat entry, Setup in four groups, and the whole-module Map (branch `claude/inventory-phase-2` from `main` `2059b4b`, with `main` `d5754d1` merged in; **not merged; no pull request opened by Claude; required CI not yet run on this head; no SQL, so nothing to apply to the hosted database; Production not deployed from this branch**)
 
 **What changed for people.**

@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
-// People & HR Phase 1 (migration 20270111000100_people_hr_phase1.sql), against a real Postgres. Fictional data throughout.
+// People & HR Phase 1 (migration 20270115000100_people_hr_phase1.sql), against a real Postgres. Fictional data throughout.
 //   * ONE job-and-pay change: today or earlier is applied in the same transaction as its audit event (title and pay together or not at all); a later date is SCHEDULED and changes nothing yet;
 //   * HR Admin may change either; Finance pay only, in force already, with no event; nobody else, no other company, and an unknown employee gets the same refusal;
 //   * the daily applier is service-role only, applies due events for one country in date order, and leaves a leaver's event unapplied;

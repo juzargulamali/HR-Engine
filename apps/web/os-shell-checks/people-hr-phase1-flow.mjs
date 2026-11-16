@@ -88,6 +88,24 @@ await step("add an employee once (identity and job only): double click creates o
   await noHScroll("the profile");
 });
 
+await step("Saudi Arabia and Poland employees take their company's country and currency into the saved records (contract and pay entered in the same step this time)", async () => {
+  for (const [co, cc, cur, no] of [[SA, "SA", "SAR", "ZZ-702"], [PL, "PL", "PLN", "ZZ-703"]]) {
+    await go("/employees/new");
+    await page.locator("#companyId").selectOption(co); await page.getByTestId("onboarding-summary").waitFor();
+    await page.locator("#firstName").fill(`Test${cc}`); await page.locator("#lastName").fill("Country"); await page.locator("#employeeNumber").fill(no); await page.locator("#hireDate").fill(plus(-10));
+    await page.getByText("Contract and pay now (optional)").click();
+    await page.locator("#contractType").selectOption("permanent"); await page.locator("#basicSalary").fill("3000");
+    if ((await page.locator("#salaryCurrency").inputValue()).toUpperCase() !== cur) throw new Error(`${cc}: the pay currency was not suggested as ${cur}`);
+    await page.getByRole("button", { name: /^Create employee/ }).click();
+    await page.waitForURL(/\/employees\/[0-9a-f-]{36}/, { timeout: 20000 });
+    const id = page.url().match(/employees\/([0-9a-f-]{36})/)[1];
+    if (one(`select country_code from employees where id = '${id}'`) !== cc) throw new Error(`${cc}: country not taken from the company`);
+    if (one(`select currency from compensation_details where employee_id = '${id}'`) !== cur) throw new Error(`${cc}: pay currency not ${cur}`);
+    if (one(`select count(*) from employment_contracts where employee_id = '${id}'`) !== "1") throw new Error(`${cc}: contract not saved`);
+    if (!/Done/.test(await page.getByTestId("setup-status-contract").innerText()) || !/Done/.test(await page.getByTestId("setup-status-compensation").innerText())) throw new Error(`${cc}: the checklist does not show contract and pay done`);
+  }
+});
+
 await step("leave midway and resume the same record: the directory flags it, the profile still lists the same steps, and a repeat submit of the creation goes to the same record", async () => {
   await go(`/employees?q=${EMPNO}`);
   const row = await body(); if (!/setup steps? to do|setup steps/i.test(row)) throw new Error(`the directory does not flag the unfinished setup: ${row.slice(0, 220)}`);

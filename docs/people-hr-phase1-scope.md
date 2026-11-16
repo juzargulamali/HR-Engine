@@ -27,8 +27,14 @@ Branch `feat/people-hr-phase1` from `main` (after Inventory Phase 2, PR #103). O
 * **One job-and-pay change process** (`recordEmploymentChange`): effective date today or earlier applies now; later dates are **scheduled** and applied by a daily job on their date. Job title and pay save together or not at all (one database transaction). "Change salary" is a shortcut into the same form. Finance (pay only) uses the same form for pay changes dated today or earlier; scheduling is HR Admin's, as the career-event record is.
 * **One Add document flow.** The type decides the table and the fields (`lib/hr/document-types.ts`): identity types keep the tighter access (number, optional scan), other types require a file and keep the daily expiry tracking. Renewal opens with employee, company and type filled in and keeps the earlier document in the history.
 * **Opening balances** are recorded once: an application check plus partial unique indexes make a repeat or a concurrent second click impossible.
-* **Migration** `20270111000100_people_hr_phase1.sql` (additive): `employee_career_events.applied_at` (default `now()` so rows written by the previous build count as applied), the apply and record functions, the two partial unique indexes, with preflight, verify and rollback packs and RLS tests.
+* **Migration** `20270115000100_people_hr_phase1.sql` (additive): `employee_career_events.applied_at` (default `now()` so rows written by the previous build count as applied), the apply and record functions, the two partial unique indexes, with preflight, verify and rollback packs and RLS tests.
 
 ## 3. Out of scope (later phases)
 
 HR work queue redesign (Phase 2); Letters, Payroll, Assets and Admin redesigns (Phase 3). Profile tabs not touched here: Leave (ledger), Attendance, Assets, final settlement.
+
+## 4. Verified where
+
+* **Local, isolated stack only; nothing hosted.** Full RLS suite 95 files, 2198 tests passed (13 new in `people-hr-phase1.rls.test.ts`); web suite 382 files, 4251 tests passed; `tsc`, `eslint` and the JARVIS knowledge check clean.
+* **One signed-in walkthrough at 390 px** (`apps/web/os-shell-checks/people-hr-phase1-flow.mjs`, 20 of 20 steps): UAE, Saudi Arabia and Poland company defaults, a company with a missing default currency, add an employee, leave midway, resume the same record, finish contract, pay, documents, opening balances and the account link without retyping; an HR Admin of one company, Finance, a line manager and the employee each see only what they may; the Sales, Projects, Operations, Inventory, Finance and HR grants are unchanged afterwards. Screenshots: `docs/people-hr-screenshots/`.
+* **Not verified:** the hosted migration, Preview or Production, a real phone, invitation delivery, Vercel's scheduler calling `/api/cron/employment-changes` with the cron secret, and the hosted storage paths for new document submissions.

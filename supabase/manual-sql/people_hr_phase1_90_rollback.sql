@@ -1,4 +1,4 @@
--- ROLLBACK for 20270111000100_people_hr_phase1.sql. Deploy the app from before this change FIRST (the Employment tab and the daily employment-changes job call these functions).
+-- ROLLBACK for 20270115000100_people_hr_phase1.sql. Deploy the app from before this change FIRST (the Employment tab and the daily employment-changes job call these functions).
 -- It STOPS while any change is still SCHEDULED (applied_at is null): a scheduled change exists only in that column, so dropping it would lose the change. Let each come due and apply, or ask HR to
 -- record it again after the rollback, then run this again. It deletes no employee, contract, pay version, career event, ledger row or document. It drops the four functions, the three indexes
 -- and the applied_at column. Safe to run twice.
