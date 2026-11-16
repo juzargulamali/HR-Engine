@@ -322,7 +322,7 @@ No capability, role, grant or policy was added or changed. The new database func
 
 `inv_request_runs` is readable through `inv_can_see_request` and has no write policy. Company names in the Inventory selectors are display names worked out from the company's country; nothing about access depends on them (`modules/inventory.md` section 2).
 
-## Inventory Phase 2 (2026-11-16; Inventory Phase 2, branch `claude/inventory-phase-2` (from `main` `2059b4b`, `d5754d1` merged in): **not merged, no pull request opened by Claude, required CI not yet run on this head, no SQL (nothing to apply to the hosted database), Production not deployed from this branch**)
+## Inventory Phase 2 (2026-11-16; Inventory Phase 2, branch `claude/inventory-phase-2` (from `main` `2059b4b`, `d5754d1` merged in): **merged as PR #103, merge `6526049`, pinned to head `1026308`; required CI (`lint-typecheck-test`, `rls-policies`) green on that head; no SQL in this phase (nothing to apply to the hosted database); real-phone Preview checks passed (owner-confirmed 2026-11-16, not run by Claude); Production `Unverified` (not confirmed by the owner or by Claude for `6526049`)**)
 
 **No permission changed.** No migration, function, policy or grant was added or altered; every write is still decided by the same database functions. What changed is what the screens offer and what they read, each through a right the person already had:
 

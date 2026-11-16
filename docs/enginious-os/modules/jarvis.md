@@ -393,7 +393,7 @@ Source: `packages/domain/src/crmStages.ts` (`CRM_SOURCES`); `apps/web/src/lib/ja
 * **Times.** JARVIS still converts the next action of a new enquiry and a meeting's follow-up on the Dubai clock, and labels the time "Time (Dubai)"; its lists and summaries are worded in Dubai dates. For a company on another zone the saved moment is then shown on that company's clock everywhere else in Sales. JARVIS stays on the Dubai clock in this release (owner decision, 2026-11-15; ledger decision 26).
 * JARVIS has no action for the handover's site contact, the outreach contact, the Operations question notice or the follow-up time zone. The rulebook (`jarvis-rulebook.md`) is unchanged.
 
-## 17. JARVIS and Inventory (2026-11-16; Inventory Phase 2 on branch `claude/inventory-phase-2`: not merged, required CI not yet run on this head, no SQL, Production not deployed from this branch)
+## 17. JARVIS and Inventory (2026-11-16; Inventory Phase 2: merged as PR #103, `6526049`; required CI green on head `1026308`; no SQL; Production `Unverified`)
 
 Verified in the code at the branch head. **Inventory Phase 2 grants JARVIS nothing new**: no read, no action, no data sent to the provider.
 

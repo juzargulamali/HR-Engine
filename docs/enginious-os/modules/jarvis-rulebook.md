@@ -149,7 +149,7 @@ This is **not a JARVIS capability**. It cannot be asked for in the panel, no JAR
 
 How it differs from section 3: the evidence is kind B1 material for Projects, admitted for this one use only, and one point is **stricter**: a line that mentions an amount of money is withheld before the review (`lib/projects/closeout/evidence.ts`), although ordinary record text may carry figures elsewhere. Layers 1 to 5 of section 3 apply unchanged (declared source, sharing restriction, screening of what goes out, screening of what comes back, blind logs). Reference: [`projects-closeout-report.md`](./projects-closeout-report.md).
 
-## 9. Inventory (2026-11-16; Inventory Phase 2, branch `claude/inventory-phase-2`: not merged, no SQL)
+## 9. Inventory (2026-11-16; Inventory Phase 2: merged as PR #103, `6526049`; no SQL)
 
 Nothing in sections 2 to 7 changes. Stated for Inventory so it does not have to be inferred:
 
