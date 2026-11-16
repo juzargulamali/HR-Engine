@@ -84,7 +84,8 @@ export async function loadProfileSetup(
     viewer.canEditCore ? supabase.from("leave_ledger").select("id", { count: "exact", head: true }).eq("employee_id", e).eq("reference_type", "opening_balance") : none,
     viewer.canEditCore ? supabase.from("comp_day_ledger").select("id", { count: "exact", head: true }).eq("employee_id", e).eq("source", "opening_balance") : none,
     // `applied_at` is added with this phase's migration; until it is installed the read fails and the flag is simply not shown.
-    viewer.canSeeCareerEvents ? supabase.from("employee_career_events").select("id", { count: "exact", head: true }).eq("employee_id", e).is("applied_at", null) : none,
+    // Scheduled = not applied and not cancelled; `conflict_at` marks the ones the daily job held back for review.
+    viewer.canSeeCareerEvents ? supabase.from("employee_career_events").select("id, conflict_at", { count: "exact" }).eq("employee_id", e).is("applied_at", null).is("dismissed_at", null) : none,
   ]);
 
   const identityRows = identity.error ? null : ((identity.data ?? []) as unknown as DocRow[]);
@@ -125,6 +126,7 @@ export async function loadProfileSetup(
     expiredDocuments: seen ? (idCounts?.expired ?? 0) + (docCounts?.expired ?? 0) : null,
     expiringDocuments: seen ? (idCounts?.expiring ?? 0) + (docCounts?.expiring ?? 0) : null,
     scheduledChanges: countOrNull(scheduled),
+    heldChanges: scheduled.error || !scheduled.data ? null : scheduled.data.filter((r) => r.conflict_at != null).length,
   });
   // Someone who cannot edit the record is not told to fill in its job title or manager: they could not act on it.
   if (!viewer.canEditCore) exceptions = exceptions.filter((x) => x.key !== "manager" && x.key !== "job" && x.key !== "setup");

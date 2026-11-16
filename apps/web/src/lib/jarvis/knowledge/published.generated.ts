@@ -934,12 +934,14 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "pay history",
       "scheduled change"
     ],
-    "summary": "A job title and pay change is made in one form on the person's Employment tab, and the Compensation tab's Change salary button opens the same form. You choose the date it takes effect. A date of today or earlier applies now; a later date is scheduled, changes nothing until that day, and is listed under Scheduled changes until it is put in force. The job title and pay are saved together or not at all.",
+    "summary": "A job title and pay change is made in one form on the person's Employment tab, and the Compensation tab's Change salary button opens the same form. You choose the date it takes effect. A date of today or earlier, by the employee's own country calendar, applies now; a later date is scheduled and changes nothing until that day. The job title and pay are saved together or not at all, and allowances you do not edit are kept.",
     "steps": [
       "Open the person and go to the Employment tab, or press Change salary on the Compensation tab.",
       "Enter the new job title and/or the new pay, and the date it takes effect.",
       "Read the line beside the button, which says what will happen on save, then save.",
-      "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms; if it is still under Scheduled changes, tell your System Administrator."
+      "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.",
+      "If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay.",
+      "If it is still under Scheduled changes with no such label, tell your System Administrator."
     ],
     "links": [
       {

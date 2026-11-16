@@ -122,12 +122,14 @@ A new employee's profile lists what is still to do: contract, salary, documents,
 - links: Employees -> /employees
 - screens: /employees/[id]
 
-A job title and pay change is made in one form on the person's Employment tab, and the Compensation tab's Change salary button opens the same form. You choose the date it takes effect. A date of today or earlier applies now; a later date is scheduled, changes nothing until that day, and is listed under Scheduled changes until it is put in force. The job title and pay are saved together or not at all.
+A job title and pay change is made in one form on the person's Employment tab, and the Compensation tab's Change salary button opens the same form. You choose the date it takes effect. A date of today or earlier, by the employee's own country calendar, applies now; a later date is scheduled and changes nothing until that day. The job title and pay are saved together or not at all, and allowances you do not edit are kept.
 
 1. Open the person and go to the Employment tab, or press Change salary on the Compensation tab.
 2. Enter the new job title and/or the new pay, and the date it takes effect.
 3. Read the line beside the button, which says what will happen on save, then save.
-4. Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms; if it is still under Scheduled changes, tell your System Administrator.
+4. Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.
+5. If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay.
+6. If it is still under Scheduled changes with no such label, tell your System Administrator.
 
 ## Add or renew a document
 - id: people-renew-document

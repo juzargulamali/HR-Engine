@@ -4,7 +4,7 @@
 
 **References.** `R` = [`people-hr.md`](./people-hr.md). `W` = [`people-hr-workflows.md`](./people-hr-workflows.md). `C` = [`people-hr-action-catalogue.md`](./people-hr-action-catalogue.md).
 
-**Evidence.** `Flow` = driven signed in at 390 px on the isolated stack by `apps/web/os-shell-checks/people-hr-phase1-flow.mjs`: 20 of 20 steps passed (run before the migration was renamed and the cron route added to the proxy list; the rename changes no behaviour). `RLS` = `packages/rls-tests/test/people-hr-phase1.rls.test.ts` (13 tests; full suite 95 files, 2198 tests passed). `Code` = unit or component tests only (web suite 382 files, 4251 tests passed). `Not run` = read from the code, not exercised by any check.
+**Evidence.** `Flow` = driven signed in at 390 px on the isolated stack by `apps/web/os-shell-checks/people-hr-phase1-flow.mjs`: 20 of 20 steps passed at the earlier head `e42a067`; it was NOT re-run after the date, allowance, stale-pay and cancel correction (its psql lines were updated to the new function forms and are unrun). `RLS` = `packages/rls-tests/test/people-hr-phase1.rls.test.ts` (19 tests passed after the correction (13 before it); the full RLS suite (95 files, 2198 tests) passed at the earlier head `e42a067` and is left to required CI for the corrected head). `Code` = unit or component tests only (the focused files were re-run after the correction; the full web suite (382 files, 4251 tests) passed at the earlier head `e42a067` and is left to required CI for the corrected head). `Not run` = read from the code, not exercised by any check.
 
 ## 1. Directory and Add employee
 
@@ -38,14 +38,14 @@
 | # | Screen or part | Route | Who reaches it | Reference | Catalogue | Evidence |
 |---|---|---|---|---|---|---|
 | HR-18 | Current terms | `?tab=employment` | HR Admin, Finance, the person (pay); contract readers | R 4.5; W 5 | none | `Flow`; `Code` (`employment-timeline.test.tsx`) |
-| HR-19 | Scheduled changes | `?tab=employment` | people who see career events: the person, HR Admin, Finance | R 4.5 | `people.employment.apply_due` | `Flow` (a later-dated change listed, nothing moved); `RLS` |
+| HR-19 | Scheduled changes | `?tab=employment` | people who see career events: the person, HR Admin, Finance | R 4.5 | `people.employment.apply_due`, `people.employment.cancel` | `Flow` (a later-dated change listed, nothing moved; earlier head); `RLS` (held, cancelled, failed and per-country cases); `Code` (the held and cancelled rows and the flag) |
 | HR-20 | Change job or pay (one form; job title and pay together) | `?tab=employment&change=job`, `#change-employment` | HR Admin: both, now or scheduled; Finance: pay only, today or earlier | R 4.5; W 5 | `people.employment.change` | `Flow`; `RLS`; `Code` (`change-employment-form.test.tsx`) |
 | HR-21 | Add salary (first pay) in the same form, from the hire date and the company currency | `?tab=employment&step=pay` | as HR-20 | R 4.4; W 4 | `people.employment.change` | `Flow` |
 | HR-22 | Contract history and Add contract | `?tab=employment&step=contract` | contract readers; HR Admin adds | R 4.3; W 4 | `people.contract.add` | `Flow` (add contract) |
 | HR-23 | History (applied changes) | `?tab=employment` | as HR-19 | R 4.5 | none | `Flow`; `RLS` (rows from the previous build count as applied) |
 | HR-24 | Compensation tab: current pay, Change salary or Add salary | `?tab=compensation` | the person, HR Admin, Finance | R 4.3; W 5 | none | `Flow` (shortcut) |
 | HR-25 | Final settlement (leaver) | `?tab=compensation` | per existing rule | R 4.3 | `Poland` steps in `C` 2 | `Not run` (unchanged) |
-| HR-26 | Daily job applying scheduled changes | `/api/cron/employment-changes` | the cron secret | R 4.5, 5 | `people.employment.apply_due` | `RLS` (the function); the route `Code`; Vercel scheduling `Not run` (owner decision deferred); the route is listed as public in `proxy.ts` and answers 401 without the cron secret (R 4.5) |
+| HR-26 | Daily job applying scheduled changes | `/api/cron/employment-changes` | the cron secret | R 4.5, 5 | `people.employment.apply_due` | `RLS` (the function, including the held, failed and per-country cases); the route `Code` (a failed event answers 500 and keeps the run's other results; a held one answers 200); Vercel scheduling `Not run` (owner decision deferred); the route is listed as public in `proxy.ts` and answers 401 without the cron secret (R 4.5) |
 
 ## 4. Documents
 

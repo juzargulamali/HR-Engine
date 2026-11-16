@@ -29,6 +29,8 @@ export interface DirectoryFacts {
   documents: ReadonlyArray<{ employee_id: string; expiry_date: string | null }> | null;
   opening: ReadonlyMap<string, number> | null;
   scheduled: ReadonlyMap<string, number> | null;
+  /** Scheduled changes the daily job held back for review, per employee; null when not known. */
+  held?: ReadonlyMap<string, number> | null;
   linked: ReadonlyMap<string, string | null>;
 }
 
@@ -71,6 +73,7 @@ export function buildDirectoryExceptions(rows: readonly DirectoryRow[], facts: D
       expiredDocuments: known ? states.filter((s) => s === "expired").length : null,
       expiringDocuments: known ? states.filter((s) => s === "expiring").length : null,
       scheduledChanges: count(facts.scheduled, r.id),
+      heldChanges: count(facts.held ?? null, r.id),
     }));
   }
   return out;
@@ -105,9 +108,9 @@ export async function loadDirectoryExceptions(
     safe(() => supabase.from("employee_documents").select("employee_id, expiry_date").in("employee_id", ids).is("deleted_at", null)),
     safe(() => supabase.from("leave_ledger").select("employee_id").in("employee_id", ids).eq("reference_type", "opening_balance")),
     safe(() => supabase.from("comp_day_ledger").select("employee_id").in("employee_id", ids).eq("source", "opening_balance")),
-    // `applied_at` is added by the People & HR migration; before it is installed this read fails and the flag is simply hidden.
-    safe(() => (supabase as unknown as { from: (t: string) => { select: (c: string) => { in: (c: string, v: string[]) => { is: (c: string, v: null) => PromiseLike<{ data: { employee_id: string }[] | null; error: Err }> } } } })
-      .from("employee_career_events").select("employee_id").in("employee_id", ids).is("applied_at", null)),
+    // `applied_at`, `dismissed_at` and `conflict_at` are added by the People & HR migration; before it is installed this read fails and the flags are simply hidden.
+    safe(() => (supabase as unknown as { from: (t: string) => { select: (c: string) => { in: (c: string, v: string[]) => { is: (c: string, v: null) => { is: (c: string, v: null) => PromiseLike<{ data: { employee_id: string; conflict_at: string | null }[] | null; error: Err }> } } } } })
+      .from("employee_career_events").select("employee_id, conflict_at").in("employee_id", ids).is("applied_at", null).is("dismissed_at", null)),
   ]);
 
   const leaveTally = tally(leave.data, leave.error);
@@ -121,6 +124,7 @@ export async function loadDirectoryExceptions(
     documents: docs.error ? null : (docs.data ?? []),
     opening,
     scheduled: tally(scheduled.data, scheduled.error),
+    held: tally(scheduled.data?.filter((r) => r.conflict_at != null) ?? null, scheduled.error),
     linked: new Map(rows.map((r) => [r.id, r.user_id ?? null])),
   };
   return buildDirectoryExceptions(rows, facts, canManage);

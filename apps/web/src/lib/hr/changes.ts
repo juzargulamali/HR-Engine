@@ -48,13 +48,23 @@ export interface CareerEventRow {
   note: string | null;
   /** Null: scheduled, not yet in force. Existing rows were all applied when written. */
   applied_at: string | null;
+  /** Why the daily job held a scheduled change back (pay moved on after it was scheduled); null when it was not held. */
+  conflict_reason?: string | null;
+  /** Set when HR cancelled the change; it was never applied. */
+  dismissed_at?: string | null;
 }
 
 export interface Timeline { scheduled: CareerEventRow[]; history: CareerEventRow[] }
 
-/** Scheduled (not yet applied) changes, soonest first, and applied history, newest first. */
+/** A scheduled change the daily job held back, waiting for HR to review it. */
+export const isHeld = (e: Pick<CareerEventRow, "applied_at" | "dismissed_at" | "conflict_reason">) => e.applied_at === null && !e.dismissed_at && Boolean(e.conflict_reason);
+
+/**
+ * Scheduled (not yet applied, not cancelled) changes, soonest first; and history, newest first: what was applied, and what HR cancelled (marked as cancelled, never applied).
+ * A change held for review stays in the scheduled list until HR cancels it or records the change again.
+ */
 export function splitTimeline(events: readonly CareerEventRow[]): Timeline {
-  const scheduled = events.filter((e) => e.applied_at === null).sort((a, b) => a.effective_date.localeCompare(b.effective_date));
-  const history = events.filter((e) => e.applied_at !== null).sort((a, b) => b.effective_date.localeCompare(a.effective_date));
+  const scheduled = events.filter((e) => e.applied_at === null && !e.dismissed_at).sort((a, b) => a.effective_date.localeCompare(b.effective_date));
+  const history = events.filter((e) => e.applied_at !== null || Boolean(e.dismissed_at)).sort((a, b) => b.effective_date.localeCompare(a.effective_date));
   return { scheduled, history };
 }

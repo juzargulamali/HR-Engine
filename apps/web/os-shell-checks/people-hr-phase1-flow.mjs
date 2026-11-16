@@ -37,7 +37,7 @@ let EMP = ""; let EMPNO = "ZZ-701"; let FIRST = "Amira"; let LAST = "Walkthrough
 let GRANTS_BEFORE = "";
 
 await step("setup: the schema has People & HR Phase 1; three countries and a company with no default currency are in place; every company-scoped grant is recorded", async () => {
-  if (one("select to_regprocedure('public.record_employment_change(uuid,date,text,numeric,numeric,text,date)') is not null") !== "t") throw new Error("the database is not built from the Phase 1 migration");
+  if (one("select to_regprocedure('public.record_employment_change(uuid,date,text,numeric,numeric,text)') is not null") !== "t") throw new Error("the database is not built from the Phase 1 migration");
   if (one("select string_agg(country_code, ',' order by country_code) from companies where is_active") !== "AE,AE,PL,SA") throw new Error("expected AE, AE, PL and SA companies");
   GRANTS_BEFORE = grantsHash();
 });
@@ -191,7 +191,7 @@ await step("job and pay: a change dated today is applied (title and pay together
   await page.getByRole("button", { name: /Save|Record|Change|Schedule/ }).last().click(); await page.waitForTimeout(1500);
   if (one(`select count(*) from compensation_details where employee_id = '${EMP}'`) !== "2") throw new Error("a change before the hire date was saved");
   // the daily job on its date applies the scheduled change (as the service role would)
-  db(`select apply_due_employment_changes('AE', current_date + 31)`);
+  db(`select apply_due_employment_changes(((current_date + 31)::timestamp + interval '12 hours') at time zone 'UTC')`);
   if (one(`select job_title from employees where id = '${EMP}'`) !== "Lead technician") throw new Error("the scheduled title was not applied on its date");
   if (one(`select count(*) from compensation_details where employee_id = '${EMP}' and is_current`) !== "1") throw new Error("pay current count after applying");
 });
@@ -242,7 +242,7 @@ await step("an HR Admin of the UAE company only: cannot see the Saudi employee, 
   if (/Salma/.test(t) && !/not found|could not be found|404/i.test(t)) throw new Error("the Saudi employee is visible");
   await go(`/employees/${SAEMP}?tab=compensation`); t = await body(); if (/9000|SAR/.test(t)) throw new Error("the Saudi salary is visible");
   await go(`/employees?q=Salma`); if (/Salma/.test(await body())) throw new Error("the Saudi employee is in the directory");
-  let refused = false; try { asDb(`${U}b1`, `select record_employment_change('${SAEMP}', current_date, 'Boss', 10000, 0, null, current_date)`); } catch { refused = true; }
+  let refused = false; try { asDb(`${U}b1`, `select record_employment_change('${SAEMP}', current_date, 'Boss', 10000, 0, null)`); } catch { refused = true; }
   if (!refused) throw new Error("the change function accepted another company's employee");
   await go(`/employees/${EMP}`); if (/Amira/.test(await body()) === false) throw new Error("their own company's employee is not visible");
   await go("/employees/new"); await page.locator("#companyId").waitFor();
@@ -258,7 +258,7 @@ await step("Finance: sees pay and can change it (pay only, no scheduling, no job
   await go("/employees"); if (await page.getByTestId("add-employee").count()) throw new Error("Finance is offered Add employee");
   await go(`/employees/${EMP}?tab=employment&change=salary`);
   if (await page.locator("#newJobTitle").count()) throw new Error("Finance is offered the job title");
-  let refused = false; try { asDb(`${U}b2`, `select record_employment_change('${EMP}', current_date + 10, null, 8000, 0, null, current_date)`); } catch { refused = true; }
+  let refused = false; try { asDb(`${U}b2`, `select record_employment_change('${EMP}', current_date + 10, null, 8000, 0, null)`); } catch { refused = true; }
   if (!refused) throw new Error("Finance could schedule a pay change");
 });
 
@@ -276,7 +276,7 @@ await step("the employee: sees their own profile and nothing of other people's; 
   await go(`/employees/${U}e5`); if (await page.getByTestId("setup-checklist").count()) throw new Error("employee sees a setup checklist");
   await go(`/employees/${U}e5?tab=documents`); if (await page.getByTestId("add-document-open").count()) throw new Error("employee is offered Add document");
   await go(`/employees/${EMP}`); const t = await body(); if (/Amira/.test(t) && !/not found|could not be found/i.test(t)) throw new Error("employee can open a colleague's profile");
-  let refused = false; try { asDb(`${U}a5`, `select record_employment_change('${U}e5', current_date, 'Boss', 99999, 0, null, current_date)`); } catch { refused = true; }
+  let refused = false; try { asDb(`${U}a5`, `select record_employment_change('${U}e5', current_date, 'Boss', 99999, 0, null)`); } catch { refused = true; }
   if (!refused) throw new Error("an employee could change their own pay");
 });
 

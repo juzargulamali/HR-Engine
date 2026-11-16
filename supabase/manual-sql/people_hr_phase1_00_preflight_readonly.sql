@@ -7,8 +7,10 @@ select item, result from (
                    and to_regclass('public.comp_day_ledger') is not null and to_regclass('public.employees') is not null and to_regprocedure('public.has_role(app_role, uuid, text)') is not null
               then 'OK' else 'STOP - a prerequisite table or function is missing; do not apply' end as result
   union all select 2, 'this migration is not installed yet (no applied_at column, no record_employment_change function)',
-         case when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'employee_career_events' and column_name = 'applied_at')
-                   or to_regprocedure('public.record_employment_change(uuid, date, text, numeric, numeric, text, date)') is not null then 'already installed' else 'not installed yet' end
+         case when to_regprocedure('public.record_employment_change(uuid, date, text, numeric, numeric, text, date)') is not null
+              then 'already installed (OLDER DRAFT: apply the migration file again; it is re-runnable and replaces it)'
+              when exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'employee_career_events' and column_name = 'applied_at')
+                   or to_regprocedure('public.record_employment_change(uuid, date, text, numeric, numeric, text)') is not null then 'already installed' else 'not installed yet' end
   union all select 3, 'no employee has two opening-balance rows for the same leave type in leave_ledger (the new unique index would refuse them)',
          case when (select count(*) from (select employee_id, leave_type_code from leave_ledger where reference_type = 'opening_balance' group by 1, 2 having count(*) > 1) d) = 0
               then 'OK' else 'STOP - ' || (select count(*) from (select employee_id, leave_type_code from leave_ledger where reference_type = 'opening_balance' group by 1, 2 having count(*) > 1) d) || ' employee / leave type pair(s) have duplicates' end

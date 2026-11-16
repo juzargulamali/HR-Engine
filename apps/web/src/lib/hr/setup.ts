@@ -108,6 +108,8 @@ export interface ExceptionInput {
   expiredDocuments: number | null;
   expiringDocuments: number | null;
   scheduledChanges: number | null;
+  /** Scheduled changes the daily job held back because pay moved on (a subset of `scheduledChanges`); null when not known. */
+  heldChanges?: number | null;
 }
 
 export interface Exception { key: string; label: string; tone: "attention" | "info"; href: string }
@@ -125,6 +127,9 @@ export function computeExceptions(i: ExceptionInput): Exception[] {
   if (!i.jobTitle) out.push({ key: "job", label: "No job title", tone: "attention", href: `${profile}?tab=overview&step=job` });
   if (i.expiredDocuments) out.push({ key: "expired", label: i.expiredDocuments === 1 ? "1 document expired" : `${i.expiredDocuments} documents expired`, tone: "attention", href: `${profile}?tab=documents` });
   else if (i.expiringDocuments) out.push({ key: "expiring", label: i.expiringDocuments === 1 ? "1 document expiring soon" : `${i.expiringDocuments} documents expiring soon`, tone: "info", href: `${profile}?tab=documents` });
-  if (i.scheduledChanges) out.push({ key: "scheduled", label: i.scheduledChanges === 1 ? "1 scheduled change" : `${i.scheduledChanges} scheduled changes`, tone: "info", href: `${profile}?tab=employment` });
+  if (i.heldChanges) out.push({ key: "held", label: i.heldChanges === 1 ? "1 scheduled change held for review" : `${i.heldChanges} scheduled changes held for review`, tone: "attention", href: `${profile}?tab=employment` });
+  // A held change is counted once, as held; the plain "scheduled" flag is for the ones simply waiting for their date.
+  const waiting = (i.scheduledChanges ?? 0) - (i.heldChanges ?? 0);
+  if (waiting > 0) out.push({ key: "scheduled", label: waiting === 1 ? "1 scheduled change" : `${waiting} scheduled changes`, tone: "info", href: `${profile}?tab=employment` });
   return out;
 }

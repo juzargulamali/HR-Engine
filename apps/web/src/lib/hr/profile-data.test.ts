@@ -75,4 +75,12 @@ describe("loadProfileSetup", () => {
     expect(r.steps.every((s) => s.status === "not_applicable")).toBe(true);
     expect(r.exceptions).toEqual([]);
   });
+
+  it("reads scheduled changes as not applied and not cancelled, and flags the ones the daily job held back", async () => {
+    const calls: { table: string; filters: string[] }[] = [];
+    const r = await loadProfileSetup(client({ employment_contracts: { count: 1 }, compensation_details: { count: 1 }, identity_documents: { count: 1, data: [{ expiry_date: "2030-01-01" }] }, employee_documents: none, leave_ledger: none, comp_day_ledger: none,
+      employee_career_events: { count: 2, data: [{ id: "a", conflict_at: "2026-11-16T00:45:00Z" }, { id: "b", conflict_at: null }] } }, calls), { ...employee, user_id: "u1" }, hr, { managerNotExpected: false });
+    expect(calls.find((c) => c.table === "employee_career_events")!.filters).toEqual(expect.arrayContaining(["applied_at is null", "dismissed_at is null"]));
+    expect(r.exceptions.map((x) => x.label)).toEqual(expect.arrayContaining(["1 scheduled change held for review", "1 scheduled change"]));
+  });
 });

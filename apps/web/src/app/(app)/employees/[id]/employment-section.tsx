@@ -55,7 +55,9 @@ export async function EmploymentSection({
   const canChangeTitle = !isSelf && canRecordCareer;
   const active = !employee.deleted_at && employee.employment_status !== "terminated";
   const country = countryCode ?? employee.country_code;
-  const today = getBusinessDateString(resolveCountryTimeZone(country));
+  // "Today" is the employee's own calendar day, read from the database (the same function the change itself uses). The local calculation is only a fallback for showing the page; the database decides the cutoff when saving.
+  const { data: dbToday } = await supabase.rpc("hr_business_today", { p_country_code: country });
+  const today = typeof dbToday === "string" ? dbToday : getBusinessDateString(resolveCountryTimeZone(country));
   const employeeName = `${employee.first_name} ${employee.last_name}`;
 
   // The company's default currency is what the first salary is recorded in; the company name is only read when the page did not pass it.
@@ -71,7 +73,7 @@ export async function EmploymentSection({
       ? supabase.from("compensation_details").select("id, effective_from, base_salary, allowances, currency").eq("employee_id", employeeId).eq("is_current", true).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
     canSeeCareerEvents
-      ? supabase.from("employee_career_events").select("id, event_type, effective_date, previous_job_title, new_job_title, previous_base_salary, new_base_salary, currency, note, applied_at").eq("employee_id", employeeId).order("effective_date", { ascending: false })
+      ? supabase.from("employee_career_events").select("id, event_type, effective_date, previous_job_title, new_job_title, previous_base_salary, new_base_salary, currency, note, applied_at, conflict_reason, dismissed_at").eq("employee_id", employeeId).order("effective_date", { ascending: false })
       : Promise.resolve({ data: null, error: null }),
   ]);
   const contracts = contractsRes.data;
@@ -124,7 +126,7 @@ export async function EmploymentSection({
         <Card>
           <CardHeader><CardTitle>Scheduled changes</CardTitle></CardHeader>
           <CardContent>
-            {eventsRes.error ? <LoadError what="the scheduled changes" retryHref={here} /> : <ScheduledChanges events={timeline.scheduled} />}
+            {eventsRes.error ? <LoadError what="the scheduled changes" retryHref={here} /> : <ScheduledChanges events={timeline.scheduled} employeeId={canChangeTitle && active ? employee.id : undefined} />}
           </CardContent>
         </Card>
       ) : null}

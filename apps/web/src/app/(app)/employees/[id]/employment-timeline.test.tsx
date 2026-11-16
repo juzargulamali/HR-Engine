@@ -27,4 +27,22 @@ describe("scheduled changes and history", () => {
     const html = renderToStaticMarkup(<ScheduledChanges events={[ev("s2", "2027-02-01", null, { new_base_salary: null, previous_base_salary: null })]} />);
     expect(html).not.toContain("Basic salary");
   });
+  it("a change the daily job held back says so with its reason and nothing was changed; an HR Admin gets a cancel control, anyone else does not", () => {
+    const held = ev("s3", "2027-02-01", null, { conflict_reason: "Pay changed after this change was scheduled (the current pay has been in force since 2026-11-10). It was not applied." });
+    const hr = renderToStaticMarkup(<ScheduledChanges events={[held]} employeeId="11111111-1111-4111-8111-111111111111" />);
+    expect(hr).toContain("Held for review");
+    expect(hr).toContain("Pay changed after this change was scheduled");
+    expect(hr).toContain("Nothing was changed");
+    expect(hr).toContain("Cancel this held change");
+    const other = renderToStaticMarkup(<ScheduledChanges events={[held]} />);
+    expect(other).toContain("Held for review");
+    expect(other).not.toContain("Cancel this");
+    const plain = renderToStaticMarkup(<ScheduledChanges events={[ev("s4", "2027-02-01", null)]} employeeId="11111111-1111-4111-8111-111111111111" />);
+    expect(plain).not.toContain("Held for review");
+    expect(plain).toContain("Cancel this change");
+  });
+  it("history marks a cancelled change as never applied", () => {
+    const html = renderToStaticMarkup(<ChangeHistory events={[ev("h2", "2027-02-01", null, { dismissed_at: "2026-11-16T09:00:00Z" })]} />);
+    expect(html).toContain("Cancelled, never applied");
+  });
 });

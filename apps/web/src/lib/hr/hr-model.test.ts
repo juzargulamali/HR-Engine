@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeExceptions, computeSetup, peopleAccessHref, remainingSteps, setupSummary, type SetupInput } from "./setup";
 import { DOCUMENT_TYPES, documentFormHref, expiryState, missingForType, ruleFor, ruleForKey, storedCode, typesForCountry } from "./document-types";
-import { planChange, splitTimeline, type CareerEventRow } from "./changes";
+import { isHeld, planChange, splitTimeline, type CareerEventRow } from "./changes";
 
 const base: SetupInput = {
   employeeId: "e1", employmentStatus: "active", removed: false,
@@ -113,5 +113,24 @@ describe("changes", () => {
     const t = splitTimeline([row("a", "2026-01-01", "x"), row("b", "2027-03-01", null), row("c", "2027-02-01", null), row("d", "2026-06-01", "x")]);
     expect(t.scheduled.map((r) => r.id)).toEqual(["c", "b"]);
     expect(t.history.map((r) => r.id)).toEqual(["d", "a"]);
+  });
+  it("a cancelled change leaves the scheduled list and appears in history as never applied; a held change stays scheduled until HR deals with it", () => {
+    const row = (id: string, d: string, over: Partial<CareerEventRow>): CareerEventRow => ({ id, effective_date: d, event_type: "promotion", previous_job_title: null, new_job_title: null, previous_base_salary: null, new_base_salary: null, currency: null, note: null, applied_at: null, ...over });
+    const held = row("held", "2027-01-01", { conflict_reason: "Pay changed after this change was scheduled." });
+    const cancelled = row("gone", "2027-02-01", { dismissed_at: "2026-11-16T09:00:00Z" });
+    const t = splitTimeline([held, cancelled, row("plain", "2027-03-01", {})]);
+    expect(t.scheduled.map((r) => r.id)).toEqual(["held", "plain"]);
+    expect(t.history.map((r) => r.id)).toEqual(["gone"]);
+    expect(isHeld(held)).toBe(true);
+    expect(isHeld(cancelled)).toBe(false);
+    expect(isHeld(row("applied", "2026-01-01", { applied_at: "x", conflict_reason: "old" }))).toBe(false);
+  });
+  it("a held change is flagged once, as held, for HR; the plain scheduled flag counts only the ones waiting for their date", () => {
+    const steps = computeSetup({ ...base, counts: { contracts: 1, compensation: 1, identityDocuments: 1, employeeDocuments: 0, openingBalances: 1 }, linkedUserId: "u1" });
+    const ex = (scheduledChanges: number, heldChanges: number | null) => computeExceptions({ employeeId: "e1", employmentStatus: "active", removed: false, jobTitle: "T", managerId: "m", managerNotExpected: false, steps, expiredDocuments: 0, expiringDocuments: 0, scheduledChanges, heldChanges });
+    expect(ex(1, 1).map((x) => [x.key, x.label, x.tone])).toEqual([["held", "1 scheduled change held for review", "attention"]]);
+    expect(ex(3, 1).map((x) => x.label)).toEqual(["1 scheduled change held for review", "2 scheduled changes"]);
+    expect(ex(2, 0).map((x) => x.label)).toEqual(["2 scheduled changes"]);
+    expect(ex(2, null).map((x) => x.label)).toEqual(["2 scheduled changes"]);
   });
 });

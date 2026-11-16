@@ -10,16 +10,11 @@ const SECRET = "test-cron-secret";
 const req = (auth = `Bearer ${SECRET}`) => new Request("https://example.test/api/cron/employment-changes", { headers: auth ? { authorization: auth } : {} });
 
 type Result = { data?: unknown; error?: { message: string } | null };
-function admin(opts: { scheduled?: Result; employees?: Result; rpc?: (args: { p_country: string; p_today: string }) => Result }) {
-  const rpc = vi.fn(async (_name: string, args: { p_country: string; p_today: string }) => opts.rpc?.(args) ?? { data: { applied: 0, skipped: 0, failed: 0 }, error: null });
-  const client = {
-    from: vi.fn((table: string) => table === "employee_career_events"
-      ? { select: () => ({ is: async () => opts.scheduled ?? { data: [], error: null } }) }
-      : { select: () => ({ in: async () => opts.employees ?? { data: [], error: null } }) }),
-    rpc,
-  };
-  vi.mocked(createAdminClient).mockReturnValue(client as never);
-  return { client, rpc };
+function admin(result: Result) {
+  const rpc = vi.fn(async (_name: string, _args?: Record<string, unknown>) => ({ data: null, error: null, ...result }));
+  const from = vi.fn();
+  vi.mocked(createAdminClient).mockReturnValue({ rpc, from } as never);
+  return { rpc, from };
 }
 
 beforeEach(() => vi.stubEnv("CRON_SECRET", SECRET));
@@ -30,43 +25,38 @@ describe("GET /api/cron/employment-changes", () => {
     const a = admin({});
     expect((await GET(req(""))).status).toBe(401);
     expect((await GET(req("Bearer wrong"))).status).toBe(401);
-    expect(a.client.from).not.toHaveBeenCalled();
-  });
-
-  it("does nothing when no change is scheduled", async () => {
-    const a = admin({ scheduled: { data: [], error: null } });
-    const res = await GET(req());
-    expect(await res.json()).toMatchObject({ applied: 0, countries: [] });
     expect(a.rpc).not.toHaveBeenCalled();
   });
 
-  it("calls the applier once per country present, with that country's own calendar day, and totals the answers", async () => {
-    const a = admin({
-      scheduled: { data: [{ employee_id: "e1" }, { employee_id: "e2" }, { employee_id: "e3" }], error: null },
-      employees: { data: [{ id: "e1", country_code: "AE" }, { id: "e2", country_code: "AE" }, { id: "e3", country_code: "PL" }], error: null },
-      rpc: ({ p_country }) => ({ data: p_country === "AE" ? { applied: 2, skipped: 1, failed: 0 } : { applied: 1, skipped: 0, failed: 0 }, error: null }),
-    });
-    const body = await (await GET(req())).json();
-    expect(a.rpc).toHaveBeenCalledTimes(2);
-    expect(a.rpc.mock.calls.map((c) => c[1].p_country).sort()).toEqual(["AE", "PL"]);
-    for (const c of a.rpc.mock.calls) expect(c[1].p_today).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(body).toMatchObject({ applied: 3, skipped: 1, failed: 0, errors: [] });
+  it("makes ONE call to the database applier and sends it no country and no date: each employee's own calendar day is decided there", async () => {
+    const a = admin({ data: { ran_at: "2026-11-17T00:45:00Z", applied: 3, skipped: 1, conflicts: 0, failed: 0, held: [], failures: [] } });
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(a.rpc).toHaveBeenCalledTimes(1);
+    expect(a.rpc.mock.calls[0]).toEqual(["apply_due_employment_changes"]);
+    expect(await res.json()).toMatchObject({ applied: 3, skipped: 1, conflicts: 0, failed: 0, errors: [] });
   });
 
-  it("fails loudly (500) when the countries cannot be read, and when a country's run fails, without hiding the others", async () => {
-    admin({ scheduled: { data: [{ employee_id: "e1" }], error: null }, employees: { data: null, error: { message: "boom" } } });
+  it("a failed application is a FAILURE of the run (500) that names the failed event, and the applications that succeeded in the same run are still reported", async () => {
+    admin({ data: { applied: 2, skipped: 0, conflicts: 0, failed: 1, held: [], failures: [{ event_id: "ev-2", employee_id: "e-2", sqlstate: "23505", message: "duplicate key value" }] } });
     const res = await GET(req());
     expect(res.status).toBe(500);
-    expect(await res.json()).toEqual({ error: "boom" });
+    const body = await res.json();
+    expect(body).toMatchObject({ applied: 2, failed: 1 });
+    expect(body.failures).toEqual([{ event_id: "ev-2", employee_id: "e-2", sqlstate: "23505", message: "duplicate key value" }]);
+  });
 
-    const a = admin({
-      scheduled: { data: [{ employee_id: "e1" }, { employee_id: "e3" }], error: null },
-      employees: { data: [{ id: "e1", country_code: "AE" }, { id: "e3", country_code: "PL" }], error: null },
-      rpc: ({ p_country }) => (p_country === "AE" ? { data: null, error: { message: "denied" } } : { data: { applied: 1, skipped: 0, failed: 0 }, error: null }),
-    });
-    const res2 = await GET(req());
-    expect(res2.status).toBe(500);
-    expect(await res2.json()).toMatchObject({ applied: 1, errors: ["AE: denied"] });
-    expect(a.rpc).toHaveBeenCalledTimes(2);
+  it("an event held for HR review is reported with its employee but is not a failure: the run is still 200", async () => {
+    admin({ data: { applied: 1, skipped: 0, conflicts: 1, failed: 0, held: [{ event_id: "ev-9", employee_id: "e-9" }], failures: [] } });
+    const res = await GET(req());
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ applied: 1, conflicts: 1, failed: 0, held: [{ event_id: "ev-9", employee_id: "e-9" }] });
+  });
+
+  it("when the database call itself fails (not installed, unreachable) nothing ran and that is a 500 too, with the reason", async () => {
+    admin({ data: null, error: { message: "Could not find the function public.apply_due_employment_changes" } });
+    const res = await GET(req());
+    expect(res.status).toBe(500);
+    expect(await res.json()).toMatchObject({ applied: 0, failed: 0, errors: ["Could not find the function public.apply_due_employment_changes"] });
   });
 });
