@@ -1,3 +1,4 @@
+import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { InsuranceSection } from "./insurance-section";
 import { LoansSection } from "./loans-section";
@@ -10,6 +11,9 @@ export function InsuranceLoansTab({
   canSeeLoans,
   canEditLoans,
   defaultCurrency,
+  employeeName,
+  companyName,
+  countryCode,
 }: {
   employeeId: string;
   canSeeInsurance: boolean;
@@ -17,7 +21,13 @@ export function InsuranceLoansTab({
   canSeeLoans: boolean;
   canEditLoans: boolean;
   defaultCurrency: string;
+  /** Carried into the add forms so the employee and company stay visible while editing. */
+  employeeName: string;
+  companyName: string;
+  /** Sets the calendar day expiry is measured against (the employee's own country). */
+  countryCode: string;
 }) {
+  const today = getBusinessDateString(resolveCountryTimeZone(countryCode));
   return (
     <div className="space-y-6">
       {canSeeInsurance ? (
@@ -26,7 +36,7 @@ export function InsuranceLoansTab({
             <CardTitle>Insurance</CardTitle>
           </CardHeader>
           <CardContent>
-            <InsuranceSection employeeId={employeeId} canEdit={canEditInsurance} />
+            <InsuranceSection employeeId={employeeId} canEdit={canEditInsurance} employeeName={employeeName} companyName={companyName} today={today} />
           </CardContent>
         </Card>
       ) : null}
@@ -37,7 +47,7 @@ export function InsuranceLoansTab({
             <CardTitle>Loans & cash advances</CardTitle>
           </CardHeader>
           <CardContent>
-            <LoansSection employeeId={employeeId} canEdit={canEditLoans} defaultCurrency={defaultCurrency} />
+            <LoansSection employeeId={employeeId} canEdit={canEditLoans} defaultCurrency={defaultCurrency} employeeName={employeeName} companyName={companyName} />
           </CardContent>
         </Card>
       ) : null}

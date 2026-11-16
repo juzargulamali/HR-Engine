@@ -446,6 +446,8 @@ export interface Database {
           note: string | null;
           created_at: string;
           created_by: string;
+          /** Null = scheduled (a change dated in the future, not yet in force); a time = applied. */
+          applied_at: string | null;
         };
         Insert: {
           id?: string;
@@ -461,6 +463,7 @@ export interface Database {
           currency?: string | null;
           note?: string | null;
           created_by: string;
+          applied_at?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["employee_career_events"]["Insert"]>;
         Relationships: [];
@@ -2114,6 +2117,8 @@ export interface Database {
       ops_crew_overlaps: { Args: { p_company_id: string }; Returns: unknown };
       ops_overview: { Args: { p_company_id: string }; Returns: unknown };
       ops_upcoming_work: { Args: { p_company_id: string | null }; Returns: unknown };
+      record_employment_change: { Args: { p_employee_id: string; p_effective_date: string; p_job_title: string | null; p_basic: number | null; p_other: number | null; p_note: string | null; p_today: string }; Returns: unknown };
+      apply_due_employment_changes: { Args: { p_country: string; p_today: string }; Returns: unknown };
       ops_tv_board: { Args: { p_company_id: string }; Returns: unknown };
       ops_tv_my_display: { Args: Record<string, never>; Returns: unknown };
       ops_tv_register_display: { Args: { p_user_id: string; p_company_id: string; p_label: string; p_office_tz?: string | null }; Returns: unknown };

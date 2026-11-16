@@ -16,14 +16,36 @@ const STATUS_VARIANT: Record<string, "default" | "secondary" | "outline" | "dest
   acknowledged: "default",
 };
 
+/** Open goals and who acts next, from the goals and appraisal statuses the records already carry. Pure, so it can be tested. */
+export function performanceNextSteps(
+  goals: readonly { status: string; manager_rating: number | null }[],
+  appraisals: readonly { status: string }[],
+  managerLabel: string,
+): string[] {
+  const out: string[] = [];
+  const open = goals.filter((g) => g.status === "in_progress");
+  if (open.length > 0) {
+    const unrated = open.filter((g) => g.manager_rating == null).length;
+    out.push(`${open.length} open ${open.length === 1 ? "goal" : "goals"}.${unrated > 0 ? ` ${unrated} still need ${managerLabel}'s rating.` : ""}`);
+  }
+  const draft = appraisals.filter((a) => a.status === "draft").length;
+  if (draft > 0) out.push(`${draft} ${draft === 1 ? "appraisal is" : "appraisals are"} in draft: ${managerLabel} or an HR Admin submits ${draft === 1 ? "it" : "them"}.`);
+  const submitted = appraisals.filter((a) => a.status === "submitted").length;
+  if (submitted > 0) out.push(`${submitted} ${submitted === 1 ? "appraisal is" : "appraisals are"} waiting for the employee to acknowledge.`);
+  return out;
+}
+
 export async function PerformanceSection({
   employeeId,
   companyId,
   canManage,
+  managerId = null,
 }: {
   employeeId: string;
   companyId: string;
   canManage: boolean;
+  /** The employee's manager, so "who acts next" can name them when the viewer is allowed to read the name. */
+  managerId?: string | null;
 }) {
   const supabase = await createClient();
   const [{ data: goals, error: goalsError }, { data: cycles, error: cyclesError }, { data: appraisals, error: appraisalsError }] = await Promise.all([
@@ -36,6 +58,9 @@ export async function PerformanceSection({
     supabase.from("appraisals").select("id, cycle_id, status, overall_rating").eq("employee_id", employeeId),
   ]);
 
+  // The manager's name through the same narrow RPC the overview uses; when it cannot be read the sentence says "the reporting manager".
+  const { data: managerName } = managerId ? await supabase.rpc("get_employee_manager_name", { p_employee_id: employeeId }) : { data: null };
+  const nextSteps = goalsError || appraisalsError ? [] : performanceNextSteps(goals ?? [], appraisals ?? [], managerName ?? "the reporting manager");
   const cycleName = new Map((cycles ?? []).map((c) => [c.id, c.name]));
   const appraisedCycleIds = new Set((appraisals ?? []).map((a) => a.cycle_id));
   const availableCyclesForAppraisal = (cycles ?? [])
@@ -45,6 +70,13 @@ export async function PerformanceSection({
   const here = `/employees/${employeeId}?tab=performance`;
   return (
     <div className="space-y-6">
+      {nextSteps.length > 0 ? (
+        <ul className="space-y-1 rounded-md border border-border p-3 text-sm" data-testid="performance-next">
+          {nextSteps.map((t) => (
+            <li key={t}>{t}</li>
+          ))}
+        </ul>
+      ) : null}
       {cyclesError && !goalsError && !appraisalsError ? <LoadError what="the cycle names" retryHref={here} note="Goals and appraisals are shown, but their cycle column could not be read." /> : null}
       <div>
         <h3 className="mb-2 text-sm font-medium text-muted-foreground">Goals</h3>

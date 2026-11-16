@@ -29,11 +29,21 @@ export function ContractHistory({
   contracts,
   currentAsOfTodayVersionNo,
   canEdit,
+  startOpen = false,
+  employeeName,
+  companyName,
+  hireDate,
 }: {
   employeeId: string;
   contracts: ContractRow[];
   currentAsOfTodayVersionNo: number | null;
   canEdit: boolean;
+  /** Open the add-contract form already expanded (the setup step "Add contract" links here), with the employee and company shown. */
+  startOpen?: boolean;
+  employeeName?: string;
+  companyName?: string;
+  /** The first contract's start date is offered as the hire date, so it is not retyped. */
+  hireDate?: string;
 }) {
   const [state, formAction, pending] = useActionState(addContractVersion, initialState);
   const currentRow = contracts.find((c) => c.is_current);
@@ -79,11 +89,13 @@ export function ContractHistory({
       </Table>
 
       {canEdit ? (
-        <form action={formAction} className="space-y-3 border-t border-border pt-4">
+        <details open={startOpen} className="border-t border-border pt-4" data-testid="add-contract">
+          <summary className="cursor-pointer text-sm font-medium">{currentRow ? "Add a new contract version" : "Add the first contract"}</summary>
+        <form action={formAction} className="mt-3 space-y-3">
+          {employeeName ? <div className="rounded-md bg-muted/50 px-3 py-2 text-sm" data-testid="add-contract-who"><span className="font-medium">{employeeName}</span>{companyName ? ` · ${companyName}` : ""}</div> : null}
           <input type="hidden" name="employeeId" value={employeeId} />
           <input type="hidden" name="currentContractId" value={currentRow?.id ?? ""} />
           <input type="hidden" name="nextVersionNo" value={nextVersionNo} />
-          <p className="text-sm font-medium">Add a new contract version</p>
           <div className="grid gap-3 sm:grid-cols-3">
             <div className="space-y-1.5">
               <Label htmlFor="contractType">Type</Label>
@@ -96,7 +108,7 @@ export function ContractHistory({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="startDate">Start date</Label>
-              <Input id="startDate" name="startDate" type="date" required />
+              <Input id="startDate" name="startDate" type="date" required defaultValue={!currentRow ? hireDate : undefined} />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="noticePeriodDays">Notice (days)</Label>
@@ -110,12 +122,13 @@ export function ContractHistory({
           </div>
           {state.error ? <Alert variant="destructive">{state.error}</Alert> : null}
           <Button type="submit" size="sm" disabled={pending}>
-            {pending ? "Saving…" : "Supersede with new version"}
+            {pending ? "Saving…" : currentRow ? "Supersede with new version" : "Add contract"}
           </Button>
           <p className="text-sm text-muted-foreground">
-            This becomes the current version; version {currentRow?.version_no ?? "—"} stays on record for history.
+            {currentRow ? `This becomes the current version; version ${currentRow.version_no} stays on record for history.` : "This becomes contract version 1 for this employee."}
           </p>
         </form>
+        </details>
       ) : null}
     </div>
   );

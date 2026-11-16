@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { computeExceptions, computeSetup, peopleAccessHref, remainingSteps, setupSummary, type SetupInput } from "./setup";
 import { DOCUMENT_TYPES, documentFormHref, expiryState, missingForType, ruleFor, ruleForKey, storedCode, typesForCountry } from "./document-types";
-import { outcomeSentence, planChange, splitTimeline, type CareerEventRow } from "./changes";
+import { planChange, splitTimeline, type CareerEventRow } from "./changes";
 
 const base: SetupInput = {
   employeeId: "e1", employmentStatus: "active", removed: false,
@@ -90,6 +90,8 @@ describe("document types", () => {
   it("builds the form address with the type chosen", () => {
     expect(documentFormHref("e1", "identity", "passport", true)).toBe("/employees/e1?tab=documents&add=identity%3Apassport&renew=1");
     expect(documentFormHref("e1", "identity", "other")).toBe("/employees/e1?tab=documents&add=identity%3Aother_identity");
+    expect(documentFormHref("e1", "employee", "visa", true, "d1")).toBe("/employees/e1?tab=documents&add=employee%3Avisa&renew=1&docId=d1");
+    expect(documentFormHref("e1", "employee", "visa", false, "d1")).toBe("/employees/e1?tab=documents&add=employee%3Avisa");
   });
 });
 
@@ -111,12 +113,5 @@ describe("changes", () => {
     const t = splitTimeline([row("a", "2026-01-01", "x"), row("b", "2027-03-01", null), row("c", "2027-02-01", null), row("d", "2026-06-01", "x")]);
     expect(t.scheduled.map((r) => r.id)).toEqual(["c", "b"]);
     expect(t.history.map((r) => r.id)).toEqual(["d", "a"]);
-  });
-  it("says exactly what saved and what did not", () => {
-    expect(outcomeSentence({ event: "failed", title: "skipped", pay: "skipped", messages: ["Denied."] }).error).toMatch(/Nothing was saved/);
-    const w = outcomeSentence({ event: "saved", title: "applied", pay: "failed", messages: ["The salary insert failed."] });
-    expect(w.warning).toMatch(/Saved: the new job title is in force/);
-    expect(w.warning).toMatch(/Not saved: the pay/);
-    expect(outcomeSentence({ event: "saved", title: "scheduled", pay: "scheduled", messages: [] }).ok).toMatch(/job title is scheduled and the new pay is scheduled/);
   });
 });

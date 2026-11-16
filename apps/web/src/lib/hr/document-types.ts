@@ -85,9 +85,9 @@ export function expiryState(expiryDate: string | null | undefined, today: string
   return days <= leadDays ? "expiring" : "valid";
 }
 
-/** Where the shared Add document form opens, with the type chosen; `renew` marks a renewal so the form says so and keeps the history of the earlier document. */
-export function documentFormHref(employeeId: string, store: DocumentStore, storedType: string, renew = false): string {
+/** Where the shared Add document form opens, with the type chosen; `renew` marks a renewal so the form says so and keeps the history of the earlier document, and `docId` names that earlier document (its number is prefilled, it is never changed). */
+export function documentFormHref(employeeId: string, store: DocumentStore, storedType: string, renew = false, docId?: string): string {
   const rule = ruleFor(store, storedType);
   const key = rule ? typeKey(rule.store, rule.code) : typeKey(store, storedType);
-  return `/employees/${employeeId}?tab=documents&add=${encodeURIComponent(key)}${renew ? "&renew=1" : ""}`;
+  return `/employees/${employeeId}?tab=documents&add=${encodeURIComponent(key)}${renew ? "&renew=1" : ""}${renew && docId ? `&docId=${encodeURIComponent(docId)}` : ""}`;
 }

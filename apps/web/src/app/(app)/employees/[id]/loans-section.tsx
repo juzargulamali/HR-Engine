@@ -10,10 +10,14 @@ export async function LoansSection({
   employeeId,
   canEdit,
   defaultCurrency,
+  employeeName,
+  companyName,
 }: {
   employeeId: string;
   canEdit: boolean;
   defaultCurrency: string;
+  employeeName?: string;
+  companyName?: string;
 }) {
   const supabase = await createClient();
   const { data: loans, error } = await supabase
@@ -27,13 +31,19 @@ export async function LoansSection({
     return (
       <div className="space-y-4">
         <LoadError what="the loans and cash advances" retryHref={`/employees/${employeeId}?tab=insurance-loans`} />
-        {canEdit ? <AddLoanForm employeeId={employeeId} defaultCurrency={defaultCurrency} /> : null}
+        {canEdit ? <AddLoanForm employeeId={employeeId} defaultCurrency={defaultCurrency} employeeName={employeeName} companyName={companyName} /> : null}
       </div>
     );
   }
 
+  // What the records support: how many are on record and the total per currency. There is no repayment schedule or due date in these records, so none is shown.
+  const totals = new Map<string, number>();
+  for (const l of loans ?? []) totals.set(l.currency, (totals.get(l.currency) ?? 0) + Number(l.amount));
+  const summary = (loans ?? []).length > 0 ? `${(loans ?? []).length} on record: ${[...totals].map(([c, t]) => `${t} ${c}`).join(", ")} issued in total.` : null;
+
   return (
     <div className="space-y-4">
+      {summary ? <p className="text-sm text-muted-foreground" data-testid="loans-summary">{summary}</p> : null}
       <Table stack>
         <TableHeader>
           <TableRow>
@@ -70,7 +80,7 @@ export async function LoansSection({
         </TableBody>
       </Table>
 
-      {canEdit ? <AddLoanForm employeeId={employeeId} defaultCurrency={defaultCurrency} /> : null}
+      {canEdit ? <AddLoanForm employeeId={employeeId} defaultCurrency={defaultCurrency} employeeName={employeeName} companyName={companyName} /> : null}
     </div>
   );
 }

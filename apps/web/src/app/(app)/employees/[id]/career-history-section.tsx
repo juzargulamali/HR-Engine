@@ -1,111 +1,64 @@
-import { createClient } from "@/lib/supabase/server";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { RecordCareerEventForm } from "./record-career-event-form";
 import { EmptyState } from "@/components/ui/empty-state";
-import { LoadError } from "@/components/workspace/states";
+import type { CareerEventRow } from "@/lib/hr/changes";
 
-const EVENT_LABEL: Record<string, string> = {
-  promotion: "Promotion",
-  title_change: "Title change",
-  salary_change: "Salary change",
-};
+const EVENT_LABEL: Record<string, string> = { promotion: "Promotion", title_change: "Title change", salary_change: "Salary change" };
+const EVENT_VARIANT: Record<string, "default" | "secondary" | "outline"> = { promotion: "default", title_change: "secondary", salary_change: "outline" };
+const longDate = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" });
 
-const EVENT_VARIANT: Record<string, "default" | "secondary" | "outline"> = {
-  promotion: "default",
-  title_change: "secondary",
-  salary_change: "outline",
-};
+function what(e: CareerEventRow) {
+  const parts: string[] = [];
+  if (e.new_job_title) parts.push(`Job title: ${e.previous_job_title ?? "none"} → ${e.new_job_title}`);
+  if (e.new_base_salary != null) parts.push(`Basic salary: ${e.previous_base_salary ?? "none"} → ${e.new_base_salary}${e.currency ? ` ${e.currency}` : ""}`);
+  return parts;
+}
 
-export async function CareerHistorySection({
-  employeeId,
-  canView,
-  canRecord,
-}: {
-  employeeId: string;
-  canView: boolean;
-  canRecord: boolean;
-}) {
-  if (!canView) return null;
-
-  const supabase = await createClient();
-  const [{ data: events, error: eventsError }, { data: employee, error: employeeError }, { data: currentComp, error: compError }] = await Promise.all([
-    supabase
-      .from("employee_career_events")
-      .select(
-        "id, event_type, effective_date, previous_job_title, new_job_title, previous_base_salary, new_base_salary, currency, note",
-      )
-      .eq("employee_id", employeeId)
-      .order("effective_date", { ascending: false }),
-    supabase.from("employees").select("job_title").eq("id", employeeId).single(),
-    supabase.from("compensation_details").select("base_salary, allowances").eq("employee_id", employeeId).eq("is_current", true).maybeSingle(),
-  ]);
-
-  const currentOther = typeof currentComp?.allowances?.other === "number" ? currentComp.allowances.other : 0;
-
-  const here = `/employees/${employeeId}?tab=employment`;
+/** Changes recorded for a later date: saved, but NOT in force yet. Each says when it will take effect. */
+export function ScheduledChanges({ events }: { events: CareerEventRow[] }) {
+  if (events.length === 0) return <p className="text-sm text-muted-foreground" data-testid="scheduled-empty">No changes are scheduled.</p>;
   return (
-    <div className="space-y-4">
-      {eventsError ? <LoadError what="the promotions and salary history" retryHref={here} /> : (
-      <Table stack>
-        <TableHeader>
-          <TableRow>
-            <TableHead>Date</TableHead>
-            <TableHead>Type</TableHead>
-            <TableHead>Title</TableHead>
-            <TableHead>Salary</TableHead>
-            <TableHead>Note</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {(events ?? []).map((e) => (
-            <TableRow key={e.id}>
-              <TableCell>{e.effective_date}</TableCell>
-              <TableCell>
-                <Badge variant={EVENT_VARIANT[e.event_type] ?? "outline"}>{EVENT_LABEL[e.event_type] ?? e.event_type}</Badge>
-              </TableCell>
-              <TableCell className="text-sm">
-                {e.new_job_title ? (
-                  <>
-                    {e.previous_job_title ?? "—"} → <span className="font-medium">{e.new_job_title}</span>
-                  </>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell className="text-sm">
-                {e.new_base_salary != null ? (
-                  <>
-                    {e.previous_base_salary ?? "—"} → <span className="font-medium">{e.new_base_salary}</span> {e.currency}
-                  </>
-                ) : (
-                  "—"
-                )}
-              </TableCell>
-              <TableCell className="text-muted-foreground">{e.note ?? "—"}</TableCell>
-            </TableRow>
-          ))}
-          {(events ?? []).length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={5}>
-                <EmptyState dense title="No promotions, title changes, or salary changes recorded yet." />
-              </TableCell>
-            </TableRow>
-          ) : null}
-        </TableBody>
-      </Table>
-      )}
+    <ul className="divide-y divide-border" data-testid="scheduled-changes">
+      {events.map((e) => (
+        <li key={e.id} className="space-y-1 py-3 first:pt-0 last:pb-0" data-testid={`scheduled-${e.id}`}>
+          <p className="font-medium">Takes effect on {longDate(e.effective_date)} <Badge variant="outline" className="ml-1 align-middle">Not in force yet</Badge></p>
+          {what(e).map((line) => <p key={line} className="text-sm">{line}</p>)}
+          {e.note ? <p className="text-sm text-muted-foreground">{e.note}</p> : null}
+        </li>
+      ))}
+    </ul>
+  );
+}
 
-      {/* The form pre-fills the current title and salary: with either unreadable it is withheld rather than shown with blanks that look like "no salary". */}
-      {canRecord && (employeeError || compError) ? <LoadError what="the current title and salary" retryHref={here} note="Recording a change is unavailable until they load." /> : null}
-      {canRecord && !employeeError && !compError ? (
-        <RecordCareerEventForm
-          employeeId={employeeId}
-          currentJobTitle={employee?.job_title ?? null}
-          currentBasicSalary={currentComp ? Number(currentComp.base_salary) : null}
-          currentOtherAllowance={currentOther}
-        />
-      ) : null}
-    </div>
+/** Changes already in force, newest first. Existing records from before scheduling existed all read as applied. */
+export function ChangeHistory({ events }: { events: CareerEventRow[] }) {
+  return (
+    <Table stack>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Date</TableHead>
+          <TableHead>Type</TableHead>
+          <TableHead>Title</TableHead>
+          <TableHead>Salary</TableHead>
+          <TableHead>Note</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((e) => (
+          <TableRow key={e.id}>
+            <TableCell>{e.effective_date}</TableCell>
+            <TableCell><Badge variant={EVENT_VARIANT[e.event_type] ?? "outline"}>{EVENT_LABEL[e.event_type] ?? e.event_type}</Badge></TableCell>
+            <TableCell className="text-sm">{e.new_job_title ? <>{e.previous_job_title ?? "—"} → <span className="font-medium">{e.new_job_title}</span></> : "—"}</TableCell>
+            <TableCell className="text-sm">{e.new_base_salary != null ? <>{e.previous_base_salary ?? "—"} → <span className="font-medium">{e.new_base_salary}</span> {e.currency}</> : "—"}</TableCell>
+            <TableCell className="text-muted-foreground">{e.note ?? "—"}</TableCell>
+          </TableRow>
+        ))}
+        {events.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={5}><EmptyState dense title="No promotions, title changes, or salary changes recorded yet." /></TableCell>
+          </TableRow>
+        ) : null}
+      </TableBody>
+    </Table>
   );
 }
