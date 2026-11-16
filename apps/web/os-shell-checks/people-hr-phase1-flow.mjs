@@ -33,7 +33,8 @@ const go = async (path) => { await page.goto(`${BASE}${path}`, { waitUntil: "net
 const plus = (n) => one(`select (current_date + ${n})::text`);
 const grantsHash = () => one("select md5(coalesce(string_agg(t.r, '|' order by t.r), '')) from (select 'p:' || user_id || company_id || capabilities::text || coalesce(revoked_at::text,'') as r from proj_company_grants union all select 'c:' || user_id || company_id || capabilities::text || coalesce(revoked_at::text,'') from crm_company_grants union all select 'i:' || user_id || company_id || capabilities::text || coalesce(revoked_at::text,'') from inv_company_grants union all select 'x:' || user_id || company_id || capabilities::text || coalesce(revoked_at::text,'') from pbx_company_grants union all select 'r:' || user_id || role::text || coalesce(company_id::text,'') || coalesce(country_code,'') || coalesce(revoked_at::text,'') from user_roles) t");
 
-let EMP = ""; let EMPNO = "ZZ-701"; let FIRST = "Amira"; let LAST = "Walkthrough";
+let EMP = ""; let EMPNO = "";   // assigned by the database from the shared series when the employee is saved; read back after the first creation
+let FIRST = "Amira"; let LAST = "Walkthrough";
 let GRANTS_BEFORE = "";
 
 await step("setup: the schema has People & HR Phase 1; three countries and a company with no default currency are in place; every company-scoped grant is recorded", async () => {
@@ -72,12 +73,14 @@ await step("company first: nothing but the company is asked until one is chosen;
 await step("add an employee once (identity and job only): double click creates one record and opens the profile with what remains", async () => {
   await go("/employees/new");
   await page.locator("#companyId").selectOption(AE); await page.getByTestId("onboarding-summary").waitFor();
-  await page.locator("#firstName").fill(FIRST); await page.locator("#lastName").fill(LAST); await page.locator("#employeeNumber").fill(EMPNO);
+  await page.locator("#firstName").fill(FIRST); await page.locator("#lastName").fill(LAST); if (await page.locator("#employeeNumber").count()) throw new Error("the form still asks for an employee number"); await page.getByTestId("number-auto").waitFor();
   await page.locator("#jobTitle").fill("Installation technician"); await page.locator("#hireDate").fill(plus(-20));
   await page.screenshot({ path: `${SHOTS}/onboarding-filled-phone.png`, fullPage: true });
   await page.getByRole("button", { name: /^Create employee/ }).dblclick();
   await page.waitForURL(/\/employees\/[0-9a-f-]{36}/, { timeout: 20000 });
   EMP = page.url().match(/employees\/([0-9a-f-]{36})/)[1];
+  EMPNO = one(`select employee_number from employees where id = '${EMP}'`);
+  if (!/^E\d{3,}$/.test(EMPNO)) throw new Error(`the new hire was not given a number of the shared series: ${EMPNO}`);
   if (one(`select count(*) from employees where company_id = '${AE}' and employee_number = '${EMPNO}'`) !== "1") throw new Error("a double click created more than one employee");
   await page.getByTestId("setup-checklist").waitFor();
   const t = await body();
@@ -89,10 +92,10 @@ await step("add an employee once (identity and job only): double click creates o
 });
 
 await step("Saudi Arabia and Poland employees take their company's country and currency into the saved records (contract and pay entered in the same step this time)", async () => {
-  for (const [co, cc, cur, no] of [[SA, "SA", "SAR", "ZZ-702"], [PL, "PL", "PLN", "ZZ-703"]]) {
+  for (const [co, cc, cur] of [[SA, "SA", "SAR"], [PL, "PL", "PLN"]]) {
     await go("/employees/new");
     await page.locator("#companyId").selectOption(co); await page.getByTestId("onboarding-summary").waitFor();
-    await page.locator("#firstName").fill(`Test${cc}`); await page.locator("#lastName").fill("Country"); await page.locator("#employeeNumber").fill(no); await page.locator("#hireDate").fill(plus(-10));
+    await page.locator("#firstName").fill(`Test${cc}`); await page.locator("#lastName").fill("Country"); await page.locator("#hireDate").fill(plus(-10));
     await page.getByText("Contract and pay now (optional)").click();
     await page.locator("#contractType").selectOption("permanent"); await page.locator("#basicSalary").fill("3000");
     if ((await page.locator("#salaryCurrency").inputValue()).toUpperCase() !== cur) throw new Error(`${cc}: the pay currency was not suggested as ${cur}`);

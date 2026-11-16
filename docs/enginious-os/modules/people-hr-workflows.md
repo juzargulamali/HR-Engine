@@ -37,7 +37,7 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 |---|---|---|
 | 1. Choose the company | Nothing else is asked yet ("Choose the company first. Its country and currency are used for this employee.") | Country, currency |
 | 2. Defaults appear | The company's country and currency are shown. A company with no country asks for the employee's country in place; a company with no default currency says so and asks for one only if pay is entered | Country, currency |
-| 3. Identity and job | First and last name, employee number, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number) | Company, country |
+| 3. Identity and job | First and last name, hire date (required); date of birth, job title, department (the company's list), manager (search by name or number). **No employee number is typed**: the form says it is assigned automatically when you save, from the one series shared by every company | Company, country, employee number |
 | 4. Contract and pay (optional) | Contract type ("Add later" is the empty choice); the start is the hire date unless changed; basic salary, others, currency (the company's) | Hire date, currency |
 | 5. Opening balances (optional) | Annual leave days, comp days earned to date; a note under the circled i says they are for a mid-year hire or a transfer and are recorded once | Hire date |
 | 6. Save | The profile **Overview** opens ("Employee created. Finish setup below.") with the checklist | |
@@ -53,7 +53,8 @@ Route `/employees/new`, action `createEmployee`. HR Admin of the company only; t
 
 **When something goes wrong:**
 
-* *The same employee number is already used in this company* — the message links to that person; nothing was created.
+* *The employee number could not be assigned* — not expected (the database skips every number already held, in every company, removed employees included); if two saves ever raced for one, nothing was saved and sending again takes the next number.
+* *Correcting a number by hand* (an HR Admin or the owner through the database; no screen edits a number) — an equivalent number held by anyone in any company is refused with "Employee number E002 is already used by another employee, in this or another company." and nothing is saved. Restoring a removed employee whose number has since been given to someone else is refused the same way.
 * *Sent twice, or retried after a lost answer* — the same record opens; nothing else is written.
 * *Contract, pay or balances could not be saved after the person was created* — the profile opens on the first step still to do with a sentence naming what was not saved ("contract", "pay", "balances"); the person exists once.
 * *No access* — "You cannot add employees to this company."

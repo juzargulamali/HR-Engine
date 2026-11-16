@@ -1,0 +1,34 @@
+{
+  "note": "Shared by the TypeScript normaliser tests (apps/web/src/lib/hr/employee-number.test.ts) and the SQL function tests (packages/rls-tests/test/employee-number.rls.test.ts). Every pair is an input and the one canonical form it must give in BOTH places. Rule: trim, remove all spaces, upper-case; if the number ends in digits, drop their leading zeros and pad back to at least three digits (longer numbers keep every digit); anything without trailing digits is only trimmed and upper-cased. Fictional numbers.",
+  "vectors": [
+    { "input": "E02", "canonical": "E002" },
+    { "input": "e002", "canonical": "E002" },
+    { "input": "E002", "canonical": "E002" },
+    { "input": "E2", "canonical": "E002" },
+    { "input": " e 0002 ", "canonical": "E002" },
+    { "input": "E0", "canonical": "E000" },
+    { "input": "E000", "canonical": "E000" },
+    { "input": "E1234", "canonical": "E1234" },
+    { "input": "e01234", "canonical": "E1234" },
+    { "input": "L-1", "canonical": "L-001" },
+    { "input": "hp-001", "canonical": "HP-001" },
+    { "input": "ZZ-171234", "canonical": "ZZ-171234" },
+    { "input": "7", "canonical": "007" },
+    { "input": "007", "canonical": "007" },
+    { "input": "CONTRACTOR", "canonical": "CONTRACTOR" },
+    { "input": "  ab-c  ", "canonical": "AB-C" },
+    { "input": "A1B", "canonical": "A1B" },
+    { "input": "E-02/B", "canonical": "E-02/B" }
+  ],
+  "equivalentGroups": [
+    ["E02", "e002", "E002", "E2", " e 0002 "],
+    ["L-1", "l-01", "L-001"],
+    ["E1234", "e01234"]
+  ],
+  "differentNumbers": [
+    ["E002", "E020"],
+    ["E002", "L-002"],
+    ["E002", "E0022"],
+    ["A1B", "A001B"]
+  ]
+}

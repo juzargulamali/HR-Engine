@@ -8,6 +8,22 @@ Maintenance rule (from `README.md`): any change to behaviour, access, navigation
 
 ## Launch-refinement release (owner-reported hosted state: migrations 1 to 15 applied and verified on V2)
 
+### 2026-11-16 | Employee numbers: one shared series across the companies (branch `feat/employee-number-uniqueness` from `main` `713f6dd`; **a draft pull request; not merged; hosted migration `20270117000100` not applied; the audit has not been run on the hosted database**)
+
+**What changed for people.**
+
+* **New employees get their number automatically** from one series shared by every company: `E001`, `E002`, ... (at least three digits, no truncation after `E999`). The Add employee form has no number field.
+* **`E02`, `e002` and `E002` are the same number** and are saved as `E002`. A number is unique across Enginious UAE, Saudi Arabia and Europe, not just within one company.
+* **Giving someone access to several companies never creates a second employee record or a new number.**
+* **Duplicates are refused with a clear sentence** on any path that writes a number, and when restoring a removed employee whose number has since been used.
+* **Existing numbers are not rewritten.** The migration refuses to run while two live employees (any companies) have equivalent numbers, changes nothing, and the read-only audit lists them for the owner to decide, one employee at a time.
+
+**Migrations.** `20270117000100_people_hr_employee_number_unique.sql` (function `employee_number_canonical`, sequence `employee_number_seq`, global unique index `employees_employee_number_canonical_unique` replacing the per-company index, trigger `employees_canonical_number`; packs `people_hr_employee_number_00_audit_readonly.sql`, `..._05_preflight_readonly.sql`, `..._20_verify_readonly.sql`, `..._90_rollback.sql`).
+
+**Files updated in `docs/enginious-os/`.** `modules/people-hr.md` (section 15), `people-hr-workflows.md`, `staff-guidance/people.md`, this log, `05-data-tests-and-release-ledger.md`.
+
+**Hosted status.** Not applied; audit not run. **Tests.** `packages/rls-tests/test/employee-number.rls.test.ts`; `web/lib/hr/employee-number.test.ts`, `employeeOnboarding.test.ts`, `new-employee-form.test.tsx`.
+
 ### 2026-11-16 | People & HR Phase 2: Daily HR work (branch `feat/people-hr-phase2` from `main` `93d10a1`; **a draft pull request; not merged; hosted migration `20270116000100` not applied**)
 
 **What changed for people.**

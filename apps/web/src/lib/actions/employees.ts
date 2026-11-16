@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getBusinessDateString, resolveCountryTimeZone } from "@enginious-hr/domain";
 import { createClient } from "@/lib/supabase/server";
+import { employeeNumberErrorMessage } from "@/lib/hr/employee-number";
 import type { ActionState } from "./companies";
 import { validateUploadFile, sanitizeForStoragePath } from "@/lib/uploads";
 import { applyPolandTerminationLeaveTrueUp } from "./polandTermination";
@@ -297,7 +298,9 @@ export async function restoreEmployee(employeeId: string): Promise<{ error: stri
   const { error } = await supabase.from("employees").update({ deleted_at: null, deleted_by: null }).eq("id", employeeId);
   revalidatePath("/employees");
   revalidatePath(`/employees/${employeeId}`);
-  return { error: error?.message ?? null };
+  // Employee numbers are one shared series: a removed employee's number may have been given to someone else since. The database says so; show it as a sentence, not as a constraint name.
+  if (error) return { error: error.code === "23505" ? employeeNumberErrorMessage(error) : error.message };
+  return { error: null };
 }
 
 /**

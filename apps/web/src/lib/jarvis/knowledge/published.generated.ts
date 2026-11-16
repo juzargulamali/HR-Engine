@@ -861,10 +861,10 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "employee number",
       "add staff"
     ],
-    "summary": "An HR Admin adds an employee from the Employees list. Choose the company first: its country and currency are used for the new person, so you do not type them. You enter the name, employee number and hire date once, and may add the contract, salary and opening leave balances now or later. Pressing the button twice never creates a second person.",
+    "summary": "An HR Admin adds an employee from the Employees list. Choose the company first: its country and currency are used for the new person, so you do not type them. You enter the name and hire date once; the employee number is given automatically when you save (the next one in a single series shared by every company, such as E007, and it stays with the person). You may add the contract, salary and opening leave balances now or later. Pressing the button twice never creates a second person.",
     "steps": [
       "Open Employees and press Add employee.",
-      "Choose the company, then fill in the name, employee number and hire date.",
+      "Choose the company, then fill in the name and hire date. Do not look for an employee number field: it is assigned when you save.",
       "Add the job, department, manager, contract and salary if you have them; leave the rest for later.",
       "Press the button at the bottom. The new profile opens and lists what is still to do."
     ],

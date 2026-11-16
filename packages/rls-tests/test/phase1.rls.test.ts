@@ -659,7 +659,7 @@ describe("Phase 1 row-level security: contracts, compensation, identity document
             [COMPANY_HQ],
           ),
         ),
-      ).rejects.toThrow(/duplicate key value violates unique constraint/);
+      ).rejects.toThrow(/Employee number REUSE-001 is already used by another employee/);   // worded by the employee-number trigger (migration 20270117000100); still a unique violation (23505)
 
       // A soft-delete (not a permanent one) already frees the number up.
       await db.seed(`update employees set deleted_at = now() where id = '${scratchId}';`);

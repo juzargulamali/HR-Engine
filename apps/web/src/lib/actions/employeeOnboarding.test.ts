@@ -27,7 +27,7 @@ import { createEmployee } from "./employeeOnboarding";
 const CO = "11111111-1111-4111-8111-111111111111";
 const EMP = "22222222-2222-4222-8222-222222222222";
 const fd = (o: Record<string, string>) => { const f = new FormData(); for (const [k, v] of Object.entries(o)) f.append(k, v); return f; };
-const base = { employeeId: EMP, companyId: CO, employeeNumber: "E010", firstName: "Riya", lastName: "Rigger", hireDate: "2026-11-01" };
+const base = { employeeId: EMP, companyId: CO, firstName: "Riya", lastName: "Rigger", hireDate: "2026-11-01" };
 const run = async (o: Record<string, string>) => { try { return { state: await createEmployee({ error: null }, fd({ ...base, ...o })), redirect: null as string | null }; } catch (e) { const m = String((e as Error).message); if (m.startsWith("REDIRECT:")) return { state: null, redirect: m.slice(9) }; throw e; } };
 const wrote = (t: string) => inserts.filter((i) => i.table === t);
 
@@ -46,7 +46,9 @@ describe("createEmployee", () => {
   });
   it("takes the country from the company on the server and uses the posted id as the employee's id", async () => {
     const r = await run({ countryCode: "PL" });
-    expect(wrote("employees")[0]!.row).toMatchObject({ id: EMP, company_id: CO, country_code: "SA", employee_number: "E010" });
+    expect(wrote("employees")[0]!.row).toMatchObject({ id: EMP, company_id: CO, country_code: "SA" });
+    // no employee number is sent: the database gives the new hire the next number of the one shared series
+    expect(wrote("employees")[0]!.row).not.toHaveProperty("employee_number");
     expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
   });
   it("asks for the country only when the company has none, and then uses the posted one", async () => {
@@ -76,11 +78,15 @@ describe("createEmployee", () => {
     expect(r.redirect).toBe(`/employees/${EMP}`);
     expect(inserts.map((i) => i.table)).toEqual(["employees"]);
   });
-  it("a number already used in the company is named, with the record that uses it", async () => {
-    insertResults.employees = { error: { code: "23505", message: 'duplicate key value violates unique constraint "employees_company_employee_number_unique"' } };
-    selects.employees = { data: { id: "99999999-9999-4999-8999-999999999999" }, error: null };
+  it("a number typed into the request is ignored: the number always comes from the database's series, never from the browser", async () => {
+    const r = await run({ employeeNumber: "E002" });
+    expect(wrote("employees")[0]!.row).not.toHaveProperty("employee_number");
+    expect(r.redirect).toBe(`/employees/${EMP}?created=1`);
+  });
+  it("a number conflict (not expected, the database skips held numbers) saves nothing and asks to try again, with no raw constraint name", async () => {
+    insertResults.employees = { error: { code: "23505", message: 'duplicate key value violates unique constraint "employees_employee_number_canonical_unique"' } };
     const r = await run({});
-    expect(r.state).toMatchObject({ error: "Employee number E010 is already used in this company.", existingEmployeeId: "99999999-9999-4999-8999-999999999999" });
+    expect(r.state).toEqual({ error: "The employee number could not be assigned. Nothing was saved. Try again." });
     expect(inserts.map((i) => i.table)).toEqual(["employees"]);
   });
   it("a failed optional part opens the profile with what failed, never a raw database message, and never repeats the employee", async () => {

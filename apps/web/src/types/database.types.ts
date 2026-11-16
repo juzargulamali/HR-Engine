@@ -330,7 +330,7 @@ export interface Database {
         Insert: {
           id?: string;
           user_id?: string | null;
-          employee_number: string;
+          employee_number?: string;
           company_id: string;
           country_code: string;
           department_id?: string | null;
