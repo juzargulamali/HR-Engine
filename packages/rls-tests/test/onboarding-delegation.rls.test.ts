@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RlsTestDatabase } from "../src/harness";
 
@@ -86,5 +88,24 @@ describe("Onboarding: which account can do which action (isolated accounts)", ()
     expect(await check(U.globalSys)).toEqual({ g: true, s: true, h: true });
     expect(await check(U.scopedSys)).toEqual({ g: false, s: true, h: true });   // scoped: true only when asked with the company, which user_roles_insert_sysadmin never does
     expect(await check(U.hrOnly)).toEqual({ g: false, s: false, h: true });
+  });
+
+  it("the owner's read-only diagnostic file reports the same verdicts per account (so the hosted run can be trusted), and changes nothing", async () => {
+    const sql = readFileSync(resolve(__dirname, "../../../supabase/manual-sql/people_access_onboarding_diagnostic_readonly.sql"), "utf8");
+    const run = async (who: string) => (await admin(sql.replace("PUT-THE-PERSONS-EMAIL-HERE@example.com", `${who}@onboarding.test`))).map((r) => `${r.section} :: ${r.detail}`);
+    const before = await admin(`select (select count(*) from user_roles) r, (select count(*) from crm_company_grants) g`);
+    const scoped = await run("scopedSys");
+    expect(scoped.find((l) => l.startsWith("C1"))).toMatch(/ALLOWED - HR Admin of: Fictional Onboarding A/);
+    expect(scoped.find((l) => l.startsWith("C2"))).toMatch(/BLOCKED - the System Administrator grant is limited to: Fictional Onboarding A/);
+    expect(scoped.find((l) => l.startsWith("C3"))).toMatch(/BLOCKED/);
+    expect(scoped.filter((l) => l.startsWith("C4")).every((l) => /BLOCKED/.test(l))).toBe(true);
+    const global = await run("globalSys");
+    expect(global.find((l) => l.startsWith("C2"))).toMatch(/ALLOWED/);
+    expect(global.find((l) => l.startsWith("C3"))).toMatch(/ALLOWED/);
+    expect(global.filter((l) => l.startsWith("C4")).every((l) => /BLOCKED/.test(l))).toBe(true);
+    const mgr = await run("accessMgr");
+    expect(mgr.find((l) => l.startsWith("C4 Give module access: Sales & CRM"))).toMatch(/ALLOWED for: Fictional Onboarding A/);
+    expect(await run("nobody-here")).toEqual(["A0 account :: NO ACCOUNT FOUND for that address - check the spelling"]);
+    expect(await admin(`select (select count(*) from user_roles) r, (select count(*) from crm_company_grants) g`)).toEqual(before);
   });
 });
