@@ -168,12 +168,15 @@ export default async function RequestWorkspacePage({ params, searchParams }: { p
       </div>
       <WorkspaceHeader model={model} pickupName={pickupName} companyName={companyName} workingName={operable.find((o) => o.id === defaultLocationId)?.name ?? null} />
       {r.kind === "project" && r.project_id && runCover && runCover.state !== "not_installed" && runCover.state !== "none" ? (
-        <section aria-label="Site runs this request serves" className="rounded-lg border border-border bg-card p-4" data-testid="job-runs">
-          <h2 className="mb-2 text-sm font-semibold">Site runs this request serves</h2>
+        <details open={step === "prepare"} aria-label="Site runs this request serves" className="rounded-lg border border-border bg-card p-4" data-testid="job-runs">
+          {/* Open while preparing; one line while picking, sending and receiving, so the step's own list and action stay near the top of a phone. */}
+          <summary className="cursor-pointer select-none text-sm font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Site runs this request serves{ownRuns.length > 0 ? ` (${ownRuns.length})` : ""}</summary>
+          <div className="mt-2">
           {runCover.state === "error" ? <Alert role="status">The site runs this request serves could not be loaded. Reload to check.</Alert>
             : ownRuns.length === 0 ? <p className="text-sm text-muted-foreground">No site run is linked to this request. The Project Manager ticks them on the request&apos;s dates.</p>
             : <><RunEquipmentList rows={ownRuns} projectId={r.project_id} timezone={r.timezone} />{ownRuns.length > 1 ? <p className="mt-2 text-sm text-muted-foreground">The same equipment stays out between these runs: it is sent once and received back once.</p> : null}</>}
-        </section>
+          </div>
+        </details>
       ) : null}
       {reviews.state === "ok" ? <EquipmentReviewPanel reviews={reviews.readiness.reviews.filter((v) => v.requestId === id)} projectId={r.project_id!} canReview={can.operableLocationIds.length > 0 || manage} />
         : reviews.state === "error" ? <Alert role="status">Whether a project date changed for this request could not be loaded. Reload to check before changing the booking.</Alert> : null}
