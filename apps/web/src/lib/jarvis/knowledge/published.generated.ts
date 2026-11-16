@@ -940,8 +940,7 @@ export const PUBLISHED_GUIDANCE: GuidanceEntry[] = [
       "Enter the new job title and/or the new pay, and the date it takes effect.",
       "Read the line beside the button, which says what will happen on save, then save.",
       "Check the Current terms, Scheduled changes and History lists. After the date, the change should be in Current terms.",
-      "If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay.",
-      "If it is still under Scheduled changes with no such label, tell your System Administrator."
+      "If a scheduled change says Held for review, pay was changed after it was scheduled and nothing was applied: read the reason, cancel it (HR Admin) and record the change again from the current pay. If it is still under Scheduled changes after its date with no such label, tell your System Administrator."
     ],
     "links": [
       {
