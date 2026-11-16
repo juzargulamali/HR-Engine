@@ -1,6 +1,7 @@
 import "server-only";
 import type { InventoryContext } from "@/lib/inventory/context";
 import { createClient } from "@/lib/supabase/server";
+import { loadOpenTransfers, type OpenTransfer } from "./transfer-data";
 import { loadEmployeeNames, loadRequestModels, type RequestModel } from "@/lib/inventory/planning-data";
 import type { PendingSalesCheck } from "@/lib/inventory/planning";
 import { loadOpenDifferences } from "@/lib/inventory/project-notes-data";
@@ -181,38 +182,27 @@ async function projectRequestLinks(db: Db, projectIds: string[]): Promise<Map<st
 
 /* ---------- transfers ---------- */
 
+/**
+ * Transfers still in transit that touch this warehouse (or, with every warehouse shown, any warehouse the person's companies run): the ones on their way HERE,
+ * which this warehouse receives, and the ones sent FROM here, which wait on the other warehouse. A transfer between companies is read through the narrow
+ * function both sides may call, so the receiving warehouse sees it too (its own rows never held it: the transfer is filed under the sending company).
+ */
 async function loadTransferRows(ctx: InventoryContext, locationId: string | null, build: { now: Date }, zone: (id: string | null) => string): Promise<QueueRow[]> {
-  const db = await createClient();
-  const toIds = locationId ? [locationId] : ctx.locations.filter((l) => l.is_active).map((l) => l.id);
-  if (toIds.length === 0) return [];
-  const { data, error } = await db.from("inv_transfers").select("id, code, from_location_id, to_location_id, expected_at")
-    .eq("status", "in_transit").in("to_location_id", toIds).order("expected_at", { ascending: true, nullsFirst: false }).order("id").limit(200);
-  if (error) throw new Error(error.message);
-  const transfers = data ?? [];
-  if (transfers.length === 0) return [];
-
-  // How many things are on each: a count of units plus counted lines, never a sum of quantities. If this cannot be read the row still shows without a count.
-  const counts = new Map<string, Set<string>>();
-  try {
-    const ids = transfers.map((t) => t.id);
-    const [units, balances] = await Promise.all([
-      db.from("inv_units").select("id, transfer_id").in("transfer_id", ids).eq("custody_kind", "transit"),
-      db.from("inv_balances").select("item_id, transfer_id").in("transfer_id", ids).eq("holder_kind", "transit").gt("qty", 0),
-    ]);
-    if (units.error || balances.error) throw new Error((units.error ?? balances.error)!.message);
-    const add = (t: string | null, key: string) => { if (t) counts.set(t, (counts.get(t) ?? new Set<string>()).add(key)); };
-    for (const u of units.data ?? []) add(u.transfer_id, `unit:${u.id}`);
-    for (const b of balances.data ?? []) add(b.transfer_id, `item:${b.item_id}`);
-  } catch (e) {
-    console.error("[inventory] today: transfer contents could not be read", e instanceof Error ? e.message : e);
-    counts.clear();
-    for (const t of transfers) counts.set(t.id, new Set(["?"]));
+  const scope = new Set(locationId ? [locationId] : ctx.locations.filter((l) => l.is_active).map((l) => l.id));
+  if (scope.size === 0) return [];
+  const open = await loadOpenTransfers(ctx);
+  // Named with the company whenever the person works with several, or the transfer crosses companies: the same city can be a warehouse of two of them.
+  const name = (t: OpenTransfer, side: "from" | "to") => (ctx.companies.length > 1 || t.crossCompany ? (side === "from" ? t.fromLabel : t.toLabel) : ctx.locationName(side === "from" ? t.fromLocationId : t.toLocationId));
+  const inputs: TransferInput[] = [];
+  for (const t of open) {
+    const incoming = scope.has(t.toLocationId);
+    const outgoing = scope.has(t.fromLocationId);
+    if (!incoming && !outgoing) continue;
+    const base = { id: t.id, code: t.code, fromName: name(t, "from"), toName: name(t, "to"), expectedAt: t.expectedAt, zone: zone(t.toLocationId), items: t.lines ? t.lines.inTransit : null, sent: t.lines ? t.lines.sent : null };
+    // With every warehouse shown a transfer between two of the person's own warehouses is one job (to receive), not two rows.
+    inputs.push({ ...base, direction: incoming ? "in" : "out" });
   }
-  const unknown = (t: string) => counts.get(t)?.has("?") ?? false;
-  const inputs: TransferInput[] = transfers.map((t) => ({
-    id: t.id, code: t.code, fromName: ctx.locationName(t.from_location_id), toName: ctx.locationName(t.to_location_id), expectedAt: t.expected_at,
-    zone: zone(t.to_location_id), items: unknown(t.id) ? null : (counts.get(t.id)?.size ?? 0),
-  }));
+  inputs.sort((x, y) => (x.expectedAt ?? "9999").localeCompare(y.expectedAt ?? "9999") || x.id.localeCompare(y.id));
   return transferRows(inputs, build, { here: locationId !== null });
 }
 

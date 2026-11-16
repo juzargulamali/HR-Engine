@@ -321,7 +321,7 @@ describe("MovementForm: transfers", () => {
     fireEvent.change(screen.getByLabelText("Send to"), { target: { value: "l2" } });
     expect(screen.getByText(/not available at the destination/i)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Review" }));
-    expect(await screen.findByText(/Riyadh warehouse \(in transit: not available there until it is received\)/)).toBeTruthy();
+    expect(await screen.findByText(/Riyadh warehouse · Enginious \(in transit: not available there until it is received\)/)).toBeTruthy();
   });
 });
 
@@ -333,7 +333,7 @@ describe("MovementForm: sending to another company's warehouse", () => {
   it("offers a warehouse of another company only when its owner authorised it for the company whose warehouse this is, naming the company", () => {
     render(<MovementForm kind="transfer" services={services()} context={withShared} initial={{ candidates: [laptop], locationId: "l1" }} />);
     const options = within(screen.getByLabelText("Send to")).getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(["Choose the destination…", "Riyadh warehouse", "Jeddah warehouse · Enginious KSA (authorised)"]);
+    expect(options).toEqual(["Choose the destination…", "Riyadh warehouse · Enginious", "Jeddah warehouse · Enginious KSA (another company, authorised)"]);
     expect(options.join("|")).not.toMatch(/Doha/);
   });
   it("says the equipment stays the sender's and names the other company in the review", async () => {
@@ -376,3 +376,67 @@ describe("MovementForm: receiving a transfer of equipment another company owns",
     expect(screen.queryByText(/does not change who owns it/)).toBeNull();
   });
 });
+
+describe("MovementForm: Phase 2, nothing is assumed and nothing is asked twice", () => {
+  const truss: Candidate = { ...laptop, key: "unit-truss", unitId: "u7", code: "UAE-E-00007", itemName: "Truss 3 m", custody: "transit", where: "In transit" };
+  const brace: Candidate = { ...laptop, key: "unit-brace", unitId: "u8", code: "UAE-E-00008", itemName: "Corner brace", custody: "transit", where: "In transit" };
+  const receiving: FormContext = {
+    ...context,
+    transfers: [{ id: "t1", code: "UAE-T-00001", companyId: "c1", fromLocationId: "l1", fromName: "Dubai · Enginious UAE", toLocationId: "l2", toName: "Riyadh · Enginious Saudi Arabia", expectedAt: null, carrier: null, reference: null, dispatchedAt: "2026-11-01T08:00:00Z", held: [truss, brace], sentLines: 3 }],
+    locations: [{ id: "l2", companyId: "c2", companyName: "Enginious Saudi Arabia", name: "Riyadh", timezone: "Asia/Riyadh", bins: [] }],
+  };
+
+  it("a receipt shows both companies and warehouses, what was sent, received and is still in transit, and asks what arrived instead of assuming everything did", async () => {
+    const s = services();
+    render(<MovementForm kind="receive_transfer" services={s} context={receiving} initial={{ transferId: "t1" }} />);
+    const facts = screen.getByTestId("transfer-context");
+    expect(within(facts).getByText("Dubai · Enginious UAE")).toBeTruthy();
+    expect(within(facts).getByText("Riyadh · Enginious Saudi Arabia")).toBeTruthy();
+    expect(within(facts).getByText("3 lines sent · 1 already received · 2 still in transit")).toBeTruthy();
+    // Nothing is ticked: Review is refused until the person says what arrived.
+    for (const r of screen.getAllByRole("radio")) expect((r as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    expect(await screen.findByText("Say whether everything still in transit arrived, or only some of it.")).toBeTruthy();
+    expect(s.submit).not.toHaveBeenCalled();
+  });
+
+  it("receiving part of a transfer records only the lines listed and says the actual result", async () => {
+    const s = services({ submit: vi.fn(async () => ({ error: null, message: "Recorded as MV-000009.", result: { transfer_id: "11111111-1111-4111-8111-111111111111", still_on_the_way: 1, lines: [{ unit_id: "u7", code: "UAE-E-00007", condition: "damaged", available: false }] } })) });
+    render(<MovementForm kind="receive_transfer" services={s} context={receiving} initial={{ transferId: "t1" }} />);
+    fireEvent.click(screen.getByRole("radio", { name: /Only some of it arrived/ }));
+    fireEvent.click(await screen.findByRole("button", { name: /add truss 3 m/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    const dl = (await screen.findByText("What")).closest("dl")!;
+    expect(within(dl).getByText("Dubai · Enginious UAE, in transit (UAE-T-00001)")).toBeTruthy();
+    expect(within(dl).getByText("Riyadh · Enginious Saudi Arabia")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm arrival" }));
+    expect((await screen.findByTestId("result-line")).textContent).toBe("1 received · 1 held for inspection · 1 line still in transit.");
+    const sent = (s.submit as ReturnType<typeof vi.fn>).mock.calls[0]![0] as { lines: { unit_id?: string }[]; transferId: string };
+    expect(sent.lines.map((l) => l.unit_id)).toEqual(["u7"]);
+    expect(screen.getByRole("link", { name: "Open the transfer" }).getAttribute("href")).toBe("/inventory/transfers/11111111-1111-4111-8111-111111111111");
+  });
+
+  it("with one warehouse the person may work at, it is shown with its company and not asked for", () => {
+    render(<MovementForm kind="issue" services={services()} context={context} />);
+    expect(screen.getByTestId("fixed-location").textContent).toBe("Dubai warehouse · Enginious");
+    expect(screen.queryByRole("option", { name: "Choose a location…" })).toBeNull();
+  });
+
+  it("a transfer always names the company with each warehouse, and says who acts next before it is confirmed", async () => {
+    const two: FormContext = { ...context, destinations: [...context.destinations, { id: "e1", companyId: "c3", companyName: "Enginious Europe", name: "Riyadh warehouse", timezone: "Europe/Madrid", bins: [], sharedFrom: "c1" }] };
+    render(<MovementForm kind="transfer" services={services()} context={two} initial={{ candidates: [laptop] }} />);
+    const options = Array.from((screen.getByLabelText("Send to") as HTMLSelectElement).options).map((o) => o.textContent);
+    expect(options).toEqual(["Choose the destination…", "Riyadh warehouse · Enginious", "Riyadh warehouse · Enginious Europe (another company, authorised)"]);
+    fireEvent.change(screen.getByLabelText("Send to"), { target: { value: "e1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    const dl = (await screen.findByText("Who acts next")).closest("dl")!;
+    expect(within(dl).getByText("Dubai warehouse · Enginious")).toBeTruthy();
+    expect(within(dl).getByText(/Riyadh warehouse · Enginious Europe records it as received/)).toBeTruthy();
+  });
+
+  it("says what was carried into the form", () => {
+    render(<MovementForm kind="return" services={services()} context={context} initial={{ employee: { id: "e1", name: "Sara Ali" }, returnFrom: "employee", notice: "UAE-E-00042 is no longer recorded with Sara Ali, so it was left off the list." }} />);
+    expect(screen.getByText("UAE-E-00042 is no longer recorded with Sara Ali, so it was left off the list.")).toBeTruthy();
+  });
+});
+

@@ -179,7 +179,7 @@ export function LinesEditor(props: Props) {
         <div>
           {searching ? <p className="text-sm text-muted-foreground" role="status">Searching…</p> : null}
           {searchError ? <p role="alert" className="text-sm text-destructive">{searchError}</p> : null}
-          {!searching && !searchError && results.length === 0 ? <p className="text-sm text-muted-foreground" role="status">Nothing found for “{q.trim()}”{source === "shelf" ? " on the shelf here" : ""}.</p> : null}
+          {!searching && !searchError && results.length === 0 ? <p className="text-sm text-muted-foreground" role="status">Nothing found for “{q.trim()}”{source === "shelf" ? " on the shelf here" : ""}.{source === "catalogue" ? <> If it is new, <a href="/inventory/stock?add=1" className="font-medium underline underline-offset-2">add the item to the catalogue</a> first (people who manage the catalogue), then receive it. What you typed here is not saved.</> : null}</p> : null}
           {results.length > 0 ? (
             <ul className="max-h-64 divide-y divide-border overflow-y-auto rounded-md border border-border" aria-label="Search results">
               {results.map((c) => (

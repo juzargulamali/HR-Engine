@@ -53,6 +53,7 @@ export function SharingSection({ companyId, companyName, canEdit, allows, uses, 
               <Select id="inv-share-use" name="useCompanyId" required defaultValue=""><option value="" disabled>Choose a company…</option>{available.map((o) => <option key={o.id} value={o.id}>{o.name}</option>)}</Select>
             </Field>
             <Field label="Note (optional)" htmlFor="inv-share-note" hint="For example the project or reason."><Input id="inv-share-note" name="note" maxLength={200} /></Field>
+            <p className="rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm text-muted-foreground">What this does: the chosen company&apos;s warehouses become destinations for transfers of {companyName}&apos;s equipment, and that equipment can be used there. {companyName} stays the owner. You can stop it later; equipment already sent can still be received.</p>
           </ActionForm>
         )
       ) : <p className="text-sm text-muted-foreground">Only a founder of {companyName} can allow or stop this.</p>}

@@ -40,7 +40,7 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   const loc = new Map(locations.map((l) => [l.id, l]));
   const zone = movementZone(m, (lid) => loc.get(lid)?.timezone ?? null, locations[0]?.timezone ?? "Asia/Dubai");
   const resolver: Resolver = {
-    location: (lid) => (lid ? (loc.get(lid)?.name ?? "Another location") : "—"),
+    location: (lid) => (lid ? ctx.placeName(lid) : "—"),
     bin: (bid) => (bid ? (d.binLabels.get(bid) ?? null) : null),
     employee: (eid) => d.names.employee(eid),
     project: (pid) => d.names.project(pid),
@@ -61,6 +61,8 @@ export async function MovementSidePanel({ openId, closeHref, locations }: { open
   const rows: [string, React.ReactNode][] = [
     ["When", movementWhen(m.occurred_at, zone)],
     ["Recorded by", d.names.user(m.performed_by)],
+    ...(m.from_location_id && m.to_location_id && m.from_location_id !== m.to_location_id ? [["Sent from", ctx.placeName(m.from_location_id)] as [string, React.ReactNode], ["Going to", ctx.placeName(m.to_location_id)] as [string, React.ReactNode]] : m.from_location_id || m.to_location_id ? [["Warehouse", ctx.placeName(m.to_location_id ?? m.from_location_id)] as [string, React.ReactNode]] : []),
+    ...(m.transfer_id ? [["Transfer", <Link key="t" href={`/inventory/transfers/${m.transfer_id}`} className="font-medium underline underline-offset-2">Open the transfer: what was sent, received and is still in transit</Link>] as [string, React.ReactNode]] : []),
     ...(m.employee_id ? [["Employee", d.names.employee(m.employee_id)] as [string, React.ReactNode]] : []),
     ...(m.project_id ? [["Project", d.names.project(m.project_id)] as [string, React.ReactNode]] : []),
     ...(m.to_project_id ? [["Moved to project", d.names.project(m.to_project_id)] as [string, React.ReactNode]] : []),

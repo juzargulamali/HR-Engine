@@ -158,7 +158,7 @@ describe("returns", () => {
     expect(person.title).toBe("Sara Khan has 2 items due back");
     expect(person.whenLabel).toBe("Due today, 17:00");
     expect(person.href).toBe("/inventory/stock?action=return&employee=e1");
-    expect(person.actionLabel).toBe("Receive returns");
+    expect(person.actionLabel).toBe("Receive return");
     expect(person.operates).toBe(true);
     expect(rows.map((r) => bucketOf(r.when, r.zone, NOW)).sort()).toEqual(["late", "today"]);
   });

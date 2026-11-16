@@ -30,7 +30,7 @@ const MAX_LABEL_CODES = 100;
  * who holds what, where each unit is, the movements and the costs appear only for people the database lets read them (the page asks the
  * database as the signed-in person, so what it does not return is simply not there).
  */
-export async function ItemSidePanel({ openId, closeHref, here, binCode }: { openId: string; closeHref: string; here: Here; binCode: string | null }) {
+export async function ItemSidePanel({ openId, closeHref, here, binCode, workingLocationId }: { openId: string; closeHref: string; here: Here; binCode: string | null; /** The warehouse the person is working in: carried into every action opened from here. */ workingLocationId?: string }) {
   const ctx = await getInventoryContext();
   if (!ctx) return null;
   const id = parseRecordId(openId);
@@ -57,13 +57,15 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
   const categoryOptions: CategoryOption[] = d.categories.filter((c) => c.is_active).map((c) => ({ id: c.id, label: categoryPath(d.categories, c.id) ?? c.name })).sort((a, b) => a.label.localeCompare(b.label));
   const locationsForUnit = (canOperate && !d.canEdit ? operableHere.map((l) => ({ id: l.id, name: l.name, bins: l.bins })) : d.locations.filter((l) => l.is_active).map((l) => ({ id: l.id, name: l.name, bins: d.bins.filter((b) => b.location_id === l.id).map((b) => ({ id: b.id, code: b.code, label: b.label })) })));
   const subtitle = [d.categoryName, trackingLabel(item.tracking)].filter(Boolean).join(" · ");
-  const resolver = makeResolver(d.placeLocations, d.bins, d.names);
+  const resolver = makeResolver(d.placeLocations, d.bins, d.names, ctx.placeName);
   const c = d.counts;
   const unitLink = (unitId: string) => here({ unit: unitId });
   const totalCodes = d.units.map((u) => u.code);
 
   const specs: ActionSpec[] = [];
-  const search = { search: item.name };
+  // Every action starts from this item and from the warehouse the person is working in (when they may operate there and it is this item's company's).
+  const fromHere = workingLocationId && operableHere.some((l) => l.id === workingLocationId) ? workingLocationId : undefined;
+  const search = { search: item.name, locationId: fromHere };
   if (item.status !== "retired") {
     if (individual && (d.canEdit || canOperate)) specs.push({ key: "add-unit", label: "Add unit", hint: "Register one more individual unit with its own ID", dialog: { title: `Add a unit of ${item.name}`, description: "It starts as “Not counted yet” until the opening stock is confirmed." } });
     if (counted && (d.canEdit || canOperate)) specs.push({ key: "bin-label", label: "Create a bin label", hint: "A label for this item in one bin", dialog: { title: "Create a bin label" } });
@@ -73,8 +75,8 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
         specs.push({ key: "return-unused", label: "Return unused", hint: "Unused consumables back on the shelf", movement: { kind: "return_unused", initial: search, title: `Return unused ${item.name}` } });
       }
       if (item.tracking !== "consumable" && item.status === "active") {
-        specs.push({ key: "give", label: "Give to a person", hint: "Issue it to an employee", movement: { kind: "issue", initial: search, title: `Give ${item.name} to a person` } });
-        specs.push({ key: "transfer", label: "Move to another warehouse", hint: "It is in transit until the other warehouse confirms it arrived", movement: { kind: "transfer", initial: search, title: `Move ${item.name} to another warehouse` } });
+        specs.push({ key: "give", label: "Give equipment", hint: "Issue it to an employee", movement: { kind: "issue", initial: search, title: `Give ${item.name} to a person` } });
+        specs.push({ key: "transfer", label: "Transfer stock", hint: "It is in transit until the other warehouse confirms it arrived", movement: { kind: "transfer", initial: search, title: `Move ${item.name} to another warehouse` } });
         specs.push({
           key: "send-project", label: "Send to a project (not from a request)", hint: "An exception: it does not fulfil any request",
           movement: {
@@ -83,7 +85,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
           },
         });
       }
-      specs.push({ key: "check", label: "Check condition", hint: "Release held stock or hold it back", separatorBefore: true, movement: { kind: "check", initial: search, title: `Check ${item.name}` } });
+      specs.push({ key: "check", label: "Inspect", hint: "Release held stock or hold it back", separatorBefore: true, movement: { kind: "check", initial: search, title: `Check ${item.name}` } });
       specs.push({ key: "repair-out", label: "Send for repair", movement: { kind: "repair_out", initial: search, title: `Send ${item.name} for repair` } });
       if (individual) specs.push({ key: "repair-in", label: "Back from repair", movement: { kind: "repair_in", initial: search, title: `${item.name} back from repair` } });
       specs.push({ key: "missing", label: "Mark missing", movement: { kind: "adjust", initial: { ...search, adjustAction: "missing" }, title: `Mark ${item.name} as missing` } });
@@ -95,7 +97,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
   if (totalCodes.length > 0) specs.push({ key: "print-all", label: totalCodes.length > MAX_LABEL_CODES ? `Print labels (first ${MAX_LABEL_CODES} units)` : "Print labels for all units", href: `/inventory/labels?codes=${encodeURIComponent(totalCodes.slice(0, MAX_LABEL_CODES).join(","))}`, separatorBefore: true });
 
   const dialogs: Record<string, React.ReactNode> = {
-    "add-unit": <AddUnitForm item={{ id: item.id, companyId: item.company_id, name: item.name }} locations={locationsForUnit} canSeeCosts={d.canSeeCosts} defaultLocationId={operableHere[0]?.id} />,
+    "add-unit": <AddUnitForm item={{ id: item.id, companyId: item.company_id, name: item.name }} locations={locationsForUnit} canSeeCosts={d.canSeeCosts} defaultLocationId={fromHere ?? operableHere[0]?.id} />,
     "bin-label": <BinLabelForm item={{ id: item.id, companyId: item.company_id }} locations={locationsForUnit} />,
     replace: <ReplaceItemForm item={{ id: item.id, name: item.name, categoryId: item.category_id, manufacturer: item.manufacturer, model: item.model, specification: item.specification, uom: item.unit_of_measure, counted }} categories={categoryOptions} />,
   };
@@ -123,7 +125,7 @@ export async function ItemSidePanel({ openId, closeHref, here, binCode }: { open
       {item.status === "draft" ? <Alert variant="warning" role="status">This item is a draft, so stock cannot be received for it yet. {d.canEdit ? "Open Edit details below and set its status to In use." : "Ask someone who manages the catalogue to put it in use."}</Alert> : null}
 
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Item actions">
-        {canOperate && item.status === "active" ? <Link href={here({ action: "receive", open: null, unit: null })} scroll={false} className={buttonVariants({ size: "sm" })}>Receive stock</Link> : null}
+        {canOperate && item.status === "active" ? <Link href={here({ action: "receive", item: item.id, open: null, unit: null })} scroll={false} className={cn(buttonVariants({ size: "sm" }), "h-11 sm:h-8")}>Receive stock</Link> : null}
         {specs.length > 0 && form ? <ActionMenu specs={specs} context={form} dialogs={dialogs} /> : specs.length > 0 ? <ActionMenu specs={specs} context={{ locations: [], destinations: [], projects: [], requests: [], transfers: [], rentals: [], canSeeCostsByCompany: {} }} dialogs={dialogs} /> : null}
       </div>
 

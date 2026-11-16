@@ -85,8 +85,8 @@ await step("a person without a PL grant reads no PL row (the data service return
 await step("Send transfer (UI): Dubai to Riyadh; the review names both warehouses with their company; one movement; it is in transit", async () => {
   await R.as("ceo");
   await R.go(`/inventory/stock?unit=${UNIT}`);
-  await R.panel().getByRole("link", { name: "Send to another location" }).click();
-  await H.mv().getByText("Send to another location").first().waitFor({ timeout: 10000 }).catch(() => {});
+  await R.panel().getByRole("link", { name: "Transfer stock" }).click();
+  await H.mv().getByText("Transfer stock").first().waitFor({ timeout: 10000 }).catch(() => {});
   const mv = H.mv();
   await pickPlace(mv.getByLabel("Send from", { exact: true }), /^Dubai/);
   await pickPlace(mv.getByLabel("Send to", { exact: true }), /^Riyadh/);
@@ -174,7 +174,7 @@ await step("part 2 set-up (through the real functions): PL founder adds the Riya
 await step("Send form (UI): before AE authorises sharing, the Dubai operator is offered no PL warehouse; the database refuses it too", async () => {
   await R.as("hr1");
   await R.go(`/inventory/stock?unit=${LAP}`);
-  await R.panel().getByRole("link", { name: "Send to another location" }).click();
+  await R.panel().getByRole("link", { name: "Transfer stock" }).click();
   const sel = H.mv().getByLabel("Send to", { exact: true });
   await sel.waitFor({ timeout: 10000 });
   await sleep(500);
@@ -187,7 +187,7 @@ await step("Send form (UI): before AE authorises sharing, the Dubai operator is 
 await step("Send transfer (UI): after AE's founder authorises sharing the hub is offered, named with its company; the review says the equipment stays AE's; one dispatch", async () => {
   asDb(3, `select inv_set_company_sharing('${AE}', '${PL}', true, 'local flow: AE equipment for the Riyadh hub')`);
   await R.go(`/inventory/stock?unit=${LAP}`);
-  await R.panel().getByRole("link", { name: "Send to another location" }).click();
+  await R.panel().getByRole("link", { name: "Transfer stock" }).click();
   const mv = H.mv();
   const sel = mv.getByLabel("Send to", { exact: true });
   await pickPlace(sel, new RegExp(`^${HUB_NAME} · ${PL_NAME} \\(authorised\\)`));

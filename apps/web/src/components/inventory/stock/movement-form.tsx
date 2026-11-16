@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { useUnsavedChanges } from "@/components/workspace/unsaved";
 import { countStillOutstanding, draftFromCandidate, unitProblemFor, type Candidate, type FormContext, type FormLocation, type FormTransfer } from "@/lib/inventory/stock-candidates";
 import { SHARING_REVOKED_TEXT } from "@/lib/inventory/xshare";
+import { receiptResultWords } from "@/lib/inventory/transfer-view";
+import { returnResultLine } from "@/lib/inventory/workspace";
 import {
   ADJUST_WORDS, KIND_CONFIG, formatInZone, localToUtcIso, nowLocalInput, parseLines, sourceFor, summaryRows, validateInput,
   type AdjustAction, type LineDraft, type MovementInput, type MovementKind, type ReturnFrom, type SummaryInput,
@@ -34,6 +36,8 @@ export interface MovementInitial {
   repairReference?: string;
   /** Words put in the search box when the form opens. */
   search?: string;
+  /** Something the person should know about what was carried into the form (for example what could not be carried). */
+  notice?: string;
 }
 
 export interface MovementFormProps {
@@ -100,7 +104,9 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
   const [rentalDeadline, setRentalDeadline] = useState("");
   const [rentalProjectId, setRentalProjectId] = useState("");
   const [rentalId, setRentalId] = useState(initial?.rentalId ?? "");
-  const [receiveAll, setReceiveAll] = useState(true);
+  // What arrived is a choice the person makes every time: nothing is assumed to have arrived.
+  const [arrived, setArrived] = useState<"" | "all" | "some">("");
+  const receiveAll = arrived === "all";
   const [currency, setCurrency] = useState("AED");
 
   // ---- the list --------------------------------------------------------------------------------------------------
@@ -154,8 +160,8 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
       return { candidates: heldLoaded?.candidates ?? [], loading: !heldLoaded, error: heldLoaded?.error ?? null, emptyText: kind === "return" ? (returnFrom === "project" ? "This project holds nothing that is recorded as dispatched to it." : "This employee holds nothing that is recorded as issued to them.") : "Nothing recorded on that project.", title: kind === "return" ? "What they are holding" : "What the project is holding" };
     }
     if (source === "transit") {
-      if (!transfer || receiveAll) return null;
-      return { candidates: transfer.held, loading: false, error: null, emptyText: "Nothing is on the way for this transfer any more.", title: `On the way (${transfer.code})` };
+      if (!transfer || arrived !== "some") return null;
+      return { candidates: transfer.held, loading: false, error: null, emptyText: "Nothing is in transit for this transfer any more.", title: `Still in transit (${transfer.code})` };
     }
     return null;
   })();
@@ -187,6 +193,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
 
   function prepare(key: string): { input: MovementInput } | { error: string; lineId?: string } {
     if (kind === "receive" && !ownership) return { error: "Say whether this stock is owned or rented." };
+    if (kind === "receive_transfer" && transfer && !arrived) return { error: "Say whether everything still in transit arrived, or only some of it." };
     const needsLines = source !== "kit";
     const isEverything = (kind === "receive_transfer" && receiveAll) || kind === "unpack_kit";
     const parsed = needsLines && !isEverything ? parseLines(kind, drafts, { canSeeCosts: !!context.canSeeCostsByCompany[companyId], currency }) : ({ ok: true as const, lines: [] as MovementInput["lines"], units: 0, quantities: 0 });
@@ -222,13 +229,17 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
     return bad ? { error: bad } : { input };
   }
 
-  // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE").
-  const placeText = (l: FormLocation) => (multiCompany || l.companyId !== companyId ? `${l.name} · ${l.companyName}` : l.name);
+  // A warehouse is named with its company when the person works with several ("Dubai warehouse · Enginious UAE"), and ALWAYS on a transfer: the same
+  // city can be a warehouse of two companies, and a transfer has to say which.
+  const isTransferKind = kind === "transfer" || kind === "receive_transfer";
+  const placeText = (l: FormLocation) => (isTransferKind || multiCompany || l.companyId !== companyId ? `${l.name} · ${l.companyName}` : l.name);
   const names = {
     project: (id: string) => { const p = context.projects.find((x) => x.id === id); return p ? `${p.reference} ${p.name}` : undefined; },
   };
   const summary: SummaryInput = {
-    kind, drafts, location: location ? placeText(location) : "", toLocation: ((l) => (l ? placeText(l) : undefined))(context.destinations.find((x) => x.id === toLocationId)),
+    kind, drafts, location: kind === "receive_transfer" && transfer ? transfer.toName : location ? placeText(location) : "", transferFrom: kind === "receive_transfer" ? transfer?.fromName : undefined,
+    arrivedLines: kind === "receive_transfer" && receiveAll && transfer ? transfer.held.map((c) => `${c.itemName}${c.code ? ` (${c.code})` : ""}${c.qty !== null ? `, ${c.qty}${c.uom === "each" ? "" : ` ${c.uom}`}` : ""}${c.ownedBy ? ` · ${c.ownedBy}` : ""}`) : undefined,
+    toLocation: ((l) => (l ? placeText(l) : undefined))(context.destinations.find((x) => x.id === toLocationId)),
     employee: employee?.name, project: names.project(projectId), toProject: names.project(toProjectId), request: chosenRequest ? `${chosenRequest.code}${chosenRequest.title ? ` · ${chosenRequest.title}` : ""}` : undefined,
     returnFrom: returnFrom || undefined, expectedReturn: expectedReturn ? formatInZone(toIso(expectedReturn), tz) : chosenRequest?.expectedReturnAt && kind === "dispatch" ? `${formatInZone(chosenRequest.expectedReturnAt, tz)} (from the request)` : undefined,
     expectedArrival: expectedArrival ? formatInZone(toIso(expectedArrival), tz) : undefined, repairReference: repairReference.trim() || undefined, transferCode: transfer?.code,
@@ -275,7 +286,23 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
 
   // ---- the three steps -------------------------------------------------------------------------------------------
   if (flow.phase === "done") {
-    return <DonePanel flow={flow} onAnother={() => { setDrafts([]); setNote(""); setReason(""); setExpectedReturn(""); setOwnership(""); flow.startNew(); }} onClose={onClose} />;
+    // What actually happened, from what the database returned (never from what was asked for), in the words of the job.
+    const result = flow.outcome?.result as Record<string, unknown> | undefined;
+    const resultLines = Array.isArray(result?.lines) ? (result!.lines as Record<string, unknown>[]) : null;
+    const count = (ls: readonly Record<string, unknown>[]) => ls.reduce((n, l) => n + (l.unit_id ? 1 : Number(l.qty ?? 1) || 1), 0);
+    const toPlace = context.destinations.find((x) => x.id === toLocationId);
+    let detail: string | null = null;
+    if (resultLines) {
+      if (kind === "transfer") detail = `${count(resultLines)} sent from ${location ? placeText(location) : "the warehouse"} to ${toPlace ? placeText(toPlace) : "the destination"}. In transit: ${toPlace ? placeText(toPlace) : "the destination"} acts next and records what arrives.`;
+      else if (kind === "receive_transfer") detail = receiptResultWords(result);
+      else if (kind === "return") {
+        const available = count(resultLines.filter((l) => l.available === true));
+        const returned = count(resultLines);
+        detail = returnResultLine({ returned, available, held: returned - available, stillOut: summary.stillOutstanding ?? null });
+      } else if (kind === "issue" && employee) detail = `${count(resultLines)} given to ${employee.name}${location ? ` from ${placeText(location)}` : ""}. It shows under With people until it is returned.`;
+    }
+    const transferId = typeof result?.transfer_id === "string" ? result.transfer_id : null;
+    return <DonePanel flow={flow} detail={detail} links={transferId && isTransferKind ? [{ href: `/inventory/transfers/${transferId}`, label: "Open the transfer" }] : undefined} onAnother={() => { setDrafts([]); setNote(""); setReason(""); setExpectedReturn(""); setOwnership(""); setArrived(""); flow.startNew(); }} onClose={onClose} />;
   }
   if (flow.phase === "reviewing" || flow.phase === "sending") {
     return <ReviewPanel flow={flow} rows={summaryRows(summary)} confirmLabel={confirmLabel} onConfirm={onConfirm} />;
@@ -289,26 +316,41 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
       <p className="text-sm text-muted-foreground">{cfg.lead}</p>
       {noLocations ? <Alert role="status">You are not set up to work at any location. Ask an Inventory founder to add a location to your access.</Alert> : null}
       {start.skipped.length > 0 ? <Alert variant="warning" role="status">Not added: {start.skipped.join(" ")}</Alert> : null}
+      {initial?.notice ? <Alert role="status">{initial.notice}</Alert> : null}
 
       {kind === "receive_transfer" ? (
         <div className="space-y-1.5">
           <label htmlFor={`${uid}-tr`} className="text-sm font-medium leading-none">Which transfer arrived?</label>
-          <Select id={`${uid}-tr`} value={transferId} onChange={(e) => { setTransferId(e.target.value); setDrafts([]); setReceiveAll(true); }} disabled={locked}>
+          <Select id={`${uid}-tr`} value={transferId} onChange={(e) => { setTransferId(e.target.value); setDrafts([]); setArrived(""); }} disabled={locked}>
             <option value="">{transfersHere.length === 0 ? "No transfer is on its way to you" : "Choose a transfer…"}</option>
             {transfersHere.map((t) => <option key={t.id} value={t.id}>{t.code} · {t.fromName} to {t.toName} · {t.held.length} line{t.held.length === 1 ? "" : "s"}</option>)}
           </Select>
           {transfer?.sharingRevoked ? <p className="text-sm font-medium text-warning" role="status">{SHARING_REVOKED_TEXT}</p> : null}
-          {transfer ? <p className="text-sm text-muted-foreground">Sent {formatInZone(transfer.dispatchedAt, tz)}{transfer.expectedAt ? `, expected ${formatInZone(transfer.expectedAt, tz)}` : ""}{transfer.carrier ? ` · ${transfer.carrier}` : ""}{transfer.reference ? ` · ref ${transfer.reference}` : ""}. It is not available at {transfer.toName} until you confirm it here.</p> : null}
+          {transfer ? (
+            <dl className="divide-y divide-border rounded-md border border-border text-sm" data-testid="transfer-context">
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Sent from</dt><dd className="break-words">{transfer.fromName}</dd></div>
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Receiving at</dt><dd className="break-words font-medium">{transfer.toName}</dd></div>
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">Sent</dt><dd className="break-words">{formatInZone(transfer.dispatchedAt, tz)}{transfer.expectedAt ? `, expected ${formatInZone(transfer.expectedAt, tz)}` : ""}{transfer.carrier ? ` · ${transfer.carrier}` : ""}{transfer.reference ? ` · ref ${transfer.reference}` : ""}</dd></div>
+              <div className="grid gap-1 px-3 py-2 sm:grid-cols-[8rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">So far</dt><dd className="break-words tabular-nums">{typeof transfer.sentLines === "number" ? `${transfer.sentLines} line${transfer.sentLines === 1 ? "" : "s"} sent · ${Math.max(0, transfer.sentLines - transfer.held.length)} already received · ` : ""}{transfer.held.length} still in transit</dd></div>
+            </dl>
+          ) : null}
+          {transfer ? <p className="text-sm text-muted-foreground">Nothing is available at {transfer.toName} until you confirm it here.</p> : null}
         </div>
       ) : null}
 
       {needLocationField ? (
         <div className="space-y-1.5">
           <label htmlFor={`${uid}-loc`} className="text-sm font-medium leading-none">{cfg.locationLabel}</label>
-          <Select id={`${uid}-loc`} value={locationId} onChange={(e) => changeLocation(e.target.value)} disabled={locked || noLocations} required>
-            <option value="">Choose a location…</option>
-            {context.locations.map((l) => <option key={l.id} value={l.id}>{l.name}{multiCompany ? ` · ${l.companyName}` : ""}</option>)}
-          </Select>
+          {context.locations.length === 1 && locationId === context.locations[0]!.id ? (
+            // One place this person may work at: it is shown, not asked for.
+            <output id={`${uid}-loc`} className="block rounded-md border border-border bg-secondary/40 px-3 py-2 text-sm font-medium" data-testid="fixed-location">{context.locations[0]!.name} · {context.locations[0]!.companyName}</output>
+          ) : (
+            <Select id={`${uid}-loc`} value={locationId} onChange={(e) => changeLocation(e.target.value)} disabled={locked || noLocations} required>
+              <option value="">Choose a location…</option>
+              {context.locations.map((l) => <option key={l.id} value={l.id}>{l.name}{multiCompany || isTransferKind ? ` · ${l.companyName}` : ""}</option>)}
+            </Select>
+          )}
+          {location && context.locations.length > 1 ? <p className="text-[13px] text-muted-foreground" data-testid="location-company">{location.companyName} · {location.name}</p> : null}
         </div>
       ) : null}
 
@@ -393,7 +435,7 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
           <label htmlFor={`${uid}-to`} className="text-sm font-medium leading-none">Send to</label>
           <Select id={`${uid}-to`} value={toLocationId} onChange={(e) => setToLocationId(e.target.value)} disabled={locked || !effectiveLocationId} required>
             <option value="">Choose the destination…</option>
-            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name}{l.companyId !== companyId ? ` · ${l.companyName} (authorised)` : ""}</option>)}
+            {destinations.map((l) => <option key={l.id} value={l.id}>{l.name} · {l.companyName}{l.companyId !== companyId ? " (another company, authorised)" : ""}</option>)}
           </Select>
           {destinations.length === 0 ? (
             <p className="text-sm text-muted-foreground" role="status">There is no other location to send to yet. Add one in Manage, Setup, Locations, then come back.</p>
@@ -428,14 +470,15 @@ export function MovementForm({ kind, services, context, initial, onClose, onReco
             <fieldset className="space-y-2" disabled={locked}>
               <legend className="text-sm font-medium">What arrived?</legend>
               <div className="space-y-1 text-sm">
-                <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={receiveAll} onChange={() => { setReceiveAll(true); setDrafts([]); }} /> Everything on the way ({transfer.held.length} line{transfer.held.length === 1 ? "" : "s"})</label>
-                <label className="flex items-center gap-2"><input type="radio" name={`${uid}-all`} checked={!receiveAll} onChange={() => setReceiveAll(false)} /> Only some of it. The rest stays in transit.</label>
+                <label className="flex min-h-[2.75rem] items-center gap-2 sm:min-h-0"><input type="radio" name={`${uid}-all`} checked={arrived === "all"} onChange={() => { setArrived("all"); setDrafts([]); }} /> Everything still in transit arrived ({transfer.held.length} line{transfer.held.length === 1 ? "" : "s"})</label>
+                <label className="flex min-h-[2.75rem] items-center gap-2 sm:min-h-0"><input type="radio" name={`${uid}-all`} checked={arrived === "some"} onChange={() => setArrived("some")} /> Only some of it arrived. The rest stays in transit.</label>
               </div>
-              {receiveAll ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}{c.ownedBy ? ` · ${c.ownedBy}` : ""}</li>)}</ul> : null}
+              {arrived !== "some" ? <ul className="list-disc space-y-0.5 pl-5 text-sm text-muted-foreground" aria-label="Still in transit">{transfer.held.map((c) => <li key={c.key}>{c.itemName}{c.code ? ` (${c.code})` : ""}{c.qty !== null ? `, ${c.qty} ${c.uom === "each" ? "" : c.uom}`.trimEnd() : ""}{c.ownedBy ? ` · ${c.ownedBy}` : ""}</li>)}</ul> : null}
+              {arrived === "all" ? <p className="text-sm text-muted-foreground">Each line is received in the condition recorded when it was sent. If anything arrived damaged or short, choose Only some of it and record each line.</p> : null}
               {transfer.held.some((c) => c.ownedBy) ? <p className="text-sm text-muted-foreground">Receiving it puts it in {transfer.toName}, available there from then on if its condition allows. It does not change who owns it.</p> : null}
             </fieldset>
           ) : null}
-          {!(kind === "receive_transfer" && receiveAll) ? (
+          {!(kind === "receive_transfer" && arrived !== "some") ? (
             <LinesEditor
               kind={kind} adjustAction={adjustAction} services={services} companyId={companyId} locationId={effectiveLocationId || null} bins={lineBins} drafts={drafts}
               onChange={(d) => { setDrafts(d); setLineError(null); }} held={held} rentalId={kind === "return_rental" ? (rentalId || null) : null}

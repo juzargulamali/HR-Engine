@@ -134,7 +134,7 @@ export function formTransferFrom(trace: XTrace, names: { from: string; to: strin
     ...trace.units.filter((u) => u.onTheWay).map((u) => unitCandidate(u, { transit: true, locationId: null })),
     ...trace.quantities.flatMap((q) => quantityCandidates(q)),
   ];
-  return { id: t.transferId, code: t.code, companyId: t.senderCompanyId, fromLocationId: t.fromLocationId, fromName: names.from, toLocationId: t.toLocationId, toName: names.to, expectedAt: t.expectedAt, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatchedAt, held, sharingRevoked: t.sharingRevoked };
+  return { id: t.transferId, code: t.code, companyId: t.senderCompanyId, fromLocationId: t.fromLocationId, fromName: names.from, toLocationId: t.toLocationId, toName: names.to, expectedAt: t.expectedAt, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatchedAt, held, sharingRevoked: t.sharingRevoked, sentLines: trace.units.length + trace.quantities.length };
 }
 
 /** A destination in the Send form. `sharedFrom` is the owning company that authorised it: it is offered only when sending from that company's warehouse. */

@@ -54,7 +54,7 @@ export function ReviewPanel({ flow, rows, confirmLabel, onConfirm }: { flow: Flo
 }
 
 /** Shown only after the database said it was recorded. */
-export function DonePanel({ flow, onAnother, onClose }: { flow: Flow; onAnother: () => void; onClose?: () => void }) {
+export function DonePanel({ flow, onAnother, onClose, detail, links }: { flow: Flow; onAnother: () => void; onClose?: () => void; /** What it did, in the words of the job: "2 received · 1 held for inspection · 1 line still in transit." */ detail?: string | null; links?: readonly { href: string; label: string }[] }) {
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus(); }, []);
   // A dispatch to a project or a return from one made a numbered note (only when the company switched notes on): the PDF can be downloaded or printed right away.
@@ -63,6 +63,7 @@ export function DonePanel({ flow, onAnother, onClose }: { flow: Flow; onAnother:
     <div className="space-y-4" data-step="done">
       <Alert variant="success" role="status">
         <h3 ref={heading} tabIndex={-1} style={{ outline: "none" }} className="font-semibold">Recorded</h3>
+        {detail ? <p className="mt-1 font-medium" data-testid="result-line">{detail}</p> : null}
         <p className="mt-1">{flow.outcome?.message ?? "Recorded."}</p>
       </Alert>
       {note ? (
@@ -73,6 +74,7 @@ export function DonePanel({ flow, onAnother, onClose }: { flow: Flow; onAnother:
       ) : null}
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" onClick={onAnother}>Record another</Button>
+        {(links ?? []).map((l) => <Link key={l.href} href={l.href} className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium underline underline-offset-2">{l.label}</Link>)}
         <Link href="/inventory/history" className="inline-flex h-9 items-center rounded-md px-3 text-sm font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline">See it in History</Link>
         {onClose ? <Button type="button" onClick={onClose}>Done</Button> : null}
       </div>

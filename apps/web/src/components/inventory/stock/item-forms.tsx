@@ -67,8 +67,8 @@ function DetailFields({ idPrefix, v }: { idPrefix: string; v?: { manufacturer?: 
 }
 
 /** The short Quick Add form: name, category, how it is tracked (and unit and decimals only for counted stock). The rest is under "Add more details". */
-export function QuickAddItemForm({ companies, close }: { companies: CompanyChoice[]; close: () => void }) {
-  const [companyId, setCompanyId] = useState(companies[0]?.id ?? "");
+export function QuickAddItemForm({ companies, close, defaultCompanyId }: { companies: CompanyChoice[]; close: () => void; /** The company the person is working in: preselected when it is one they may add items to. */ defaultCompanyId?: string }) {
+  const [companyId, setCompanyId] = useState(companies.find((c) => c.id === defaultCompanyId)?.id ?? companies[0]?.id ?? "");
   const [tracking, setTracking] = useState<InvTracking | "">("");
   const company = companies.find((c) => c.id === companyId);
   const counted = tracking === "quantity" || tracking === "consumable";

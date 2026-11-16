@@ -45,8 +45,10 @@ export interface Resolver {
 const KIND_FROM: Record<string, string> = { external: "Outside (new stock)", transit: "On the way", repair: "At the repairer", kit: "Inside a kit", adjustment: "Stock record" };
 const KIND_TO: Record<string, string> = { consumed: "Used up", transit: "On the way", repair: "At the repairer", kit: "Inside a kit", adjustment: "Stock record" };
 
-function place(kind: string, locationId: string | null, binId: string | null, employeeId: string | null, projectId: string | null, r: Resolver, words: Record<string, string>): string {
+function place(kind: string, locationId: string | null, binId: string | null, employeeId: string | null, projectId: string | null, r: Resolver, words: Record<string, string>, side: "from" | "to"): string {
   switch (kind) {
+    // A transfer line records the warehouse at the other end too: say it, so History shows the real source and destination and not only "in transit".
+    case "transit": return locationId ? `In transit ${side === "to" ? "to" : "from"} ${r.location(locationId)}` : (words[kind] ?? "In transit");
     case "warehouse": {
       const bin = r.bin(binId);
       return `${r.location(locationId)}${bin ? `, bin ${bin}` : ""}`;
@@ -58,10 +60,10 @@ function place(kind: string, locationId: string | null, binId: string | null, em
 }
 
 export function lineFrom(l: LineLike, r: Resolver): string {
-  return place(l.from_kind, l.from_location_id, l.from_bin_id, l.from_employee_id, l.from_project_id, r, KIND_FROM);
+  return place(l.from_kind, l.from_location_id, l.from_bin_id, l.from_employee_id, l.from_project_id, r, KIND_FROM, "from");
 }
 export function lineTo(l: LineLike, r: Resolver): string {
-  return place(l.to_kind, l.to_location_id, l.to_bin_id, l.to_employee_id, l.to_project_id, r, KIND_TO);
+  return place(l.to_kind, l.to_location_id, l.to_bin_id, l.to_employee_id, l.to_project_id, r, KIND_TO, "to");
 }
 
 /** "A → B" for the whole movement: the single place if every line agrees, otherwise the common kind of place ("several places"). */

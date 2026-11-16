@@ -16,7 +16,7 @@ const L1 = "22222222-2222-4222-8222-222222222222";
 let grants: { companyId: string; capabilities: InvCapability[] }[] = [];
 const loc = { id: L1, company_id: C1, code: "DXB", name: "Dubai warehouse", kind: "warehouse", timezone: "Asia/Dubai", address: null, is_active: true, created_by: null, created_at: "", updated_at: "" } as InvLocationRow;
 vi.mock("@/lib/inventory/context", () => ({
-  getInventoryContext: async () => ({ userId: "u", fullName: "T", installed: true, grants, companies: [{ id: C1, name: "Enginious", referenceCode: "UAE", isEnabled: true }], locations: [loc], assignedLocationIds: [L1], employeeId: null, managesProjects: false, companyName: () => "Enginious", locationName: () => "Dubai warehouse" }),
+  getInventoryContext: async () => ({ userId: "u", fullName: "T", installed: true, grants, companies: [{ id: C1, name: "Enginious", referenceCode: "UAE", isEnabled: true }], locations: [loc], assignedLocationIds: [L1], employeeId: null, managesProjects: false, companyName: () => "Enginious", locationName: () => "Dubai warehouse", placeName: () => "Dubai warehouse" }),
 }));
 const names: Names = { employees: new Map(), projects: new Map(), users: new Map(), requests: new Map(), employee: () => "Sara Ali", project: () => "P-7 Mall", user: () => "Omar Operator", request: () => "REQ-1" };
 let result: MovementList | Error;

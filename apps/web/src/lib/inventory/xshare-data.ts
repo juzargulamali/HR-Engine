@@ -5,6 +5,7 @@ import {
   formTransferFrom, mapCounted, mapDestination, mapHead, mapTrace, mapUnit, type XCounted, type XDestination, type XTrace, type XTransferHead, type XUnit,
 } from "./xshare";
 import type { FormTransfer } from "./stock-candidates";
+import { getInventoryContext } from "./context";
 
 /**
  * Server-side reading of the cross-company receiving functions (inv_xshare_*), through the signed-in person's own session. The database decides
@@ -12,6 +13,16 @@ import type { FormTransfer } from "./stock-candidates";
  * nothing of another company can have been sent through it), while any other failed read throws so the page says it could not load.
  */
 type Db = Awaited<ReturnType<typeof createClient>>;
+
+/**
+ * The database functions name companies by their LEGAL name. On the screens a company is said by its short Inventory name (Enginious UAE, Enginious Saudi
+ * Arabia, Enginious Europe), so the two sides of a transfer read the same everywhere. The name from the database is kept when the short one is not known.
+ */
+async function shortNames(): Promise<(id: string, fallback: string) => string> {
+  const ctx = await getInventoryContext().catch(() => null);
+  return (id, fallback) => { const n = ctx?.companyName(id); return n && n !== "Unknown" ? n : fallback; };
+}
+const headNames = (h: XTransferHead, name: (id: string, fallback: string) => string): XTransferHead => ({ ...h, senderName: name(h.senderCompanyId, h.senderName), toCompanyName: name(h.toCompanyId, h.toCompanyName) });
 
 async function rows<T>(db: Db, fn: string, args: Record<string, unknown>, map: (r: Record<string, unknown>) => T): Promise<T[]> {
   const { data, error } = await (db.rpc as unknown as (f: string, a: Record<string, unknown>) => PromiseLike<{ data: unknown; error: { code?: string; message: string } | null }>)(fn, args);
@@ -24,22 +35,26 @@ async function rows<T>(db: Db, fn: string, args: Record<string, unknown>, map: (
 
 /** Warehouses of other companies the caller's own company has authorised as destinations (identifiers and names only). */
 export async function loadXDestinations(db?: Db): Promise<XDestination[]> {
-  return rows(db ?? (await createClient()), "inv_xshare_destinations", {}, mapDestination);
+  const name = await shortNames();
+  return (await rows(db ?? (await createClient()), "inv_xshare_destinations", {}, mapDestination)).map((d) => ({ ...d, companyName: name(d.companyId, d.companyName), ownerCompanyName: name(d.ownerCompanyId, d.ownerCompanyName) }));
 }
 
 /** Other companies' units in transit to, or on the shelf at, a warehouse the caller operates (the minimum fields), optionally for one warehouse or one exact code. */
 export async function loadXUnits(opts: { locationId?: string | null; code?: string | null } = {}, db?: Db): Promise<XUnit[]> {
-  return rows(db ?? (await createClient()), "inv_xshare_units", { p_location_id: opts.locationId || null, p_code: opts.code || null }, mapUnit);
+  const name = await shortNames();
+  return (await rows(db ?? (await createClient()), "inv_xshare_units", { p_location_id: opts.locationId || null, p_code: opts.code || null }, mapUnit)).map((u) => ({ ...u, ownerName: name(u.ownerCompanyId, u.ownerName) }));
 }
 
 /** Other companies' counted stock in transit to, or on the shelf at, a warehouse the caller operates (item, owner, quantity, place; no costs). */
 export async function loadXCounted(opts: { locationId?: string | null } = {}, db?: Db): Promise<XCounted[]> {
-  return rows(db ?? (await createClient()), "inv_xshare_counted_stock", { p_location_id: opts.locationId || null }, mapCounted);
+  const name = await shortNames();
+  return (await rows(db ?? (await createClient()), "inv_xshare_counted_stock", { p_location_id: opts.locationId || null }, mapCounted)).map((c) => ({ ...c, ownerName: name(c.ownerCompanyId, c.ownerName) }));
 }
 
 /** Cross-company transfers the caller is a party to, newest first. */
 export async function loadXTransfers(db?: Db): Promise<XTransferHead[]> {
-  return rows(db ?? (await createClient()), "inv_xshare_transfers", {}, mapHead);
+  const name = await shortNames();
+  return (await rows(db ?? (await createClient()), "inv_xshare_transfers", {}, mapHead)).map((h) => headNames(h, name));
 }
 
 /** One transfer as the caller may see it, or null (not found / not theirs: one answer for both). */
@@ -50,7 +65,15 @@ export async function loadXTrace(transferId: string, db?: Db): Promise<XTrace | 
     if (error.code === "P0002" || isNotInstalled(error)) return null;
     throw new Error(`inv_xshare_transfer_trace: ${error.message}`);
   }
-  return data ? mapTrace(data as Record<string, unknown>) : null;
+  if (!data) return null;
+  const name = await shortNames();
+  const t = mapTrace(data as Record<string, unknown>);
+  return {
+    transfer: headNames(t.transfer, name),
+    units: t.units.map((u) => ({ ...u, ownerName: name(u.ownerCompanyId, u.ownerName) })),
+    quantities: t.quantities.map((q) => ({ ...q, ownerName: name(q.ownerCompanyId, q.ownerName) })),
+    events: t.events.map((e) => ({ ...e, filedUnderName: name(e.filedUnderCompanyId, e.filedUnderName) })),
+  };
 }
 
 /** Open cross-company transfers addressed to the given warehouses, ready for the Receive transfer form. */

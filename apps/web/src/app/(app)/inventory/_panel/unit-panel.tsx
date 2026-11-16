@@ -23,6 +23,7 @@ import { parseInventoryScan } from "@enginious-hr/domain";
 import { ForeignUnitPanel } from "./foreign-unit";
 import { candidateBase, type FormContext } from "@/lib/inventory/stock-candidates";
 import { CUSTODY_WORDS, formatQty } from "@/lib/inventory/words";
+import { unitAnswers } from "@/lib/inventory/unit-answers";
 import { cn } from "@/lib/utils";
 import { HistoryList, makeResolver } from "./history";
 import { ConditionBadge, LifecycleBadge, Section } from "./parts";
@@ -69,7 +70,7 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
   if (canOperateStock) {
     try { form = await loadFormContext(ctx, { projects: true, requests: true, rentals: true }); } catch (e) { console.error("[inventory] unit panel form context failed", e); }
   }
-  const resolver = makeResolver(d.placeLocations, d.bins, d.names);
+  const resolver = makeResolver(d.placeLocations, d.bins, d.names, ctx.placeName);
   const isKit = item.tracking === "kit";
   const overdue = u.overdue;
   const cand = candidateBase({
@@ -81,23 +82,26 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
   const onShelf = u.lifecycle === "active" && u.custody_kind === "warehouse";
   const usable = onShelf && (u.condition === "good" || u.condition === "fair") && !u.in_kit_id;
   const code = encodeURIComponent(u.code);
+  const answers = unitAnswers({ lifecycle: u.lifecycle, custody: u.custody_kind, condition: u.condition, inKit: !!u.in_kit_id, where: u.where, employeeName: u.employeeName, projectName: u.projectName, overdue });
   const quick: { label: string; href: string }[] = [];
   if (canOperateStock) {
+    // Held for inspection: the one thing to do is inspect it, so that is the first button (it used to be two taps away, under More actions).
+    if (answers.nextAction === "inspect") quick.push({ label: "Inspect", href: here({ action: "check", codes: u.code, unit: null, open: null }) });
     if (usable) {
-      quick.push({ label: "Issue to a person", href: here({ action: "issue", codes: u.code, unit: null, open: null }) });
+      quick.push({ label: "Give equipment", href: here({ action: "issue", codes: u.code, unit: null, open: null }) });
       quick.push({ label: "Dispatch to a project", href: here({ action: "dispatch", codes: u.code, unit: null, open: null }) });
-      quick.push({ label: "Send to another location", href: here({ action: "transfer", codes: u.code, unit: null, open: null }) });
+      quick.push({ label: "Transfer stock", href: here({ action: "transfer", codes: u.code, unit: null, open: null }) });
     }
-    if (u.custody_kind === "employee") quick.push({ label: "Return from employee", href: here({ action: "return", codes: u.code, employee: u.employee_id, unit: null, open: null }) });
-    if (u.custody_kind === "project") quick.push({ label: "Return from project", href: here({ action: "return", codes: u.code, project: u.project_id, unit: null, open: null }) });
-    if (u.custody_kind === "transit" && u.transfer_id) quick.push({ label: "Receive the transfer", href: here({ action: "transfer", mode: "receive", transfer: u.transfer_id, unit: null, open: null }) });
+    if (u.custody_kind === "employee") quick.push({ label: "Receive return", href: here({ action: "return", codes: u.code, employee: u.employee_id, unit: null, open: null }) });
+    if (u.custody_kind === "project") quick.push({ label: "Receive return", href: here({ action: "return", codes: u.code, project: u.project_id, unit: null, open: null }) });
+    if (u.custody_kind === "transit" && u.transfer_id) quick.push({ label: "Receive transfer", href: here({ action: "transfer", mode: "receive", transfer: u.transfer_id, unit: null, open: null }) });
   }
 
   const specs: ActionSpec[] = [];
   if (canOperateStock) {
     if (u.lifecycle === "missing") specs.push({ key: "found", label: "Mark found", hint: "It turned up again", movement: { kind: "adjust", initial: { ...base, adjustAction: "found" }, title: `Mark ${u.code} as found` } });
     if (onShelf) {
-      specs.push({ key: "check", label: "Check condition", hint: "Release it after a check, or hold it back", movement: { kind: "check", initial: base, title: `Check ${u.code}` } });
+      specs.push({ key: "check", label: "Inspect", hint: "Release it after a check, or hold it back", movement: { kind: "check", initial: base, title: `Check ${u.code}` } });
       specs.push({ key: "repair-out", label: "Send for repair", movement: { kind: "repair_out", initial: base, title: `Send ${u.code} for repair` } });
       if (u.ownership === "rental" && u.rental_id) specs.push({ key: "rental", label: "Return rental to supplier", hint: d.rental ? `${d.rental.supplier_name}, reference ${d.rental.external_reference}` : undefined, movement: { kind: "return_rental", initial: { ...base, rentalId: u.rental_id }, title: `Return ${u.code} to the supplier` } });
       specs.push({ key: "missing", label: "Mark missing", separatorBefore: true, movement: { kind: "adjust", initial: { ...base, adjustAction: "missing" }, title: `Mark ${u.code} as missing` } });
@@ -178,8 +182,14 @@ export async function UnitSidePanel({ unitRef, closeHref, here }: { unitRef: str
       {u.lifecycle === "retired" ? <Alert role="status">Retired{u.retired_at ? ` on ${formatDate(u.retired_at)}` : ""}. Its history is kept.</Alert> : null}
       {(u.condition === "needs_inspection" || u.condition === "damaged" || u.condition === "unserviceable") && u.lifecycle === "active" ? <Alert variant="warning" role="status">Held back: it is not counted as available until someone checks it and releases it.</Alert> : null}
 
+      <dl className="divide-y divide-border rounded-lg border border-border bg-card text-sm" aria-label="Where it is, who has it, and whether it is available" data-available={answers.available ? "yes" : "no"}>
+        {([["Where is it now", answers.where], ["Who has it", answers.who], ["Is it available", answers.availability], ...(answers.next ? [["What to do next", answers.next]] : [])] as [string, string][]).map(([label, value]) => (
+          <div key={label} className="grid gap-0.5 px-3 py-2 sm:grid-cols-[9rem_minmax(0,1fr)]"><dt className="text-[13px] font-medium text-muted-foreground">{label}</dt><dd className={cn("break-words", label === "Is it available" && (answers.available ? "font-medium text-success" : "font-medium text-[hsl(var(--os-amber))]"))}>{value}</dd></div>
+        ))}
+      </dl>
+
       <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Unit actions">
-        {quick.map((q) => <Link key={q.label} href={q.href} scroll={false} className={cn(buttonVariants({ size: "sm", variant: "outline" }))}>{q.label}</Link>)}
+        {quick.map((q, i) => <Link key={q.label} href={q.href} scroll={false} className={cn(buttonVariants({ size: "sm", variant: i === 0 ? "default" : "outline" }), "h-11 sm:h-8")}>{q.label}</Link>)}
         <ActionMenu specs={specs} context={form} dialogs={dialogs} />
       </div>
 

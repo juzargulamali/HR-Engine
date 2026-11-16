@@ -160,7 +160,8 @@ export async function loadStockList(ctx: InventoryContext, opts: { locationId: s
   const names = new Map((companyRows.data ?? []).map((c) => [c.id, c.legal_name]));
   return {
     rows, categories: cats.rows, locations: locs.rows,
-    companies: companyIds.map((id) => ({ id, name: names.get(id) ?? ctx.companyName(id) })).sort((a, b) => a.name.localeCompare(b.name)),
+    // The short Inventory name in the Company filter and column, the same one the selector shows; the legal name only when no short one is known.
+    companies: companyIds.map((id) => ({ id, name: ctx.companyName(id) !== "Unknown" ? ctx.companyName(id) : (names.get(id) ?? "Unknown") })).sort((a, b) => a.name.localeCompare(b.name)),
     detailCompanyIds: detail, costCompanyIds: costIds,
     truncated: items.truncated || units.truncated || balances.truncated,
   };
@@ -716,6 +717,39 @@ export async function resolveCodes(ctx: InventoryContext, rawCodes: string[]): P
   return results.flatMap((r) => (r.ok ? [r.candidate] : []));
 }
 
+/** One catalogue item as a line to receive (`item=` in an address, from the item's own panel): the person may read it, or nothing is carried. */
+export async function itemCandidate(itemId: string): Promise<Candidate | null> {
+  const db = await createClient();
+  const { data: i, error } = await db.from("inv_items").select("*").eq("id", itemId).maybeSingle();
+  if (error) throw new Error(`item: ${error.message}`);
+  if (!i || i.status !== "active") return null;
+  const item = i as InvItemRow;
+  return candidateBase({ key: `item-${item.id}`, type: "item", itemId: item.id, itemName: item.name, detail: itemDetailText(item), tracking: item.tracking, uom: item.unit_of_measure, scale: item.quantity_scale, where: "" });
+}
+
+/**
+ * What an employee request already has reserved by name and not yet given out: the units the warehouse chose under Reserve. They are carried into Give
+ * equipment so nobody looks them up again. Counted stock is never carried (its quantity is always typed), and nothing here says it was handed over.
+ */
+export async function requestUnitCandidates(ctx: InventoryContext, requestId: string): Promise<{ candidates: Candidate[]; counted: string[] }> {
+  const db = await createClient();
+  const { data: lines, error } = await db.from("inv_request_lines").select("id").eq("request_id", requestId).neq("status", "cancelled");
+  if (error) throw new Error(`request lines: ${error.message}`);
+  const lineIds = (lines ?? []).map((l) => l.id);
+  if (lineIds.length === 0) return { candidates: [], counted: [] };
+  const { data: res, error: rErr } = await db.from("inv_reservations").select("unit_id, item_id, qty, dispatched_qty, status").in("request_line_id", lineIds).eq("status", "active");
+  if (rErr) throw new Error(`reservations: ${rErr.message}`);
+  const open = (res ?? []).filter((r) => Number(r.dispatched_qty) < Number(r.qty));
+  const unitIds = open.map((r) => r.unit_id).filter((x): x is string => !!x);
+  const countedItemIds = [...new Set(open.filter((r) => !r.unit_id).map((r) => r.item_id))];
+  const [units, items] = await Promise.all([
+    unitIds.length > 0 ? db.from("inv_units").select("code").in("id", unitIds.slice(0, 60)) : Promise.resolve({ data: [] as { code: string }[] }),
+    countedItemIds.length > 0 ? db.from("inv_items").select("name").in("id", countedItemIds.slice(0, 60)) : Promise.resolve({ data: [] as { name: string }[] }),
+  ]);
+  const candidates = await resolveCodes(ctx, (units.data ?? []).map((u) => u.code));
+  return { candidates, counted: (items.data ?? []).map((i) => i.name) };
+}
+
 // ---------------------------------------------------------------------------------------------------------------
 // What the movement forms need
 // ---------------------------------------------------------------------------------------------------------------
@@ -752,15 +786,26 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
 
   const trs = (transfers.data ?? []) as InvTransferRow[];
   // A route names the company too when the person works with several (there can be a "Dubai" under each of them).
-  const pcx = placeCtx(ctx);
-  const routeName = (id: string, owner: string) => placeOf(pcx, id, owner).label ?? ctx.locationName(id);
+  // A transfer always names the company with the warehouse: there can be a "Dubai" under more than one company.
+  const routeName = (id: string, owner: string) => {
+    const l = ctx.locations.find((x) => x.id === id);
+    return l ? `${l.name} · ${ctx.companyName(l.company_id)}` : (placeOf(placeCtx(ctx), id, owner).label ?? "A warehouse of another company");
+  };
+  const sentLines = new Map<string, number>();
   const heldByTransfer = new Map<string, Candidate[]>();
   if (trs.length > 0) {
     const ids = trs.map((t) => t.id);
-    const [units, balances] = await Promise.all([
+    const [units, balances, sent] = await Promise.all([
       db.from("inv_units").select("*").in("transfer_id", ids).eq("custody_kind", "transit"),
       db.from("inv_balances").select("*").in("transfer_id", ids).eq("holder_kind", "transit").gt("qty", 0),
+      db.from("inv_movements").select("transfer_id, inv_movement_lines(item_id, unit_id)").in("transfer_id", ids).eq("kind", "transfer_dispatch").limit(500),
     ]);
+    // What each transfer sent, as lines (a unit is one, a counted item is one). Left unknown when it cannot be read: the form then says only what is still in transit.
+    if (!sent.error) {
+      for (const m of (sent.data ?? []) as unknown as { transfer_id: string | null; inv_movement_lines: { item_id: string; unit_id: string | null }[] }[]) {
+        if (m.transfer_id) sentLines.set(m.transfer_id, new Set((m.inv_movement_lines ?? []).map((l) => (l.unit_id ? `u:${l.unit_id}` : `i:${l.item_id}`))).size + (sentLines.get(m.transfer_id) ?? 0));
+      }
+    }
     const itemIds = [...new Set([...(units.data ?? []).map((u) => u.item_id), ...(balances.data ?? []).map((b) => b.item_id)])];
     const { data: items } = itemIds.length > 0 ? await db.from("inv_items").select("*").in("id", itemIds.slice(0, 300)) : { data: [] as InvItemRow[] };
     const itemById = new Map(((items ?? []) as InvItemRow[]).map((i) => [i.id, i]));
@@ -787,7 +832,7 @@ export async function loadFormContext(ctx: InventoryContext, needs: { projects?:
     projects: (projects.data ?? []).map((p) => ({ id: p.id, companyId: p.company_id, reference: p.reference, name: p.name, status: p.status })),
     requests: (requests.data ?? []).map((r) => ({ id: r.id, companyId: r.company_id, code: r.code, kind: r.kind, projectId: r.project_id, employeeId: r.employee_id, title: r.title, status: r.status, expectedReturnAt: r.expected_return_at ?? r.needed_until })),
     transfers: [
-      ...trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: routeName(t.from_location_id, t.company_id), toLocationId: t.to_location_id, toName: routeName(t.to_location_id, t.company_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [] })),
+      ...trs.map((t) => ({ id: t.id, code: t.code, companyId: t.company_id, fromLocationId: t.from_location_id, fromName: routeName(t.from_location_id, t.company_id), toLocationId: t.to_location_id, toName: routeName(t.to_location_id, t.company_id), expectedAt: t.expected_at, carrier: t.carrier, reference: t.reference, dispatchedAt: t.dispatched_at, held: heldByTransfer.get(t.id) ?? [], sentLines: sentLines.get(t.id) ?? null })),
       // Sent to this person's warehouse by another company: the owner's rows are not readable here, so these come from the narrow function (a transfer already read above is not listed twice).
       ...xIncoming.filter((t) => !ownTransferIds.has(t.id)),
     ],
