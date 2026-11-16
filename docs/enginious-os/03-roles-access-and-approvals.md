@@ -307,3 +307,17 @@ Next: `04-flows-sales-to-warehouse-and-others.md`.
 
 * Scheduling, client timelines and QA (2026-11-15; PR #97 merged as `fb60b04`; migrations `20270113000100`, `20270113000200` not applied by Claude; applied and verified on the hosted database by the owner, owner-confirmed 2026-11-15). **Choosing tasks for a client timeline, reading the preview and issuing** follow the existing rule for issuing: the Project Manager, someone holding temporary project leadership, or a founder (`proj_require_manager` in `proj_set_client_timeline_tasks` and `proj_issue_plan_checked`; `proj_can_manage` in `proj_plan_preview` and in the SELECT policy of `proj_client_timeline_tasks`). A member reads issued versions and nothing of the choice; a summary-only person reads neither. **Who is booked twice** needs the Operations right (or founder) for the company (`ops_require` in `ops_crew_overlaps`); the other side of an overlap is described only where the reader holds that right for its company too (`ops_company_ids`). An office board display is refused. Tests: `proj-client-timeline-tasks.rls.test.ts`, `ops-crew-overlaps.rls.test.ts`.
 
+## Inventory Phase 1 (2026-11-16; Inventory Phase 1, branch `claude/inventory-phase-1`: **draft, not merged; required CI not yet run; hosted SQL not applied; Production not deployed**)
+
+No capability, role, grant or policy was added or changed. The new database functions check access themselves (`supabase/migrations/20270114000100_inv_phase1_job_flow.sql`; proved in `packages/rls-tests/test/inventory_phase1_job_flow.rls.test.ts`):
+
+| Function | Who is permitted | Everyone else |
+|---|---|---|
+| `inv_pick_for_request` | A warehouse operator at that location (`warehouse` with the location assigned, or `cross_location`), or an Inventory founder (`inv_loc`), who can also see the request | A worded refusal (42501); another company: "Request not found" |
+| `inv_set_request_runs` | Whoever may edit the request (`inv_can_edit_request`): the Project Manager, an acting one, a Projects founder, warehouse staff of the company | A project member: refused; anyone who cannot see the request: "Request not found" |
+| `inv_project_run_cover`, `inv_project_sales_check` | People who can see the project's details (members, Projects founders, Operations Managers of the company), and warehouse staff of the company | "Project not found" |
+| `inv_company_run_cover` | An Operations Manager or Projects founder of that company (`ops_require`) | Refused |
+| `inv_opportunity_check_locations` | The enquiry's owner or a Sales founder of its company (the people who may ask for a check) | "Opportunity not found" |
+| `inv_check_condition` (unchanged: the inspection that clears a damaged or held unit) | A warehouse operator at that location, or a founder | Refused. Open owner decision: `modules/inventory.md` section 10 |
+
+`inv_request_runs` is readable through `inv_can_see_request` and has no write policy. Company names in the Inventory selectors are display names worked out from the company's country; nothing about access depends on them (`modules/inventory.md` section 2).

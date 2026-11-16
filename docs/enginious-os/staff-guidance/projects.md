@@ -375,12 +375,12 @@ When Sales submits a handover, a founder, an Operations Manager, or someone a fo
 - links: Projects -> /projects; My Work -> /projects/work
 - screens: /projects/[id]/equipment
 
-The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Submit to the warehouse; submitting sets nothing aside; the warehouse does that next. Then it reads Waiting for the warehouse, Being prepared, All dispatched and Closed. Each request has a Readiness line: Reserved, Partly ready, Short, Dispatched and so on. Others can read the tab but not change it.
+The Project Manager asks the warehouse for equipment on the project's Equipment tab. A project that came from Sales starts with a draft marked Imported from the Sales handover. A request is a Draft until you press Send to Warehouse; sending sets nothing aside; the warehouse does that next. Availability check from Sales shows what the warehouse found before the job was won, and says when the project has changed since. Equipment by site run shows each run with its request.
 
 1. Open the project, then Equipment. Open the draft, or press New equipment request and Create draft.
-2. Under Planning dates set at least a start and an end, then press Save the dates.
+2. Tick the site runs the request serves. Press Use these dates to take the suggested Leaves warehouse and Due back, or type them, then press Save the dates and site runs.
 3. Use Add an item or Add from a technology template; change a line under More.
-4. Press Submit to the warehouse. If something is missing, the page says what.
+4. Press Send to Warehouse. If something is missing, the page says what.
 5. Afterwards watch Reserved and Not covered yet; use Accept or decline for a proposed substitute, and Need to buy or rent for a shortage.
 
 ## Dispatch and return notes on a project
@@ -412,7 +412,7 @@ A won job passes from Sales to a founder or Operations Manager, to the Project M
 1. Sales: confirm the enquiry as won, then prepare and submit the handover.
 2. Founder or Operations Manager: open Handovers and press Assign Project Manager.
 3. Project Manager: press Accept handover (it opens the Project Plan, where you press Bring in accepted technologies), add people under Manage project, People & access, and add tasks on Work. Everyone added is in the project's Chat.
-4. Project Manager: on Equipment, check the draft and press Submit to the warehouse; acknowledge the dispatch note when it comes.
+4. Project Manager: on Equipment, check the draft, tick its site runs and press Send to Warehouse; acknowledge the dispatch note when it comes.
 5. Project Manager: use Manage project, Complete project when the work is done. Warehouse: record the returns; the Project Manager confirms the return list.
 
 ## The Project Plan of a project
@@ -441,11 +441,11 @@ The Project Plan is where the Project Manager breaks each technology of an accep
 
 Release gives the work to the teams: each work requirement becomes one task for its owner, and each hardware line matched to Inventory goes on the project's draft equipment request. Releasing again, or at the same time, never creates anything twice.
 
-1. Hardware: choose the stock item from Inventory. If it is not there, save it as a manual line: it stays in the plan as Needs stock match or Specification pending while everything else is released.
+1. Hardware: choose how it is supplied: From stock, Buy, Rent or Client supplied. For From stock choose the stock item. If it is not there yet, save the line: it stays in the plan as Needs stock match or Specification pending while everything else is released.
 2. Bought, rented or client-supplied hardware is followed in the plan with its owner and expected date and is never sent to the warehouse.
 3. Project Manager: press Release plan. Read what it will create first, then confirm.
 4. Press Review and send to Warehouse on a hardware line to open the draft request, and submit it on the Equipment tab.
-5. Later, match a manual line to a stock item and release again: it is added once.
+5. Later, press Match to stock on that line, choose the stock item and release again: it is added once, and its description and quantity are not typed again.
 
 ## Follow the Project Plan after release
 - id: projects-plan-after-release
@@ -519,7 +519,7 @@ Upcoming Work is for Operations Managers. It lists the enquiries Sales flagged f
 - links: Overview -> /operations; Handovers -> /projects/handovers
 - screens: /operations
 
-The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues and project health. Operations changes no task, booking or stock.
+The Overview is for Operations Managers. Four cards at the top give the counts and open their lists: Needs my decision, Installations in the next 14 days, Equipment issues and Upcoming Sales work. Needs my decision names who each item is with, since when and why, with one button. Beside it is the delivery timeline for the next 30 days; enquiry dates are marked Tentative until won. Below are delivery by week, equipment issues, equipment by site run and project health. Operations changes no task, booking or stock.
 
 1. Open Operations, then Overview. Choose the company if you have more than one.
 2. Press a card at the top to jump to its list.
