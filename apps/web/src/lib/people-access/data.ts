@@ -98,6 +98,8 @@ export interface PeopleAccessData {
   managed: PaManaged[];
   people: PaPerson[];
   totalPeople: number;
+  /** Deactivated accounts left out of the list because "Show deactivated people" is off. Never counted in totalPeople. */
+  hiddenDeactivated: number;
   selected: PaPerson | null;
   tabs: PaTab[];
   employee: PaEmployee | null;
@@ -112,7 +114,7 @@ export interface PeopleAccessData {
 
 export type PeopleAccessResult = { kind: "signed-out" } | { kind: "denied" } | { kind: "ok"; data: PeopleAccessData };
 
-export interface PeopleAccessQuery { q?: string; company?: string; person?: string }
+export interface PeopleAccessQuery { q?: string; company?: string; person?: string; showDeactivated?: boolean }
 
 const LIMIT = 400;
 
@@ -256,7 +258,10 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
     if (!p.name) p.name = "Unnamed user";
   }
 
-  let people = [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+  const everyone = [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name));
+  // A deactivated account stays one click away (the toggle) because that is where it is reactivated. The person whose details are open stays listed either way.
+  let people = query.showDeactivated ? everyone : everyone.filter((p) => p.accountStatus !== "deactivated" || p.key === query.person);
+  const hiddenDeactivated = everyone.length - people.length;
   const totalPeople = people.length;
   const q = (query.q ?? "").trim().toLowerCase();
   if (q) people = people.filter((p) => p.name.toLowerCase().includes(q) || (p.email ?? "").toLowerCase().includes(q) || (p.jobTitle ?? "").toLowerCase().includes(q));
@@ -351,7 +356,7 @@ export const loadPeopleAccess = cache(async (query: PeopleAccessQuery): Promise<
   return {
     kind: "ok",
     data: {
-      userId: session.userId, isSysAdmin: sysAdmin, isHrAdmin: hrAdmin, companies, managed, people, totalPeople, selected, tabs, employee, canEditJob, jobView,
+      userId: session.userId, isSysAdmin: sysAdmin, isHrAdmin: hrAdmin, companies, managed, people, totalPeople, hiddenDeactivated, selected, tabs, employee, canEditJob, jobView,
       moduleContexts, operatorLocations, companySettings, accountDetails,
     },
   };

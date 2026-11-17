@@ -17,12 +17,12 @@ const TABS: readonly PaTab[] = ["account", "job", "roles", "modules"];
 
 export default async function PeopleAccessPage({ searchParams }: { searchParams: Promise<Record<string, string | string[] | undefined>> }) {
   const sp = await searchParams;
-  const params = { q: one(sp.q), company: one(sp.company), person: one(sp.person) };
+  const params = { q: one(sp.q), company: one(sp.company), person: one(sp.person), inactive: one(sp.inactive) === "1" ? ("1" as const) : undefined };
   const view = one(sp.view) === "company" ? ("company" as const) : undefined;
   const tabParam = one(sp.tab);
   const tab = (TABS as readonly string[]).includes(tabParam ?? "") ? (tabParam as PaTab) : null;
 
-  const result = await loadPeopleAccess(params);
+  const result = await loadPeopleAccess({ q: params.q, company: params.company, person: params.person, showDeactivated: params.inactive === "1" });
   if (result.kind === "signed-out") return null;
   if (result.kind === "denied") {
     return <AccessNotice title="People & Access">You cannot manage people or access. This page is for System Administrators, HR Admins and people who manage access to Sales, Projects, Inventory or project budgets.</AccessNotice>;
@@ -54,7 +54,7 @@ export default async function PeopleAccessPage({ searchParams }: { searchParams:
                 <div className="mt-3"><InviteUserForm /></div>
               </details>
             ) : null}
-            <PersonList people={data.people} total={data.totalPeople} companies={data.companies} params={params} companyNames={companyNames} showRoles={data.isSysAdmin} />
+            <PersonList people={data.people} total={data.totalPeople} hiddenDeactivated={data.hiddenDeactivated} companies={data.companies} params={params} companyNames={companyNames} showRoles={data.isSysAdmin} />
           </div>
           <div className="min-w-0">
             {data.selected ? <PersonDetail data={data} tab={tab} params={params} /> : (
