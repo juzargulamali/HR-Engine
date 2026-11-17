@@ -139,7 +139,7 @@ On the profile, **Remove** or **Restore** (HR Admin of the company). Removed rec
 
 **Attendance register.** Open `/attendance`. It leads with Needs review. A day with nothing recorded says No record on a working day and Rest day on a rest day or public holiday; Absent only when recorded as absent; live clock status is its own column. **Profile tabs.** Leave leads with balances and Pending requests (each linking to its row in Approvals for someone who can decide); Attendance leads with Needs review and the days concerned.
 
-## 10b. Onboarding a new employee end to end (draft PR #108)
+## 10b. Onboarding a new employee end to end (PR #108, merged as `18fb95d`)
 
 1. **Add employee** (HR Admin of the company). You land on `/employees/<id>/onboarding`.
 2. **Complete profile**, then **Invite**: an HR Admin of the employee's company (or an unrestricted System Administrator) invites and links the login in one step; an existing account for the address is linked, never invited twice.
@@ -157,7 +157,7 @@ Document, insurance and receipt files go from the browser straight to private st
 
 Compensation tab → history → **Correct pay record** → old and new values, reason → save. Original kept in audit; impacted approved payroll runs or final settlements are flagged, never changed. Update pay is unchanged. Evidence: `people-hr-pay-correction.rls.test.ts`, `payCorrection.test.ts`.
 
-## 10e. One-time pre-launch cleanup (owner only; draft PR #108)
+## 10e. One-time pre-launch cleanup (owner only; PR #108, merged as `18fb95d`; run once on the night of 16 to 17 November 2026, no rerun needed)
 
 Run once before go-live, by the owner, in the Production SQL editor; never automatic and never a migration. (1) `prelaunch_cleanup_00_audit_readonly.sql`: set the cutoff, read the counts by company, type and status, and note the **E. TOTAL** row. (2) `prelaunch_cleanup_05_impact_readonly.sql`: information on approved requests that touched a balance, comp-off credit, attendance record or payroll export; they are left untouched. (3) `prelaunch_cleanup_10_cleanup.sql`: set the cutoff, type the audit's total as the EXPECTED TOTAL, and your own user id; run. (4) `prelaunch_cleanup_20_verify_readonly.sql`: every row OK. It cancels outstanding leave applications and Recovery Leave / comp-off requests, closes their pending approval steps and acknowledges the related alerts and attendance exceptions (they stay visible under Acknowledged). **Approved requests, balances, attendance history and payroll are never changed; there is no reversal option.** Evidence: `prelaunch-cleanup.rls.test.ts`.
 
